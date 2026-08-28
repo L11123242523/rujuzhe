@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RuJuZhe！BAGs - 入局者卡组查询与构筑工具</title>
 <style>
+[v-cloak]{display:none!important;}
+
 /* ========== 《入局者》特色主题 ========== */
 :root {
   --bg-primary: #0d1117;
@@ -1520,7 +1522,25 @@ input:focus, select:focus, textarea:focus {
   .tab:active, .action-btn:active { opacity: 0.7; }
 }
 
+
+/* ===== 智能推荐卡组弹窗 ===== */
+.rec-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;margin-top:8px;max-height:70vh;overflow-y:auto;padding-right:4px}
+.rec-card{background:#16162a;border:1px solid #2a3a5c;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.rec-head{display:flex;justify-content:space-between;align-items:center}
+.rec-arch{font-weight:bold;color:#e94560;font-size:15px}
+.rec-score{font-size:22px;font-weight:bold}
+.rec-team{font-size:13px;color:#ffd700;background:rgba(255,215,0,.08);padding:6px 8px;border-radius:6px}
+.rec-sec{font-size:12px}
+.rec-sec label{display:block;color:#87ceeb;font-size:11px;margin-bottom:3px}
+.rec-chip{display:inline-block;background:#22223c;border:1px solid #33446a;border-radius:5px;padding:2px 7px;margin:2px 3px 2px 0;font-size:11px;color:#d6d6e8}
+.rec-chip.perm{border-color:#e94560;color:#ff9eb0}
+.rec-chip.carry{border-color:#2e8b57;color:#9fe8c0}
+.rec-reasons{display:flex;flex-wrap:wrap;gap:4px}
+.rec-reasons span{font-size:10.5px;background:rgba(76,175,80,.12);color:#88e0a0;border-radius:4px;padding:2px 6px}
+.rec-warn{font-size:11px;color:#ffb74d;background:rgba(255,152,0,.1);border-radius:4px;padding:4px 6px}
+.rec-adopt{margin-top:auto;width:100%;padding:8px}
 </style>
+<script src="./vue.global.prod.js"></script>
 </head>
 <body>
 
@@ -1645,30 +1665,48 @@ input:focus, select:focus, textarea:focus {
 
 <!-- 查询模式 -->
 <div id="queryMode">
+<div id="queryApp" v-cloak>
 <div class="search-bar">
-  <input type="text" id="search" placeholder="搜索卡牌名称、效果、角色...">
+  <input type="text" v-model="filters.search" placeholder="搜索卡牌名称、效果、角色...">
   <div id="keywordTags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;width:100%">
-    <span onclick="filterKeyword('回费')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#4a9eff;border:1px solid #4a9eff44">回费</span>
-    <span onclick="filterKeyword('拆卡')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#e94560;border:1px solid #e9456044">拆卡</span>
-    <span onclick="filterKeyword('移动')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#22c55e;border:1px solid #22c55e44">移动</span>
-    <span onclick="filterKeyword('判定')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#a855f7;border:1px solid #a855f744">判定</span>
-    <span onclick="filterKeyword('回复')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#f59e0b;border:1px solid #f59e0b44">回复</span>
-    <span onclick="filterKeyword('暴击')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#ec4899;border:1px solid #ec489944">暴击</span>
-    <span onclick="filterKeyword('驱散')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#14b8a6;border:1px solid #14b8a644">驱散</span>
-    <span onclick="filterKeyword('抽卡')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#06b6d4;border:1px solid #06b6d444">抽卡</span>
-    <span onclick="filterKeyword('')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#888;border:1px solid #555">全部</span>
+    <span v-for="kw in keywords" :key="kw.value" @click="setKeyword(kw.value)"
+      style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;border:1px solid"
+      :style="'cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:'+kw.color+';border:1px solid '+kw.color+'44'">{{kw.label}}</span>
+    <span @click="setKeyword('')" style="cursor:pointer;padding:3px 8px;border-radius:10px;font-size:11px;background:#0f3460;color:#888;border:1px solid #555">全部</span>
   </div>
-  <select id="attrFilter"><option value="">全部属性</option><option>无序</option><option>热忱</option><option>理智</option><option>混沌</option></select>
-  <select id="costFilter"><option value="">全部费用</option></select>
-  <select id="typeFilter"><option value="">全部类型</option></select>
-<select id="gradeFilter"><option value="">全部评级</option><option>S</option><option>A+</option><option>A</option><option>B</option><option>C</option><option>D</option></select>
-<button onclick="resetAllGrades()" style="padding:6px 12px;border-radius:6px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;font-size:12px;margin-left:8px">重置评级</button>
+  <select v-model="filters.attr"><option value="">全部属性</option><option>无序</option><option>热忱</option><option>理智</option><option>混沌</option></select>
+  <select v-model="filters.cost"><option value="">全部费用</option><option v-for="c in costOptions" :key="c" :value="c">{{c}}费</option></select>
+  <select v-model="filters.type"><option value="">全部类型</option><option v-for="t in typeOptions" :key="t" :value="t">{{t}}</option></select>
+  <select v-model="filters.grade"><option value="">全部评级</option><option>S</option><option>A+</option><option>A</option><option>B</option><option>C</option><option>D</option></select>
+  <button @click="resetAllGrades" style="padding:6px 12px;border-radius:6px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;font-size:12px;margin-left:8px">重置评级</button>
 </div>
-<div class="tabs" id="tabs"></div>
+<div class="tabs">
+  <div v-for="t in tabs" :key="t.key" class="tab" :class="{active: currentTab===t.key}" @click="currentTab=t.key">
+    {{t.name}}<span class="count">{{tabCount(t.key)}}</span>
+  </div>
+</div>
 <div class="container">
-  <div class="rules-panel" id="rulesPanel"></div>
-  <div id="cardGrid" class="card-grid"></div>
-  <div id="empty" class="empty" style="display:none">没有找到匹配的卡牌</div>
+  <div class="rules-panel" v-html="rulesHtml"></div>
+  <div class="card-grid">
+    <div v-for="c in filteredCards" :key="c.category+'_'+c._idx+'_'+c.name" class="card"
+         :class="'attr-'+(c.attribute||'')" :style="'--card-color:'+attrColor(c.attribute)"
+         @click="openDetail(c)">
+      <div class="cost" v-if="c.cost!==undefined">{{c.cost}}</div>
+      <div class="name">{{c.name}}<span v-if="c.grade" class="grade" :class="'grade-'+c.grade">{{c.grade}}</span><span v-if="c.excluded" class="tag 允许超模">允许超模</span></div>
+      <div class="meta">
+        <span v-if="c.attribute" class="tag">{{c.attribute}}</span>
+        <span v-if="c.type" class="tag">{{c.type}}</span>
+        <span v-if="c.character" class="tag">{{c.character}}</span>
+        <span v-if="c.sync" class="tag">同步{{c.sync}}</span>
+        <span v-if="c.sp_member===true" class="tag">队员SP可用</span>
+        <span v-if="c.sp_member===false" class="tag">仅队长</span>
+        <span v-for="r in (c.roles||[])" :key="r" class="tag">{{r}}</span>
+      </div>
+      <div class="effect">{{cardEffectText(c)}}</div>
+    </div>
+  </div>
+  <div class="empty" v-if="filteredCards.length===0">没有找到匹配的卡牌</div>
+</div>
 </div>
 </div>
 
@@ -1695,9 +1733,10 @@ input:focus, select:focus, textarea:focus {
     <button class="btn btn-primary" onclick="analyzeHand()">起手分析</button>
     <button class="btn btn-secondary" onclick="calcDeckScore()">卡组评分</button>
     <button class="btn btn-secondary" onclick="showPresetTemplates()">预设模板</button>
+    <button class="btn btn-primary" onclick="showRecommendedDecks()" style="background:linear-gradient(135deg,#e94560,#ff7a45)">✨ 推荐卡组</button>
     <button class="btn btn-secondary" onclick="showCarryRecommend()">推荐携带卡</button>
     <button class="btn btn-primary" onclick="autoFillCarries()">一键补全携带卡</button>
-    <select id="archetypeSelect" onchange="try{randomByArchetype()}catch(e){alert('编组出错: '+e.message+'\n'+e.stack);console.error(e)}" style="padding:8px 12px;border-radius:8px;border:1px solid #2a3a5c;background:#1a1a2e;color:#eee;font-size:13px;cursor:pointer">
+    <select id="archetypeSelect" onchange="try{smartRandomDeck()}catch(e){alert('编组出错: '+e.message);console.error(e)}" style="padding:8px 12px;border-radius:8px;border:1px solid #2a3a5c;background:#1a1a2e;color:#eee;font-size:13px;cursor:pointer">
       <option value="">按流派随机...</option>
       <option value="进攻队">进攻队</option>
       <option value="判定伤害队">判定伤害队</option>
@@ -2105,19 +2144,11 @@ function initTabs(){
 }
 
 function initFilters(){
-  const costs = [...new Set(allCards.map(c=>c.cost).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}));
-  const cf = document.getElementById('costFilter');
-  costs.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c+'费';cf.appendChild(o);});
-  const types = [...new Set(allCards.map(c=>c.type).filter(Boolean))];
-  const tf = document.getElementById('typeFilter');
-  types.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;tf.appendChild(o);});
-  ['search','attrFilter','costFilter','typeFilter'].forEach(id=>{
-    document.getElementById(id).addEventListener('input',render);
-    document.getElementById(id).addEventListener('change',render);
-  });
-  document.getElementById('pickerSearch').addEventListener('input',renderPicker);
-  document.getElementById('pickerAttr').addEventListener('change',renderPicker);
-  document.getElementById('gradeFilter').addEventListener('change',render);
+  // 查询模块筛选器已由 Vue 接管，这里只保留构筑模式选卡弹窗的绑定
+  const ps = document.getElementById('pickerSearch');
+  const pa = document.getElementById('pickerAttr');
+  if(ps) ps.addEventListener('input',renderPicker);
+  if(pa) pa.addEventListener('change',renderPicker);
 }
 
 // 手动调整评级（存在localStorage）
@@ -2135,6 +2166,7 @@ function setGrade(cardName, grade){
   localStorage.setItem('grade_overrides', JSON.stringify(overrides));
   // 重新构建allCards以同步评级
   allCards = flattenCards();
+  if(window.__refreshQueryCards) window.__refreshQueryCards();
   // 直接更新当前modal中的评级显示
   const mc = document.getElementById('modalContent');
   if(mc){
@@ -2206,7 +2238,7 @@ function loadGradeOverrides(){
   allCards = flattenCards();
 }
 
-function resetAllGrades(){
+function resetAllGradesNative(){
   localStorage.removeItem('grade_overrides');
   for(const key of ['characters','attack_cards','skill_cards','item_permanent','item_single','gift_cards','music_cards','event_cards']){
     for(const c of DB[key]){
@@ -2216,6 +2248,7 @@ function resetAllGrades(){
   allCards = flattenCards();
   render();
 }
+window.resetAllGrades = resetAllGradesNative;
 loadGradeOverrides();
 
 function renderRules(){
@@ -2226,7 +2259,8 @@ function renderRules(){
     ['献祭规则',r.sacrifice],['队伍规则',r.team],['混沌弱势',r.chaos_weakness],
     ['攻击力规则',r.attack_power_divide_2],['暴击规则',r.crit],['多段判定',r.multi_hit],
     ['控骰限制', r.control_dice_no_calibration],
-    ['音韵抽卡', r.draw_by_cost]
+    ['音韵抽卡', '自己回合内可支付3点音韵值抽1张卡'],
+    ['位移上限', r.max_movement||'单次位移量超过20格按20格计算']
   ];
   return '<h3>核心规则速查</h3><div class="rule-grid">'+rules.map(([k,v])=>`<div class="rule-item"><b>${k}：</b>${v}</div>`).join('')+'</div>';
 }
@@ -2263,26 +2297,8 @@ function getFiltered(){
 }
 
 function render(){
-  const cards = getFiltered();
-  const grid = document.getElementById('cardGrid');
-  const empty = document.getElementById('empty');
-  document.getElementById('stats').textContent = `共 ${allCards.length} 张 | 当前 ${cards.length} 张`;
-  if(cards.length===0){grid.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
-  grid.innerHTML = cards.map(c=>{
-    const attr = c.attribute||'';
-    const attrColor = attr==='无序'?'#888':attr==='热忱'?'#e94560':attr==='理智'?'#4a9eff':attr==='混沌'?'#a855f7':'#888';
-    const cost = c.cost!==undefined?`<div class="cost">${c.cost}</div>`:'';
-    const excl = c.excluded?'<span class="tag 允许超模">允许超模</span>':'';
-    const roles = c.roles?c.roles.map(r=>`<span class="tag">${r}</span>`).join(''):'';
-    const sync = c.sync?`<span class="tag">同步${c.sync}</span>`:'';
-    const spMem = c.sp_member===true?'<span class="tag">队员SP可用</span>':c.sp_member===false?'<span class="tag">仅队长</span>':'';
-    const effect = c.effect||c.passive||(c.options?c.options.join(' / '):c.flavor||'');
-    return `<div class="card attr-${attr}" style="--card-color:${attrColor}" onclick='showDetail(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
-      ${cost}<div class="name">${c.name}${c.grade?` <span class="grade grade-${c.grade}">${c.grade}</span>`:''}${excl}</div>
-      <div class="meta">${attr?`<span class="tag">${attr}</span>`:''}${c.type?`<span class="tag">${c.type}</span>`:''}${c.character?`<span class="tag">${c.character}</span>`:''}${sync}${spMem}${roles}</div>
-      <div class="effect">${effect}</div></div>`;
-  }).join('');
+  // 查询网格已由 Vue 3 接管，这里仅刷新数据引用（兼容构筑/评级等旧调用）
+  if(window.__refreshQueryCards) window.__refreshQueryCards();
 }
 
 function showDetail(c){
@@ -3456,6 +3472,43 @@ function showPresetTemplates(){
   document.getElementById('modal').classList.add('active');
 }
 
+// ===== 智能推荐卡组 =====
+let _REC_CACHE = null;
+function _gradeColor(s){ return s>=85?'#4caf50':s>=80?'#ffc107':s>=75?'#ff9800':'#b0b0b0'; }
+function showRecommendedDecks(){
+  const list = BUILD_ENGINE.recommendAll(48);
+  _REC_CACHE = list;
+  const cn = idx => DB.characters[idx].name;
+  const html = list.map((r,i)=>{
+    const t=r.team, ev=r.ev;
+    const items = r.items.map(x=>`<span class="rec-chip ${x.perm?'perm':''}" title="${(x.card.effect||'').replace(/"/g,'&quot;')}">${x.card.name}</span>`).join('');
+    const carries = r.carries.map(x=>`<span class="rec-chip carry" title="${(x.card.effect||'').replace(/"/g,'&quot;')}">${x.card.name}</span>`).join('');
+    const spName = (t.activeMember===null||t.activeMember===undefined)?'无队员SP':cn(t.members[t.activeMember])+' 提供SP';
+    return `<div class="rec-card">
+      <div class="rec-head"><span class="rec-arch">${ev.archLabel}体系</span><span class="rec-score" style="color:${_gradeColor(ev.score)}">${ev.score.toFixed(1)}</span></div>
+      <div class="rec-team">队长 ${cn(t.captain)}　队员 ${t.members.map(cn).join('、')}　<span style="color:#87ceeb">（${spName}）</span></div>
+      <div class="rec-sec"><label>道具卡 ×8（红框=永续）</label><div>${items}</div></div>
+      <div class="rec-sec"><label>角色携带卡 ×4</label><div>${carries}</div></div>
+      <div class="rec-reasons">${ev.reasons.map(x=>'<span>'+x+'</span>').join('')}</div>
+      ${ev.warnings.length?`<div class="rec-warn">注意：${ev.warnings.join('；')}</div>`:''}
+      <button class="btn btn-primary rec-adopt" onclick="adoptRecommended(${i})">采用这套</button>
+    </div>`;
+  }).join('');
+  document.getElementById('modalContent').innerHTML =
+    '<div class="close" onclick="closeModal()">×</div>'+
+    '<h3 style="color:#e94560;margin-bottom:6px">✨ 智能推荐卡组</h3>'+
+    '<div style="color:#aaa;font-size:12px;margin-bottom:8px">按六大流派自动构筑并评分，每次打开都会重新择优，点击「采用这套」直接载入构筑区。</div>'+
+    '<div class="rec-list">'+html+'</div>';
+  document.getElementById('modal').classList.add('active');
+}
+function adoptRecommended(i){
+  const r = _REC_CACHE && _REC_CACHE[i];
+  if(!r){ alert('推荐方案已失效，请重新打开'); return; }
+  applyEngineBuild(r, r.ev.archLabel+'推荐');
+  closeModal();
+}
+
+
 function loadPreset(idx){
   const p = PRESET_DECKS[idx];
   // 角色
@@ -3476,7 +3529,7 @@ function loadPreset(idx){
     if(ci<0){ ci = findCardIndex('skill_cards', name); cat='skill_cards'; }
     if(ci>=0 && i<4) deck.carries[i] = {_idx:ci, category:cat};
   });
-  document.getElementById('presetModal').style.display='none';
+  closeModal();
   document.getElementById('deckName').textContent = '当前模板: ' + p.name;
   renderBuilder();
 }
@@ -5767,218 +5820,475 @@ function simulateOpening(){
 }
 
 function smartRandomDeck(){
-  const archetype = document.getElementById('archetypeSelect')?.value;
-  if(archetype && archetype !== ''){
-    try { randomByArchetype(); } catch(e) { console.error('流派随机编组出错:', e); }
-  } else {
-    try { randomDeck(); } catch(e) { console.error('随机编组出错:', e); }
-  }
+  const sel = document.getElementById('archetypeSelect');
+  const web = sel ? sel.value : '';
+  try{
+    if(web && WEB_ARCH_TO_ENGINE[web]){
+      const best = BUILD_ENGINE.autoBuild(WEB_ARCH_TO_ENGINE[web], 40);
+      applyEngineBuild(best, web);
+      if(sel) sel.value='';
+    } else if(web){
+      randomByArchetype();   // 引擎暂未覆盖的细分流派沿用专用逻辑
+    } else {
+      randomDeck();
+    }
+  }catch(e){ console.error('智能编组出错:', e); alert('智能编组出错: '+e.message); }
 }
 
-function randomDeck(){
-  // ===== 实战向智能编组算法 =====
-  const gradeVal = {S:10,'A+':9,A:8,B:6,C:4,D:2};
-  
-  // --- 1. 智能选角色：优先高评级+有协同的组合 ---
-  // 预设协同组合（基于实战验证的流派）
-  const synergyGroups = [
-    ['小沙香琉璃','入间予','星奈(水着)'],        // 判定伤害队
-    ['小沙香琉璃','入间予','入间枫'],            // 判定+控骰+混沌
-    ['现实间里绪','予(水着)','椎名小春'],        // 移动造伤队
-    ['入间予','松山惠','露璐缇雅·爱德华'],      // 理智控制
-    ['小沙香琉璃','入间予','露璐缇雅·爱德华'],  // 判定+控场
-    ['小野结衣','现实间里绪','霜烬'],            // 热忱快攻
-    ['木原光太郎','入间枫','里尔亚斯'],          // 献祭回费
-    ['小野伊织','里绪(水着)','小沙香琉璃'],      // 破局队
-    ['雨宫羽奈','小野结衣','宫樱子'],            // 纯输出进攻
-    ['小仓霞','现实间里绪','椎名小春'],          // 位移拉扯
-    ['宁雨清','松山惠','露璐缇雅·爱德华'],      // 检索滤牌
-    ['里尔亚斯','入间枫','霜烬'],                // 破甲混伤
-    ['琉璃(水着)','霜烬','宫樱子'],              // 热忱同步
-    ['予(水着)','小仓霞','椎名小春'],            // 理智位移
-  ];
-  let captainIdx, memberIdxs;
-  // 70%概率选协同组合，30%完全随机高评级
-  if(Math.random() < 0.7){
-    const group = synergyGroups[Math.floor(Math.random()*synergyGroups.length)];
-    const idxs = group.map(name=>DB.characters.findIndex(c=>c.name===name)).filter(i=>i>=0);
-    if(idxs.length>=3){
-      shuffle(idxs);
-      captainIdx = idxs[0];
-      memberIdxs = [idxs[1],idxs[2]];
-    }
-  }
-  // 兜底：按评级排序选角色
-  if(captainIdx===undefined){
-    const sorted = DB.characters.map((c,i)=>({c,i,score:gradeVal[c.grade]||5 + (c.sp_member?1:0)})).sort((a,b)=>b.score-a.score);
-    // 从前10名中随机选3个，保证多样性
-    const top = sorted.slice(0,Math.min(12,sorted.length));
-    shuffle(top);
-    captainIdx = top[0].i;
-    memberIdxs = [top[1].i, top[2].i];
-  }
-  deck.captain = captainIdx;
-  deck.members = memberIdxs;
-  // 选SP生效的队员（必须sp_member=true，否则设为null表示无队员SP）
-  const validMembers = [0,1].filter(i=>DB.characters[deck.members[i]].sp_member===true);
-  if(validMembers.length>0){
-    validMembers.sort((a,b)=>(gradeVal[DB.characters[deck.members[b]].grade]||5)-(gradeVal[DB.characters[deck.members[a]].grade]||5));
-    deck.activeMember = validMembers[0];
-  } else {
-    deck.activeMember = null; // 无可用队员SP
-  }
+/* ============================================================
+ * 入局者 · 智能构筑引擎 v2（纯逻辑，不依赖 DOM / 全局 deck）
+ * 能力：
+ *  1) 流派聚类自动选队（核心队长 + 协同队员 + 队员SP）
+ *  2) 属性硬约束 + 流派契合 + recommended_with 协同 + 费用曲线 + 功能完备 的统一评估
+ *  3) 多候选带权采样、评估择优（每次不同但稳定强）
+ *  4) 扫描全部流派自动产出推荐卡组
+ * ============================================================ */
+function createBuildEngine(DB, CHAR_TO_CARRY){
+  const gradeVal = {'S+':10.5,S:10,'A+':9,A:8,'B+':7,B:6,'C+':5,C:4,D:2};
+  const gv = g => (g===undefined||g===null)?5.5:(gradeVal[g]!==undefined?gradeVal[g]:5.5);
 
-  // --- 2. 智能选道具卡：属性匹配+评级优先+费用曲线+永续≤2 ---
-  const req = getAttrRequirement();
-  const itemPool = [...DB.item_permanent.map((c,i)=>({...c,_idx:i,_category:'item_permanent'})),...DB.item_single.map((c,i)=>({...c,_idx:i,_category:'item_single'}))];
-  
-  // 给道具卡评分：评级为主，费用适中加分，回费/抽卡功能加分
-  function scoreItem(c){
-    let s = gradeVal[c.grade]||5;
-    const cost = c.cost||0;
-    if(cost>=1 && cost<=3) s += 2; // 低费灵活
-    else if(cost>=4 && cost<=5) s += 1;
-    else if(cost>=7) s -= 2; // 高费卡手
-    const eff = (c.effect||'')+(c.passive||'');
-    if(/回.*音韵|回复.*费|\+.*音韵/.test(eff)) s += 3; // 回费核心
-    if(/抽.*张|从牌组抽/.test(eff)) s += 2; // 抽卡
-    if(c._category==='item_permanent') s += 1; // 永续有持续价值
+  /* ---------- 流派归一化 ---------- */
+  const ARCH_ALIAS = {
+    '判定伤害队':'判定',
+    '位移队':'位移','移动造伤队':'位移',
+    '资源运转队':'资源','资源运转流':'资源','回费队':'资源','抽卡队':'资源','金币队':'资源',
+    '控场队':'控场','理智控场队':'控场','控制队':'控场',
+    '快攻侵略队':'快攻','热忱快攻队':'快攻','进攻队':'快攻',
+    '破局队':'破局','破局流':'破局',
+    '泛用辅助':'泛用','泛用':'泛用'
+  };
+  const ARCH_LABEL = {'判定':'判定伤害','位移':'位移造伤','资源':'资源运转','控场':'控场干扰','快攻':'快攻进攻','破局':'破局校准'};
+  const ARCH_ORDER = ['判定','位移','资源','控场','快攻','破局'];
+  const normArch = a => ARCH_ALIAS[a]||null;
+  // 卡牌/角色命中的打法流派簇（去泛用）
+  function archSetOf(obj){
+    const s = new Set();
+    (obj.archetypes||[]).forEach(a=>{const n=normArch(a); if(n) s.add(n);});
     return s;
   }
-  itemPool.forEach(c=>c._score = scoreItem(c));
-  itemPool.sort((a,b)=>b._score-a._score);
-  
-  const byAttr = {'无序':[],'热忱':[],'理智':[],'混沌':[]};
-  itemPool.forEach(c=>{if(byAttr[c.attribute])byAttr[c.attribute].push(c);});
-  
-  const selectedItems = [];
-  let permCount = 0;
-  const usedKeys = new Set();
-  
-  // 先满足必选属性（按评分从高到低选）
-  Object.entries(req).forEach(([attr,count])=>{
-    const pool = byAttr[attr]||[];
-    let picked = 0;
-    for(const c of pool){
-      if(picked>=count) break;
-      const key = c._idx+'_'+c._category;
-      if(usedKeys.has(key)) continue;
-      if(c._category==='item_permanent' && permCount>=2) continue;
-      selectedItems.push(c);
-      usedKeys.add(key);
-      if(c._category==='item_permanent') permCount++;
-      picked++;
-    }
-  });
-  
-  // 灵活位：优先补低费卡保证曲线，再选高评分
-  const remaining = 8 - selectedItems.length;
-  const allPool = itemPool.filter(c=>!usedKeys.has(c._idx+'_'+c._category));
-  // 优先选1-3费卡（至少3张低费）
-  const lowCost = allPool.filter(c=>(c.cost||0)<=3);
-  const midCost = allPool.filter(c=>(c.cost||0)>=4 && (c.cost||0)<=5);
-  const highCost = allPool.filter(c=>(c.cost||0)>=6);
-  
-  const currentLow = selectedItems.filter(c=>(c.cost||0)<=3).length;
-  const needLow = Math.max(0, 3 - currentLow);
-  
-  // 先补低费
-  for(const c of lowCost){
-    if(selectedItems.length>=8) break;
-    if(selectedItems.length - (8-remaining) >= needLow && selectedItems.length >= (8-remaining)) break;
-    if(c._category==='item_permanent' && permCount>=2) continue;
-    selectedItems.push(c);
-    if(c._category==='item_permanent') permCount++;
+  // 解析 archetype_roles（兼容 dict / array / null）
+  function roleTags(c){
+    let r = c.archetype_roles;
+    if(!r) return [];
+    if(Array.isArray(r)) return r.map(x=>{const i=x.indexOf(':');return i<0?[normArch(x),'']:[normArch(x.slice(0,i)),x.slice(i+1)];});
+    return Object.entries(r).map(([k,v])=>[normArch(k),v]);
   }
-  // 再补中费
-  for(const c of midCost){
-    if(selectedItems.length>=8) break;
-    if(c._category==='item_permanent' && permCount>=2) continue;
-    selectedItems.push(c);
-    if(c._category==='item_permanent') permCount++;
-  }
-  // 最后高费
-  for(const c of highCost){
-    if(selectedItems.length>=8) break;
-    if(c._category==='item_permanent' && permCount>=2) continue;
-    selectedItems.push(c);
-    if(c._category==='item_permanent') permCount++;
-  }
-  // 如果还不够，从全部池中按评分补
-  if(selectedItems.length<8){
-    for(const c of allPool){
-      if(selectedItems.length>=8) break;
-      if(selectedItems.find(s=>s._idx===c._idx&&s._category===c._category)) continue;
-      if(c._category==='item_permanent' && permCount>=2) continue;
-      selectedItems.push(c);
-      if(c._category==='item_permanent') permCount++;
-    }
-  }
-  
-  deck.items = selectedItems.map(c=>({_idx:c._idx,category:c._category}));
-  while(deck.items.length<8) deck.items.push(null);
-
-  // --- 3. 智能选携带卡：严格形态匹配+2攻2技+评级优先+费用合理 ---
-  const charNames = getDeckCharacters().map(c=>c.name);
-  const carryPool = [];
-  ['attack_cards','skill_cards'].forEach(cat=>{
-    (DB[cat]||[]).forEach((card,idx)=>{
-      const ch = card.character||'';
-      if(charNames.some(n=>strictMatchChar(n, ch))){
-        carryPool.push({card, idx, category:cat});
-      }
+  function coreLevel(c,arch){
+    let lv=0;
+    roleTags(c).forEach(([a,tag])=>{
+      if(a!==arch) return;
+      if(/S_core/i.test(tag)) lv=Math.max(lv,3);
+      else if(/A_core/i.test(tag)) lv=Math.max(lv,2);
+      else if(/core/i.test(tag)) lv=Math.max(lv,1);
     });
+    return lv;
+  }
+
+  /* ---------- 卡牌池扁平化 ---------- */
+  const ITEM_POOL = [];
+  ['item_permanent','item_single'].forEach(cat=>{
+    DB[cat].forEach((c,i)=>ITEM_POOL.push({card:c,_idx:i,category:cat,perm:cat==='item_permanent',archs:archSetOf(c)}));
   });
-  
-  // 给携带卡评分
-  function scoreCarry(item){
-    const c = item.card;
-    let s = gradeVal[c.grade]||5;
-    const cost = c.cost||0;
-    if(cost>=2 && cost<=4) s += 2;
-    else if(cost>=5) s -= 1;
-    if(item.category==='attack_cards') s += 1; // 攻击卡优先
+  const CARRY_POOL = [];
+  ['attack_cards','skill_cards'].forEach(cat=>{
+    DB[cat].forEach((card,i)=>CARRY_POOL.push({card,_idx:i,category:cat,isAttack:cat==='attack_cards'}));
+  });
+  const BASIC_ATTRS = ['无序','热忱','理智','混沌'];
+  const isBasicAttr = a => BASIC_ATTRS.includes(a);
+
+  /* ---------- 携带卡归属（简称 + 形态，纯函数） ---------- */
+  function carryOwner(teamChars, card){
+    const cc = card.character||'';
+    if(!cc) return null;
+    const ccBase = cc.replace(/[（(]水着[)）]/g,'');
+    const ccSwim = /水着/.test(cc);
+    // 队伍是否同时持有该角色原皮+水着
+    for(const c of teamChars){
+      const short = CHAR_TO_CARRY[c.name]||c.name;
+      const sBase = short.replace(/[（(]水着[)）]/g,'');
+      if(sBase===ccBase || cc.includes(sBase) || sBase.includes(ccBase)){
+        // 形态判定
+        const teamHas = {};
+        teamChars.forEach(x=>{
+          const sx=(CHAR_TO_CARRY[x.name]||x.name).replace(/[（(]水着[)）]/g,'');
+          if(sx===sBase){ teamHas[x.name.includes('水着')?'swim':'orig']=true; }
+        });
+        if(teamHas.orig && teamHas.swim) return c;     // 双形态都在，混用允许
+        const cSwim = c.name.includes('水着');
+        if(cSwim===ccSwim) return c;                    // 形态一致
+      }
+    }
+    return null;
+  }
+
+  /* ---------- 属性需求（与网页 getAttrRequirement 同规则） ---------- */
+  function attrRequirement(teamChars){
+    const req={'无序':2};
+    teamChars.forEach(c=>{ if(c.attribute!=='混沌') req[c.attribute]=(req[c.attribute]||0)+2; });
+    return req;
+  }
+
+  /* ---------- 效果文本功能识别 ---------- */
+  const textOf = c => `${c.effect||''} ${c.passive||''} ${c.sp||''}`;
+  const FEATURE = {
+    recover: t=>/回.{0,3}音韵|回复.{0,2}费|音韵值\+|\+\d音韵|献祭.{0,6}回|回复自身\d/.test(t),
+    draw:    t=>/抽\s*\d?\s*张|从牌组.{0,4}抽|抽一张|抽卡|检索/.test(t),
+    damage:  t=>/造成.{0,4}伤害|造\d.{0,3}伤害|判定伤害|攻击力\+|最终伤害|直伤/.test(t),
+    defense: t=>/防御|护盾|驱散|免疫|减伤|抵消/.test(t),
+    control: t=>/入迷|封印|降.{0,2}防御|减速|眩晕|干扰|无效/.test(t),
+  };
+
+  /* ============================================================
+   * 选队伍
+   * ============================================================ */
+  // 每个流派簇的候选队长（核心优先）
+  function captainsOfArch(arch){
+    return DB.characters.map((c,i)=>({c,i,core:coreLevel(c,arch),inArch:archSetOf(c).has(arch)}))
+      .filter(x=>x.inArch)
+      .sort((a,b)=> (b.core*10+gv(b.c.grade)+(b.c.score||5)) - (a.core*10+gv(a.c.grade)+(a.c.score||5)));
+  }
+  function genTeam(lockArch){
+    // 1) 确定主流派
+    let arch = lockArch;
+    if(!arch){
+      // 按"该流派是否有核心队长"加权挑一个流派
+      const candidates = ARCH_ORDER.filter(a=>captainsOfArch(a).length>0);
+      const weighted=[];
+      candidates.forEach(a=>{
+        const cap=captainsOfArch(a);
+        const w = 1 + cap.filter(x=>x.core>=2).length*2; // 有核心的流派更可能被选
+        for(let k=0;k<w;k++) weighted.push(a);
+      });
+      arch = weighted[Math.floor(Math.random()*weighted.length)] || '资源';
+    }
+    // 2) 选队长：核心优先，top 候选内带随机（避免永远同一个）
+    const caps = captainsOfArch(arch);
+    const capPickPool = caps.slice(0, Math.min(3, caps.length));
+    const captain = capPickPool[Math.floor(Math.random()*capPickPool.length)].i;
+    // 3) 选两名队员：同流派优先，其次互补/泛用，避免重复角色
+    const others = DB.characters.map((c,i)=>({c,i})).filter(x=>x.i!==captain);
+    function memberScore(x){
+      let s = gv(x.c.grade)+(x.c.score||5)*0.4;
+      const as = archSetOf(x.c);
+      if(as.has(arch)) s+=6;                       // 同流派
+      if(x.c.sp_member) s+=1.5;                    // 队员SP可用
+      // 与队长 recommended_with 互相命中
+      const cap=DB.characters[captain];
+      if((cap.recommended_with||[]).includes(x.c.name)) s+=3;
+      if((x.c.recommended_with||[]).includes(cap.name)) s+=3;
+      return s;
+    }
+    others.forEach(x=>x._s=memberScore(x));
+    // 带权随机取两名（softmax 温度，兼顾质量与多样）
+    const picked=[]; const used=new Set([captain]);
+    for(let slot=0; slot<2; slot++){
+      const pool=others.filter(x=>!used.has(x.i));
+      const chosen = weightedPick(pool, x=>Math.exp(x._s/2.2));
+      if(!chosen) break;
+      used.add(chosen.i); picked.push(chosen.i);
+    }
+    while(picked.length<2){ // 兜底
+      const x=others.find(x=>!used.has(x.i)); if(!x) break;
+      used.add(x.i); picked.push(x.i);
+    }
+    // 4) activeMember：仅 sp_member=true 的队员可提供SP，取评级最高
+    const spOk = picked.map((i,k)=>({i,k,ok:DB.characters[i].sp_member===true}))
+                       .filter(x=>x.ok)
+                       .sort((a,b)=>gv(DB.characters[b.i].grade)-gv(DB.characters[a.i].grade));
+    const activeMember = spOk.length? spOk[0].k : null;
+    return {captain, members:picked, activeMember, arch};
+  }
+
+  /* ============================================================
+   * 选道具（属性硬约束 + 加权随机 + 功能补位）
+   * ============================================================ */
+  function teamRecNames(teamChars){
+    const s=new Set();
+    teamChars.forEach(c=>(c.recommended_with||[]).forEach(r=>s.add(r)));
     return s;
   }
-  carryPool.forEach(i=>i._score = scoreCarry(i));
-  carryPool.sort((a,b)=>b._score-a._score);
-  
-  const atkPool = carryPool.filter(i=>i.category==='attack_cards');
-  const sklPool = carryPool.filter(i=>i.category==='skill_cards');
-  
-  const selectedCarries = [];
-  const usedCarry = new Set();
-  // 优先2攻击
-  for(const i of atkPool){
-    if(selectedCarries.length>=2) break;
-    const key = i.idx+'_'+i.category;
-    if(usedCarry.has(key)) continue;
-    selectedCarries.push(i);
-    usedCarry.add(key);
+  // 单张道具在当前队伍/流派下的协同分
+  function itemAffinity(card, arch, recNames, teamChars){
+    let s = gv(card.grade);                         // 单卡强度
+    const as = archSetOf(card);
+    if(as.has(arch)) s+=3.2;                        // 流派契合
+    if(as.has('泛用')) s+=1.0;
+    if(recNames.has(card.name)) s+=4.5;             // 被队伍角色点名推荐
+    // recommended_with 反向命中（道具推荐了队伍角色）
+    (card.recommended_with||[]).forEach(r=>{ if(teamChars.some(c=>c.name===r)) s+=2.2; });
+    const cost=card.cost||0;
+    if(cost>=1&&cost<=3) s+=1.6; else if(cost===0) s+=1.2; else if(cost>=6) s-=1.4;
+    const t=textOf(card);
+    if(FEATURE.recover(t)) s+=1.2;
+    if(FEATURE.draw(t)) s+=0.8;
+    return s;
   }
-  // 再2技能
-  for(const i of sklPool){
-    if(selectedCarries.length>=4) break;
-    const key = i.idx+'_'+i.category;
-    if(usedCarry.has(key)) continue;
-    selectedCarries.push(i);
-    usedCarry.add(key);
-  }
-  // 不够则从全部中按评分补
-  if(selectedCarries.length<4){
-    for(const i of carryPool){
-      if(selectedCarries.length>=4) break;
-      if(usedCarry.has(i.idx+'_'+i.category)) continue;
-      selectedCarries.push(i);
-      usedCarry.add(i.idx+'_'+i.category);
+  function genItems(team, gapBoost){
+    const teamChars=[DB.characters[team.captain],...team.members.map(i=>DB.characters[i])];
+    const arch=team.arch, recNames=teamRecNames(teamChars);
+    const req=attrRequirement(teamChars);
+    const aff = c=>itemAffinity(c,arch,recNames,teamChars)+(gapBoost?gapBoost(c):0);
+    const chosen=[]; let perm=0; const used=new Set();
+    const key=x=>x.category+'#'+x._idx;
+    function take(x){ chosen.push(x); used.add(key(x)); if(x.perm) perm++; }
+    function pickFrom(pool, need){
+      let n=0;
+      const cand=pool.filter(x=>!used.has(key(x)) && (!x.perm||perm<2));
+      while(n<need){
+        const avail=cand.filter(x=>!used.has(key(x)) && (!x.perm||perm<2));
+        if(!avail.length) break;
+        const sel=weightedPick(avail,x=>Math.exp(aff(x.card)/1.6));
+        if(!sel) break;
+        take(sel); n++;
+      }
+      return n;
     }
+    // 1) 先满足基础属性硬需求（每属性从对应基础属性桶选）
+    Object.entries(req).forEach(([attr,count])=>{
+      const pool=ITEM_POOL.filter(x=>x.card.attribute===attr);
+      pickFrom(pool,count);
+    });
+    // 2) 灵活位补到8：特殊属性道具 + 剩余基础属性，按协同/功能加权
+    pickFrom(ITEM_POOL, 8-chosen.length);
+    return chosen;
   }
-  
-  deck.carries = selectedCarries.slice(0,4).map(i=>({_idx:i.idx,category:i.category}));
-  while(deck.carries.length<4) deck.carries.push(null);
 
-  document.getElementById('deckName').textContent = `智能编组：${DB.characters[deck.captain].name} 带队`;
+  /* ============================================================
+   * 选携带卡（归属合规 + 2攻2技 + 专属契合）
+   * ============================================================ */
+  function genCarries(team){
+    const teamChars=[DB.characters[team.captain],...team.members.map(i=>DB.characters[i])];
+    const arch=team.arch, recNames=teamRecNames(teamChars);
+    // 归属合规的携带池
+    const pool=CARRY_POOL.filter(x=>carryOwner(teamChars,x.card));
+    function score(x){
+      const c=x.card; let s=gv(c.grade)+(c.score||5)*0.3;
+      // 属于队长的卡小幅优先（队长攻击/技能最常用）
+      const owner=carryOwner(teamChars,c);
+      if(owner && owner.name===DB.characters[team.captain].name) s+=1.2;
+      if(recNames.has(c.name)) s+=3;
+      // 攻击子类型与流派契合（判定流派偏爱 judge，位移偏爱 move，快攻偏爱 direct）
+      const st=c.attack_subtypes;
+      if(st){
+        if(arch==='判定') s+=(st.judge||0)*0.25;
+        else if(arch==='位移') s+=(st.move||0)*0.25;
+        else if(arch==='快攻') s+=(st.direct||0)*0.25;
+      }
+      const cost=c.cost||0; if(cost>=2&&cost<=4)s+=1; else if(cost>=6)s-=1;
+      return s;
+    }
+    const atk=pool.filter(x=>x.isAttack), skl=pool.filter(x=>!x.isAttack);
+    const chosen=[],used=new Set();
+    function grab(arr,need){
+      let n=0;
+      while(n<need){
+        const avail=arr.filter(x=>!used.has(x.category+'#'+x._idx));
+        if(!avail.length) break;
+        const sel=weightedPick(avail,x=>Math.exp(score(x)/1.5));
+        if(!sel)break;
+        used.add(sel.category+'#'+sel._idx); chosen.push(sel); n++;
+      }
+      return n;
+    }
+    grab(atk,2); grab(skl,4-chosen.length);
+    grab(pool,4-chosen.length); // 不足则不限类型补齐
+    return chosen.slice(0,4);
+  }
+
+  /* ============================================================
+   * 统一评估（0-100），并产出亮点/警告
+   * ============================================================ */
+  function evaluate(team, items, carries){
+    const teamChars=[DB.characters[team.captain],...team.members.map(i=>DB.characters[i])];
+    const arch=team.arch; const recNames=teamRecNames(teamChars);
+    const reasons=[], warnings=[];
+    let score=0;
+    /* A. 单卡强度 25 */
+    const playCards=[...items.map(x=>x.card),...carries.map(x=>x.card)];
+    const avgChar = teamChars.reduce((s,c)=>s+(c.score||5),0)/teamChars.length;
+    const avgPlay = playCards.length? playCards.reduce((s,c)=>s+(c.score||5),0)/playCards.length : 5;
+    const power = Math.min(10,(avgChar*0.45+avgPlay*0.55))/10*25;
+    score+=power;
+    /* B. 流派契合 20 */
+    let fit=0,fitTot=0;
+    [...items,...carries].forEach(x=>{
+      fitTot++; if(archSetOf(x.card).has(arch)) fit++;
+    });
+    const fitRatio=fitTot?fit/fitTot:0; score+=fitRatio*20;
+    /* C. 协同命中 15 */
+    let syn=0;
+    [...items,...carries].forEach(x=>{ if(recNames.has(x.card.name)) syn++; });
+    score+=Math.min(1,syn/5)*15;
+    /* D. 费用曲线 15 */
+    const costs=items.map(x=>x.card.cost||0);
+    const low=costs.filter(c=>c<=3).length, avgCost=costs.reduce((a,b)=>a+b,0)/(costs.length||1);
+    let curve=0;
+    curve+=Math.min(low,4)/4*8;
+    if(avgCost>=2.2&&avgCost<=4.6) curve+=7; else if(avgCost<5.4) curve+=4;
+    score+=curve;
+    if(low<3) warnings.push(`低费卡仅${low}张，前期略卡手`);
+    if(avgCost>5) warnings.push(`平均费用${avgCost.toFixed(1)}偏高`);
+    /* E. 功能完备 15（回费/抽卡/伤害/防御/控制） */
+    const allText=playCards.map(textOf).join(' ');
+    const teamText=teamChars.map(textOf).join(' ');
+    let feat=0;
+    const hasRecover=FEATURE.recover(allText)||FEATURE.recover(teamText);
+    const hasDraw=FEATURE.draw(allText)||FEATURE.draw(teamText);
+    const hasDamage=FEATURE.damage(allText)||carries.some(x=>x.isAttack);
+    const hasDef=FEATURE.defense(allText)||FEATURE.defense(teamText);
+    if(hasRecover)feat+=3.5; else warnings.push('缺少回费手段');
+    if(hasDraw)feat+=3; else warnings.push('缺少抽卡/检索');
+    if(hasDamage)feat+=4; else warnings.push('缺少输出手段');
+    if(hasDef)feat+=2.5; else warnings.push('缺少防御/驱散');
+    if(FEATURE.control(allText))feat+=2;
+    score+=feat;
+    /* F. 队伍结构 10 */
+    let struct=0;
+    const sameArch=teamChars.filter(c=>archSetOf(c).has(arch)).length;
+    struct+=sameArch/3*5;
+    if(team.activeMember!==null && team.activeMember!==undefined) struct+=3;
+    else warnings.push('两名队员SP均仅队长生效，无队员SP');
+    const permN=items.filter(x=>x.perm).length;
+    if(permN>=1&&permN<=2) struct+=2;
+    score+=struct;
+    /* G. 硬约束校验（不满足重罚） */
+    const req=attrRequirement(teamChars); const have={};
+    items.forEach(x=>{const a=x.card.attribute; if(isBasicAttr(a))have[a]=(have[a]||0)+1;});
+    let attrMiss=0;
+    Object.entries(req).forEach(([a,n])=>{const m=Math.max(0,n-(have[a]||0)); attrMiss+=m; if(m>0)warnings.push(`${a}属性缺${m}张`);});
+    score-=attrMiss*12;
+    if(items.filter(x=>x.perm).length>2){ score-=10; warnings.push('永续超过2张'); }
+    // 携带合规
+    const badCarry=carries.filter(x=>!carryOwner(teamChars,x.card)).length;
+    score-=badCarry*10;
+    score=Math.max(0,Math.min(100,score));
+    /* 亮点 */
+    if(fitRatio>=0.55) reasons.push(`${(fitRatio*100).toFixed(0)}%卡牌契合${ARCH_LABEL[arch]||arch}体系`);
+    if(syn>=3) reasons.push(`命中${syn}张角色点名推荐卡`);
+    if(hasRecover&&hasDraw) reasons.push('回费+滤牌闭环，资源流畅');
+    if(sameArch===3) reasons.push('三人同流派，协同最大化');
+    if(permN>=1) reasons.push(`携带${permN}张永续建立持续优势`);
+    if(!reasons.length) reasons.push('属性满足、费用结构均衡');
+    return {score, power, fitRatio, syn, low, avgCost, attrMiss, badCarry, reasons, warnings, archLabel:ARCH_LABEL[arch]||arch};
+  }
+
+  /* ---------- 带权随机工具 ---------- */
+  function weightedPick(arr, wfn){
+    if(!arr||!arr.length) return null;
+    const ws=arr.map(wfn); const min=Math.min(...ws);
+    const adj=ws.map(w=>Math.max(0.0001,w-min+0.0001));
+    let sum=adj.reduce((a,b)=>a+b,0), r=Math.random()*sum;
+    for(let i=0;i<arr.length;i++){ r-=adj[i]; if(r<=0) return arr[i]; }
+    return arr[arr.length-1];
+  }
+
+  /* ---------- 组装一个候选 ---------- */
+  function buildOne(lockArch){
+    const team=genTeam(lockArch);
+    // 两轮道具：第二轮根据第一轮功能缺口微调权重，择优
+    let best=null;
+    for(let attempt=0;attempt<2;attempt++){
+      const items=genItems(team, attempt===1?gapBooster(best):null);
+      const carries=genCarries(team);
+      const ev=evaluate(team,items,carries);
+      const cand={team,items,carries,ev};
+      if(!best||ev.score>best.ev.score) best=cand;
+    }
+    return best;
+  }
+  function gapBooster(prev){
+    if(!prev) return null;
+    return function(card){
+      const t=textOf(card); let b=0;
+      if(prev.ev.warnings.some(w=>w.includes('回费'))&&FEATURE.recover(t))b+=3;
+      if(prev.ev.warnings.some(w=>w.includes('抽卡'))&&FEATURE.draw(t))b+=2.5;
+      if(prev.ev.warnings.some(w=>w.includes('防御'))&&FEATURE.defense(t))b+=2;
+      if(prev.ev.warnings.some(w=>/低费/.test(w))&&(card.cost||0)<=3)b+=2;
+      return b;
+    };
+  }
+
+  /* ---------- 智能随机：先均匀定流派，再在流派内多次采样择优 ---------- */
+  function autoBuild(lockArch, samples){
+    samples=samples||36;
+    // 未指定流派时：在所有"有队长候选"的流派中等概率选一个（保证流派多样性）
+    let arch=lockArch;
+    if(!arch){
+      const feasible=ARCH_ORDER.filter(a=>captainsOfArch(a).length>0);
+      arch=feasible[Math.floor(Math.random()*feasible.length)];
+    }
+    let best=null;
+    for(let k=0;k<samples;k++){
+      let cand;
+      try{ cand=buildOne(arch); }catch(e){ continue; }
+      if(!best||cand.ev.score>best.ev.score) best=cand;
+    }
+    return best;
+  }
+
+  /* ---------- 推荐卡组：每个流派簇各产一套最优 ---------- */
+  function recommendAll(perArchSamples){
+    perArchSamples=perArchSamples||60;
+    const list=[];
+    ARCH_ORDER.forEach(arch=>{
+      if(!captainsOfArch(arch).length) return;
+      let best=null;
+      for(let k=0;k<perArchSamples;k++){
+        let cand; try{ cand=buildOne(arch); }catch(e){continue;}
+        if(!best||cand.ev.score>best.ev.score) best=cand;
+      }
+      if(best) list.push(best);
+    });
+    list.sort((a,b)=>b.ev.score-a.ev.score);
+    return list;
+  }
+
+  return {autoBuild,recommendAll,evaluate,buildOne,genTeam,attrRequirement,carryOwner,
+          ARCH_ORDER,ARCH_LABEL,captainsOfArch,archSetOf,ITEM_POOL,CARRY_POOL};
+}
+
+// ===== 全局智能引擎实例（DB、CHAR_TO_CARRY 已先行定义）=====
+const BUILD_ENGINE = createBuildEngine(DB, CHAR_TO_CARRY);
+
+// 网页"按流派随机"下拉名称 -> 引擎流派簇
+const WEB_ARCH_TO_ENGINE = {
+  '判定伤害队':'判定',
+  '位移队':'位移',
+  '进攻队':'快攻','热忱队':'快攻',
+  '回费队':'资源','抽卡队':'资源','资源运转流':'资源','金币队':'资源',
+  '控制队':'控场','理智队':'控场',
+  '破局队':'破局'
+};
+
+// 把引擎产出的方案写入全局 deck 并刷新构筑界面
+function applyEngineBuild(best, titleLabel){
+  if(!best || !best.team){ alert('智能编组本次未能生成有效方案，请再点一次'); return null; }
+  const t = best.team;
+  deck.captain = t.captain;
+  deck.members = t.members.slice();
+  deck.activeMember = (t.activeMember===null||t.activeMember===undefined)?null:t.activeMember;
+  deck.items = best.items.map(x=>({_idx:x._idx, category:x.category}));
+  while(deck.items.length<8) deck.items.push(null);
+  deck.carries = best.carries.map(x=>({_idx:x._idx, category:x.category}));
+  while(deck.carries.length<4) deck.carries.push(null);
+  const ev = best.ev;
+  const nameEl = document.getElementById('deckName');
+  const archName = titleLabel || (ev.archLabel+'体系');
+  nameEl.textContent = `智能编组：${archName} · 综合${ev.score.toFixed(1)}分 · 契合${(ev.fitRatio*100).toFixed(0)}%`;
+  nameEl.style.color = ev.score>=85?'#4caf50':(ev.score>=78?'#ffc107':'#ff9800');
+  nameEl.title = '亮点：'+ev.reasons.join('；')+(ev.warnings.length?String.fromCharCode(10)+'注意：'+ev.warnings.join('；'):'');
   renderBuilder();
+  if(typeof validateDeck==='function') validateDeck();
+  if(typeof updateCostChart==='function') updateCostChart();
+  return best;
+}
+
+
+function randomDeck(){
+  // 智能构筑引擎 v2：流派聚类选队 + 协同选卡 + 多候选采样择优
+  let best = BUILD_ENGINE.autoBuild(null, 40);
+  if(!best) best = BUILD_ENGINE.autoBuild(null, 80); // 兜底再采样
+  applyEngineBuild(best);
 }
 
 function shuffle(arr){
@@ -6013,11 +6323,117 @@ function exportDeck(){
   });
 }
 
-// 初始化
-initTabs();
+// 初始化（查询模块由 Vue 3 接管）
 initFilters();
-renderRules();
-render();
+
+// ========== Vue 3 查询模块 ==========
+const QUERY_KEYWORD_REGEX = {
+  '回费': /回.{0,4}音韵|音韵.{0,4}回|回复.{0,2}音韵/,
+  '拆卡': /拆|移除|移出游戏|送墓|献祭/,
+  '抽卡': /抽.{0,2}卡|摸牌|抽牌/,
+  '回复': /回复.{0,3}同步|回复.{0,3}生命|回血|回复/,
+};
+
+const queryApp = Vue.createApp({
+  data() {
+    return {
+      currentTab: 'all',
+      filters: { search: '', attr: '', cost: '', type: '', grade: '' },
+      keywords: [
+        {value:'回费', label:'回费', color:'#4a9eff'},
+        {value:'拆卡', label:'拆卡', color:'#e94560'},
+        {value:'移动', label:'移动', color:'#22c55e'},
+        {value:'判定', label:'判定', color:'#a855f7'},
+        {value:'回复', label:'回复', color:'#f59e0b'},
+        {value:'暴击', label:'暴击', color:'#ec4899'},
+        {value:'驱散', label:'驱散', color:'#14b8a6'},
+        {value:'抽卡', label:'抽卡', color:'#06b6d4'},
+      ],
+      tabs: tabs,
+      cards: allCards,
+      rulesHtml: renderRules(),
+    };
+  },
+  computed: {
+    costOptions() {
+      return [...new Set(this.cards.map(c=>c.cost).filter(v=>v!==undefined&&v!==null&&v!==''))]
+        .sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}));
+    },
+    typeOptions() {
+      return [...new Set(this.cards.map(c=>c.type).filter(Boolean))];
+    },
+    filteredCards() {
+      const q = (this.filters.search||'').toLowerCase();
+      const attr = this.filters.attr;
+      const cost = this.filters.cost;
+      const type = this.filters.type;
+      const grade = this.filters.grade;
+      const tab = this.currentTab;
+      return this.cards.filter(c=>{
+        if(tab!=='all' && c.category!==tab) return false;
+        if(attr && c.attribute!==attr) return false;
+        if(cost!=='' && String(c.cost)!==String(cost)) return false;
+        if(type && c.type!==type) return false;
+        if(grade && c.grade!==grade) return false;
+        if(q){
+          const hay = [c.name,c.effect,c.passive,c.sp,c.character,c.note,c.flavor,c.options].filter(Boolean).join(' ').toLowerCase();
+          if(QUERY_KEYWORD_REGEX[this.filters.search]){
+            if(!QUERY_KEYWORD_REGEX[this.filters.search].test(hay)) return false;
+          } else {
+            if(!hay.includes(q)) return false;
+          }
+        }
+        return true;
+      });
+    },
+  },
+  methods: {
+    attrColor(attr) {
+      attr = attr||'';
+      if(attr==='无序') return '#888';
+      if(attr==='热忱') return '#e94560';
+      if(attr==='理智') return '#4a9eff';
+      if(attr==='混沌') return '#a855f7';
+      return '#888';
+    },
+    cardEffectText(c) {
+      return c.effect||c.passive||(c.options?c.options.join(' / '):c.flavor||'');
+    },
+    tabCount(key) {
+      return key==='all' ? this.cards.length : this.cards.filter(c=>c.category===key).length;
+    },
+    setKeyword(kw) { this.filters.search = kw; },
+    openDetail(c) { showDetail(c); },
+    resetAllGrades() {
+      window.resetAllGradesNative && window.resetAllGradesNative();
+    },
+  },
+  watch: {
+    filteredCards(list) {
+      const el = document.getElementById('stats');
+      if(el) el.textContent = `共 ${this.cards.length} 张 | 当前 ${list.length} 张`;
+    },
+    cards: {
+      handler() { this.$nextTick(()=>{
+        const el = document.getElementById('stats');
+        if(el) el.textContent = `共 ${this.cards.length} 张 | 当前 ${this.filteredCards.length} 张`;
+      });},
+    },
+  },
+  mounted() {
+    const el = document.getElementById('stats');
+    if(el) el.textContent = `共 ${this.cards.length} 张 | 当前 ${this.filteredCards.length} 张`;
+  },
+}).mount('#queryApp');
+
+// 全局刷新入口：评级被修改、allCards 被重建后调用
+window.__refreshQueryCards = function(){
+  queryApp.cards = allCards;
+  queryApp.rulesHtml = renderRules();
+};
+// 切换关键词（兼容旧全局调用）
+function filterKeyword(kw){ queryApp.setKeyword(kw); }
+
 
 
 // ========== 规则模式 ==========
