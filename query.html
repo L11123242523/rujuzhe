@@ -1785,6 +1785,13 @@ img,video,canvas,svg{max-width:100%}
 // ===== 统一评级系统（全站唯一事实来源）=====
 // 新维度：角色/攻击/技能/公共卡=4维(威力/泛用/协同/稳定)；道具=5维(多一个"费用")
 const DIM_CN = {'power':'威力','cost':'费用','flex':'泛用','synergy':'协同','stable':'稳定'};
+const DIM_DESC = {
+  'power':'威力：卡牌结算效果本身的综合强度与收益质量——数值大小、段数、覆盖目标数与附加收益。伤害只是效果的一种，增益/控制/去除/检索/资源/位移等效果同等按含金量计入，不等于直接造伤。',
+  'cost':'费用：达成该效果所需音韵值代价的效率，同等效果越省费得分越高。',
+  'flex':'泛用：能在多少构筑、局面、时机下使用；发动条件、目标、属性、位置是否挑剔。',
+  'synergy':'协同：与特定角色、标签、流派或其他卡牌联动时的放大空间与 combo 上限。',
+  'stable':'稳定：兑现效果的确定性；是否依赖骰子/判定/概率或对手配合，是否容易被打断、落空。'
+};
 const DIM_ORDER_CHAR = ['power','flex','synergy','stable'];
 const DIM_ORDER_ITEM = ['power','cost','flex','synergy','stable'];
 const W_DIM_CHAR = {'power':.35,'flex':.30,'synergy':.15,'stable':.20};
@@ -2035,7 +2042,7 @@ function showDetail(c){
       dOrder.forEach(k=>{
         const v=c.dims[k]; if(v===undefined) return;
         const pct=Math.round((w[k]||0)*100);
-        html += `<div class="score-row"><span class="label">${DIM_CN[k]}<span style="color:#666;font-size:10px"> ${pct}%</span></span><div class="bar"><div class="score-bar"><div class="score-bar-fill" style="width:${v*10}%;background:${dimColor[k]}"></div></div></div><span class="val">${v.toFixed(1)}</span></div>`;
+        html += `<div class="score-row"><span class="label" title="${DIM_DESC[k]||''}" style="cursor:help;border-bottom:1px dotted #777">${DIM_CN[k]}<span style="color:#666;font-size:10px"> ${pct}%</span></span><div class="bar"><div class="score-bar"><div class="score-bar-fill" style="width:${v*10}%;background:${dimColor[k]}"></div></div></div><span class="val">${v.toFixed(1)}</span></div>`;
       });
     }
 
