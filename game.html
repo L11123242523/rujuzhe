@@ -4084,6 +4084,7 @@ function startTurn() {
         __pc._zhichiPaidThisTurn = false;
         __pc._phoneUsedThisTurn = false; __pc._phoneExtraThisTurn = false;
         __pc._supplyUsedThisTurn = false; __pc._langyaUsedThisTurn = false;
+        __pc._juanUsedTurn = false;
       }
     }
   }
@@ -4792,21 +4793,19 @@ function aiUseCardComplete(handIndex, callback) {
   
   try {
     // 永续卡只执行“发动时”第一句，避免把每回合主动效果/被动在发动时误执行
-    var __aiParseText = effectText;
-    if (isPermanent) {
-      var __aiOnPlay = getOnPlayEffectText(card);
-      __aiParseText = (__aiOnPlay !== null && __aiOnPlay !== '') ? __aiOnPlay : '';
-    }
-    var steps = parseEffect(__aiParseText);
-    executeEffectSteps(steps, context, function() {
-      // 效果处理完成
-      if (!isPermanent) {
-        battleState.p2.grave.push(card);
-      }
+    var __aiDone = function() {
+      if (!isPermanent) { battleState.p2.grave.push(card); }
       checkBattleEnd();
       updateBattleUI();
       if (callback) setTimeout(callback, 300);
-    }, false); // AI使用卡牌时不弹出效果处理窗口
+    };
+    if (isPermanent) {
+      // 永续卡：玩家与 AI 共用同一结构化结算入口，杜绝两套实现不一致
+      resolvePermanentOnPlay(card, 'p2', __aiDone);
+    } else {
+      var steps = parseEffect(effectText);
+      executeEffectSteps(steps, context, __aiDone, false); // AI不弹效果窗
+    }
   } catch(e) {
     console.error('AI卡牌效果处理错误:', e);
     if (!isPermanent) {
@@ -5017,6 +5016,7 @@ function aiEndTurn() {
     __ac._zhichiPaidThisTurn = false;
     __ac._phoneUsedThisTurn = false; __ac._phoneExtraThisTurn = false;
     __ac._supplyUsedThisTurn = false; __ac._langyaUsedThisTurn = false;
+    __ac._juanUsedTurn = false;
   }
   
   addBattleLog('p2', '结束回合');
@@ -8328,21 +8328,8 @@ function activatePermanentCard(index) {
   }
   
   if (hasActiveEffect) {
-    // 有主动发动效果：执行永续卡效果
-    showTimingQuestion(
-      '发动【' + cardName + '】效果',
-      effect.substring(0, 80),
-      '效果声明中，是否要连锁发动效果？',
-      function(chain) {
-        if (chain) {
-          addBattleLog('system', '连锁发动功能开发中');
-          return;
-        }
-        executePermanentEffect(index);
-        // 标记本回合已使用（用于一回合一次限制）
-        card._usedThisTurn = true;
-      }
-    );
+    // 主动发动直接进入统一内核（阶段/次数由内核统一判定），不再弹多余的“自我连锁”询问
+    executePermanentEffect(index);
   } else {
     // 没有主动发动效果：显示卡牌信息
     var cost = card.cost || 0;
@@ -8359,428 +8346,354 @@ function activatePermanentCard(index) {
   }
 }
 
-function executePermanentEffect(index) {
-  var card = battleState.p1.permanent[index];
-  if (!card) return;
-  
-  // 如果是盖伏卡，先翻开
-  if (card._faceDown === true) {
-    card._faceDown = false;
-    addBattleLog('p1', '翻开盖伏卡【' + card.name + '】');
-  }
-  
-  var cardName = card.name || '';
-  var effect = card.effect || '';
-  
-  // 检查是否有可以主动发动的效果
-  // 是否可主动发动严格按白名单
-  var hasActiveEffect = permanentHasActiveEffect(card);
+// ============================================================
+// ===== 统一永续卡结算内核（结构化效果；玩家 / AI 唯一入口）=====
+// 设计原则：
+//  - 时机由数据显式声明，不再靠匹配整段中文文本猜测；
+//  - onPlay：打出瞬间执行（玩家与 AI 共用同一入口）；
+//  - active：在效果处理区点击主动发动，带 once 次数限制；
+//  - passive：常驻/触发效果不在此执行，由对应钩子处理；
+//  - 简单效果用“规范短句”复用已验证的统一效果执行器，复杂选择/支付用具名 handler。
+// ============================================================
+var PERMANENT_STRUCT = [
+  { match: ['臂章'], onPlayHandler: 'armband', active: null },
+  { match: ['Huginn', '穆宁', '福金'], onPlayHandler: 'huginnPlay',
+    active: { once: 'game', flag: '_huginnUsedGame', handler: 'huginn' } },
+  { match: ['钢笔'],
+    onPlay: ['从牌组、墓地将一张攻击卡或技能卡加入手卡', '那之后可以选一张手卡送入墓地然后抽一张'], active: null },
+  { match: ['共鸣者'], onPlay: ['抽取一张馈赠卡'], active: null },
+  { match: ['黑色卡片'], onPlay: [], active: null },
+  { match: ['镌刻'],
+    onPlay: ['从牌组或移出游戏的卡中选一张[侵略]标签的卡加入手卡'],
+    active: { once: 'turn', flag: '_juanUsedTurn', handler: 'juanKe' } },
+  { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'], active: null },
+  { match: ['善意面具', '笑意面具'], onPlayHandler: 'kindMask', active: null },
+  { match: ['智能手机'], onPlay: ['获得2000金币'],
+    active: { once: 'turn', flag: '_phoneUsedThisTurn', handler: 'phone', noAutoFlag: true } },
+  { match: ['血之佑戒', '血戒'], onPlay: ['立即回复3点音韵值'], active: null },
+  { match: ['妖刀', '五月雨'], onPlayHandler: 'yaodaoPlay', active: null },
+  { match: ['直尺'], onPlay: ['前进4格'],
+    active: { once: 'turn', flag: '_zhichiPaidThisTurn', handler: 'ruler' } },
+  { match: ['永奏', '进行曲'], onPlayHandler: 'yongzouPlay', active: null },
+  { match: ['狼牙', '鹰爪'],
+    onPlay: ['从墓地中选一张[侵略]标签的卡加入手卡', '然后可以选一张卡送入墓地并抽一张'],
+    active: { once: 'turn', flag: '_langyaUsedThisTurn', handler: 'langya' } },
+  { match: ['巧匠'], onPlayHandler: 'qiaojiangPlay',
+    active: { once: 'game', flag: '_qiaojiangUsedGame', handler: 'qiaojiang' } },
+  { match: ['供给者'], onPlay: ['回复1点音韵值'],
+    active: { once: 'turn', flag: '_supplyUsedThisTurn', handler: 'supplier' } },
+  { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } }
+];
 
-  // 如果没有主动发动效果，显示卡牌信息而不是发动
-  if (!hasActiveEffect) {
-    addBattleLog('p1', '【' + cardName + '】为被动效果或发动时效果，无需主动发动');
-    alert('【' + cardName + '】\n效果：' + effect + '\n\n（此卡为被动效果或发动时效果，无需主动发动）');
-    updateBattleUI();
-    return;
+function permanentStruct(card) {
+  if (!card) return null;
+  var name = card.name || '';
+  for (var i = 0; i < PERMANENT_STRUCT.length; i++) {
+    var st = PERMANENT_STRUCT[i];
+    for (var j = 0; j < st.match.length; j++) {
+      if (name.indexOf(st.match[j]) >= 0) return st;
+    }
   }
+  return null;
+}
+// 主动效果是否存在（替代旧的关键词/白名单猜测）
+function permanentHasActiveEffect(card) {
+  var st = permanentStruct(card);
+  return !!(st && st.active && st.active.handler);
+}
+function permOther(user) { return user === 'p1' ? 'p2' : 'p1'; }
 
-  addBattleLog('p1', '发动永续卡【' + cardName + '】');
-  
-  // 风纪委员臂章：发动时给予一名玩家3理智伤害
-  if (cardName.indexOf('臂章') >= 0) {
-    dealDamageWithResponse('p2', 3, cardName, function() {
-      addBattleLog('p1', '【风纪委员臂章】给予3理智伤害');
+// ---------- 打出瞬间（onPlay）：玩家/AI 共用 ----------
+function resolvePermanentOnPlay(card, user, cb) {
+  var st = permanentStruct(card);
+  if (!st) { if (cb) cb(); return; }
+  var other = permOther(user);
+  // 复杂打出效果：具名 handler（仅玩家可视化；AI 无选择交互时回退到短句/直接完成，保证不挂起）
+  if (st.onPlayHandler && PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler]) {
+    PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler](card, user, function () {
+      if (cb) cb();
     });
     return;
   }
-  
-  // 福金与穆宁 主动（一局游戏只能使用一次）：支付3音韵，从墓地/移出区选一张[侵略]卡加入手卡，之后最终伤害+1
-  if (cardName.indexOf('Huginn') >= 0 || cardName.indexOf('穆宁') >= 0 || cardName.indexOf('福金') >= 0) {
-    if (card._huginnUsedGame) { alert('【福金与穆宁】该主动效果一局游戏只能使用一次。'); return; }
-    if (battleState.p1.cost < 3) { alert('【福金与穆宁】音韵值不足3点，无法发动。'); return; }
-    var hugPool = [], hugZone = [];
-    battleState.p1.grave.forEach(function(c){ if (c.attribute === '侵略') { hugPool.push(c); hugZone.push('grave'); } });
-    (battleState.p1.removed || []).forEach(function(c){ if (c.attribute === '侵略') { hugPool.push(c); hugZone.push('removed'); } });
-    if (!hugPool.length) { alert('【福金与穆宁】墓地与移出游戏区都没有[侵略]标签的卡。'); return; }
-    showCardPickerMulti(hugPool, '福金与穆宁：支付3音韵，选一张[侵略]卡加入手卡（一局一次）', function(idx) {
-      if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
-      var picked = hugPool[idx], zone = hugZone[idx];
-      battleState.p1.cost -= 3; card._huginnUsedGame = true;
-      if (zone === 'grave') { var gi = battleState.p1.grave.indexOf(picked); if (gi >= 0) battleState.p1.grave.splice(gi, 1); }
-      else { var ri = battleState.p1.removed.indexOf(picked); if (ri >= 0) battleState.p1.removed.splice(ri, 1); }
-      battleState.p1.hand.push(picked);
-      battleState.p1.attackBuff = (battleState.p1.attackBuff || 0) + 1;
-      addBattleLog('p1', '【福金与穆宁】支付3音韵回收【' + picked.name + '】，之后最终伤害+1（当前攻击加成+' + battleState.p1.attackBuff + '）');
-      updateBattleUI();
+  var text = (st.onPlay || []).join('然后');
+  if (!text) { if (cb) cb(); return; }
+  var steps = parseEffect(text);
+  executeEffectSteps(steps, { user: user, target: other, card: card }, function () { if (cb) cb(); }, user === 'p1');
+}
+
+// ---------- onPlay 具名处理 ----------
+var PERMANENT_ONPLAY_HANDLERS = {
+  // 风纪委员臂章：3 理智伤害
+  armband: function (card, user, cb) {
+    dealDamageWithResponse(permOther(user), 3, card.name, function () { cb && cb(); });
+  },
+  // 福金与穆宁：3 混沌伤害 + 自身攻击力+3
+  huginnPlay: function (card, user, cb) {
+    var p = battleState[user];
+    dealDamageWithResponse(permOther(user), 3, card.name, function () {
+      p.attackBuff = (p.attackBuff || 0) + 3;
+      addBattleLog(user, '【福金与穆宁】自身攻击力+3（当前+' + p.attackBuff + '）');
+      updateBattleUI(); cb && cb();
     });
-    return;
-  }
-  
-  // 钢笔：发动时从牌组、墓地将一张攻击卡或技能卡加入手卡
-  if (cardName.indexOf('钢笔') >= 0) {
-    // 筛选牌组中的攻击卡和技能卡
-    var penCandidates = battleState.p1.deck.filter(function(c) {
-      return c._category === 'attack_cards' || c._category === 'skill_cards';
+  },
+  // 善意面具：选手牌一张攻击卡免费打出（最终伤害+1）；AI 不做交互直接完成
+  kindMask: function (card, user, cb) {
+    if (user !== 'p1') { cb && cb(); return; }
+    var attackCards = battleState.p1.hand.filter(function (c) { return c._category === 'attack_cards'; });
+    if (!attackCards.length) { addBattleLog('p1', '【善意面具】手中没有攻击卡'); cb && cb(); return; }
+    showTargetCards('p1', 'hand', '善意面具：选择一张攻击卡打出（不耗音韵，无视距离，最终伤害+1）', true, function (selectedCard) {
+      var idx = battleState.p1.hand.indexOf(selectedCard);
+      if (idx >= 0) {
+        battleState.p1.hand.splice(idx, 1);
+        var dmg = (selectedCard.baseDamage || 2) + 1 + (battleState.p1.attackBuff || 0);
+        addBattleLog('p1', '【善意面具】免费打出【' + selectedCard.name + '】，最终伤害+1，共' + dmg + '点');
+        dealDamageWithResponse('p2', dmg, selectedCard.name, function () {
+          battleState.p1.grave.push(selectedCard); updateBattleUI(); cb && cb();
+        });
+      } else { cb && cb(); }
     });
-    if (penCandidates.length === 0) {
-      addBattleLog('p1', '【钢笔】牌组中没有攻击卡或技能卡');
-      updateBattleUI();
-      return;
-    }
-    // 临时存储筛选结果，使用showTargetCards的deck区域但只显示符合条件的
-    var _penOriginalDeck = battleState.p1.deck.slice();
-    battleState.p1.deck = penCandidates;
-    showTargetCards('p1', 'deck', '钢笔：选择一张攻击卡或技能卡加入手卡', true, function(selectedCard, idx) {
-      // 恢复牌组
-      battleState.p1.deck = _penOriginalDeck;
-      // 从牌组中移除选中的卡
-      var realIdx = battleState.p1.deck.indexOf(selectedCard);
-      if (realIdx >= 0) battleState.p1.deck.splice(realIdx, 1);
-      battleState.p1.hand.push(selectedCard);
-      addBattleLog('p1', '【钢笔】从牌组将【' + selectedCard.name + '】加入手卡');
-      updateBattleUI();
-    });
-    return;
-  }
-  
-  // 共鸣者：发动时抽取一张馈赠卡
-  if (cardName.indexOf('共鸣者') >= 0) {
-    drawGiftCard('p1');
-    addBattleLog('p1', '【共鸣者】抽取一张馈赠卡');
-    return;
-  }
-  
-  // 镌刻的艺术（每回合主动效果）：支付4点同步值回复2点音韵；同步低于50%时回复量+100%（回4）
-  if (cardName.indexOf('镌刻') >= 0) {
-    var juanMaxSync = battleState.p1.maxSync || battleState.p1.sync;
-    if (battleState.p1.sync < 4) {
-      addBattleLog('p1', '【镌刻的艺术】同步值不足4点，无法支付主动效果');
-      updateBattleUI(); return;
-    }
-    battleState.p1.sync = Math.max(0, battleState.p1.sync - 4);
-    var juanLow = battleState.p1.sync < juanMaxSync * 0.5;
-    var juanBack = juanLow ? 4 : 2;
-    battleState.p1.cost = Math.min(battleState.p1.cost + juanBack, battleState.p1.maxCost);
-    addBattleLog('p1', '【镌刻的艺术】支付4点同步值，回复' + juanBack + '点音韵值（当前同步' + battleState.p1.sync + '、音韵' + battleState.p1.cost + '）' + (juanLow ? '（同步低于50%，回复量+100%）' : ''));
-    updateBattleUI();
-    return;
-  }
-  
-  // 蓝宝之杖·命：发动时对一名其他玩家造成一次硬币判定伤害（正面2点，背面0点）
-  if (cardName.indexOf('蓝宝') >= 0 || cardName.indexOf('蓝杖') >= 0) {
-    var coinResult = Math.random() > 0.5 ? '正面' : '背面';
-    var judgeDamage = (coinResult === '正面') ? 2 : 0;
-    if (battleState.p1._judgeDamageBonus && judgeDamage > 0) judgeDamage += battleState.p1._judgeDamageBonus;
-    addBattleLog('p1', '【蓝宝之杖·命】硬币判定：' + coinResult + '，造成' + judgeDamage + '点伤害');
-    dealDamageWithResponse('p2', judgeDamage, cardName, function() {
-      // 每回合首次造成判定伤害后追加硬币判定伤害
-      if (!battleState.p1._lanzhangUsed) {
-        battleState.p1._lanzhangUsed = true;
-        var coinResult = Math.random() > 0.5 ? '正面' : '背面';
-        if (coinResult === '正面') {
-          addBattleLog('p1', '【蓝宝之杖·命】追加硬币判定：正面，造成2点判定伤害');
-          dealDamageWithResponse('p2', 2, cardName + '追加', function() {});
-        } else {
-          addBattleLog('p1', '【蓝宝之杖·命】追加硬币判定：背面，不造成伤害');
-        }
-      }
-    });
-    return;
-  }
-  
-  // 善意面具：发动时若手中有攻击卡可不耗音韵且无视距离打出
-  if (cardName.indexOf('善意面具') >= 0 || cardName.indexOf('笑意面具') >= 0) {
-    var attackCards = battleState.p1.hand.filter(function(c) {
-      return c._category === 'attack_cards';
-    });
-    if (attackCards.length > 0) {
-      showTargetCards('p1', 'hand', '善意面具：选择一张攻击卡打出（不耗音韵，无视距离，最终伤害+1）', true, function(selectedCard, idx) {
-        var cardIdx = battleState.p1.hand.indexOf(selectedCard);
-        if (cardIdx >= 0) {
-          battleState.p1.hand.splice(cardIdx, 1);
-          var damage = (selectedCard.baseDamage || 2) + 1;
-          if (battleState.p1.attackBuff) damage += battleState.p1.attackBuff;
-          addBattleLog('p1', '【善意面具】不耗音韵且无视距离打出【' + selectedCard.name + '】，最终伤害+1，共' + damage + '点');
-          dealDamageWithResponse('p2', damage, selectedCard.name, function() {
-            battleState.p1.grave.push(selectedCard);
-            updateBattleUI();
-          });
-        }
+  },
+  // 妖刀五月雨：破坏对方场上1张卡 → 造5混沌 → 自失3同步；AI 简化为造5+失3
+  yaodaoPlay: function (card, user, cb) {
+    var p = battleState[user], o = permOther(user);
+    function rest() {
+      dealDamageWithResponse(o, 5, card.name, function () {
+        p.sync = Math.max(0, p.sync - 3);
+        addBattleLog(user, '【妖刀五月雨】自己失3同步（当前' + p.sync + '）');
+        updateBattleUI(); cb && cb();
       });
-    } else {
-      addBattleLog('p1', '【善意面具】手中没有攻击卡');
     }
-    return;
+    if (user === 'p1' && battleState.p2.permanent.length) {
+      showTargetCards('p2', 'permanent', '妖刀五月雨：选择对方场上1张卡破坏', true, function (sc, si) {
+        if (si >= 0) { battleState.p2.permanent.splice(si, 1); battleState.p2.grave.push(sc); addBattleLog('p1', '【妖刀五月雨】破坏【' + sc.name + '】'); }
+        rest();
+      });
+    } else rest();
+  },
+  // 永奏进行曲：抽2，再选一张手卡/区域内卡送墓；AI 只抽2
+  yongzouPlay: function (card, user, cb) {
+    var p = battleState[user];
+    for (var i = 0; i < 2; i++) if (p.deck.length) { var c = p.deck.shift(); p.hand.push(c); addBattleLog(user, '【永奏进行曲】抽到【' + c.name + '】'); }
+    if (user !== 'p1') { updateBattleUI(); cb && cb(); return; }
+    var choices = [];
+    p.hand.forEach(function (c) { choices.push('[手牌] ' + c.name); });
+    p.permanent.forEach(function (c) { choices.push('[永续区] ' + c.name); });
+    if (!choices.length) { updateBattleUI(); cb && cb(); return; }
+    showChoiceModal('永奏进行曲', card.name, '选择一张手卡或永续区卡送入墓地', choices, function (ci) {
+      var hc = p.hand.length;
+      if (ci < hc) { var rc = p.hand.splice(ci, 1)[0]; p.grave.push(rc); addBattleLog('p1', '【永奏进行曲】手牌【' + rc.name + '】送入墓地'); }
+      else { var pi = ci - hc, rc = p.permanent.splice(pi, 1)[0]; p.grave.push(rc); addBattleLog('p1', '【永奏进行曲】永续区【' + rc.name + '】送入墓地'); }
+      updateBattleUI(); cb && cb();
+    });
+  },
+  // 巧匠之手：立即进行一次献祭（选手牌送墓回2费），完成后抽1；AI 抽1
+  qiaojiangPlay: function (card, user, cb) {
+    var p = battleState[user];
+    function draw() { var d = drawCard(user); if (d) addBattleLog(user, '【巧匠之手】献祭后抽到【' + d.name + '】'); updateBattleUI(); cb && cb(); }
+    if (user !== 'p1' || !p.hand.length) { draw(); return; }
+    var hand = p.hand.slice();
+    showCardPickerMulti(hand, '巧匠之手：选一张手卡献祭（回复2音韵），完成后抽1张', function (hi) {
+      if (hi === null || hi === undefined || hi < 0) { cb && cb(); return; }
+      var real = p.hand.indexOf(hand[hi]); if (real < 0) { cb && cb(); return; }
+      var sac = p.hand.splice(real, 1)[0]; p.grave.push(sac); checkGraveTrigger('p1', sac);
+      p.cost = Math.min(p.cost + 2, p.maxCost);
+      addBattleLog('p1', '【巧匠之手】献祭【' + sac.name + '】，回复2音韵（当前' + p.cost + '）');
+      draw();
+    });
   }
-  
-  // 智能手机 主动（每回合一次，可扣500金币追加一次）：扣700金币选 ①攻击力+1 ②手卡送墓并对一名玩家造3理智伤害
-  if (cardName.indexOf('智能手机') >= 0) {
-    if (!battleState.p1.gold) battleState.p1.gold = 0;
+};
+
+// ---------- 主动发动（玩家在效果处理区点击）----------
+var PERMANENT_ACTIVE_HANDLERS = {
+  // 镌刻：付4同步回2音韵（同步低于50%回4）
+  juanKe: function (card) {
+    var p = battleState.p1, maxS = p.maxSync || p.sync;
+    if (p.sync < 4) { alert('【镌刻的艺术】同步值不足4点，无法支付主动效果。'); return false; }
+    p.sync = Math.max(0, p.sync - 4);
+    var low = p.sync < maxS * 0.5, back = low ? 4 : 2;
+    p.cost = Math.min(p.cost + back, p.maxCost);
+    addBattleLog('p1', '【镌刻的艺术】支付4同步，回复' + back + '音韵（同步' + p.sync + '、音韵' + p.cost + '）' + (low ? '（低于50%，+100%）' : ''));
+    updateBattleUI(); return true;
+  },
+  // 直尺：每1音韵前进1格（每回合一次）
+  ruler: function (card) {
+    var p = battleState.p1;
+    if (p.cost <= 0) { alert('【设计师的直尺】音韵值不足，无法支付前进。'); return false; }
+    var opts = [];
+    for (var k = 1; k <= p.cost; k++) opts.push('支付 ' + k + ' 音韵，前进 ' + Math.min(k, 20) + ' 格');
+    showChoiceModal('设计师的直尺', '支付音韵值前进（每1点音韵前进1格，每回合一次）', '当前音韵 ' + p.cost, opts, function (oi) {
+      var pay = oi + 1; p.cost -= pay; var old = p.position, mv = Math.min(pay, 20);
+      p.position = (p.position + mv) % 42;
+      addBattleLog('p1', '【设计师的直尺】支付' + pay + '音韵前进' + mv + '格，第' + old + '格→第' + p.position + '格');
+      triggerTileEffect('p1'); checkMoveTriggers('p1', mv); updateBattleUI();
+    });
+    return true;
+  },
+  // 福金与穆宁主动：付3音韵从墓地/移出选[侵略]回收，最终伤害+1（一局一次）
+  huginn: function (card) {
+    var p = battleState.p1;
+    if (p.cost < 3) { alert('【福金与穆宁】音韵不足3点。'); return false; }
+    var pool = [], zone = [];
+    p.grave.forEach(function (c) { if (c.attribute === '侵略') { pool.push(c); zone.push('grave'); } });
+    (p.removed || []).forEach(function (c) { if (c.attribute === '侵略') { pool.push(c); zone.push('removed'); } });
+    if (!pool.length) { alert('【福金与穆宁】墓地与移出区都没有[侵略]卡。'); return false; }
+    showCardPickerMulti(pool, '福金与穆宁：支付3音韵选一张[侵略]加入手卡（一局一次）', function (idx) {
+      if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
+      var picked = pool[idx], z = zone[idx]; p.cost -= 3;
+      if (z === 'grave') { var i = p.grave.indexOf(picked); if (i >= 0) p.grave.splice(i, 1); }
+      else { var j = p.removed.indexOf(picked); if (j >= 0) p.removed.splice(j, 1); }
+      p.hand.push(picked); p.attackBuff = (p.attackBuff || 0) + 1;
+      addBattleLog('p1', '【福金与穆宁】支付3音韵回收【' + picked.name + '】，最终伤害+1（攻击加成+' + p.attackBuff + '）');
+      updateBattleUI();
+    });
+    return true;
+  },
+  // 智能手机：扣700金币选①攻击+1②手卡送墓造3理智（可扣500追加一次）
+  phone: function (card) {
+    var p = battleState.p1; if (!p.gold) p.gold = 0;
     if (card._phoneUsedThisTurn && !card._phoneExtraThisTurn) {
-      if (battleState.p1.gold < 500) { alert('【智能手机】本回合已发动，且金币不足500，无法追加发动次数。'); return; }
-      battleState.p1.gold -= 500; card._phoneExtraThisTurn = true;
-      addBattleLog('p1', '【智能手机】扣除500金币追加一次发动次数，剩余' + battleState.p1.gold + '金币');
-    } else if (card._phoneUsedThisTurn) { alert('【智能手机】本回合已追加过一次，不能再发动。'); return; }
-    if (battleState.p1.gold < 700) { alert('【智能手机】金币不足700，无法发动等价交换。'); return; }
-    showChoiceModal('智能手机·等价交换', '扣除700金币，选择一项效果适用', '当前金币 ' + battleState.p1.gold,
-      ['① 上升1点攻击力', '② 选一张手卡送入墓地，对一名玩家造成3点理智伤害'], function(ci) {
-        battleState.p1.gold -= 700; card._phoneUsedThisTurn = true;
-        if (ci === 0) {
-          battleState.p1.attackBuff = (battleState.p1.attackBuff || 0) + 1;
-          addBattleLog('p1', '【智能手机】①攻击力+1（当前+' + battleState.p1.attackBuff + '），剩余金币' + battleState.p1.gold);
-          updateBattleUI();
-        } else {
-          if (!battleState.p1.hand.length) { addBattleLog('p1', '【智能手机】②没有手卡可送入墓地，效果不适用'); updateBattleUI(); return; }
-          var phoneHand = battleState.p1.hand.slice();
-          showCardPickerMulti(phoneHand, '智能手机②：选一张手卡送入墓地', function(hi) {
+      if (p.gold < 500) { alert('【智能手机】本回合已发动，金币不足500，无法追加。'); return false; }
+      p.gold -= 500; card._phoneExtraThisTurn = true;
+      addBattleLog('p1', '【智能手机】扣500金币追加一次发动次数，剩余' + p.gold);
+    } else if (card._phoneUsedThisTurn) { alert('【智能手机】本回合已追加过一次。'); return false; }
+    if (p.gold < 700) { alert('【智能手机】金币不足700。'); return false; }
+    showChoiceModal('智能手机·等价交换', '扣除700金币选择一项', '当前金币 ' + p.gold,
+      ['① 上升1点攻击力', '② 选一张手卡送入墓地，对一名玩家造成3点理智伤害'], function (ci) {
+        p.gold -= 700; card._phoneUsedThisTurn = true;
+        if (ci === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog('p1', '【智能手机】①攻击力+1（+' + p.attackBuff + '），余' + p.gold); updateBattleUI(); }
+        else {
+          if (!p.hand.length) { addBattleLog('p1', '【智能手机】②无手卡可送，效果不适用'); updateBattleUI(); return; }
+          var h = p.hand.slice();
+          showCardPickerMulti(h, '智能手机②：选一张手卡送入墓地', function (hi) {
             if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
-            var real = battleState.p1.hand.indexOf(phoneHand[hi]); if (real < 0) { updateBattleUI(); return; }
-            var dc = battleState.p1.hand.splice(real, 1)[0]; battleState.p1.grave.push(dc);
-            addBattleLog('p1', '【智能手机】②将【' + dc.name + '】送入墓地');
-            showChoiceModal('智能手机②', '对谁造成3点理智伤害？', '', ['对手', '自己'], function(wi) {
-              var tgt = wi === 0 ? 'p2' : 'p1';
-              dealDamageWithResponse(tgt, 3, '智能手机', function() {
-                addBattleLog('p1', '【智能手机】②对' + (tgt === 'p2' ? '对手' : '自己') + '造成3点理智伤害');
-                updateBattleUI();
-              });
+            var ri = p.hand.indexOf(h[hi]); if (ri < 0) { updateBattleUI(); return; }
+            var dc = p.hand.splice(ri, 1)[0]; p.grave.push(dc);
+            addBattleLog('p1', '【智能手机】②【' + dc.name + '】送入墓地');
+            showChoiceModal('智能手机②', '对谁造成3点理智伤害？', '', ['对手', '自己'], function (w) {
+              var t = w === 0 ? 'p2' : 'p1';
+              dealDamageWithResponse(t, 3, '智能手机', function () { addBattleLog('p1', '【智能手机】②造成3理智伤害'); updateBattleUI(); });
             });
           });
         }
       });
-    return;
-  }
-  
-  // 血之佑戒·红泪拉克莎：发动时立即回复3点音韵值
-  if (cardName.indexOf('血之佑戒') >= 0 || cardName.indexOf('血戒') >= 0) {
-    battleState.p1.cost = Math.min(battleState.p1.cost + 3, battleState.p1.maxCost);
-    addBattleLog('p1', '【血之佑戒】立即回复3点音韵值，当前' + battleState.p1.cost + '点');
-    updateBattleUI();
-    return;
-  }
-  
-  // 妖刀五月雨：发动时对一名其他玩家造成5点混沌属性伤害
-  // 永续效果：每回合一次，单次造5点以上伤害时可选：①破坏场上1张卡，自己失3同步 ②抽1张卡，自己失3同步
-  if (cardName.indexOf('妖刀') >= 0 || cardName.indexOf('五月雨') >= 0) {
-    // 选择目标
-    var targetPlayer = 'p2';
-    addBattleLog('p1', '【妖刀五月雨】对玩家2造成5点混沌属性伤害');
-    dealDamageWithResponse(targetPlayer, 5, cardName, function() {
-      addBattleLog('p1', '【妖刀五月雨】伤害处理完成');
-      // 永续效果：每回合一次，单次造5点以上伤害时可选
-      if (!battleState.p1._yaodaoTriggered) {
-        battleState.p1._yaodaoTriggered = true;
-        var yaodaoChoices = [
-          '破坏场上1张卡，自己失3同步',
-          '抽1张卡，自己失3同步'
-        ];
-        showChoiceModal('妖刀五月雨', cardName, '单次造5点以上伤害，选择永续效果：', yaodaoChoices, function(choiceIdx) {
-          battleState.p1.sync = Math.max(0, battleState.p1.sync - 3);
-          addBattleLog('p1', '【妖刀五月雨】自己失3同步，当前同步：' + battleState.p1.sync);
-          if (choiceIdx === 0) {
-            // 破坏场上1张卡（选择目标永续区卡）
-            if (battleState.p2.permanent.length > 0) {
-              showTargetCards('p2', 'permanent', '妖刀五月雨：选择目标场上1张卡破坏', true, function(selectedCard, idx) {
-                battleState.p2.permanent.splice(idx, 1);
-                battleState.p2.grave.push(selectedCard);
-                addBattleLog('p1', '【妖刀五月雨】破坏目标场上【' + selectedCard.name + '】');
-                updateBattleUI();
-              });
-            } else {
-              addBattleLog('p1', '【妖刀五月雨】目标场上没有可破坏的卡');
-              updateBattleUI();
-            }
-          } else {
-            // 抽1张卡
-            var drawnCard = drawCard('p1');
-            if (drawnCard) {
-              addBattleLog('p1', '【妖刀五月雨】抽到【' + drawnCard.name + '】');
-            }
-            updateBattleUI();
-          }
-        });
-      }
-      updateBattleUI();
-    });
-    return;
-  }
-  
-  // 设计师的直尺：发动时前进4格已在“打出瞬间”由发动时效果处理；点击永续区只发动【每回合一次：支付音韵值前进】
-  if (cardName.indexOf('直尺') >= 0) {
-    if (card._zhichiPaidThisTurn) {
-      alert('【设计师的直尺】本回合已经支付过音韵值前进了（每回合一次）！');
-      return;
-    }
-    var currentCost = battleState.p1.cost;
-    if (currentCost <= 0) {
-      alert('【设计师的直尺】音韵值不足，无法支付前进！');
-      return;
-    }
-    var payOpts = [];
-    for (var __k = 1; __k <= currentCost; __k++) payOpts.push('支付 ' + __k + ' 音韵，前进 ' + Math.min(__k, 20) + ' 格');
-    showChoiceModal('设计师的直尺', '支付音韵值前进（每1点音韵前进1格，每回合一次）', '当前音韵值 ' + currentCost, payOpts, function(oi) {
-      var payAmount = oi + 1;
-      battleState.p1.cost -= payAmount;
-      card._zhichiPaidThisTurn = true;
-      var oldPos2 = battleState.p1.position;
-      var actualMove = Math.min(payAmount, 20);
-      battleState.p1.position = (battleState.p1.position + actualMove) % 42;
-      addBattleLog('p1', '【设计师的直尺】支付' + payAmount + '点音韵值前进' + actualMove + '格，从第' + oldPos2 + '格到第' + battleState.p1.position + '格');
-      triggerTileEffect('p1');
-      checkMoveTriggers('p1', actualMove);
-      updateBattleUI();
-    });
-    return;
-  }
-  
-  // 永奏进行曲：发动时立即抽2张卡，然后选一张手卡或区域内的卡送入墓地
-  if (cardName.indexOf('永奏') >= 0 || cardName.indexOf('进行曲') >= 0) {
-    for (var i = 0; i < 2; i++) {
-      if (battleState.p1.deck.length > 0) {
-        var c = battleState.p1.deck.shift();
-        battleState.p1.hand.push(c);
-        addBattleLog('p1', '【永奏进行曲】抽到【' + c.name + '】');
-      }
-    }
-    updateBattleUI();
-    // 选一张手卡或永续区卡送入墓地
-    var yongzouChoices = [];
-    for (var hi = 0; hi < battleState.p1.hand.length; hi++) {
-      yongzouChoices.push('[手牌] ' + battleState.p1.hand[hi].name);
-    }
-    for (var pi = 0; pi < battleState.p1.permanent.length; pi++) {
-      yongzouChoices.push('[永续区] ' + battleState.p1.permanent[pi].name);
-    }
-    if (yongzouChoices.length > 0) {
-      showChoiceModal('永奏进行曲', cardName, '选择一张手卡或永续区卡送入墓地', yongzouChoices, function(choiceIdx) {
-        var handCount = battleState.p1.hand.length;
-        if (choiceIdx < handCount) {
-          var removedCard = battleState.p1.hand.splice(choiceIdx, 1)[0];
-          battleState.p1.grave.push(removedCard);
-          addBattleLog('p1', '【永奏进行曲】将手牌【' + removedCard.name + '】送入墓地');
-        } else {
-          var permIdx = choiceIdx - handCount;
-          var removedCard = battleState.p1.permanent.splice(permIdx, 1)[0];
-          battleState.p1.grave.push(removedCard);
-          addBattleLog('p1', '【永奏进行曲】将永续区【' + removedCard.name + '】送入墓地');
-        }
-        updateBattleUI();
-      });
-    }
-    return;
-  }
-  
-  // 黑色卡片：被动效果（每回合开始额外抽1卡），发动时无特殊效果
-  if (cardName.indexOf('黑色卡片') >= 0) {
-    addBattleLog('p1', '【黑色卡片】为被动效果，每回合开始额外抽1卡');
-    return;
-  }
-  // 绿宝之杖·择：三选一主动效果（全部由玩家可视化选择，禁止代选）
-  if (cardName.indexOf('绿宝') >= 0) {
-    var lzChoices = ['① 选一名玩家抽1张，你后退2格', '② 选你效果处理区1张送墓，你前进3格', '③ 选墓地1张加入手卡，再选手牌1张送墓（同色/同费回1音韵）'];
-    showChoiceModal('绿宝之杖·择', cardName, '选择一项发动', lzChoices, function(ci) {
-      if (ci === 0) {
-        showChoiceModal('绿宝之杖·择 ①', '由谁抽 1 张？', '你随后后退2格', ['你抽1张', '对手抽1张'], function(w) {
-          var wd = w === 0 ? 'p1' : 'p2';
-          drawCard(wd);
-          battleState.p1.position = (battleState.p1.position - 2 + 42) % 42;
-          addBattleLog('p1', '【绿宝之杖·择】① ' + (wd === 'p1' ? '你' : '对手') + '抽1张，你后退到第' + battleState.p1.position + '格');
-          checkMoveTriggers('p1', -2); triggerTileEffect('p1'); updateBattleUI();
-        });
-      } else if (ci === 1) {
-        if (!battleState.p1.permanent.length) { addBattleLog('p1', '【绿宝之杖·择】② 效果处理区无卡可送'); updateBattleUI(); return; }
-        var c2 = battleState.p1.permanent.slice();
-        showCardPickerMulti(c2, '② 选你效果处理区一张送入墓地', function(si) {
-          if (si === null || si === undefined || si < 0) return;
-          var ri = battleState.p1.permanent.indexOf(c2[si]);
-          if (ri >= 0) { var sc = battleState.p1.permanent.splice(ri,1)[0]; battleState.p1.grave.push(sc); addBattleLog('p1', '【绿宝之杖·择】② 【'+sc.name+'】送入墓地'); }
-          battleState.p1.position = (battleState.p1.position + 3) % 42;
-          addBattleLog('p1', '【绿宝之杖·择】② 前进3格到第'+battleState.p1.position+'格');
-          checkMoveTriggers('p1', 3); triggerTileEffect('p1'); updateBattleUI();
-        });
-      } else {
-        if (!battleState.p1.grave.length) { addBattleLog('p1', '【绿宝之杖·择】③ 墓地无卡可回收'); updateBattleUI(); return; }
-        var g3 = battleState.p1.grave.slice();
-        showCardPickerMulti(g3, '③ 选墓地一张加入手卡', function(gi) {
-          if (gi === null || gi === undefined || gi < 0) return;
-          var gri = battleState.p1.grave.indexOf(g3[gi]); if (gri < 0) return;
-          var gc = battleState.p1.grave.splice(gri,1)[0]; battleState.p1.hand.push(gc);
-          addBattleLog('p1', '【绿宝之杖·择】③ 回收【'+gc.name+'】');
-          var h3 = battleState.p1.hand.slice();
-          showCardPickerMulti(h3, '再选手牌一张送入墓地', function(hi) {
-            if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
-            var hri = battleState.p1.hand.indexOf(h3[hi]); if (hri < 0) { updateBattleUI(); return; }
-            var dc = battleState.p1.hand.splice(hri,1)[0]; battleState.p1.grave.push(dc);
-            addBattleLog('p1', '【绿宝之杖·择】③ 手卡【'+dc.name+'】送入墓地');
-            if (gc.attribute === dc.attribute || gc.cost === dc.cost) { battleState.p1.cost = Math.min(battleState.p1.cost+1, battleState.p1.maxCost); addBattleLog('p1', '【绿宝之杖·择】同色/同费回复1音韵，当前'+battleState.p1.cost); }
-            updateBattleUI();
-          });
-        });
-      }
-    });
-    return;
-  }
-  
-  // 核心的供给者 主动（每回合一次）：获得3点激励点数
-  if (cardName.indexOf('供给者') >= 0) {
-    if (card._supplyUsedThisTurn) { alert('【核心的供给者】本回合已发动过（每回合一次）。'); return; }
-    card._supplyUsedThisTurn = true;
-    battleState.p1.motivation = (battleState.p1.motivation || 0) + 3;
-    addBattleLog('p1', '【核心的供给者】获得3点激励点数（当前' + battleState.p1.motivation + '点）');
-    checkLevelUp('p1');
-    updateBattleUI();
-    return;
-  }
-
-  // 巧匠之手 主动（一局一次）：选手卡献祭（移出游戏而非进墓地），再选该卡以外自己被移出的卡加入手卡
-  if (cardName.indexOf('巧匠') >= 0) {
-    if (card._qiaojiangUsedGame) { alert('【巧匠之手】该主动效果一局游戏只能发动一次。'); return; }
-    if (!battleState.p1.hand.length) { alert('【巧匠之手】没有手卡可以献祭。'); return; }
-    var qjHand = battleState.p1.hand.slice();
-    showCardPickerMulti(qjHand, '巧匠之手：选一张手卡献祭（移出游戏，一局一次）', function(hi) {
+    return true;
+  },
+  // 核心供给者：得3激励
+  supplier: function (card) {
+    var p = battleState.p1; p.motivation = (p.motivation || 0) + 3;
+    addBattleLog('p1', '【核心的供给者】获得3点激励（当前' + p.motivation + '点）');
+    checkLevelUp('p1'); updateBattleUI(); return true;
+  },
+  // 巧匠主动（一局一次）：选手卡献祭移出，再选其他被移出卡回收
+  qiaojiang: function (card) {
+    var p = battleState.p1;
+    if (!p.hand.length) { alert('【巧匠之手】没有手卡可以献祭。'); return false; }
+    var h = p.hand.slice();
+    showCardPickerMulti(h, '巧匠之手：选一张手卡献祭（移出游戏，一局一次）', function (hi) {
       if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
-      var real = battleState.p1.hand.indexOf(qjHand[hi]); if (real < 0) { updateBattleUI(); return; }
-      var sac = battleState.p1.hand.splice(real, 1)[0];
-      if (!battleState.p1.removed) battleState.p1.removed = [];
-      battleState.p1.removed.push(sac); card._qiaojiangUsedGame = true;
-      addBattleLog('p1', '【巧匠之手】将【' + sac.name + '】献祭并移出游戏');
-      var qjPool = battleState.p1.removed.filter(function(c){ return c !== sac; });
-      if (!qjPool.length) { addBattleLog('p1', '【巧匠之手】没有其他被移出游戏的卡可回收'); updateBattleUI(); return; }
-      showCardPickerMulti(qjPool, '巧匠之手：选该卡以外、自己被移出游戏的一张卡加入手卡', function(ri) {
+      var real = p.hand.indexOf(h[hi]); if (real < 0) { updateBattleUI(); return; }
+      var sac = p.hand.splice(real, 1)[0]; if (!p.removed) p.removed = []; p.removed.push(sac);
+      addBattleLog('p1', '【巧匠之手】【' + sac.name + '】献祭并移出游戏');
+      var pool = p.removed.filter(function (c) { return c !== sac; });
+      if (!pool.length) { addBattleLog('p1', '【巧匠之手】没有其他被移出的卡可回收'); updateBattleUI(); return; }
+      showCardPickerMulti(pool, '巧匠之手：选该卡以外、自己被移出的一张卡加入手卡', function (ri) {
         if (ri === null || ri === undefined || ri < 0) { updateBattleUI(); return; }
-        var rc = qjPool[ri], ii = battleState.p1.removed.indexOf(rc); if (ii >= 0) battleState.p1.removed.splice(ii, 1);
-        battleState.p1.hand.push(rc);
-        addBattleLog('p1', '【巧匠之手】将移出区【' + rc.name + '】加入手卡');
-        updateBattleUI();
+        var rc = pool[ri], ii = p.removed.indexOf(rc); if (ii >= 0) p.removed.splice(ii, 1);
+        p.hand.push(rc); addBattleLog('p1', '【巧匠之手】移出区【' + rc.name + '】加入手卡'); updateBattleUI();
       });
     });
-    return;
-  }
-
-  // 狼牙鹰爪 主动（一回合一次）：选墓地一张[侵略]单次卡，支付其费用+1音韵适用其效果（该卡留在墓地）
-  if (cardName.indexOf('狼牙') >= 0 || cardName.indexOf('鹰爪') >= 0) {
-    if (card._langyaUsedThisTurn) { alert('【狼牙鹰爪】本回合已发动过（一回合一次）。'); return; }
-    var lyPool = battleState.p1.grave.filter(function(c){ return c.attribute === '侵略' && c._category !== 'item_permanent'; });
-    if (!lyPool.length) { alert('【狼牙鹰爪】墓地中没有[侵略]标签的单次卡。'); return; }
-    showCardPickerMulti(lyPool, '狼牙鹰爪：选墓地一张[侵略]单次卡，支付其费用+1音韵适用其效果（一回合一次）', function(idx) {
+    return true;
+  },
+  // 狼牙鹰爪（一回合一次）：选墓地[侵略]单次卡，付其费用+1适用其效果（留墓地）
+  langya: function (card) {
+    var p = battleState.p1;
+    var pool = p.grave.filter(function (c) { return c.attribute === '侵略' && c._category !== 'item_permanent'; });
+    if (!pool.length) { alert('【狼牙鹰爪】墓地没有[侵略]单次卡。'); return false; }
+    showCardPickerMulti(pool, '狼牙鹰爪：选墓地[侵略]单次卡，付其费用+1音韵适用效果（一回合一次）', function (idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
-      var tc = lyPool[idx], need = (tc.cost || 0) + 1;
-      if (battleState.p1.cost < need) { alert('【狼牙鹰爪】音韵不足，需要' + need + '点（该卡费用' + (tc.cost||0) + '+1）。'); updateBattleUI(); return; }
-      battleState.p1.cost -= need; card._langyaUsedThisTurn = true;
-      addBattleLog('p1', '【狼牙鹰爪】支付' + need + '音韵，适用墓地【' + tc.name + '】的效果（该卡留在墓地）');
-      var lySteps = parseEffect(tc.effect || tc.text || '');
-      executeEffectSteps(lySteps, { user: 'p1', target: 'p2', card: tc }, function() {
-        addBattleLog('p1', '【狼牙鹰爪】适用【' + tc.name + '】效果完毕');
-        updateBattleUI();
-      }, true);
+      var tc = pool[idx], need = (tc.cost || 0) + 1;
+      if (p.cost < need) { alert('【狼牙鹰爪】音韵不足，需要' + need + '点。'); updateBattleUI(); return; }
+      p.cost -= need;
+      addBattleLog('p1', '【狼牙鹰爪】支付' + need + '音韵，适用墓地【' + tc.name + '】效果（留墓地）');
+      var steps = parseEffect(tc.effect || tc.text || '');
+      executeEffectSteps(steps, { user: 'p1', target: 'p2', card: tc }, function () { addBattleLog('p1', '【狼牙鹰爪】适用完毕'); updateBattleUI(); }, true);
     });
+    return true;
+  },
+  // 绿宝之杖·择：三选一
+  lvbao: function (card) {
+    var p = battleState.p1;
+    showChoiceModal('绿宝之杖·择', card.name, '选择一项发动',
+      ['① 选一名玩家抽1张，你后退2格', '② 选你效果处理区1张送墓，你前进3格', '③ 选墓地1张加入手卡，再选手牌1张送墓（同色/同费回1音韵）'], function (ci) {
+        if (ci === 0) {
+          showChoiceModal('绿宝之杖·择 ①', '由谁抽1张？', '你随后后退2格', ['你抽1张', '对手抽1张'], function (w) {
+            var wd = w === 0 ? 'p1' : 'p2'; drawCard(wd);
+            p.position = (p.position - 2 + 42) % 42;
+            addBattleLog('p1', '【绿宝之杖·择】① ' + (wd === 'p1' ? '你' : '对手') + '抽1，你后退到第' + p.position + '格');
+            checkMoveTriggers('p1', -2); triggerTileEffect('p1'); updateBattleUI();
+          });
+        } else if (ci === 1) {
+          if (!p.permanent.length) { addBattleLog('p1', '【绿宝之杖·择】② 效果处理区无卡'); updateBattleUI(); return; }
+          var c2 = p.permanent.slice();
+          showCardPickerMulti(c2, '② 选你效果处理区一张送入墓地', function (si) {
+            if (si === null || si === undefined || si < 0) { updateBattleUI(); return; }
+            var ri = p.permanent.indexOf(c2[si]);
+            if (ri >= 0) { var sc = p.permanent.splice(ri, 1)[0]; p.grave.push(sc); addBattleLog('p1', '【绿宝之杖·择】②【' + sc.name + '】送墓'); }
+            p.position = (p.position + 3) % 42; addBattleLog('p1', '【绿宝之杖·择】②前进到第' + p.position + '格');
+            checkMoveTriggers('p1', 3); triggerTileEffect('p1'); updateBattleUI();
+          });
+        } else {
+          if (!p.grave.length) { addBattleLog('p1', '【绿宝之杖·择】③ 墓地无卡可回收'); updateBattleUI(); return; }
+          var g3 = p.grave.slice();
+          showCardPickerMulti(g3, '③ 选墓地一张加入手卡', function (gi) {
+            if (gi === null || gi === undefined || gi < 0) { updateBattleUI(); return; }
+            var gri = p.grave.indexOf(g3[gi]); if (gri < 0) { updateBattleUI(); return; }
+            var gc = p.grave.splice(gri, 1)[0]; p.hand.push(gc); addBattleLog('p1', '【绿宝之杖·择】③回收【' + gc.name + '】');
+            var h3 = p.hand.slice();
+            showCardPickerMulti(h3, '再选手牌一张送入墓地', function (hi) {
+              if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
+              var hri = p.hand.indexOf(h3[hi]); if (hri < 0) { updateBattleUI(); return; }
+              var dc = p.hand.splice(hri, 1)[0]; p.grave.push(dc); addBattleLog('p1', '【绿宝之杖·择】③手牌【' + dc.name + '】送墓');
+              if (gc.attribute === dc.attribute || gc.cost === dc.cost) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog('p1', '【绿宝之杖·择】同色/同费回1音韵，当前' + p.cost); }
+              updateBattleUI();
+            });
+          });
+        }
+      });
+    return true;
+  }
+};
+
+// 主动发动统一入口（替代旧 executePermanentEffect 的关键词分支堆叠）
+function executePermanentActive(index) {
+  var card = battleState.p1.permanent[index];
+  if (!card) return;
+  if (card._faceDown === true) { card._faceDown = false; addBattleLog('p1', '翻开盖伏卡【' + card.name + '】'); }
+  var st = permanentStruct(card);
+  if (!st || !st.active || !st.active.handler) {
+    alert('【' + (card.name || '') + '】\n效果：' + (card.effect || '') + '\n\n（此卡为被动/发动时效果，无需主动发动）');
     return;
   }
-
-  // 默认：显示效果描述
-  alert('【' + cardName + '】发动效果：\n\n' + effect);
-  addBattleLog('p1', '【' + cardName + '】发动效果：' + effect.substring(0, 100));
+  // 主要阶段才能主动发动（盖伏卡翻开当回合限制已在合法性层处理）
+  if (battleState.phase !== 'main1' && battleState.phase !== 'main2' && card._faceDown !== true) {
+    alert('当前阶段不能发动永续卡效果，请在主要阶段发动。'); return;
+  }
+  var act = st.active;
+  // 次数限制
+  if (act.flag && card[act.flag]) {
+    alert('【' + card.name + '】' + (act.once === 'game' ? '该效果一局游戏只能使用一次。' : '本回合已经发动过（每回合一次）。'));
+    return;
+  }
+  var fn = PERMANENT_ACTIVE_HANDLERS[act.handler];
+  if (!fn) return;
+  addBattleLog('p1', '发动永续卡【' + card.name + '】主动效果');
+  var ok = fn(card);
+  if (ok && act.flag && !act.noAutoFlag) card[act.flag] = true;
   updateBattleUI();
+}
 
+function executePermanentEffect(index) {
+  executePermanentActive(index);
 }
 
 // ========== 角色被动和SP处理 ==========
@@ -9014,83 +8927,13 @@ function getOnPlayEffectText(card) {
   return out.length ? out.join('。') + '。' : null;
 }
 
-// 永续卡是否拥有“点击主动发动”的效果（严格按卡面：其余永续卡只有发动时一次性效果与自动被动，点击不主动发动）
-function permanentHasActiveEffect(card) {
-  var n = (card && (card.name || '')) || '';
-  if (n.indexOf('镌刻') >= 0) return true;                                    // 每回合：付4同步回2音韵
-  if (n.indexOf('直尺') >= 0) return true;                                    // 每回合：付音韵前进
-  if (n.indexOf('智能手机') >= 0) return true;                                // 每回合：扣700金币选①②
-  if (n.indexOf('Huginn') >= 0 || n.indexOf('穆宁') >= 0 || n.indexOf('福金') >= 0) return true; // 一局一次：付3音韵回收侵略
-  if (n.indexOf('狼牙') >= 0 || n.indexOf('鹰爪') >= 0) return true;          // 一回合一次：付费适用墓地侵略效果
-  if (n.indexOf('巧匠') >= 0) return true;                                    // 一局一次：献祭移出并回收
-  if (n.indexOf('供给者') >= 0) return true;                                  // 每回合：得3激励
-  if (n.indexOf('绿宝') >= 0) return true;                                    // 三选一主动
-  return false;
-}
-
-// 处理永续卡"发动时"特殊效果
+// 永续卡打出瞬间：统一走结构化内核（玩家侧）；永续卡一律不在此整段解析文本
 function handlePermanentActivation(card, effectText, callback) {
-  var cardName = card.name || '';
-  
-  // 善意面具：发动时若手中有攻击卡可不耗音韵且无视距离打出，那次最终伤害+1
-  if (cardName === '善意面具' || cardName === '笑意面具') {
-    var attackCards = battleState.p1.hand.filter(function(c) {
-      return c._category === 'attack_cards' || (c.type && c.type.indexOf('攻击') >= 0);
-    });
-    
-    if (attackCards.length > 0) {
-      // 弹出选择框询问是否要打出攻击卡
-      showAttackCardSelect(attackCards, function(selectedCard) {
-        if (selectedCard) {
-          // 打出选中的攻击卡（不耗音韵，无视距离，最终伤害+1）
-          addBattleLog('p1', '【善意面具效果】不耗音韵且无视距离打出【' + selectedCard.name + '】，最终伤害+1');
-          
-          // 从手牌中移除
-          var idx = battleState.p1.hand.indexOf(selectedCard);
-          if (idx >= 0) {
-            battleState.p1.hand.splice(idx, 1);
-          }
-          
-          // 执行攻击卡效果（简化版：造成伤害）
-          var damage = selectedCard.baseDamage || 2;
-          damage += 1; // 善意面具加成
-          battleState.p2.sync = Math.max(0, battleState.p2.sync - damage);
-          addBattleLog('p1', '对玩家2造成' + damage + '点伤害（含善意面具+1加成）');
-          
-          // 攻击卡送入墓地
-          battleState.p1.grave.push(selectedCard);
-          
-          effectEngine.effectLog.push({
-            label: '【善意面具发动效果】',
-            text: '不耗音韵且无视距离打出【' + selectedCard.name + '】，造成' + damage + '点伤害（最终伤害+1）',
-            class: 'effect-step step-result'
-          });
-        } else {
-          addBattleLog('p1', '【善意面具效果】选择不打出攻击卡');
-        }
-        callback();
-      });
-      return true; // 有特殊效果
-    }
-  }
-  
-  // 通用处理：只执行“发动时（作为效果处理）：”的第一句
-  var activationEffect = getOnPlayEffectText(card);
-  if (activationEffect) {
-    {
-      addBattleLog('p1', '【' + cardName + '】发动时效果：' + activationEffect);
-      
-      // 使用processSingleEffect处理发动时效果
-      var steps = parseEffect(activationEffect);
-      var ctx = { user: 'p1', target: 'p2', card: card };
-      executeEffectSteps(steps, ctx, function() {
-        callback();
-      });
-      return true;
-    }
-  }
-  
-  return false; // 没有特殊效果
+  var st = permanentStruct(card);
+  if (!st || (!st.onPlayHandler && !(st.onPlay || []).length)) { callback(); return true; }
+  addBattleLog('p1', '【' + (card.name || '') + '】发动时效果');
+  resolvePermanentOnPlay(card, 'p1', function () { callback(); });
+  return true;
 }
 
 // 显示攻击卡选择框
