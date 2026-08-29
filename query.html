@@ -11906,13 +11906,21 @@ function initToolsMode(){
       });
     }
   });
-  const syncSel=document.getElementById('syncChar');
-  if(syncSel && syncSel.options.length===0){
-    const ph=document.createElement('option');ph.value='';ph.textContent='自定义（手动输入初始同步值）';syncSel.appendChild(ph);
-    (DB.characters||[]).slice().sort((a,b)=>(a.sync||0)-(b.sync||0)).forEach(c=>{
-      const o=document.createElement('option');o.value=c.name;o.textContent=`${c.name}（同步值${c.sync}）`;syncSel.appendChild(o);
+  // 同步值计算器：填充 队长/队员1/队员2 三个下拉（队伍同步值＝三人同步值之和×2.5）
+  (function(){
+    const ids=['syncLeader','syncM1','syncM2'];
+    const chars=(DB.characters||[]).slice().sort((a,b)=>(a.sync||0)-(b.sync||0));
+    ids.forEach((sid,idx)=>{
+      const sel=document.getElementById(sid);
+      if(!sel || sel.options.length>0) return;
+      chars.forEach(c=>{
+        const o=document.createElement('option');o.value=c.name;o.textContent=`${c.name}（同步${c.sync}）`;sel.appendChild(o);
+      });
+      // 默认选三个不同角色，保证一进来就有合法的队伍初始值
+      if(chars[idx]) sel.selectedIndex=idx;
     });
-  }
+  })();
+  if(typeof onTeamSyncPick==='function') onTeamSyncPick();
   updateSyncCalc();
   updateDamageCalc();
   calcGiftProb();
@@ -12008,13 +12016,20 @@ function updateDamageCalc(){
   document.getElementById('dmgResult').innerHTML = html;
 }
 
-// ========== 同步值计算器（血量结算） ==========
-function _syncVal(id){ const v = +document.getElementById(id).value; return Number.isFinite(v)?v:0; }
-function onSyncCharPick(){
-  const name = document.getElementById('syncChar').value;
-  if(!name) return;
-  const c = findCardByName(name);
-  if(c && c.sync!=null){ document.getElementById('syncInit').value=c.sync; updateSyncCalc(); }
+// ========== 同步值计算器（队伍血量结算） ==========
+function _syncVal(id){ const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v)?v:0; }
+function _fmt(n){ n=Math.round(n*100)/100; return String(n); }   // 消除浮点误差，整数不显示 .0
+function _charSync(name){ const c=findCardByName(name); return c&&c.sync!=null?(+c.sync||0):0; }
+// 队伍同步值＝队长 + 两名队员的同步值之和 ×2.5
+function onTeamSyncPick(){
+  const L=document.getElementById('syncLeader'),M1=document.getElementById('syncM1'),M2=document.getElementById('syncM2');
+  if(!L) return;
+  const sl=_charSync(L.value), m1=_charSync(M1.value), m2=_charSync(M2.value);
+  const sum=sl+m1+m2, team=sum*2.5;
+  const initEl=document.getElementById('syncInit'); if(initEl) initEl.value=_fmt(team);
+  const pv=document.getElementById('teamSyncPreview');
+  if(pv) pv.innerHTML=`队长 ${sl} ＋ 队员 ${m1} ＋ 队员 ${m2} ＝ ${sum}，×2.5 ＝ <b style="color:#ffd700">${_fmt(team)}</b> 点队伍同步值`;
+  updateSyncCalc();
 }
 function importDmgToSync(){
   let v = window.__lastAvgDmg!=null ? window.__lastAvgDmg : (window.__lastDmgTotal||0);
@@ -12032,17 +12047,18 @@ function updateSyncCalc(){
   const hpLoss = dmg-absorb;                    // 实际扣除同步值
   const raw = init - hpLoss + heal + extra;     // 未截断结果（可能为负）
   const final = Math.max(0, raw);
+  const dangerLine = Math.max(2, Math.ceil(init*0.34));
   let status,color;
   if(raw<=0){ status='同步值归零 · 出局/被击败'; color='#e94560'; }
-  else if(raw<=Math.max(2, Math.ceil(init*0.34))){ status='同步值告急'; color='#f59e0b'; }
+  else if(raw<=dangerLine){ status='同步值告急（≤初始约1/3）'; color='#f59e0b'; }
   else { status='同步值安全'; color='#22c55e'; }
-  let s='';
-  s+=`<div>受到伤害 <b>${dmg}</b>：护盾抵消 <b style="color:#4a9eff">${absorb}</b>，剩余护盾 ${shieldLeft}</div>`;
-  if(dmg>shield) s+=`<div>护盾被击穿，实际扣除同步值 <b style="color:#e94560">-${hpLoss}</b></div>`;
+  let s=`<div style="color:#aaa;font-size:12px;margin-bottom:4px">队伍初始同步值 <b style="color:#eee">${_fmt(init)}</b>，告急线 ≤ ${_fmt(dangerLine)}</div>`;
+  s+=`<div>受到伤害 <b>${_fmt(dmg)}</b>：护盾抵消 <b style="color:#4a9eff">${_fmt(absorb)}</b>，剩余护盾 ${_fmt(shieldLeft)}</div>`;
+  if(dmg>shield) s+=`<div>护盾被击穿，实际扣除同步值 <b style="color:#e94560">-${_fmt(hpLoss)}</b></div>`;
   else if(dmg>0) s+=`<div style="color:#22c55e">护盾完全抵消，同步值不受损失</div>`;
-  if(heal) s+=`<div>回复同步值 <b style="color:#22c55e">+${heal}</b></div>`;
-  if(extra) s+=`<div>其他增减益 <b style="color:${extra>0?'#22c55e':'#e94560'}">${extra>0?'+':''}${extra}</b></div>`;
-  s+=`<div style="margin-top:10px;font-size:24px">最终同步值：<b style="color:${color}">${final}</b>${raw<0?` <span style="font-size:13px;color:#888">（溢出伤害 ${-raw}）</span>`:''}</div>`;
+  if(heal) s+=`<div>回复同步值 <b style="color:#22c55e">+${_fmt(heal)}</b></div>`;
+  if(extra) s+=`<div>其他增减益 <b style="color:${extra>0?'#22c55e':'#e94560'}">${extra>0?'+':''}${_fmt(extra)}</b></div>`;
+  s+=`<div style="margin-top:10px;font-size:24px">最终队伍同步值：<b style="color:${color}">${_fmt(final)}</b>${raw<0?` <span style="font-size:13px;color:#888">（溢出伤害 ${_fmt(-raw)}）</span>`:''}</div>`;
   s+=`<div style="color:${color};font-weight:bold;margin-top:6px">状态：${status}</div>`;
   el.innerHTML=s;
 }
@@ -13052,16 +13068,21 @@ function navChapter(dir){
 
     <!-- ===== 同步值计算器（血量结算） ===== -->
     <div style="margin-top:22px;border-top:1px solid #0f3460;padding-top:18px">
-      <h3 style="color:#e94560;margin-bottom:6px">同步值计算器（血量结算）</h3>
-      <div style="color:#888;font-size:12px;margin-bottom:12px">同步值即角色生命：先扣护盾，护盾击穿后的部分才扣同步值；回复与其他增减益随后结算，下限为 0。</div>
+      <h3 style="color:#e94560;margin-bottom:6px">队伍同步值计算器（血量结算）</h3>
+      <div style="color:#888;font-size:12px;margin-bottom:12px">队伍同步值（即队伍生命）＝所选 3 名角色同步值之和 ×2.5；受伤时先扣护盾，护盾击穿后的部分才扣同步值，回复与其他增减益随后结算，下限为 0。</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div style="background:#16213e;padding:16px;border-radius:10px">
           <div style="margin-bottom:10px">
-            <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px">目标角色（选择后自动带入初始同步值）</label>
-            <select id="syncChar" onchange="onSyncCharPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%;cursor:pointer"></select>
+            <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px">队伍构成（队长 ＋ 2 名队员；队伍同步值＝三人同步值之和 ×2.5）</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+              <select id="syncLeader" title="队长" onchange="onTeamSyncPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:12px;width:100%;cursor:pointer"></select>
+              <select id="syncM1" title="队员1" onchange="onTeamSyncPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:12px;width:100%;cursor:pointer"></select>
+              <select id="syncM2" title="队员2" onchange="onTeamSyncPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:12px;width:100%;cursor:pointer"></select>
+            </div>
+            <div id="teamSyncPreview" style="color:#4a9eff;font-size:12px;margin-top:6px;line-height:1.5"></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div><label style="color:#aaa;font-size:12px">初始同步值</label><input type="number" id="syncInit" value="6" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div><label style="color:#aaa;font-size:12px">队伍初始同步值（自动×2.5，可手动改）</label><input type="number" id="syncInit" value="30" min="0" step="0.5" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">当前护盾值</label><input type="number" id="syncShield" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">受到伤害</label><input type="number" id="syncDmg" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">回复同步值(+)</label><input type="number" id="syncHeal" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
