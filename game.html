@@ -4753,69 +4753,26 @@ function aiUseCardComplete(handIndex, callback) {
   var __aiPlay = evaluatePlayable(card, 'p2');
   if (!__aiPlay.ok) { if (callback) callback(); return; }
   
-  // 自动选择目标：攻击卡/伤害卡目标为p1，增益/回复卡目标为p2自己
-  var target = 'p1';
-  var isSelfTarget = effectText.indexOf('自身') >= 0 || effectText.indexOf('自己') >= 0 || 
-                     effectText.indexOf('回复') >= 0 || effectText.indexOf('获得') >= 0 ||
-                     effectText.indexOf('抽') >= 0 || effectText.indexOf('护盾') >= 0 ||
-                     effectText.indexOf('前进') >= 0 || effectText.indexOf('移动') >= 0;
-  if (isSelfTarget) target = 'p2';
-  
-  // 永续卡处理
+  // 默认目标由统一目标器推导（与玩家同一套规则，不再用另一套关键词猜测）
+  var target = decideDefaultTarget(card, 'p2');
   var isPermanent = card._category === 'item_permanent';
-  
-  // 支付费用并移除手牌
-  battleState.p2.cost -= cost;
+  // 手牌先移除；付费/技能记录/执行/去向/角色被动钩子全部走统一管线（与玩家同一入口）
   battleState.p2.hand.splice(handIndex, 1);
-  addBattleLog('p2', (isPermanent ? '发动' : '使用') + '【' + card.name + '】（消耗' + cost + '费用）');
-  
-  // 永续卡放入永续区
-  if (isPermanent) {
-    if (battleState.p2.permanent.length < 3) {
-      battleState.p2.permanent.push(card);
-      addBattleLog('p2', '【' + card.name + '】放置到永续区');
-    } else {
-      battleState.p2.grave.push(card);
-      addBattleLog('p2', '永续区已满，【' + card.name + '】送入墓地');
-    }
-  }
-  
-  // 初始化效果日志
+  addBattleLog('p2', (isPermanent ? '发动' : '使用') + '【' + card.name + '】');
   effectEngine.effectLog = [];
-  effectEngine.effectLog.push({
-    label: '【主要效果】',
-    text: effectText.substring(0, 100),
-    class: 'effect-step step-header'
-  });
-  
-  // 调用效果处理引擎
-  var context = { user: 'p2', target: target, card: card };
-  
+  effectEngine.effectLog.push({ label: '【主要效果】', text: effectText.substring(0, 100), class: 'effect-step step-header' });
   try {
-    // 永续卡只执行“发动时”第一句，避免把每回合主动效果/被动在发动时误执行
-    var __aiDone = function() {
-      if (!isPermanent) { battleState.p2.grave.push(card); }
-      checkBattleEnd();
-      updateBattleUI();
+    var actualCost = computeActualCost(card, 'p2');
+    settleCardExecution(card, 'p2', target, { actualCost: actualCost }, function () {
       if (callback) setTimeout(callback, 300);
-    };
-    if (isPermanent) {
-      // 永续卡：玩家与 AI 共用同一结构化结算入口，杜绝两套实现不一致
-      resolvePermanentOnPlay(card, 'p2', __aiDone);
-    } else {
-      var steps = parseEffect(effectText);
-      executeEffectSteps(steps, context, __aiDone, false); // AI不弹效果窗
-    }
-  } catch(e) {
+    });
+  } catch (e) {
     console.error('AI卡牌效果处理错误:', e);
-    if (!isPermanent) {
-      battleState.p2.grave.push(card);
-    }
+    battleState.p2.grave.push(card);
     updateBattleUI();
     if (callback) setTimeout(callback, 300);
   }
 }
-
 
 function aiTurn() {
   if (battleState.currentPlayer !== 'p2') return;
@@ -8871,30 +8828,12 @@ function useCardComplete(handIndex) {
 }
 
 function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, target) {
-  // 小野葵被动：携带卡首次使用费用-1
-  var actualCost = cost;
-  if (battleState.p1._aoiPassive && card._isCarry && !card._aoiDiscountUsed) {
-    actualCost = Math.max(0, cost - 1);
-    card._aoiDiscountUsed = true;
-    addBattleLog('p1', '【小野葵被动】携带卡首次使用费用-1（原' + cost + '费，现' + actualCost + '费）');
-  }
-  // 好孩子的奖励等减费效果：下一次使用卡费用-1
-  if (battleState.p1._nextCostReduction && battleState.p1._nextCostReduction > 0) {
-    var reduced = Math.min(actualCost, battleState.p1._nextCostReduction);
-    actualCost = Math.max(0, actualCost - reduced);
-    addBattleLog('p1', '减费效果生效：费用-' + reduced + '（原' + cost + '费，现' + actualCost + '费）');
-    battleState.p1._nextCostReduction = 0;
-  }
-  // 步骤2：支付费用并移除手牌
+  // 费用减免（葵被动/下张减费）与技能一次记录走统一管线，玩家与AI一致
+  var actualCost = computeActualCost(card, 'p1');
+  // 支付费用并移除手牌
   battleState.p1.cost -= actualCost;
   battleState.p1.hand.splice(handIndex, 1);
-  
-  // 记录技能卡使用（每回合一次限制）
-  if (card._category === 'skill_cards') {
-    if (!battleState.p1.usedSkillsThisTurn) battleState.p1.usedSkillsThisTurn = [];
-    battleState.p1.usedSkillsThisTurn.push(card.name);
-  }
-  
+  recordSkillUse(card, 'p1');
   addBattleLog('p1', actionType + '【' + card.name + '】（消耗' + actualCost + '费用）');
   
   // 永续卡"发动时"特殊效果处理
@@ -8985,84 +8924,159 @@ function showAttackCardSelect(attackCards, callback) {
   modal.classList.add('active');
 }
 
+// ============================================================
+// ===== 统一单次卡 / 攻击卡 / 技能卡结算管线（玩家与 AI 唯一入口）=====
+// 消灭“玩家一套、AI 一套”：费用减免、技能每回合一次记录、卡牌去向、
+// 使用后角色被动钩子（惠/爱德华/枫）、默认目标推导全部在此共用。
+// 效果原子仍复用已验证的 parseEffect / executeEffectSteps。
+// ============================================================
+
+// 默认目标推导（玩家可视化选择的底层依据，AI 直接使用）：以统一目标类型器为准
+function decideDefaultTarget(card, user) {
+  var foe = user === 'p1' ? 'p2' : 'p1';
+  var tt = parseTargetType(card.effect || card.text || '');
+  if (tt === 'self') return user;
+  if (tt === 'opponent' || tt === 'other_player') return foe;
+  var t = card.effect || card.text || '';
+  var selfish = /自身|自己|回复|获得|护盾|抽|前进|后退|移动|过载|激励|音韵值|金币/.test(t);
+  var harm = /伤害|破坏|降低|弃|移出|送入墓地/.test(t);
+  if (selfish && !harm) return user;
+  return foe;
+}
+
+// 实际费用：小野葵携带卡首次-1、下一次使用卡减费（玩家/AI 共用）
+function computeActualCost(card, user) {
+  var p = battleState[user];
+  var cost = (typeof card.cost === 'number') ? card.cost : 0;
+  var actual = cost;
+  if (p._aoiPassive && card._isCarry && !card._aoiDiscountUsed) {
+    actual = Math.max(0, cost - 1);
+    card._aoiDiscountUsed = true;
+    addBattleLog(user, '【小野葵被动】携带卡首次使用费用-1（原' + cost + '费，现' + actual + '费）');
+  }
+  if (p._nextCostReduction && p._nextCostReduction > 0) {
+    var reduced = Math.min(actual, p._nextCostReduction);
+    actual = Math.max(0, actual - reduced);
+    p._nextCostReduction = 0;
+    addBattleLog(user, '减费效果生效：费用-' + reduced + '（原' + cost + '费，现' + actual + '费）');
+  }
+  return actual;
+}
+
+// 技能卡每回合一次记录（玩家/AI 共用，供合法性引擎判定）
+function recordSkillUse(card, user) {
+  if (card._category !== 'skill_cards') return;
+  var p = battleState[user];
+  if (!p.usedSkillsThisTurn) p.usedSkillsThisTurn = [];
+  p.usedSkillsThisTurn.push(card.name);
+}
+
+// 使用后卡牌去向：永续进效果处理区（满则送墓），其余送墓（玩家/AI 共用）
+function placeAfterUse(user, card, isPerm) {
+  var p = battleState[user];
+  if (isPerm) {
+    if (p.permanent.length < 3) { p.permanent.push(card); addBattleLog(user, '【永续】' + card.name + '留在效果处理区'); }
+    else { p.grave.push(card); addBattleLog(user, '效果处理区已满，' + card.name + '送入墓地'); }
+  } else {
+    p.grave.push(card);
+    addBattleLog(user, card.name + '送入墓地');
+  }
+}
+
+// 使用卡牌后的角色被动钩子（玩家/AI 共用；AI 的选择类自动决策，不挂起）
+function postUsePassiveHooks(user, card) {
+  var p = battleState[user];
+  // 惠：3 张牌费用序列
+  if (p._megumiPassive && card.cost !== undefined) {
+    if (!p._megumiCostSeq) p._megumiCostSeq = [];
+    p._megumiCostSeq.push(card.cost);
+    if (p._megumiCostSeq.length >= 3) {
+      var seq = p._megumiCostSeq.slice(-3);
+      var inc = (seq[0] < seq[1] && seq[1] < seq[2]);
+      var dec = (seq[0] > seq[1] && seq[1] > seq[2]);
+      var special = (seq[0] === 3 && seq[1] === 2 && seq[2] === 5);
+      if (special) {
+        p.sync = Math.min(p.sync + 3, p.maxSync || 999);
+        addBattleLog(user, '【惠被动·音律感应】特殊序列[3,2,5]乐曲γ：回复3点同步值');
+      } else if (inc) {
+        p.cost = Math.min(p.cost + 2, p.maxCost); drawCard(user);
+        addBattleLog(user, '【惠被动·音律感应】费用递增乐曲α：回2音韵并抽1');
+      } else if (dec) {
+        p.position = (p.position + 2) % 42; triggerTileEffect(user);
+        addBattleLog(user, '【惠被动·音律感应】费用递减乐曲β：前进2格');
+      }
+      p._megumiCostSeq = [];
+    }
+  }
+  // 爱德华：与上一张同费回 1/2/3 音韵
+  if (p._edwardPassive && card.cost !== undefined) {
+    if (p._edwardLastCost === card.cost) {
+      p._edwardTriggerCount = (p._edwardTriggerCount || 0) + 1;
+      var refund = Math.min(p._edwardTriggerCount, 3);
+      p.cost = Math.min(p.cost + refund, p.maxCost);
+      addBattleLog(user, '【爱德华被动·帽子戏法】同费回复' + refund + '音韵（第' + p._edwardTriggerCount + '次）');
+    }
+    p._edwardLastCost = card.cost;
+  }
+  // 枫：使用战术/增益卡后移动1-4并抽1展示（玩家选方向，AI 默认前进）
+  if (p._kaedePassive && card.tags && (card.tags.indexOf('战术') >= 0 || card.tags.indexOf('增益') >= 0)) {
+    var moveAmt = Math.floor(Math.random() * 4) + 1;
+    function kaedeMove(direction) {
+      var oldPos = p.position;
+      p.position = ((p.position + moveAmt * direction) % 42 + 42) % 42;
+      addBattleLog(user, '【枫被动】' + (direction > 0 ? '前进' : '后退') + moveAmt + '格，第' + oldPos + '格→第' + p.position + '格');
+      triggerTileEffect(user);
+      var d = drawCard(user);
+      if (d) {
+        var same = (d.attribute === card.attribute);
+        addBattleLog(user, '【枫被动】抽到【' + d.name + '】，' + (same ? '同色保留' : '异色送墓回2音韵'));
+        if (!same) {
+          var hi = p.hand.indexOf(d); if (hi >= 0) p.hand.splice(hi, 1);
+          p.grave.push(d);
+          p.cost = Math.min(p.cost + 2, p.maxCost);
+        }
+      }
+      updateBattleUI();
+    }
+    if (user === 'p1') {
+      showChoiceModal('入间枫被动·敏锐洞察', '前进还是后退' + moveAmt + '格？', '移动后抽1展示：同色保留，异色送墓回2音韵', ['前进', '后退'], function (d) { kaedeMove(d === 0 ? 1 : -1); });
+    } else { kaedeMove(1); }
+  }
+}
+
+// 统一结算：付费→记录技能→执行效果→去向+被动钩子。opts.askChain 供玩家插入连锁确认，AI 不传。
+function settleCardExecution(card, user, target, opts, done) {
+  opts = opts || {};
+  var p = battleState[user];
+  var isPerm = card._category === 'item_permanent';
+  var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
+  p.cost -= actual;
+  recordSkillUse(card, user);
+  function finalize() {
+    placeAfterUse(user, card, isPerm);
+    postUsePassiveHooks(user, card);
+    checkBattleEnd();
+    updateBattleUI();
+    if (done) done();
+  }
+  function run() {
+    if (isPerm) resolvePermanentOnPlay(card, user, finalize);
+    else {
+      var steps = parseEffect(card.effect || card.text || '');
+      executeEffectSteps(steps, { user: user, target: target, card: card }, finalize, user === 'p1');
+    }
+  }
+  var __ask = opts.askChain;
+  if (__ask) __ask(run); else run();
+}
+
 // 继续卡牌使用流程
 function continueCardUse(card, effectText, isPermanent, actionType, target, alreadyHandledOnPlay) {
   // 卡牌去向 + 角色被动钩子（无论效果如何解析都必须执行一次）
   function __finalize() {
-    if (isPermanent) {
-      if (battleState.p1.permanent.length < 3) {
-        battleState.p1.permanent.push(card);
-        addBattleLog('p1', '【永续】' + card.name + '留在永续区');
-      } else {
-        battleState.p1.grave.push(card);
-        addBattleLog('p1', '永续区已满，' + card.name + '送入墓地');
-      }
-    } else {
-      battleState.p1.grave.push(card);
-      addBattleLog('p1', card.name + '送入墓地');
-    }
-
-    // 惠被动：使用3张牌后根据费用序列触发乐曲
-    if (battleState.p1._megumiPassive && card.cost !== undefined) {
-      if (!battleState.p1._megumiCostSeq) battleState.p1._megumiCostSeq = [];
-      battleState.p1._megumiCostSeq.push(card.cost);
-      if (battleState.p1._megumiCostSeq.length >= 3) {
-        var seq = battleState.p1._megumiCostSeq.slice(-3);
-        var isIncreasing = (seq[0] < seq[1] && seq[1] < seq[2]);
-        var isDecreasing = (seq[0] > seq[1] && seq[1] > seq[2]);
-        var isSpecial = (seq[0] === 3 && seq[1] === 2 && seq[2] === 5);
-        if (isSpecial) {
-          battleState.p1.sync = Math.min(battleState.p1.sync + 3, battleState.p1.maxSync || 999);
-          addBattleLog('p1', '【惠被动·音律感应】特殊序列[3,2,5]触发乐曲γ：回复3点同步值');
-        } else if (isIncreasing) {
-          battleState.p1.cost = Math.min(battleState.p1.cost + 2, battleState.p1.maxCost);
-          drawCard('p1');
-          addBattleLog('p1', '【惠被动·音律感应】费用递增触发乐曲α：回复2点音韵值并抽1张卡');
-        } else if (isDecreasing) {
-          var oldPos = battleState.p1.position;
-          battleState.p1.position = (battleState.p1.position + 2) % 42;
-          addBattleLog('p1', '【惠被动·音律感应】费用递减触发乐曲β：前进2格，从第' + oldPos + '格到第' + battleState.p1.position + '格');
-          triggerTileEffect('p1');
-        }
-        battleState.p1._megumiCostSeq = [];
-      }
-    }
-
-    // 爱德华被动：费用与上一张相同时回1/2/3音韵
-    if (battleState.p1._edwardPassive && card.cost !== undefined) {
-      if (battleState.p1._edwardLastCost === card.cost) {
-        battleState.p1._edwardTriggerCount = (battleState.p1._edwardTriggerCount || 0) + 1;
-        var refundAmt = Math.min(battleState.p1._edwardTriggerCount, 3);
-        battleState.p1.cost = Math.min(battleState.p1.cost + refundAmt, battleState.p1.maxCost);
-        addBattleLog('p1', '【爱德华被动·帽子戏法】费用相同，回复' + refundAmt + '点音韵值（第' + battleState.p1._edwardTriggerCount + '次触发）');
-      }
-      battleState.p1._edwardLastCost = card.cost;
-    }
-
-    // 枫被动：使用战术/增益卡后前进/后退1-4格并抽卡展示
-    if (battleState.p1._kaedePassive && card.tags && (card.tags.indexOf('战术') >= 0 || card.tags.indexOf('增益') >= 0)) {
-      var moveAmt = Math.floor(Math.random() * 4) + 1;
-      showChoiceModal('入间枫被动·敏锐洞察', '前进还是后退' + moveAmt + '格？', '移动后抽1张展示：同色保留，异色送墓回2音韵', ['前进', '后退'], function(d) {
-        var direction = d === 0 ? 1 : -1;
-        var oldPos = battleState.p1.position;
-        battleState.p1.position = ((battleState.p1.position + moveAmt * direction) % 42 + 42) % 42;
-        addBattleLog('p1', '【枫被动】' + (direction > 0 ? '前进' : '后退') + moveAmt + '格，从第' + oldPos + '格到第' + battleState.p1.position + '格');
-        triggerTileEffect('p1');
-        var drawnKaede = drawCard('p1');
-        if (drawnKaede) {
-          var sameColor = (drawnKaede.attribute === card.attribute);
-          addBattleLog('p1', '【枫被动】抽到【' + drawnKaede.name + '】（' + (drawnKaede.attribute || '无') + '属性），' + (sameColor ? '同色保留' : '异色送墓回2音韵'));
-          if (!sameColor) {
-            var handIdx = battleState.p1.hand.indexOf(drawnKaede);
-            if (handIdx >= 0) battleState.p1.hand.splice(handIdx, 1);
-            battleState.p1.grave.push(drawnKaede);
-            battleState.p1.cost = Math.min(battleState.p1.cost + 2, battleState.p1.maxCost);
-          }
-        }
-        updateBattleUI();
-      });
-    }
-
+    // 去向（效果处理区/墓地）与使用后角色被动钩子走统一管线（玩家/AI一致）
+    placeAfterUse('p1', card, isPermanent);
+    postUsePassiveHooks('p1', card);
     updateBattleUI();
     checkBattleEnd();
   }
