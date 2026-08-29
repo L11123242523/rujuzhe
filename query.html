@@ -792,7 +792,7 @@ input[type="text"]:focus,input[type="number"]:focus,select:focus,textarea:focus{
 #rulesContent > div:hover{transform:translateX(4px)}
 
 /* 页面切换动画 */
-#queryMode,#buildMode,#gameMode,#playMode,#rulesMode,#toolsMode,#guideMode{animation:fadeIn .3s ease}
+#queryMode,#buildMode,#rulesMode,#toolsMode,#guideMode{animation:fadeIn .3s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 /* 费用曲线 */
@@ -1550,8 +1550,6 @@ input:focus, select:focus, textarea:focus {
     <div class="mode-switch">
       <button class="mode-btn active" onclick="switchMode('query',this)">查询</button>
       <button class="mode-btn" onclick="switchMode('build',this)">构筑</button>
-      <button class="mode-btn" onclick="switchMode('game',this)">对局</button>
-      <button class="mode-btn" onclick="switchMode('play',this)">游玩</button>
       <button class="mode-btn" onclick="switchMode('rules',this)">规则</button>
       <button class="mode-btn" onclick="switchMode('tools',this)">工具</button>
       <button class="mode-btn" onclick="switchMode('guide',this)">指南</button>
@@ -1560,88 +1558,6 @@ input:focus, select:focus, textarea:focus {
     <span class="stats" id="stats"></span>
   </div>
 </div>
-
-<!-- 游玩模式 -->
-<div id="playMode" class="play-board" style="display:none">
-  <!-- 角色选择 -->
-  <div id="playSetup">
-    <h2 style="color:#e94560;margin-bottom:16px">选择你的角色（3名）</h2>
-    <div style="margin-bottom:12px;color:#aaa">点击选择角色，已选 <span id="selectedCount">0</span>/3</div>
-    <div id="playCharSelect" class="char-select-grid"></div>
-    <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-      <button class="btn btn-primary" onclick="startPlayGame()" id="startPlayBtn">🎮 玩家 vs AI</button>
-      <button class="btn btn-secondary" onclick="startAIBattle()" id="startAIBattleBtn" style="background:linear-gradient(135deg,#667eea,#764ba2)">🤖 AI vs AI 观战</button>
-      <button class="btn btn-secondary" onclick="switchMode('query')">返回</button>
-    </div>
-    <div style="margin-top:12px;text-align:center;color:#888;font-size:12px">
-      AI vs AI模式：双方随机卡组自动对战，可观战学习战术
-    </div>
-  </div>
-  
-  <!-- 游戏主界面 -->
-  <div id="playMain" style="display:none">
-    <!-- 顶部状态栏 -->
-    <div class="play-topbar">
-      <div class="play-turn-info">第 <b id="playTurn">1</b> 回合 · <b id="playPhase">准备</b> 阶段</div>
-      <div class="play-players">
-        <div id="playPlayerInfo" class="play-player-info active"></div>
-        <div id="playAIInfo" class="play-player-info"></div>
-      </div>
-    </div>
-    
-    <!-- AI手牌（背面） -->
-    <div class="play-opponent-hand">
-      <div class="hand-label">对手手牌 (<span id="aiHandCount">0</span>)</div>
-      <div id="aiHand" class="hand-cards"></div>
-    </div>
-    
-    <!-- 场地中央：地图+日志 -->
-    <div class="play-field">
-      <div class="play-map-area">
-        <div class="map-title">地图（点击投掷移动）</div>
-        <div id="playMap" class="play-map"></div>
-        <div class="map-legend">
-          <span class="legend-item"><span class="legend-dot" style="background:#e94560"></span>你</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#4a9eff"></span>AI</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>公交/地铁</span>
-        </div>
-      </div>
-      <div id="playLog" class="play-log"></div>
-    </div>
-    
-    <!-- 玩家区域划分 -->
-    <div class="player-zones">
-      <div class="zone-box">
-        <div class="zone-title">手卡结算区 (<span id="settleCount">0</span>)</div>
-        <div id="settleZone" class="zone-mini-cards"></div>
-      </div>
-      <div class="zone-box">
-        <div class="zone-title">墓地 (<span id="graveCount">0</span>)</div>
-        <div id="graveZone" class="zone-mini-cards"></div>
-      </div>
-      <div class="zone-box">
-        <div class="zone-title">牌组 (<span id="deckCount">0</span>)</div>
-        <div class="zone-mini-cards"><div class="deck-back-icon">🂠</div></div>
-      </div>
-    </div>
-    
-    <!-- 玩家手牌 -->
-    <div class="play-player-hand">
-      <div class="hand-label">我的手牌 (点击打出) · 音韵 <span id="playerCost">5</span>/12</div>
-      <div id="playerHand" class="hand-cards"></div>
-    </div>
-    
-    <!-- 操作按钮 -->
-    <div class="play-actions">
-      <button class="btn btn-primary" onclick="playRollMove()" id="rollMoveBtn">🎲 投掷移动（投掷阶段）</button>
-      <button class="btn btn-secondary" onclick="playNextStage()" id="nextStageBtn">进入下一阶段</button>
-      <button class="btn btn-primary" onclick="playEndTurn()">结束回合</button>
-      <button class="btn btn-secondary" onclick="playQuit()">退出对局</button>
-    </div>
-  </div>
-</div>
-
-
 
 <!-- 规则模式 -->
 <div id="rulesMode" style="display:none">
@@ -2537,17 +2453,13 @@ function switchMode(m, btn){
   if(btn) btn.classList.add('active');
   else {
     const btns = document.querySelectorAll('.mode-btn');
-    const map = {query:0,build:1,game:2,play:3,rules:4,tools:5,guide:6,story:7};
+    const map = {query:0,build:1,rules:2,tools:3,guide:4,story:5};
     if(btns[map[m]]) btns[map[m]].classList.add('active');
   }
   document.getElementById('queryMode').style.display = m==='query'?'block':'none';
   document.getElementById('buildMode').classList.toggle('active', m==='build');
-  document.getElementById('gameMode').classList.toggle('active', m==='game');
-  document.getElementById('playMode').style.display = m==='play'?'block':'none';
-  if(m==='play') initPlayMode();
   document.getElementById('rulesMode').style.display = m==='rules'?'block':'none';
   if(m==='build') renderBuilder();
-  if(m==='game'){ document.getElementById('gameSetup').style.display='block'; document.getElementById('gameMain').style.display='none'; updatePlayerSetup(); }
   if(m==='rules') renderRulesPage();
   document.getElementById('toolsMode').style.display = m==='tools'?'block':'none';
   document.getElementById('guideMode').style.display = m==='guide'?'block':'none';
@@ -11994,6 +11906,14 @@ function initToolsMode(){
       });
     }
   });
+  const syncSel=document.getElementById('syncChar');
+  if(syncSel && syncSel.options.length===0){
+    const ph=document.createElement('option');ph.value='';ph.textContent='自定义（手动输入初始同步值）';syncSel.appendChild(ph);
+    (DB.characters||[]).slice().sort((a,b)=>(a.sync||0)-(b.sync||0)).forEach(c=>{
+      const o=document.createElement('option');o.value=c.name;o.textContent=`${c.name}（同步值${c.sync}）`;syncSel.appendChild(o);
+    });
+  }
+  updateSyncCalc();
   updateDamageCalc();
   calcGiftProb();
   calcDiceProb();
@@ -12064,6 +11984,7 @@ function updateDamageCalc(){
   let total = Math.floor(perSegment * segments);
   let critTotal = Math.floor(critPerSegment * segments);
   const avgDmg = total * (1 - critRate/100) + critTotal * (critRate/100);
+  window.__lastAvgDmg=avgDmg; window.__lastDmgTotal=total; window.__lastCritDmg=critTotal;
 
   let html = `<div style="margin-bottom:8px"><b style="color:#e94560">${card.name}</b> (${card.attribute||''} ${card.type||''})</div>`;
   html += `<div>伤害类型: <span style="color:#a855f7">${damageType}</span></div>`;
@@ -12086,6 +12007,46 @@ function updateDamageCalc(){
   if(is弱点) html += `<div style="color:#f59e0b;margin-top:6px">弱点分析: 暴击率+25%，暴击伤害+50%</div>`;
   document.getElementById('dmgResult').innerHTML = html;
 }
+
+// ========== 同步值计算器（血量结算） ==========
+function _syncVal(id){ const v = +document.getElementById(id).value; return Number.isFinite(v)?v:0; }
+function onSyncCharPick(){
+  const name = document.getElementById('syncChar').value;
+  if(!name) return;
+  const c = findCardByName(name);
+  if(c && c.sync!=null){ document.getElementById('syncInit').value=c.sync; updateSyncCalc(); }
+}
+function importDmgToSync(){
+  let v = window.__lastAvgDmg!=null ? window.__lastAvgDmg : (window.__lastDmgTotal||0);
+  v = Math.max(0, Math.round(v));
+  document.getElementById('syncDmg').value = v;
+  updateSyncCalc();
+}
+function updateSyncCalc(){
+  const el = document.getElementById('syncResult');
+  if(!el) return;
+  const init=_syncVal('syncInit'), shield=_syncVal('syncShield'), dmg=_syncVal('syncDmg'),
+        heal=_syncVal('syncHeal'), extra=_syncVal('syncExtra');
+  const absorb = Math.min(shield,dmg);          // 护盾抵消
+  const shieldLeft = shield-absorb;             // 剩余护盾
+  const hpLoss = dmg-absorb;                    // 实际扣除同步值
+  const raw = init - hpLoss + heal + extra;     // 未截断结果（可能为负）
+  const final = Math.max(0, raw);
+  let status,color;
+  if(raw<=0){ status='同步值归零 · 出局/被击败'; color='#e94560'; }
+  else if(raw<=Math.max(2, Math.ceil(init*0.34))){ status='同步值告急'; color='#f59e0b'; }
+  else { status='同步值安全'; color='#22c55e'; }
+  let s='';
+  s+=`<div>受到伤害 <b>${dmg}</b>：护盾抵消 <b style="color:#4a9eff">${absorb}</b>，剩余护盾 ${shieldLeft}</div>`;
+  if(dmg>shield) s+=`<div>护盾被击穿，实际扣除同步值 <b style="color:#e94560">-${hpLoss}</b></div>`;
+  else if(dmg>0) s+=`<div style="color:#22c55e">护盾完全抵消，同步值不受损失</div>`;
+  if(heal) s+=`<div>回复同步值 <b style="color:#22c55e">+${heal}</b></div>`;
+  if(extra) s+=`<div>其他增减益 <b style="color:${extra>0?'#22c55e':'#e94560'}">${extra>0?'+':''}${extra}</b></div>`;
+  s+=`<div style="margin-top:10px;font-size:24px">最终同步值：<b style="color:${color}">${final}</b>${raw<0?` <span style="font-size:13px;color:#888">（溢出伤害 ${-raw}）</span>`:''}</div>`;
+  s+=`<div style="color:${color};font-weight:bold;margin-top:6px">状态：${status}</div>`;
+  el.innerHTML=s;
+}
+
 
 function calcGiftProb(){
   const count = +document.getElementById('giftCount').value||0;
@@ -13050,64 +13011,6 @@ function navChapter(dir){
 }
 
 </script>
-<!-- 对局模式 -->
-<div id="gameMode" class="game-board">
-  <!-- 对局设置 -->
-  <div id="gameSetup" class="game-setup">
-    <h2>对局设置</h2>
-    <div class="setup-row">
-      <label>玩家数</label>
-      <select id="playerCount" onchange="updatePlayerSetup()">
-        <option value="2">2人</option>
-        <option value="3" selected>3人</option>
-        <option value="4">4人</option>
-      </select>
-    </div>
-    <div id="playerSetupList"></div>
-    <div class="modal-btns">
-      <button class="btn btn-primary" onclick="startGame()">开始对局</button>
-      <button class="btn btn-secondary" onclick="switchMode('query')">返回</button>
-    </div>
-  </div>
-
-  <!-- 对局主界面 -->
-  <div id="gameMain" style="display:none">
-    <div class="game-topbar">
-      <div class="turn-info">第 <b id="turnNum">1</b> 回合 · 当前：<b id="currentPlayer">-</b></div>
-      <div class="phase" id="phaseBar">
-        <span data-phase="准备">准备</span>
-        <span data-phase="主要1">主要1</span>
-        <span data-phase="投掷">投掷</span>
-        <span data-phase="主要2">主要2</span>
-        <span data-phase="结束">结束</span>
-      </div>
-      <div>
-        <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px" onclick="nextPhase()">下一阶段</button>
-        <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px" onclick="endGame()">结束对局</button>
-      </div>
-    </div>
-    <div class="players-area" id="playersArea"></div>
-    <div class="game-actions">
-      <div class="action-grid">
-        <button class="action-btn move" onclick="actMove()">🎲 投掷移动</button>
-        <button class="action-btn attack" onclick="actAttack()">⚔️ 造成伤害</button>
-        <button class="action-btn heal" onclick="actHeal()">💚 回复同步</button>
-        <button class="action-btn calib" onclick="actCalibrate()">🎵 校准降入迷</button>
-        <button class="action-btn sac" onclick="actSacrifice()">🔥 献祭回费</button>
-        <button class="action-btn draw" onclick="actDraw()">🃏 抽/弃牌</button>
-        <button class="action-btn shield" onclick="actShield()">🛡️ 护盾</button>
-        <button class="action-btn card" onclick="actUseCard()">🎴 使用卡牌</button>
-        <button class="action-btn log" onclick="actCustom()">📝 自定义记录</button>
-        <button class="action-btn end" onclick="endTurn()">⏭️ 结束回合</button>
-      </div>
-    </div>
-    <div class="game-log">
-      <h3>对局日志</h3>
-      <div id="logList"></div>
-    </div>
-  </div>
-</div>
-
 <!-- ============ 工具模式 ============ -->
 <div id="toolsMode" style="display:none;padding:20px 24px;max-width:1200px;margin:0 auto">
   <div class="tools-tabs" style="display:flex;gap:4px;margin-bottom:16px;background:#0f3460;padding:3px;border-radius:8px;width:fit-content">
@@ -13144,6 +13047,32 @@ function navChapter(dir){
       <div style="background:#16213e;padding:16px;border-radius:10px">
         <div style="color:#aaa;font-size:13px;margin-bottom:8px">计算结果</div>
         <div id="dmgResult" style="font-size:15px;color:#eee;line-height:1.8"></div>
+      </div>
+    </div>
+
+    <!-- ===== 同步值计算器（血量结算） ===== -->
+    <div style="margin-top:22px;border-top:1px solid #0f3460;padding-top:18px">
+      <h3 style="color:#e94560;margin-bottom:6px">同步值计算器（血量结算）</h3>
+      <div style="color:#888;font-size:12px;margin-bottom:12px">同步值即角色生命：先扣护盾，护盾击穿后的部分才扣同步值；回复与其他增减益随后结算，下限为 0。</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="background:#16213e;padding:16px;border-radius:10px">
+          <div style="margin-bottom:10px">
+            <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px">目标角色（选择后自动带入初始同步值）</label>
+            <select id="syncChar" onchange="onSyncCharPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%;cursor:pointer"></select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label style="color:#aaa;font-size:12px">初始同步值</label><input type="number" id="syncInit" value="6" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div><label style="color:#aaa;font-size:12px">当前护盾值</label><input type="number" id="syncShield" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div><label style="color:#aaa;font-size:12px">受到伤害</label><input type="number" id="syncDmg" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div><label style="color:#aaa;font-size:12px">回复同步值(+)</label><input type="number" id="syncHeal" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div style="grid-column:1/3"><label style="color:#aaa;font-size:12px">其他同步值变化（增减益，可正可负）</label><input type="number" id="syncExtra" value="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+          </div>
+          <button onclick="importDmgToSync()" style="margin-top:12px;width:100%;padding:9px;background:#0f3460;border:1px solid #e94560;color:#fff;border-radius:6px;cursor:pointer;font-size:13px">⇩ 把上方伤害计算器的预计伤害带入「受到伤害」</button>
+        </div>
+        <div style="background:#16213e;padding:16px;border-radius:10px">
+          <div style="color:#aaa;font-size:13px;margin-bottom:8px">结算过程 / 结果</div>
+          <div id="syncResult" style="font-size:14px;color:#eee;line-height:1.9"></div>
+        </div>
       </div>
     </div>
   </div>
