@@ -6450,6 +6450,238 @@ function answerTiming(chain) {
 
 // ========== 效果分步执行器 ==========
 
+// ============================================================
+// ===== 结构化效果指令层（解析与执行分离，精确互斥，文本仅兜底）=====
+// compileStepOps：把“一句效果文本”严格编译成互斥指令数组；
+//   只要该句含无法精确识别、或需要交互式“选具体卡”的动作，一律返回 null，
+//   交回 processSingleEffect 文本引擎兜底（零回归）。注意：“选一名玩家”是
+//   选目标（上层已选定），不属于选卡，不回退。
+// runOps：纯指令执行，数字一律来自紧邻正则，不再做关键词邻近猜测。
+// ============================================================
+
+var EFFECT_OPS_OVERRIDE = {}; // 卡名 -> 整卡指令数组（手写精确覆盖，最高优先）
+
+var __CN = { '一': 1, '两': 2, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+function __toNum(s) { if (s == null) return null; if (/^\d+$/.test(s)) return parseInt(s, 10); return (__CN[s] != null ? __CN[s] : null); }
+function __matchNum(re, t) { var m = t.match(re); return m ? __toNum(m[1]) : null; }
+var __NUM = '([0-9]+|[一二两三四五六七八九十])';
+
+// 需要交互式“选具体卡”的句型信号：出现即整句回退文本引擎
+function __hasInteractiveSignal(t) {
+  if (t.indexOf('加入手卡') >= 0) return true;
+  if (t.indexOf('送入墓地') >= 0) return true;
+  if (t.indexOf('破坏') >= 0 && /区域内|场上|永续|效果处理区|区域的一?张|区域内一?张/.test(t)) return true;
+  if (new RegExp('选[^。；，]{0,10}(?:一张|1张|手牌|牌组|墓地|移出)').test(t)) return true;
+  return false;
+}
+
+// 这些复杂机制当前无对应指令，整句回退（避免只执行半句）
+function __hasComplexMechanic(t) {
+  return /段伤害|足以击碎|相同数值|附加伤害值|暴击|克制|领域|决斗|缴械|神醉|超频|献祭|盖伏|追加[：:]|Lv\d|暴击率|概率|%|掷骰阶段|重新进行一次判定|视为与/.test(t);
+}
+
+// 严格编译单句 -> 指令数组 或 null
+function compileStepOps(text) {
+  if (!text) return null;
+  var t = String(text);
+  if (__hasInteractiveSignal(t)) return null;
+  if (__hasComplexMechanic(t)) return null;
+  var ops = [];
+  var uncovered = [];
+  function has(w) { return t.indexOf(w) >= 0; }
+
+  // ---- 伤害（普通 / 判定：硬币·四面骰·六面骰）----
+  if (has('伤害')) {
+    var judge = has('判定伤害'), dice = null;
+    if (judge) {
+      if (has('硬币') || has('正反面')) dice = 'coin';
+      else if (has('4面骰') || has('四面骰')) dice = 'd4';
+      else if (has('6面骰') || has('六面骰')) dice = 'd6';
+    }
+    var n = __matchNum(new RegExp('造(?:成)?\\s*' + __NUM + '\\s*点?'), t);
+    var kind = has('无序') ? 'chaos' : (has('理智') ? 'sanity' : (has('热忱') ? 'fervor' : null));
+    if (judge && dice) ops.push({ op: 'damage', judge: true, dice: dice, base: (n == null ? 2 : n), kind: kind });
+    else if (!judge && n != null) ops.push({ op: 'damage', judge: false, base: n, kind: kind });
+    else uncovered.push('damage');
+  }
+
+  // ---- 同步值：回复/回 vs 直接扣除 ----
+  if (has('同步')) {
+    var hm = __matchNum(new RegExp('(?:回复|回)\\s*' + __NUM + '\\s*点?\\s*(?:同步值?|生命值?|血量)'), t);
+    var lm = __matchNum(new RegExp('扣除\\s*(?:其|目标|自身)?\\s*' + __NUM + '\\s*点\\s*同步'), t);
+    if (hm != null) ops.push({ op: 'heal_sync', amount: hm });
+    else if (lm != null) ops.push({ op: 'loss_sync', amount: lm, targetWho: has('自身') ? 'self' : 'target' });
+    else if (new RegExp('(?:回复|回)[^。；;\\n]{0,16}同步').test(t)) uncovered.push('sync');
+  }
+
+  // ---- 音韵：回复/回 vs 失去 ----
+  if (has('音韵')) {
+    var cm = __matchNum(new RegExp('(?:回复|回)\\s*' + __NUM + '\\s*点?音韵'), t);
+    var lc = __matchNum(new RegExp('失去\\s*' + __NUM + '\\s*点?音韵'), t);
+    if (cm != null) ops.push({ op: 'gain_cost', amount: cm });
+    if (lc != null) ops.push({ op: 'lose_cost', amount: lc });
+    if (cm == null && lc == null && new RegExp('(?:回复|回|失去)[^。；;\\n]{0,12}音韵').test(t)) uncovered.push('cost');
+  }
+
+  // ---- 护盾 ----
+  if (has('护盾')) {
+    var sm = __matchNum(new RegExp('(?:获得|回复|增加)\\s*' + __NUM + '\\s*点?护盾'), t);
+    if (sm != null) ops.push({ op: 'gain_shield', amount: sm });
+    else if (has('获得') || has('回复') || has('增加')) uncovered.push('shield');
+  }
+
+  // ---- 防御升降 ----
+  if (has('防御')) {
+    var dd = __matchNum(new RegExp('降低(?:其|目标)?\\s*' + __NUM + '\\s*点防御'), t);
+    var du = __matchNum(new RegExp('提升(?:自身)?\\s*' + __NUM + '\\s*点防御'), t);
+    if (dd != null) ops.push({ op: 'def_down', amount: dd });
+    else if (du != null) ops.push({ op: 'def_up', amount: du });
+    else uncovered.push('defense');
+  }
+
+  // ---- 抽牌 / 馈赠 / 御神签 ----
+  if (has('抽')) {
+    if (has('馈赠')) ops.push({ op: 'draw_gift' });
+    else if (has('御神签')) ops.push({ op: 'draw_omikuji' });
+    else if (!has('乐谱') && !has('事件')) {
+      var dn = __matchNum(new RegExp('抽\\s*' + __NUM + '\\s*张'), t);
+      ops.push({ op: 'draw', n: (dn == null ? 1 : dn) });
+    }
+  }
+
+  // ---- 入迷值降低 ----
+  if (has('入迷')) {
+    var fm = __matchNum(new RegExp('降低\\s*' + __NUM + '\\s*点?入迷'), t);
+    if (fm != null) ops.push({ op: 'reduce_fascination', amount: fm });
+    else uncovered.push('fascination');
+  }
+
+  // ---- 移动：直接移动 / 位移翻倍 / 完成后追加 ----
+  if (has('位移量') && /位移量\s*[x×]\s*2/.test(t)) ops.push({ op: 'buff_double_move' });
+  var bm = __matchNum(new RegExp('追加\\s*' + __NUM + '\\s*格'), t);
+  if (has('追加') && bm != null && has('移动')) ops.push({ op: 'buff_bonus_move_after', amount: bm });
+  var direct = (has('前进') || has('后退') || /向前|向后/.test(t) || new RegExp('移动\\s*' + __NUM + '\\s*格').test(t)) &&
+    !has('位移量') && !has('移动动作') && !has('下次移动') && !has('追加') && !has('跃向') && !has('移动到') && !has('移动至');
+  if (direct) {
+    var back = /后退|向后/.test(t);
+    var mn = __matchNum(new RegExp('(?:前进|后退|向前[^。；，]{0,6}移动|向后[^。；，]{0,6}移动|移动)\\s*' + __NUM + '\\s*格'), t);
+    if (mn == null) mn = 1;
+    ops.push({ op: 'move', n: back ? -mn : mn });
+  }
+
+  // ---- 下次使用卡减费 ----
+  if (has('费用-') || has('花费-') || has('减费')) {
+    var rc = __matchNum(new RegExp('[费用花费]\\s*-\\s*' + __NUM), t);
+    ops.push({ op: 'next_cost_down', amount: (rc == null ? 1 : rc), alsoTarget: true });
+  }
+
+  // ---- 金币 ----
+  if (has('金币') && !has('支付') && !has('消耗') && !has('花费')) {
+    var gm = __matchNum(new RegExp('(?:获得|得到|\\+)\\s*' + __NUM + '\\s*金币'), t);
+    if (gm != null) ops.push({ op: 'gain_gold', amount: gm });
+    else uncovered.push('gold');
+  }
+
+  // ---- 攻击数值增益（明确数值才接管；百分比/暴击等已在复杂机制回退）----
+  if (has('攻击')) {
+    var av = __matchNum(new RegExp('(?:自身攻击|攻击力|攻击)\\s*\\+\\s*' + __NUM), t);
+    if (av == null) av = __matchNum(new RegExp('\\+\\s*' + __NUM + '\\s*攻击'), t);
+    if (av == null) av = __matchNum(new RegExp('提升自身\\s*' + __NUM + '\\s*点?攻击力'), t);
+    if (av != null) ops.push({ op: 'attack_buff', amount: av });
+  }
+
+  if (uncovered.length) return null;
+  return ops.length ? ops : null;
+}
+
+// 统一移动底层：限幅、改位、里绪累计8格判定、落地格子效果
+function applyMove(user, signedN) {
+  var p = battleState[user];
+  var n = Math.max(-20, Math.min(20, signedN));
+  var oldPos = p.position;
+  p.position = ((p.position + n) % 42 + 42) % 42;
+  addBattleLog(user, (n >= 0 ? '前进' : '后退') + Math.abs(n) + '格，第' + oldPos + '格→第' + p.position + '格');
+  if (p._rioPassive) {
+    p._rioMoveCount = (p._rioMoveCount || 0) + Math.abs(n);
+    var foe = user === 'p1' ? 'p2' : 'p1';
+    while (p._rioMoveCount >= 8) {
+      p._rioMoveCount -= 8;
+      var rd = applyDiceControl(user, Math.floor(Math.random() * 4) + 1, 4);
+      if (p._judgeDamageBonus) rd += p._judgeDamageBonus;
+      var fd = Math.max(0, rd - (battleState[foe].defense || 0));
+      dealDamageWithResponse(foe, fd, '里绪被动');
+      addBattleLog(user, '【里绪被动】累计移动8格，4面骰造成' + fd + '点判定伤害');
+    }
+  }
+  if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
+}
+
+// 统一伤害底层：判定骰/攻击加成/判定增伤 → 减防（负防加伤）→ 护盾/护符结算
+function applyDamageOps(user, target, op, done) {
+  var p = battleState[user], base = op.base || 0;
+  if (op.judge) {
+    if (op.dice === 'coin') { base = (Math.random() < 0.5) ? (op.base || 2) : 0; }
+    else { var max = op.dice === 'd4' ? 4 : 6; base = applyDiceControl(user, Math.floor(Math.random() * max) + 1, max); }
+  }
+  if (p.attackBuff) base += p.attackBuff;
+  if (op.judge && p._judgeDamageBonus) base += p._judgeDamageBonus;
+  var td = battleState[target].defense || 0;
+  var afterDef = base - td;
+  if (afterDef < 0) afterDef = 0;
+  if (afterDef > base + 30) afterDef = base + 30;
+  dealDamageWithResponse(target, afterDef, op.source || '效果', function () {
+    if (op.judge && p._ruriPassive && base > 0) {
+      p.cost = Math.min(p.cost + 1, p.maxCost);
+      addBattleLog(user, '【琉璃被动】判定伤害后回复1点音韵值');
+    }
+    if (done) done();
+  });
+}
+
+// 执行单条指令
+function runOneOp(op, ctx, next) {
+  var user = ctx.user || 'p1', target = ctx.target || 'p2', p = battleState[user];
+  switch (op.op) {
+    case 'damage': applyDamageOps(user, target, op, next); return;
+    case 'heal_sync': p.sync = Math.min(p.sync + op.amount, p.maxSync || 999); break;
+    case 'loss_sync': { var who = op.targetWho === 'self' ? user : target; battleState[who].sync = Math.max(0, battleState[who].sync - op.amount); break; }
+    case 'gain_cost': p.cost = Math.min(p.cost + op.amount, p.maxCost); break;
+    case 'lose_cost': p.cost = Math.max(0, p.cost - op.amount); break;
+    case 'gain_shield': p.shield = (p.shield || 0) + op.amount; break;
+    case 'def_down': battleState[target].defense = (battleState[target].defense || 0) - op.amount; break;
+    case 'def_up': p.defense = (p.defense || 0) + op.amount; break;
+    case 'draw': for (var i = 0; i < op.n; i++) drawCard(user); break;
+    case 'draw_gift': if (typeof drawGiftCard === 'function') drawGiftCard(user); break;
+    case 'draw_omikuji': if (typeof drawOmikuji === 'function') drawOmikuji(user); break;
+    case 'reduce_fascination': p.fascination = Math.max(0, (p.fascination || 0) - op.amount); break;
+    case 'move': applyMove(user, op.n); break;
+    case 'buff_double_move': p.moveBuff = p.moveBuff || {}; p.moveBuff.doubleMove = true; p.moveBuff.maxBonus = 8; break;
+    case 'buff_bonus_move_after': p.moveBuff = p.moveBuff || {}; p.moveBuff.bonusMoveAfter = op.amount; break;
+    case 'next_cost_down':
+      p._nextCostReduction = op.amount;
+      if (op.alsoTarget && target && target !== user) battleState[target]._nextCostReduction = op.amount;
+      break;
+    case 'gain_gold': p.gold = (p.gold || 0) + op.amount; break;
+    case 'attack_buff': p.attackBuff = (p.attackBuff || 0) + op.amount; break;
+    default: break;
+  }
+  next();
+}
+
+function runOps(ops, ctx, done) {
+  var i = 0;
+  function step() { if (i >= ops.length) { if (done) done(); return; } runOneOp(ops[i++], ctx, step); }
+  step();
+}
+
+// 单句分发：能精确编译就走指令层，否则回退文本引擎
+function dispatchStep(text, ctx, next) {
+  var ops = compileStepOps(text);
+  if (ops && ops.length) runOps(ops, ctx, next);
+  else processSingleEffect(text, ctx, next);
+}
+
+
 function executeEffectSteps(steps, context, finalCallback, showLog) {
   effectEngine.effectLog = [];
   // 发动者为 AI(p2) 时进入自动结算：所有选卡/目标弹窗自动决策，避免 AI 回合卡死
@@ -6491,8 +6723,8 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
     
     addBattleLog('system', stepLabel + ' ' + step.text);
     
-    // 执行效果（简化版：根据效果文本关键词执行）
-    processSingleEffect(step.text, context, function() {
+    // 单句分发：优先结构化指令精确执行，无法精确编译则回退文本引擎
+    dispatchStep(step.text, context, function() {
       currentStep++;
       // 模拟分步执行的延迟感
       setTimeout(executeNextStep, 300);
