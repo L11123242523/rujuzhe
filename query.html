@@ -1782,22 +1782,20 @@ img,video,canvas,svg{max-width:100%}
 
 
 <script>
-const DIM_CN = {'cost_eff':'费用效率','power':'效果强度','versatility':'泛用性','synergy':'协同性','stability':'稳定性','growth':'等级成长','drawback':'副作用','requirement':'构筑需求','counter':'反制价值'};
+// ===== 统一评级系统（全站唯一事实来源）=====
+// 新维度：角色/攻击/技能/公共卡=4维(威力/泛用/协同/稳定)；道具=5维(多一个"费用")
+const DIM_CN = {'power':'威力','cost':'费用','flex':'泛用','synergy':'协同','stable':'稳定'};
+const DIM_ORDER_CHAR = ['power','flex','synergy','stable'];
+const DIM_ORDER_ITEM = ['power','cost','flex','synergy','stable'];
+const W_DIM_CHAR = {'power':.35,'flex':.25,'synergy':.20,'stable':.20};
+const W_DIM_ITEM = {'power':.30,'cost':.20,'flex':.20,'synergy':.15,'stable':.15};
+// 统一6档（仅 S/A+/A/B/C/D，不存在 B+/S+/C+/A-）
+function gradeOf(x){ if(x>=8.0)return 'S'; if(x>=7.5)return 'A+'; if(x>=7.0)return 'A'; if(x>=5.5)return 'B'; if(x>=4.0)return 'C'; return 'D'; }
+// 由维度+成长加分自动推导总分（保留一位小数）
+function scoreOfDims(dims, growth=0){ if(!dims) return 0; const w = ('cost' in dims)?W_DIM_ITEM:W_DIM_CHAR; let s=0; for(const k in dims){ s += (w[k]||0)*(dims[k]||0); } return Math.round((s+growth)*10)/10; }
+function dimOrderOf(c){ return (c && c.dims && 'cost' in c.dims)?DIM_ORDER_ITEM:DIM_ORDER_CHAR; }
 const DB = window.__CARD_DATA__;
-  // 角色默认评级 = 流派中得分最高的评级（破局流/进攻流/资源运转流取高）
-  DB.characters.forEach(c => {
-    const scores = [];
-    if(c.score_pojv !== undefined) scores.push(c.score_pojv);
-    if(c.score_attack !== undefined) scores.push(c.score_attack);
-    if(c.score_resource !== undefined) scores.push(c.score_resource);
-    if(scores.length > 0){
-      const best = Math.max(...scores);
-      c.grade = best>=8.0?'S':best>=7.5?'A+':best>=7.0?'A':best>=6.5?'B+':best>=6.0?'B':best>=5.0?'C':'D';
-      c._best_stream_score = best;
-    } else if(c.default_grade) {
-      c.grade = c.default_grade;
-    }
-  });
+// 数据层已保证 score/grade 自洽，启动不再重算；新增/改卡时用 scoreOfDims+gradeOf 实时推导。
 
 // 角色名→携带卡character精确映射（原皮与换装不可混用）
 const CHAR_TO_CARRY = {'现实间冬马':'冬马','入间枫':'枫','木原光太郎':'光太郎','松山惠':'惠','小野结衣':'结衣','小野葵':'葵','里尔亚斯·斯塔芙莉娅斯特':'里尔亚斯','现实间里绪':'里绪','莉莉·缇雅菲洛':'莉莉','小沙香琉璃':'琉璃','琉璃(水着)':'琉璃(水着)','露璐缇雅·爱德华':'露璐','小仓霞':'霞','椎名小春':'小春','小野伊织':'伊织','宫樱子':'樱子','入间予':'予','予(水着)':'予(水着)','雨宫羽奈':'羽奈','宁雨清':'雨清','霜烬':'霜烬','枫(水着)':'枫(水着)','星奈(水着)':'星奈(水着)','里绪(水着)':'里绪(水着)'};
@@ -1903,9 +1901,7 @@ function resetGrade(cardName){
   // 从DB恢复默认评级
   for(const key of ['characters','attack_cards','skill_cards','item_permanent','item_single','gift_cards','music_cards','event_cards']){
     for(const c of DB[key]){
-      if(c.name===cardName && c.default_grade){
-        c.grade = c.default_grade;
-      }
+      if(c.name===cardName){ c.grade = gradeOf(c.score); }
     }
   }
   allCards = flattenCards();
@@ -1921,7 +1917,7 @@ function resetGrade(cardName){
 // 加载手动评级覆盖
 function loadGradeOverrides(){
   const validGrades = ['S','A+','A','B','C','D'];
-  const DATA_VERSION = 'v2_20260818';
+  const DATA_VERSION = 'v3_20260829_unified';
   // 数据版本更新时清除旧的评级覆盖
   if(localStorage.getItem('grade_data_version') !== DATA_VERSION){
     localStorage.removeItem('grade_overrides');
@@ -1950,7 +1946,7 @@ function resetAllGradesNative(){
   localStorage.removeItem('grade_overrides');
   for(const key of ['characters','attack_cards','skill_cards','item_permanent','item_single','gift_cards','music_cards','event_cards']){
     for(const c of DB[key]){
-      if(c.default_grade) c.grade = c.default_grade;
+      c.grade = gradeOf(c.score);
     }
   }
   allCards = flattenCards();
@@ -2025,132 +2021,24 @@ function showDetail(c){
   
   // 评级展示区域
   if(c.grade){
-    const gradeColors = {'S':'linear-gradient(135deg,#ff6b6b,#c0392b)','A+':'linear-gradient(135deg,#9b59b6,#6c3483)','A':'#ffd700','B+':'#4a9eff','B':'#22c55e','C':'#00d2d3','D':'#636e72'};
+    const gradeColors = {'S':'linear-gradient(135deg,#ff6b6b,#c0392b)','A+':'linear-gradient(135deg,#9b59b6,#6c3483)','A':'#ffd700','B':'#22c55e','C':'#00d2d3','D':'#636e72'};
     const gradeTextColor = (c.grade==='A'||c.grade==='C'||c.grade==='D')?'#1a1a2e':'#fff';
     html += `<div class="card-grade-v2">`;
-    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">强度评级</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c._best_stream_score!==undefined?c._best_stream_score:(c.score_pojv!==undefined&&c.score_attack!==undefined?Math.max(c.score_pojv,c.score_attack):(c.score_pojv||c.score_attack||c.score||0))).toFixed(1)}分</span></div>`;
+    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">强度评级</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c.score||0).toFixed(1)}分</span></div>`;
     
-    // 场景化评分
-    if(c.score_p3 !== undefined || c.score_p4 !== undefined){
-      html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.2);border-radius:6px;font-size:12px;color:#aaa">';
-      if(c.score_p3 !== undefined) html += '3人局 <b style="color:#4a9eff">'+c.score_p3+'</b> | ';
-      if(c.score_p4 !== undefined) html += '4人局 <b style="color:#4a9eff">'+c.score_p4+'</b>';
-      if(c.captain_modifier !== undefined){
-        const capS = (c.score + c.captain_modifier).toFixed(1);
-        const memS = (c.score + (c.member_modifier||0)).toFixed(1);
-        html += ' | 队长 <b style="color:#f59e0b">'+capS+'</b> / 队员 <b style="color:#f59e0b">'+memS+'</b>';
-      }
-      html += '</div>';
+    // 新维度评分（角色/战斗/公共=4维，道具=5维，按类型加权；成长为额外加分）
+    if(c.dims){
+      const dOrder = dimOrderOf(c);
+      const dimColor = {'power':'#e94560','cost':'#f59e0b','flex':'#22c55e','synergy':'#a855f7','stable':'#06b6d4'};
+      const w = ('cost' in c.dims)?W_DIM_ITEM:W_DIM_CHAR;
+      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">${dOrder.length}维强度构成</b>${c.growth?` <span style="color:#f59e0b;font-size:11px">等级成长加分 +${c.growth.toFixed(1)}</span>`:''} <span style="color:#666;font-size:11px">（加权合计+成长=总分）</span></div>`;
+      dOrder.forEach(k=>{
+        const v=c.dims[k]; if(v===undefined) return;
+        const pct=Math.round((w[k]||0)*100);
+        html += `<div class="score-row"><span class="label">${DIM_CN[k]}<span style="color:#666;font-size:10px"> ${pct}%</span></span><div class="bar"><div class="score-bar"><div class="score-bar-fill" style="width:${v*10}%;background:${dimColor[k]}"></div></div></div><span class="val">${v.toFixed(1)}</span></div>`;
+      });
     }
-    
-    // 三流派评分（破局流/进攻流/资源运转流）
-    if(c.score_pojv !== undefined || c.score_attack !== undefined || c.score_resource !== undefined){
-      const gColor = g => g==='S'?'#e94560':g==='A+'?'#9b59b6':g==='A'?'#f39c12':g==='B+'?'#4a9eff':g==='B'?'#22c55e':g==='C'?'#06b6d4':'#7f8c8d';
-      const streamCount = [c.score_pojv, c.score_attack, c.score_resource].filter(s=>s!==undefined).length;
-      const cols = streamCount>=3?'1fr 1fr 1fr':streamCount===2?'1fr 1fr':'1fr';
-      html += `<div style="margin-top:10px;display:grid;grid-template-columns:${cols};gap:8px">`;
-      if(c.score_pojv !== undefined){
-        const col = gColor(c.grade_pojv);
-        html += `<div style="background:linear-gradient(135deg,${col}22,${col}11);border:1px solid ${col}44;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:11px;color:${col};font-weight:bold;margin-bottom:4px">破局流</div>
-          <div style="font-size:18px;font-weight:bold;color:${col}">${c.grade_pojv} · ${c.score_pojv.toFixed(1)}</div>
-        </div>`;
-      }
-      if(c.score_attack !== undefined){
-        const col = gColor(c.grade_attack);
-        html += `<div style="background:linear-gradient(135deg,${col}22,${col}11);border:1px solid ${col}44;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:11px;color:${col};font-weight:bold;margin-bottom:4px">进攻流</div>
-          <div style="font-size:18px;font-weight:bold;color:${col}">${c.grade_attack} · ${c.score_attack.toFixed(1)}</div>
-        </div>`;
-      }
-      if(c.score_resource !== undefined){
-        const col = gColor(c.grade_resource);
-        html += `<div style="background:linear-gradient(135deg,${col}22,${col}11);border:1px solid ${col}44;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:11px;color:${col};font-weight:bold;margin-bottom:4px">资源运转流</div>
-          <div style="font-size:18px;font-weight:bold;color:${col}">${c.grade_resource} · ${c.score_resource.toFixed(1)}</div>
-        </div>`;
-      }
-      html += '</div>';
-      
-      // 进攻流三子流派
-      if(c.attack_subtypes){
-        const subs = [
-          {k:'直伤', v:c.attack_subtypes.direct, color:'#e94560'},
-          {k:'判定伤害', v:c.attack_subtypes.judge, color:'#9b59b6'},
-          {k:'移动造伤', v:c.attack_subtypes.move, color:'#22c55e'},
-        ];
-        html += '<div style="margin-top:8px;padding:8px 10px;background:rgba(0,0,0,0.2);border-radius:6px">';
-        html += '<div style="font-size:11px;color:#888;margin-bottom:6px">进攻流子流派契合度' + (c.best_attack_subtype?` · 最强：<b style="color:#f59e0b">${c.best_attack_subtype}</b>`:'') + '</div>';
-        subs.forEach(d=>{
-          html += `<div style="display:flex;align-items:center;margin-bottom:3px;font-size:11px">
-            <span style="width:56px;color:#aaa">${d.k}</span>
-            <div style="flex:1;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden;margin:0 8px">
-              <div style="height:100%;width:${d.v*10}%;background:${d.color};border-radius:4px"></div>
-            </div>
-            <span style="width:24px;text-align:right;color:${d.color};font-weight:bold">${d.v}</span>
-          </div>`;
-        });
-        html += '</div>';
-      }
-      
-      // 三维度评分条
-      if(c.dim_effect !== undefined){
-        html += '<div style="margin-top:10px;padding:8px 10px;background:rgba(0,0,0,0.2);border-radius:6px">';
-        html += '<div style="font-size:11px;color:#888;margin-bottom:6px">评分维度（效果35% + 流派契合45% + 泛用20% + 费用调和 + 副作用）</div>';
-        const dims = [
-          {k:'效果价值',v:c.dim_effect,color:'#e94560'},
-          {k:'破局契合',v:c.dim_pojv,color:'#9b59b6'},
-          {k:'进攻契合',v:c.dim_attack,color:'#f39c12'},
-          {k:'泛用性',v:c.dim_versatility,color:'#22c55e'},
-        ];
-        dims.forEach(d=>{
-          html += `<div style="display:flex;align-items:center;margin-bottom:3px;font-size:11px">
-            <span style="width:56px;color:#aaa">${d.k}</span>
-            <div style="flex:1;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden;margin:0 8px">
-              <div style="height:100%;width:${d.v*10}%;background:${d.color};border-radius:4px"></div>
-            </div>
-            <span style="width:24px;text-align:right;color:${d.color};font-weight:bold">${d.v}</span>
-          </div>`;
-        });
-        if(c.cost_adjustment !== undefined || c.side_effect_penalty !== undefined || c.range_adjustment !== undefined || c.mechanic_bonus !== undefined){
-          html += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1);font-size:11px;color:#888">';
-          if(c.cost_adjustment !== undefined){
-            const ca = c.cost_adjustment;
-            html += `费用调和 <b style="color:${ca>=0?'#22c55e':'#e94560'}">${ca>=0?'+':''}${ca}</b>`;
-          }
-          if(c.range_adjustment !== undefined && c.range_adjustment !== 0){
-            const ra = c.range_adjustment;
-            if(c.cost_adjustment !== undefined) html += ' | ';
-            html += `距离调和 <b style="color:${ra>=0?'#22c55e':'#e94560'}">${ra>=0?'+':''}${ra}</b>`;
-          }
-          if(c.mechanic_bonus !== undefined && c.mechanic_bonus > 0){
-            const mb = c.mechanic_bonus;
-            if(c.cost_adjustment !== undefined || c.range_adjustment !== undefined) html += ' | ';
-            html += `机制加分 <b style="color:#f59e0b" title="${c.mechanic_note||''}">+${mb}</b>`;
-          }
-          if(c.side_effect_penalty !== undefined && c.side_effect_penalty !== 0){
-            if(c.cost_adjustment !== undefined || c.range_adjustment !== undefined || (c.mechanic_bonus !== undefined && c.mechanic_bonus > 0)) html += ' | ';
-            html += `副作用 <b style="color:#e94560">${c.side_effect_penalty}</b>`;
-          }
-          html += '</div>';
-        }
-        html += '</div>';
-      }
-    }
-    
-    // 9维评分
-    if(c.dimensions){
-      const dimCount = Object.keys(c.dimensions).length;
-      const dimColors = {'费用效率':'#e94560','效果强度':'#4a9eff','泛用性':'#22c55e','协同性':'#a855f7','稳定性':'#06b6d4','等级成长':'#f59e0b','副作用':'#ec4899','构筑需求':'#14b8a6','反制价值':'#f97316'};
-      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">${dimCount}维评分</b> <span style="color:#888;font-size:11px">（按卡牌类型加权计总分）</span></div>`;
-      html += '<div style="font-size:11px;color:#666;margin-bottom:6px">稳定性=效果确定性(高=稳定低方差) | 反制价值=针对特定流派能力 | 副作用=使用代价(高=无副作用)</div>';
-      for(const [k,v] of Object.entries(c.dimensions)){
-        const cn = DIM_CN[k]||k;
-        const dcolor = dimColors[cn]||'#888';
-        html += `<div class="score-row"><span class="label">${cn}</span><div class="bar"><div class="score-bar"><div class="score-bar-fill" style="width:${v*10}%;background:${dcolor}"></div></div></div><span class="val">${v}</span></div>`;
-      }
-    }
-    
+
     // 适用流派
     if(c.archetypes && c.archetypes.length){
       html += '<div style="margin-top:10px"><b style="color:#e0e0e0;font-size:12px">适用流派</b> ';
@@ -2162,9 +2050,9 @@ function showDetail(c){
       html += '</div>';
     }
     
-    // 强度说明
-    if(c.rating_note && c.rating_note!=='待评估'){
-      html += `<div style="margin-top:10px;padding:8px 10px;background:rgba(245,158,11,0.08);border-radius:6px;border-left:3px solid #f59e0b;font-size:12px;color:#ccc"><b style="color:#f59e0b">强度说明</b>：${c.rating_note}</div>`;
+    // 一句话强度点评（由维度结构自动生成）
+    if(c.brief){
+      html += `<div style="margin-top:10px;padding:8px 10px;background:rgba(245,158,11,0.08);border-radius:6px;border-left:3px solid #f59e0b;font-size:12px;color:#ccc"><b style="color:#f59e0b">点评</b>：${c.brief}</div>`;
     }
     
     // 手动调整评级
@@ -2963,35 +2851,26 @@ function calcDeckScore(){
   const allCards = [...chars, ...items, ...carries];
   if(allCards.length<12){ alert('卡组未满12张（当前'+allCards.length+'张），评分仅供参考'); }
 
-  // 8维度加权平均（角色卡权重1.5，其他1.0）
-  const dims = ["cost_eff","power","versatility","synergy","stability","growth","drawback","requirement"];
+  // 新维度聚合到统一5维（角色卡无"费用"维则自动跳过；角色权重1.5，其余1.0）
+  const dims = ["power","cost","flex","synergy","stable"];
   const dimSums = {}, dimCounts = {};
   dims.forEach(d=>{ dimSums[d]=0; dimCounts[d]=0; });
   let totalScore = 0, totalWeight = 0;
-
   allCards.forEach(card=>{
     const w = chars.includes(card)?1.5:1.0;
     if(card.score!==undefined){ totalScore += card.score*w; totalWeight += w; }
-    if(card.dimensions){
+    if(card.dims){
       dims.forEach(d=>{
-        if(card.dimensions[d]!==undefined){
-          dimSums[d] += card.dimensions[d]*w;
-          dimCounts[d] += w;
-        }
+        if(card.dims[d]!==undefined){ dimSums[d]+=card.dims[d]*w; dimCounts[d]+=w; }
       });
     }
   });
-
   const avgScore = totalWeight>0 ? totalScore/totalWeight : 0;
   const dimAvgs = {};
   dims.forEach(d=>{ dimAvgs[d] = dimCounts[d]>0 ? dimSums[d]/dimCounts[d] : 0; });
-
-  // 评级
-  let grade = 'D', gradeColor = '#888';
-  if(avgScore>=8.0){ grade='S'; gradeColor='#e94560'; }
-  else if(avgScore>=6.5){ grade='A'; gradeColor='#f39c12'; }
-  else if(avgScore>=5.0){ grade='B'; gradeColor='#3498db'; }
-  else if(avgScore>=3.5){ grade='C'; gradeColor='#2ecc71'; }
+  // 统一档位（与全站一致）
+  const grade = gradeOf(avgScore);
+  const gradeColor = {'S':'#e94560','A+':'#9b59b6','A':'#f39c12','B':'#4a9eff','C':'#22c55e','D':'#636e72'}[grade]||'#888';
 
   // 短板分析
   const weaknesses = [];
@@ -3031,7 +2910,7 @@ function calcDeckScore(){
 
   // 维度短板
   dims.forEach(d=>{
-    if(dimAvgs[d]<4.5 && dimCounts[d]>0) weaknesses.push({text:`${DIM_CN[d]||d}维度偏低(${dimAvgs[d].toFixed(1)})`, level:'low'});
+    if(dimCounts[d]>0 && dimAvgs[d]<5.5) weaknesses.push({text:`${DIM_CN[d]||d}维度偏低(${dimAvgs[d].toFixed(1)})`, level:'low'});
   });
 
   // 渲染
@@ -3042,9 +2921,9 @@ function calcDeckScore(){
     <div style="color:#aaa;font-size:13px;margin-top:4px">综合评分 <b style="color:#fff">${avgScore.toFixed(1)}</b>/10</div>
   </div>`;
 
-  // 8维度条形图
-  html += `<div style="margin-bottom:20px"><h4 style="color:#4a9eff;margin:0 0 10px 0">八维分析</h4>`;
-  dims.forEach(d=>{
+  // 维度条形图（跳过无样本的维度）
+  html += `<div style="margin-bottom:20px"><h4 style="color:#4a9eff;margin:0 0 10px 0">维度分析</h4>`;
+  dims.filter(d=>dimCounts[d]>0).forEach(d=>{
     const v = dimAvgs[d];
     const pct = (v/10*100).toFixed(0);
     const color = v>=7?'#22c55e':v>=5?'#f39c12':'#e94560';
@@ -5530,7 +5409,7 @@ function smartRandomDeck(){
  *  4) 扫描全部流派自动产出推荐卡组
  * ============================================================ */
 function createBuildEngine(DB, CHAR_TO_CARRY){
-  const gradeVal = {'S+':10.5,S:10,'A+':9,A:8,'B+':7,B:6,'C+':5,C:4,D:2};
+  const gradeVal = {S:10,'A+':9,A:8,B:6,C:4,D:2};
   const gv = g => (g===undefined||g===null)?5.5:(gradeVal[g]!==undefined?gradeVal[g]:5.5);
 
   /* ---------- 流派归一化 ---------- */
@@ -5753,13 +5632,11 @@ function createBuildEngine(DB, CHAR_TO_CARRY){
       const owner=carryOwner(teamChars,c);
       if(owner && owner.name===DB.characters[team.captain].name) s+=1.2;
       if(recNames.has(c.name)) s+=3;
-      // 攻击子类型与流派契合（判定流派偏爱 judge，位移偏爱 move，快攻偏爱 direct）
-      const st=c.attack_subtypes;
-      if(st){
-        if(arch==='判定') s+=(st.judge||0)*0.25;
-        else if(arch==='位移') s+=(st.move||0)*0.25;
-        else if(arch==='快攻') s+=(st.direct||0)*0.25;
-      }
+      // 流派契合：依据效果文本与流派标签（替代旧 attack_subtypes）
+      const effTxt=(c.effect||'')+(c.passive||''); const archTags=c.archetypes||[];
+      if(arch==='判定' && (/判定|面骰|骰子/.test(effTxt)||archTags.some(t=>/判定/.test(t)))) s+=1.2;
+      else if(arch==='位移' && (/移动|前进|后退|位移/.test(effTxt)||archTags.some(t=>/位移|移动/.test(t)))) s+=1.0;
+      else if(arch==='快攻' && /伤害|攻击|横扫|连击|追击/.test(effTxt)) s+=0.8;
       const cost=c.cost||0; if(cost>=2&&cost<=4)s+=1; else if(cost>=6)s-=1;
       return s;
     }
@@ -6880,11 +6757,11 @@ function updateCompare(){
     if(c.passive) h += `<div style="font-size:11px;color:#aaa;margin-bottom:3px"><b>被动:</b> ${c.passive.substring(0,60)}${c.passive.length>60?'...':''}</div>`;
     if(c.sp) h += `<div style="font-size:11px;color:#aaa;margin-bottom:3px"><b>SP:</b> ${c.sp.substring(0,60)}${c.sp.length>60?'...':''}</div>`;
     if(c.effect) h += `<div style="font-size:11px;color:#ccc;margin-bottom:3px"><b>效果:</b> ${c.effect.substring(0,80)}${c.effect.length>80?'...':''}</div>`;
-    if(c.dimensions){
+    if(c.dims){
       h += `<div style="margin-top:6px;font-size:10px">`;
-      for(const [k,v] of Object.entries(c.dimensions)){
-        h += `<div style="display:flex;align-items:center;gap:4px;margin:1px 0"><span style="width:52px;color:#888">${k}</span><div style="flex:1;height:5px;background:#0f3460;border-radius:3px"><div style="height:100%;width:${v*10}%;background:${color};border-radius:3px"></div></div><span style="width:16px;text-align:right;color:#aaa">${v}</span></div>`;
-      }
+      dimOrderOf(c).forEach(k=>{ const v=c.dims[k]; if(v===undefined) return;
+        h += `<div style="display:flex;align-items:center;gap:4px;margin:1px 0"><span style="width:40px;color:#888">${DIM_CN[k]}</span><div style="flex:1;height:5px;background:#0f3460;border-radius:3px"><div style="height:100%;width:${v*10}%;background:${color};border-radius:3px"></div></div><span style="width:22px;text-align:right;color:#aaa">${v.toFixed(1)}</span></div>`;
+      });
       h += `</div>`;
     }
     h += `</div>`;
