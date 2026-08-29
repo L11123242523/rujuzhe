@@ -2553,6 +2553,34 @@ function isDiceModifyCard(card){
   var name=card.name||'',eff=card.effect||card.text||'';
   return name==='遥控骰子'||name==='颠倒骰子'||name==='特制手套'||eff.indexOf('修改一次掷骰结果')>=0||eff.indexOf('修改骰子点数')>=0||eff.indexOf('改变一名玩家下一次移动的方向')>=0;
 }
+// 通用资源条件：卡面要求“从某区域选卡”时，该区域必须非空（宁漏勿错，避免误拦合法卡）
+function checkCardResource(card,me,bs){
+  var eff=card.effect||card.text||'';
+  var opp=bs[me===bs.p1?'p2':'p1'];
+  var L=function(a){return (a||[]).length;};
+  var vsOther=/其他玩家|对手|一名玩家|一名角色|其|目标/.test(eff);
+  // 从牌组检索/选卡加入手卡
+  if(eff.indexOf('牌组')>=0 && /加入手|检索|从牌组/.test(eff) && eff.indexOf('放回')<0){
+    if(/攻击卡或技能卡/.test(eff)){
+      var hasAT=[].concat(me.deck||[],me.grave||[]).some(function(c){return c&&(c._category==='attack_cards'||c._category==='skill_cards');});
+      if(!hasAT) return {ok:false,reason:'牌组与墓地中都没有攻击卡/技能卡，无法检索'};
+    } else if(!vsOther && L(me.deck)===0){ return {ok:false,reason:'你的牌组已空，无法从中选择卡牌'}; }
+  }
+  // 选自己墓地 N 张回收/加入手卡
+  if(eff.indexOf('墓地')>=0 && eff.indexOf('牌组')<0 && /加入手卡|加入手牌|回收|返回手卡|拿回/.test(eff) && !/其他玩家|对手|其墓地|一名玩家/.test(eff)){
+    var m=eff.match(/墓地\D{0,4}(\d+)\s*张/); var need=m?parseInt(m[1],10):(/一张|1张/.test(eff)?1:0);
+    if(need>0 && L(me.grave)<need) return {ok:false,reason:'需要自己墓地中有至少'+need+'张卡（当前'+L(me.grave)+'张）'};
+  }
+  // 查看/选择手牌
+  if(eff.indexOf('手牌')>=0 && /查看|选其中|一张手牌|手牌中/.test(eff)){
+    if(L(me.hand)===0 && L(opp.hand)===0) return {ok:false,reason:'双方手牌均为空，没有可选择的卡'};
+  }
+  // 破坏效果处理区/区域内的卡
+  if(eff.indexOf('破坏')>=0 && /区域内|永续|效果处理区|区域的一张|区域的1张/.test(eff)){
+    if(L(me.permanent)===0 && L(opp.permanent)===0) return {ok:false,reason:'双方效果处理区都没有可破坏的卡'};
+  }
+  return true;
+}
 // 统一合法性：opts.fromFaceDown=true 表示从盖伏状态翻开（任意阶段可发，但当回合盖下不可发、连锁类仍需对象）
 function evaluatePlayable(card,player,opts){
   opts=opts||{};
@@ -2586,7 +2614,9 @@ function evaluatePlayable(card,player,opts){
   // 5) 攻击卡：范围内必须存在可攻击目标
   if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
-  // 6) 特例卡条件
+  // 6) 通用资源条件（检索/回收/看手牌/破坏区域 需对应区域非空）
+  var __res=checkCardResource(card,me,battleState); if(__res&&__res.ok===false) return __res;
+  // 7) 特例卡条件
   var cond=CARD_PLAY_CONDITIONS[name];
   if(cond){ var r=cond(card,me,battleState); if(r&&r.ok===false) return r; }
   return {ok:true,reason:''};
@@ -4061,88 +4091,65 @@ function pushEffect(effect) {
   addBattleLog('system', '【效果栈】压入效果：' + effect.description);
 }
 
-// 检查效果依赖的对象是否存在
-function checkEffectDependency(effect) {
-  if (!effect.dependencies) return true;
-  
-  // 检查骰子结果依赖
-  if (effect.dependencies.diceResult !== undefined) {
-    // 如果骰子结果被修改过，依赖对象丢失
-    if (effect._diceModified) {
-      addBattleLog('system', '【效果对象丢失】骰子结果' + effect.dependencies.diceResult + '已被修改，效果不执行');
-      return false;
-    }
+// 收集某玩家在当前响应窗口下真正可连锁的卡（手牌+盖伏）：必须是连锁类卡、存在作用对象、费用足够、非盖伏当回合
+function collectChainable(player){
+  var me=battleState[player]; if(!me) return [];
+  var out=[];
+  function consider(c,from,index){
+    if(!c || !isChainOnlyCard(c) || !hasChainTarget(c)) return;
+    if((c.cost||0)>(me.cost||0)) return;
+    if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
+    out.push({card:c,from:from,index:index});
   }
-  
-  return true;
+  (me.hand||[]).forEach(function(c,i){consider(c,'hand',i);});
+  (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
+  return out;
 }
-
-// 效果将要执行前时点：询问双方是否连锁
-function beforeEffectExecution(effect, callback) {
-  addBattleLog('system', '【效果将要执行前时点】' + effect.description + '，双方可连锁');
-  
-  // 检查玩家手牌中是否有可连锁的卡（遥控骰子等）
-  var chainableCards = battleState.p1.hand.filter(function(c) {
-    return c.effect && (c.effect.indexOf('遥控') >= 0 || c.effect.indexOf('改') >= 0 || c.effect.indexOf('连锁') >= 0);
-  });
-  
-  if (chainableCards.length > 0) {
-    var chainNames = chainableCards.map(function(c) { return c.name; }).join('、');
-    var useChain = confirm('【效果将要执行前时点】\n' + effect.description + '\n\n你手牌中有可连锁的卡：' + chainNames + '\n\n是否连锁？\n（确定=连锁，取消=不连锁）');
-    
-    if (useChain) {
-      // 让玩家选择要连锁的卡
-      var cardList = chainableCards.map(function(c, i) { return (i+1) + '. ' + c.name + '（' + c.cost + '费）'; }).join('\n');
-      var choice = prompt('选择要连锁的卡：\n\n' + cardList, '1');
-      var choiceIdx = parseInt(choice) - 1;
-      
-      if (choiceIdx >= 0 && choiceIdx < chainableCards.length) {
-        var chainCard = chainableCards[choiceIdx];
-        addBattleLog('p1', '连锁发动【' + chainCard.name + '】');
-        
-        // 标记原始效果的骰子结果被修改
-        if (effect.dependencies && effect.dependencies.diceResult !== undefined) {
-          effect._diceModified = true;
-        }
-        
-        // 执行连锁卡效果（简化：遥控骰子修改结果）
-        if (chainCard.effect && chainCard.effect.indexOf('遥控') >= 0) {
-          var newResult = Math.floor(Math.random() * 6) + 1;
-          addBattleLog('p1', '【遥控骰子】将骰子结果改为' + newResult + '点');
-          effect._newDiceResult = newResult;
-        }
-        
-        // 询问对手是否连锁（简化：AI随机决定）
-        var aiChain = Math.random() > 0.5;
-        if (aiChain) {
-          addBattleLog('p2', '对手连锁发动效果，将骰子结果改回');
-          effect._newDiceResult = Math.floor(Math.random() * 6) + 1;
-          addBattleLog('p2', '对手将骰子结果改为' + effect._newDiceResult + '点');
-        }
-        
-        // 连锁处理完成，检查依赖
-        setTimeout(function() {
-          if (checkEffectDependency(effect)) {
-            callback(effect);
-          } else {
-            addBattleLog('system', '效果对象丢失，不执行：' + effect.description);
-            callback(null);
-          }
-        }, 500);
-        return;
-      }
-    }
+// 发动一张连锁卡并修改待结算效果
+function applyChainCard(player,pick,effect,done){
+  var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
+  me.cost-=(c.cost||0);
+  if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
+  (me.grave=me.grave||[]).push(c);
+  addBattleLog(player,'连锁发动【'+name+'】');
+  if(name.indexOf('遥控骰子')>=0 || eff.indexOf('修改一次掷骰结果')>=0 || eff.indexOf('修改骰子点数')>=0){
+    var v=null;
+    for(var t=0;t<3;t++){ var raw=prompt('【'+name+'】将本次骰子结果改为几点？输入 1-6','6'); if(raw===null) break; v=parseInt(raw,10); if(v>=1&&v<=6) break; v=null; }
+    if(v!==null){ effect._newDiceResult=v; effect.moveAmount=v; addBattleLog(player,'【'+name+'】骰子结果改为 '+v+' 点'); }
+  } else if(name.indexOf('颠倒骰子')>=0 || (eff.indexOf('改变')>=0&&eff.indexOf('方向')>=0)){
+    effect._reverseDir=!effect._reverseDir; addBattleLog(player,'【'+name+'】下一次移动方向反转');
+  } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
+    var add=confirm('【'+name+'】确定=位移量+2，取消=位移量-2')?2:-2;
+    var base=(effect._newDiceResult!==undefined?effect._newDiceResult:effect.moveAmount)||0;
+    var nv=Math.max(0,base+add); effect._newDiceResult=nv; effect.moveAmount=nv;
+    addBattleLog(player,'【'+name+'】位移量变为 '+nv+' 格');
+  } else if(eff.indexOf('打断')>=0||name.indexOf('猎手爪链')>=0){
+    effect.cancelled=true; addBattleLog(player,'【'+name+'】打断本次移动');
+  } else if(eff.indexOf('抵消')>=0&&eff.indexOf('伤害')>=0){
+    effect.cancelled=true; addBattleLog(player,'【'+name+'】抵消本次效果');
   }
-  
-  // 无连锁，直接执行
-  setTimeout(function() {
-    if (checkEffectDependency(effect)) {
-      callback(effect);
-    } else {
-      addBattleLog('system', '效果对象丢失，不执行：' + effect.description);
-      callback(null);
-    }
-  }, 300);
+  updateBattleUI(); setTimeout(done,250);
+}
+// 效果将要执行前时点：双方可连锁；不存在可连锁卡时不弹任何询问
+function beforeEffectExecution(effect, callback) {
+  addBattleLog('system','【效果将要执行前时点】'+effect.description+'，双方可连锁');
+  function finish(){
+    if(effect.cancelled){ addBattleLog('system','本次效果被连锁打断，不执行'); callback(null); return; }
+    callback(effect);
+  }
+  function askPlayer(){
+    var list=collectChainable('p1');
+    if(list.length===0){ finish(); return; }
+    var txt=list.map(function(x,i){return (i+1)+'. '+x.card.name+'（'+(x.card.cost||0)+'费）';}).join('\n');
+    var go=confirm('【效果将要执行前时点】\n'+effect.description+'\n\n你可连锁以下卡片：\n'+txt+'\n\n确定=选择卡片连锁，取消=不连锁');
+    if(!go){ finish(); return; }
+    var raw=prompt('选择要连锁的卡编号（取消=不连锁）：\n'+txt,'1');
+    if(raw===null){ finish(); return; }
+    var idx=parseInt(raw,10)-1;
+    if(!(idx>=0&&idx<list.length)){ finish(); return; }
+    applyChainCard('p1',list[idx],effect,askPlayer); // 结算后可继续追加连锁
+  }
+  askPlayer();
 }
 
 // 执行移动效果
@@ -4162,8 +4169,9 @@ function executeMoveEffect(effect) {
   var oldPos = p.position;
   // 单次位移最多20格
   var actualMoveAmount = Math.min(moveAmount, 20);
-  p.position = (p.position + actualMoveAmount) % 42;
-  addBattleLog(player, '移动' + actualMoveAmount + '格，从第' + oldPos + '格到第' + p.position + '格');
+  var moveDir = effect._reverseDir ? -1 : 1; // 颠倒骰子可反转方向
+  p.position = ((p.position + moveDir * actualMoveAmount) % 42 + 42) % 42;
+  addBattleLog(player, (moveDir<0?'反向':'') + '移动' + actualMoveAmount + '格，从第' + oldPos + '格到第' + p.position + '格');
   
   // 里绪被动：单回合内每累计移动8格后对一名玩家造成4面骰判定伤害
   if (p._rioPassive) {
