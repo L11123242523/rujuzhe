@@ -2467,6 +2467,59 @@ function isSameRow(pos1, pos2) {
   return Math.abs(y1 - y2) <= 5;
 }
 
+// ===== 统一攻击范围引擎（严格按卡牌 attack_range 文本解析，环形跑道 N=42，前进=id增大）=====
+function ringLen(){ return MAP_TILES ? MAP_TILES.length : 42; }
+// 从 a 沿前进方向到 b 的步数
+function ringForward(a,b){ var N=ringLen(); return ((b-a)%N+N)%N; }
+// a、b 沿环最短步数
+function ringMinDist(a,b){ var N=ringLen(), d=ringForward(a,b); return Math.min(d,N-d); }
+// 把 attack_range 文本解析为结构化范围
+function parseAttackRange(text){
+  text = text || '';
+  var spec = { kind:'global', aoe:/所有玩家|AOE/.test(text), raw:text };
+  if (/无（(治疗|增益|驱散|疗愈)/.test(text)){ spec.kind='noneed'; return spec; }      // 治疗/增益/驱散无需敌方目标
+  if (/全图|无距离限制/.test(text)){ spec.kind='global'; return spec; }                    // 全图 / SP无距离限制
+  var m;
+  if (/同格/.test(text)){ spec.kind='samecell'; return spec; }
+  if ((m=text.match(/前移(\d+)格后前后(\d+)格/))){ spec.kind='moveThenAround'; spec.move=+m[1]; spec.n=+m[2]; return spec; } // 钢筋铁肘：先移动再判定
+  if ((m=text.match(/前方最远(\d+)格\+身后(\d+)格/))){ spec.kind='forwardBack'; spec.n=+m[1]; spec.m=+m[2]; return spec; }  // 横扫之刃
+  if ((m=text.match(/后退(\d+)格过程中/))){ spec.kind='pathBack'; spec.n=+m[1]; return spec; }                            // 谢幕：后退路径触碰
+  if (/移动到同一行目标格/.test(text)){ spec.kind='movetorow'; return spec; }                                            // 狩猎少女
+  if (/同一行/.test(text)){ spec.kind='samerow'; return spec; }
+  if ((m=text.match(/前后(\d+)格/))){ spec.kind='around'; spec.n=+m[1]; return spec; }
+  if ((m=text.match(/前方(\d+)格/))){ spec.kind='forward'; spec.n=+m[1]; return spec; }
+  if ((m=text.match(/最远(\d+)格/))){ spec.kind='around'; spec.n=+m[1]; return spec; }   // 前/后飞行物最远N（双向）
+  if (/玩家/.test(text)){ spec.kind='global'; if(window&&window.console)console.warn('攻击范围未识别，按全图处理:',text); return spec; }
+  spec.kind='noneed'; return spec;
+}
+// 判断从 fromPos 是否能打到 toPos
+function canReachByRange(specOrText, fromPos, toPos){
+  var spec = (typeof specOrText==='string') ? parseAttackRange(specOrText) : specOrText;
+  fromPos=fromPos||0; toPos=toPos||0;
+  switch(spec.kind){
+    case 'noneed': case 'global': return true;
+    case 'samecell': return fromPos===toPos;
+    case 'samerow': case 'movetorow': return isSameRow(fromPos,toPos);
+    case 'around': return ringMinDist(fromPos,toPos)<=spec.n;
+    case 'forward': { var d=ringForward(fromPos,toPos); return d>=1 && d<=spec.n; }
+    case 'forwardBack': { var f=ringForward(fromPos,toPos), b=ringLen()-f; return (f>=1&&f<=spec.n)||(b>=1&&b<=spec.m); }
+    case 'moveThenAround': { var base=(fromPos+spec.move)%ringLen(); return ringMinDist(base,toPos)<=spec.n; }
+    case 'pathBack': { for(var st=1;st<=spec.n;st++){ if(((fromPos-st+ringLen()*2)%ringLen())===toPos) return true; } return false; }
+    default: return true;
+  }
+}
+// 该攻击卡是否需要敌方目标
+function attackNeedsEnemy(card){ return parseAttackRange(card&&card.attack_range).kind!=='noneed'; }
+// player 的对手是否处于该攻击卡范围内（无需目标的治疗/增益/驱散恒为 true）
+function hasEnemyInAttackRange(card, player){
+  var spec=parseAttackRange(card&&card.attack_range);
+  if (spec.kind==='noneed') return true;
+  if(!battleState||!battleState[player]) return false;
+  var opp=battleState[player==='p1'?'p2':'p1'];
+  if(!opp) return false;
+  return canReachByRange(spec, battleState[player].position||0, opp.position||0);
+}
+
 var deckConfig = {
   p1: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) },
   p2: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) }
@@ -8920,40 +8973,10 @@ function useCardComplete(handIndex) {
   
   // 永续卡默认正面放置（右键可盖伏）
   
-  // 攻击卡距离限制检查
-  if (card._category === 'attack_cards' || (card.type && card.type.indexOf('攻击') >= 0)) {
-    var attackRange = card.range || card.distance || '';
-    var p1Pos = battleState.p1.position || 0;
-    var p2Pos = battleState.p2.position || 0;
-    var distance = Math.abs(p1Pos - p2Pos);
-    var sameRow = isSameRow(p1Pos, p2Pos); // 基于MAP_TILES的y坐标判断同一行
-    
-    var canAttack = true;
-    var rangeReason = '';
-    
-    if (attackRange.indexOf('同一行') >= 0 || attackRange.indexOf('同行') >= 0) {
-      if (!sameRow) {
-        canAttack = false;
-        rangeReason = '只能攻击同一行的玩家！当前玩家不在同一行。';
-      }
-    } else if (attackRange.indexOf('前后') >= 0) {
-      // 前后N格
-      var rangeMatch = attackRange.match(/前后(\d+)/);
-      var rangeNum = rangeMatch ? parseInt(rangeMatch[1]) : 3;
-      if (distance > rangeNum) {
-        canAttack = false;
-        rangeReason = '只能攻击前后' + rangeNum + '格内的目标！当前距离' + distance + '格。';
-      }
-    } else if (attackRange.indexOf('近距离') >= 0 || attackRange.indexOf('近战') >= 0) {
-      if (distance > 3) {
-        canAttack = false;
-        rangeReason = '近战攻击只能攻击3格内的目标！当前距离' + distance + '格。';
-      }
-    }
-    // 没有距离限制的攻击卡可以攻击任何目标
-    
-    if (!canAttack) {
-      alert('【' + card.name + '】' + rangeReason);
+  // 攻击卡距离限制检查（统一走攻击范围引擎，严格按 attack_range 判定；范围内无目标则不可用）
+  if (card._category === 'attack_cards') {
+    if (!hasEnemyInAttackRange(card, 'p1')) {
+      alert('【' + card.name + '】攻击范围内没有可攻击的目标（范围：' + (card.attack_range || '无') + '），无法使用');
       return;
     }
   }
