@@ -1787,7 +1787,7 @@ img,video,canvas,svg{max-width:100%}
 const DIM_CN = {'power':'威力','cost':'费用','flex':'泛用','synergy':'协同','stable':'稳定'};
 const DIM_ORDER_CHAR = ['power','flex','synergy','stable'];
 const DIM_ORDER_ITEM = ['power','cost','flex','synergy','stable'];
-const W_DIM_CHAR = {'power':.25,'flex':.25,'synergy':.25,'stable':.25};
+const W_DIM_CHAR = {'power':.30,'flex':.30,'synergy':.20,'stable':.20};
 const W_DIM_ITEM = {'power':.30,'cost':.20,'flex':.20,'synergy':.15,'stable':.15};
 // 统一6档（仅 S/A+/A/B/C/D，不存在 B+/S+/C+/A-）
 function gradeOf(x){ if(x>=8.0)return 'S'; if(x>=7.5)return 'A+'; if(x>=7.0)return 'A'; if(x>=5.5)return 'B'; if(x>=4.0)return 'C'; return 'D'; }
@@ -2492,7 +2492,14 @@ function toggleDeckImages(){
 // 卡图加载失败：先自动重试一次（GitHub Pages 偶发抖动），仍失败则弱化占位避免裂图
 function imgRetry(el){
   try{
-    if(!el.dataset.retried){ el.dataset.retried='1'; const s=el.src; if(s){ el.src=s+(s.indexOf('?')>=0?'&':'?')+'r=1'; } return; }
+    var n=parseInt(el.dataset.retry||'0',10);
+    if(!el.getAttribute('data-src0')) el.setAttribute('data-src0',(el.src||'').split('?')[0]);
+    if(n<3){
+      el.dataset.retry=String(n+1);
+      var delay=[300,700,1500][n]||1500;
+      setTimeout(function(){ var base=el.getAttribute('data-src0'); if(base){ el.src=base+'?r='+(n+1)+'_'+Date.now(); } },delay);
+      return;
+    }
     el.style.opacity='0.25'; el.alt='卡图加载失败'; el.title='卡图加载失败，可刷新重试';
   }catch(e){}
 }
