@@ -6423,39 +6423,64 @@ function closeCardPicker(e) {
 }
 // 游戏内通用选卡弹窗（从给定卡牌数组中选一张）
 var _cardPickerMultiCallback = null;
-function showCardPickerMulti(cards, title, callback) {
+// 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
+function showCardPickerMulti(cards, title, callback, needCount) {
   var picker = document.getElementById('cardPicker');
   var grid = document.getElementById('cardPickerGrid');
   var titleEl = picker.querySelector('h3');
   if (titleEl) titleEl.textContent = title || '选择卡牌';
-  
+  var need = needCount || 1;
+  var multi = need >= 2;
+  var chosen = [];
   _cardPickerMultiCallback = callback;
   grid.innerHTML = '';
-  
+  var oldBar = document.getElementById('cardPickerBtnBar'); if (oldBar) oldBar.remove();
+  function fire(payload) {
+    picker.style.display = 'none';
+    var cb = _cardPickerMultiCallback; _cardPickerMultiCallback = null;
+    if (cb) cb(payload);
+  }
   cards.forEach(function(card, idx) {
     var div = document.createElement('div');
     div.className = 'card-picker-item';
     div.style.cssText = 'border:2px solid ' + getCardBorderColor(card) + ';border-radius:8px;padding:8px;margin:4px;cursor:pointer;background:rgba(255,255,255,0.05);min-width:120px;max-width:150px;transition:all 0.2s;';
     div.onmouseenter = function() { div.style.background = 'rgba(255,255,255,0.15)'; div.style.transform = 'translateY(-2px)'; };
     div.onmouseleave = function() { div.style.background = 'rgba(255,255,255,0.05)'; div.style.transform = ''; };
-    
     var costColor = card.attribute === '移动' ? '#3498db' : card.attribute === '战术' ? '#9b59b6' : card.attribute === '侵略' ? '#e74c3c' : card.attribute === '丰沛' ? '#2ecc71' : card.attribute === '无序' ? '#95a5a6' : '#f39c12';
     var name = card.name || '未知';
     var cost = card.cost !== undefined ? card.cost : '?';
     var type = card.type || card.card_type || '';
-    
     div.innerHTML = '<div style="text-align:center;"><div style="display:inline-block;background:' + costColor + ';color:#fff;border-radius:50%;width:24px;height:24px;line-height:24px;font-size:12px;font-weight:bold;margin-bottom:4px;">' + cost + '</div><div style="color:#fff;font-size:12px;font-weight:bold;margin-bottom:2px;">' + name + '</div><div style="color:#aaa;font-size:10px;">' + type + '</div></div>';
-    div.onclick = function() {
-      picker.style.display = 'none';
-      if (_cardPickerMultiCallback) {
-        var cb = _cardPickerMultiCallback;
-        _cardPickerMultiCallback = null;
-        cb(idx);
-      }
-    };
+    if (multi) {
+      div.onclick = function() {
+        var p = chosen.indexOf(idx);
+        if (p >= 0) { chosen.splice(p,1); div.style.outline=''; }
+        else { if (chosen.length >= need) return; chosen.push(idx); div.style.outline='3px solid #f1c40f'; }
+        var btn = document.getElementById('cardPickerConfirm');
+        if (btn) { btn.textContent='确认选择（'+chosen.length+'/'+need+'）'; btn.disabled = chosen.length!==need; btn.style.opacity = chosen.length===need?'1':'0.5'; }
+      };
+    } else {
+      div.onclick = function() { fire(idx); };
+    }
     grid.appendChild(div);
   });
-  
+  if (multi) {
+    var bar = document.createElement('div');
+    bar.id = 'cardPickerBtnBar';
+    bar.style.cssText = 'grid-column:1/-1;display:flex;gap:12px;justify-content:center;margin-top:10px;';
+    var ok = document.createElement('button');
+    ok.id = 'cardPickerConfirm';
+    ok.textContent = '确认选择（0/'+need+'）';
+    ok.disabled = true;
+    ok.style.cssText = 'padding:8px 22px;border:none;border-radius:8px;background:#f1c40f;color:#222;font-weight:bold;cursor:pointer;opacity:0.5;';
+    ok.onclick = function() { if (chosen.length === need) fire(chosen.slice()); };
+    var cc = document.createElement('button');
+    cc.textContent = '取消';
+    cc.style.cssText = 'padding:8px 22px;border:1px solid #888;border-radius:8px;background:transparent;color:#ccc;cursor:pointer;';
+    cc.onclick = function() { fire([]); };
+    bar.appendChild(ok); bar.appendChild(cc);
+    picker.querySelector('.card-picker').appendChild(bar);
+  }
   picker.style.display = 'flex';
 }
 
@@ -6830,6 +6855,10 @@ function processSingleEffect(effectText, context, callback) {
   
   var target = context.target || 'p2';
   var user = context.user || 'p1';
+  // 显式异步控制：需要玩家在效果中途选择时 hold() 暂停自动推进，选择回调里 finish() 继续
+  var __finished = false, __autoTimer = null;
+  function finish() { if (__finished) return; __finished = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } callback(); }
+  function hold() { if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } }
   
   // 伤害效果（支持"造成X伤害"和"造X伤害"两种格式）
   if ((effectText.indexOf('造成') >= 0 || effectText.indexOf('造') >= 0) && effectText.indexOf('伤害') >= 0) {
@@ -6986,7 +7015,7 @@ function processSingleEffect(effectText, context, callback) {
   }
 
   // 抽牌效果
-  if (effectText.indexOf('抽') >= 0 && effectText.indexOf('牌') >= 0) {
+  if (effectText.indexOf('抽') >= 0 && effectText.indexOf('牌') >= 0 && effectText.indexOf('馈赠') < 0 && effectText.indexOf('御神签') < 0 && effectText.indexOf('乐谱') < 0 && effectText.indexOf('事件') < 0) {
     var drawCount = extractNumber(effectText, '抽') || 1;
     for (var i = 0; i < drawCount; i++) {
       var drawn = drawCard(user);
@@ -7178,39 +7207,31 @@ function processSingleEffect(effectText, context, callback) {
     }
     
     if (searchSources.length > 0) {
-      // 标记需要等待玩家选择
-      effectEngine._searchPending = true;
-      effectEngine._searchSources = searchSources;
-      effectEngine._searchUser = user;
-      
-      // 显示选卡界面
+      // 解析需选择的张数（“选墓地2张”=2，默认 1 张）
+      var __needM = effectText.match(/选[^。；，,]{0,12}(\d+)\s*张/);
+      var __need = __needM ? parseInt(__needM[1], 10) : 1;
+      __need = Math.max(1, Math.min(__need, searchSources.length));
       var cardsForPicker = searchSources.map(function(s) { return s.card; });
-      showCardPickerMulti(cardsForPicker, '选择一张卡加入手卡', function(selectedIdx) {
-        var selected = searchSources[selectedIdx];
-        var card = selected.card;
-        // 从原位置移除
-        if (selected.source === 'deck') {
-          battleState[user].deck.splice(selected.index, 1);
-        } else if (selected.source === 'grave') {
-          battleState[user].grave.splice(selected.index, 1);
-        } else if (selected.source === 'removed') {
-          battleState[user].removed.splice(selected.index, 1);
-        }
+      hold(); // 暂停步骤自动推进，等玩家选完再 finish
+      function __takeOne(sel) {
+        var card = sel.card;
+        if (sel.source === 'deck') battleState[user].deck.splice(sel.index, 1);
+        else if (sel.source === 'grave') battleState[user].grave.splice(sel.index, 1);
+        else if (sel.source === 'removed') battleState[user].removed.splice(sel.index, 1);
         battleState[user].hand.push(card);
-        effectEngine.effectLog.push({
-          label: '【效果结果】',
-          text: '将【' + card.name + '】加入手卡',
-          class: 'effect-step step-result'
-        });
+        effectEngine.effectLog.push({ label: '【效果结果】', text: '将【' + card.name + '】加入手卡', class: 'effect-step step-result' });
         addBattleLog('system', '加入手卡：' + card.name);
-        effectEngine._searchPending = false;
-        updateBattleUI();
-        renderHand();
-        // 继续效果处理
-        if (typeof effectEngine.resumeAfterSearch === 'function') {
-          effectEngine.resumeAfterSearch();
-        }
-      });
+      }
+      showCardPickerMulti(cardsForPicker, __need > 1 ? ('选择' + __need + '张卡加入手卡') : '选择一张卡加入手卡', function(sel) {
+        try {
+          var idxs = Array.isArray(sel) ? sel : [sel];
+          var picked = idxs.map(function(x) { return searchSources[x]; }).filter(Boolean);
+          // 同来源按原索引从大到小删除，避免索引错位
+          picked.sort(function(a, b) { return a.source === b.source ? b.index - a.index : (a.source < b.source ? -1 : 1); });
+          picked.forEach(__takeOne);
+          updateBattleUI(); renderHand();
+        } finally { finish(); }
+      }, __need);
     } else {
       effectEngine.effectLog.push({
         label: '【效果结果】',
@@ -7276,27 +7297,29 @@ function processSingleEffect(effectText, context, callback) {
     }
   }
   
-  // 破坏场上卡牌（由发动方选择破坏哪张）
-  if (effectText.indexOf('破坏') >= 0 && effectText.indexOf('场上') >= 0) {
-    if (battleState[target].permanent && battleState[target].permanent.length > 0) {
-      var targetPerms = battleState[target].permanent;
-      var permList = targetPerms.map(function(c, idx) { return (idx+1) + '. ' + c.name; }).join('\n');
-      var destroyChoice = parseInt(prompt('选择要破坏的对方永续卡（输入编号）：\n' + permList, '1')) - 1;
-      if (destroyChoice < 0 || destroyChoice >= targetPerms.length) destroyChoice = 0;
-      var destroyed = targetPerms.splice(destroyChoice, 1)[0];
-      battleState[target].grave.push(destroyed);
-      effectEngine.effectLog.push({
-        label: '【效果结果】',
-        text: '破坏对方场上永续卡【' + destroyed.name + '】，送入墓地',
-        class: 'effect-step step-result'
+  // 破坏效果处理区/区域内的卡（发动方可视化选择；“破坏并移出”进移出区，否则进墓地）
+  if (effectText.indexOf('破坏') >= 0 && /场上|区域内|永续|效果处理区|区域的一张|区域的1张|区域内1张|区域内一张/.test(effectText)) {
+    var destZone = battleState[target].permanent || [];
+    var banishDest = effectText.indexOf('移出') >= 0;
+    if (destZone.length > 0) {
+      hold();
+      var destCands = destZone.slice();
+      showCardPickerMulti(destCands, '选择要' + (banishDest ? '破坏并移出' : '破坏') + '的卡', function(di) {
+        try {
+          if (di === null || di === undefined || di < 0) return;
+          var realDI = battleState[target].permanent.indexOf(destCands[di]);
+          if (realDI >= 0) {
+            var destroyed = battleState[target].permanent.splice(realDI, 1)[0];
+            if (banishDest) { if (!battleState[target].removed) battleState[target].removed = []; battleState[target].removed.push(destroyed); }
+            else battleState[target].grave.push(destroyed);
+            effectEngine.effectLog.push({ label: '【效果结果】', text: (banishDest ? '破坏并移出' : '破坏') + '卡【' + destroyed.name + '】', class: 'effect-step step-result' });
+            addBattleLog(user, (banishDest ? '破坏并移出' : '破坏') + '【' + destroyed.name + '】');
+          }
+          updateBattleUI();
+        } finally { finish(); }
       });
-      addBattleLog(user, '选择破坏对方永续卡【' + destroyed.name + '】');
     } else {
-      effectEngine.effectLog.push({
-        label: '【效果结果】',
-        text: '对方场上没有可破坏的永续卡',
-        class: 'effect-step step-result'
-      });
+      effectEngine.effectLog.push({ label: '【效果结果】', text: '目标效果处理区没有可破坏的卡', class: 'effect-step step-result' });
     }
   }
   
@@ -7312,28 +7335,30 @@ function processSingleEffect(effectText, context, callback) {
     addBattleLog('system', '自身攻击+2');
   }
   
-  // 送入墓地然后抽卡（永奏进行曲效果）
+  // 选一张手卡送入墓地然后抽卡（必须由玩家选择，禁止 shift/随机代选）
   if (effectText.indexOf('送入墓地') >= 0 && effectText.indexOf('抽') >= 0) {
-    if (battleState[user].hand.length > 0) {
-      var sentCard = battleState[user].hand.shift();
-      battleState[user].grave.push(sentCard);
-      effectEngine.effectLog.push({
-        label: '【效果结果】',
-        text: '将【' + sentCard.name + '】送入墓地',
-        class: 'effect-step step-result'
+    var selfCardNow = context.card || null;
+    var sendCands = battleState[user].hand.filter(function(c) { return c !== selfCardNow; });
+    if (sendCands.length > 0) {
+      hold();
+      showCardPickerMulti(sendCands, '选择一张手卡送入墓地（然后抽1张）', function(si) {
+        try {
+          if (si === null || si === undefined || si < 0) return;
+          var realIdx = battleState[user].hand.indexOf(sendCands[si]);
+          if (realIdx >= 0) {
+            var sentCard = battleState[user].hand.splice(realIdx, 1)[0];
+            battleState[user].grave.push(sentCard);
+            effectEngine.effectLog.push({ label: '【效果结果】', text: '将【' + sentCard.name + '】送入墓地', class: 'effect-step step-result' });
+            var drawn2 = drawCard(user);
+            if (drawn2) effectEngine.effectLog.push({ label: '【效果结果】', text: '抽到【' + drawn2.name + '】', class: 'effect-step step-result' });
+          }
+          updateBattleUI(); renderHand();
+        } finally { finish(); }
       });
-      var drawn2 = drawCard(user);
-      if (drawn2) {
-        effectEngine.effectLog.push({
-          label: '【效果结果】',
-          text: '抽到【' + drawn2.name + '】',
-          class: 'effect-step step-result'
-        });
-      }
     }
   }
   
-  setTimeout(callback, 200);
+  __autoTimer = setTimeout(finish, 200);
 }
 
 // 从文本中提取数字
