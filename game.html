@@ -4752,6 +4752,11 @@ function aiUseCardComplete(handIndex, callback) {
   // 统一合法性校验（与玩家共用 evaluatePlayable：时点/连锁对象/阶段/费用/攻击范围/特例条件；AI 不合法直接跳过，不弹窗）
   var __aiPlay = evaluatePlayable(card, 'p2');
   if (!__aiPlay.ok) { if (callback) callback(); return; }
+  // 指向性交互卡：AI 走同一 SPECIAL 表（自动选目标/第一张），不再缺失
+  if (isSpecialInteractiveCard(card)) {
+    settleSpecialCard(card, handIndex, 'p2', callback);
+    return;
+  }
   
   // 默认目标由统一目标器推导（与玩家同一套规则，不再用另一套关键词猜测）
   var target = decideDefaultTarget(card, 'p2');
@@ -8677,146 +8682,12 @@ function useCardComplete(handIndex) {
   
   // 永续卡默认正面放置（右键可盖伏）
   
-  // 特殊卡牌处理：特制手套 - 三选一效果
-  if (cardName === '特制手套') {
-    var gloveChoices = [
-      '从牌组选1张卡加入手卡',
-      '修改一次掷骰结果',
-      '选对手墓地1张卡放回其牌组'
-    ];
-    showChoiceModal('特制手套', cardName, effectText.substring(0, 80), gloveChoices, function(choiceIdx) {
-      battleState.p1.cost -= cost;
-      battleState.p1.hand.splice(handIndex, 1);
-      addBattleLog('p1', '使用【特制手套】（消耗' + cost + '费用），选择：' + gloveChoices[choiceIdx]);
-      
-      if (choiceIdx === 0) {
-        showTargetCards('p1', 'deck', '特制手套：从牌组选1张卡加入手卡', true, function(selectedCard, idx) {
-          battleState.p1.deck.splice(idx, 1);
-          battleState.p1.hand.push(selectedCard);
-          addBattleLog('p1', '【特制手套】从牌组将【' + selectedCard.name + '】加入手卡');
-          updateBattleUI();
-        });
-      } else if (choiceIdx === 1) {
-        battleState.p1._modifyDiceNext = true;
-        addBattleLog('p1', '【特制手套】已标记修改一次掷骰结果，下次投骰时可选择修改');
-        updateBattleUI();
-      } else if (choiceIdx === 2) {
-        if (battleState.p2.grave.length === 0) {
-          addBattleLog('p1', '【特制手套】对手墓地为空，无法选择');
-          updateBattleUI();
-        } else {
-          showTargetCards('p2', 'grave', '特制手套：选对手墓地1张卡放回其牌组', true, function(selectedCard, idx) {
-            battleState.p2.grave.splice(idx, 1);
-            battleState.p2.deck.push(selectedCard);
-            addBattleLog('p1', '【特制手套】将对手墓地【' + selectedCard.name + '】放回其牌组');
-            updateBattleUI();
-          });
-        }
-      }
-    });
+  // 指向性交互卡：统一走 SPECIAL 表（玩家可视化 / AI 自动，效果一致）
+  if (isSpecialInteractiveCard(card)) {
+    settleSpecialCard(card, handIndex, 'p1');
     return;
   }
-  
-  // 特殊卡牌处理：神乐铃 - 选目标区域内1张卡破坏并移出游戏
-  if (cardName === '神乐铃') {
-    showTargetSelect(card, effectText, function(target) {
-      var targetPlayer = target;
-      // 显示目标方永续区让玩家选择要破坏的卡
-      showTargetCards(targetPlayer, 'permanent', '神乐铃：选择目标区域内1张卡破坏并移出游戏', true, function(selectedCard, idx) {
-        // 支付费用并移除手牌
-        battleState.p1.cost -= cost;
-        battleState.p1.hand.splice(handIndex, 1);
-        addBattleLog('p1', '发动【' + cardName + '】（消耗' + cost + '费用）');
-        
-        // 破坏并移出游戏
-        if (!battleState[targetPlayer].removedFromGame) battleState[targetPlayer].removedFromGame = [];
-        battleState[targetPlayer].permanent.splice(idx, 1);
-        battleState[targetPlayer].removedFromGame.push(selectedCard);
-        var removedCount = battleState[targetPlayer].removedFromGame.length;
-        addBattleLog('p1', '【' + cardName + '】破坏并移出游戏【' + selectedCard.name + '】，目标被移出游戏卡数：' + removedCount);
-        
-        // 时点询问
-        showTimingQuestion('发动【' + cardName + '】', effectText.substring(0, 80), '效果声明中，是否要连锁发动效果？', function(chain) {
-          // 造成移出数量+5点无序伤害
-          var damage = removedCount + 5;
-          effectEngine.effectLog = [];
-          effectEngine.effectLog.push({label: '【主要效果】', text: '破坏区域内1张卡并移出游戏，之后根据被移出游戏卡数量造' + damage + '点无序伤害', class: 'effect-step step-header'});
-          effectEngine.effectLog.push({label: '【效果结果】', text: '破坏【' + selectedCard.name + '】并移出游戏，目标被移出游戏卡数：' + removedCount, class: 'effect-step step-result'});
-          dealDamageWithResponse(targetPlayer, damage, cardName, function() {
-            effectEngine.effectLog.push({label: '【伤害结果】', text: '造成' + damage + '点无序伤害', class: 'effect-step step-result'});
-            showEffectLog();
-          });
-        });
-      });
-    });
-    return;
-  }
-  
-  // 特殊卡牌处理：搜查令 - 查看目标手牌，选1张移出游戏
-  if (cardName === '搜查令') {
-    showTargetSelect(card, effectText, function(target) {
-      var targetPlayer = target;
-      // 显示目标方手牌让玩家查看并选择
-      showTargetCards(targetPlayer, 'hand', '搜查令：查看目标手牌，选1张在3次行动内移出游戏', true, function(selectedCard, idx) {
-        // 支付费用并移除手牌
-        battleState.p1.cost -= cost;
-        battleState.p1.hand.splice(handIndex, 1);
-        addBattleLog('p1', '使用【搜查令】（消耗' + cost + '费用）');
-        
-        // 移出游戏（3次行动后恢复）
-        if (!battleState[targetPlayer].removedFromGame) battleState[targetPlayer].removedFromGame = [];
-        if (!battleState[targetPlayer].temporaryRemoved) battleState[targetPlayer].temporaryRemoved = [];
-        battleState[targetPlayer].hand.splice(idx, 1);
-        selectedCard._removeTurns = 3;
-        battleState[targetPlayer].temporaryRemoved.push(selectedCard);
-        var removedCount = (battleState[targetPlayer].removedFromGame.length || 0) + (battleState[targetPlayer].temporaryRemoved.length || 0);
-        addBattleLog('p1', '【搜查令】将【' + selectedCard.name + '】移出游戏3次行动，目标被移出游戏卡数：' + removedCount);
-        
-        // 时点询问
-        showTimingQuestion('使用【搜查令】', effectText.substring(0, 80), '效果声明中，是否要连锁发动效果？', function(chain) {
-          // 造成移出数量+1点理智伤害
-          var damage = removedCount + 1;
-          effectEngine.effectLog = [];
-          effectEngine.effectLog.push({label: '【主要效果】', text: '查看目标手牌，选1张移出游戏3次行动，之后根据被移出游戏卡数量造' + damage + '点理智伤害', class: 'effect-step step-header'});
-          effectEngine.effectLog.push({label: '【效果结果】', text: '将【' + selectedCard.name + '】移出游戏3次行动', class: 'effect-step step-result'});
-          dealDamageWithResponse(targetPlayer, damage, '搜查令', function() {
-            effectEngine.effectLog.push({label: '【伤害结果】', text: '造成' + damage + '点理智伤害', class: 'effect-step step-result'});
-            showEffectLog();
-          });
-        });
-      });
-    });
-    return;
-  }
-  
-  // 特殊卡牌处理：破坏（技能卡）- 破坏目标区域内1张卡
-  if (cardName === '破坏' || (effectText.indexOf('破坏其区域内的一张卡') >= 0)) {
-    showTargetSelect(card, effectText, function(target) {
-      var targetPlayer = target;
-      // 显示目标方永续区让玩家选择要破坏的卡
-      showTargetCards(targetPlayer, 'permanent', '破坏：选择目标区域内1张卡破坏', true, function(selectedCard, idx) {
-        // 支付费用并移除手牌
-        battleState.p1.cost -= cost;
-        battleState.p1.hand.splice(handIndex, 1);
-        addBattleLog('p1', '发动【破坏】（消耗' + cost + '费用）');
-        
-        // 破坏卡
-        battleState[targetPlayer].permanent.splice(idx, 1);
-        battleState[targetPlayer].grave.push(selectedCard);
-        addBattleLog('p1', '【破坏】破坏目标区域内【' + selectedCard.name + '】');
-        
-        // 时点询问
-        showTimingQuestion('发动【破坏】', effectText.substring(0, 80), '效果声明中，是否要连锁发动效果？', function(chain) {
-          effectEngine.effectLog = [];
-          effectEngine.effectLog.push({label: '【主要效果】', text: '破坏目标区域内1张卡', class: 'effect-step step-header'});
-          effectEngine.effectLog.push({label: '【效果结果】', text: '破坏【' + selectedCard.name + '】，送入墓地', class: 'effect-step step-result'});
-          showEffectLog();
-        });
-      });
-    });
-    return;
-  }
-  
+
   // 步骤1：检查是否需要选择目标
   if (needTargetSelect(effectText)) {
     showTargetSelect(card, effectText, function(target) {
@@ -9068,6 +8939,130 @@ function settleCardExecution(card, user, target, opts, done) {
   }
   var __ask = opts.askChain;
   if (__ask) __ask(run); else run();
+}
+
+// ============================================================
+// ===== 指向性交互卡统一处理（玩家可视化 / AI 自动，同一套效果）=====
+// 覆盖：特制手套、神乐铃、搜查令、破坏。选择过程对玩家弹窗、对 AI 自动决策，
+// 但效果本体、费用、去向、被动钩子全部一致，杜绝“玩家有、AI 缺失”。
+// ============================================================
+
+// 选择目标玩家：玩家弹窗选，AI 直接取对手
+function chooseTargetPlayer(user, card, cb) {
+  if (user === 'p1') { showTargetSelect(card, card.effect || card.text || '', cb); }
+  else { cb(user === 'p1' ? 'p2' : 'p1'); }
+}
+// 从某玩家某区域选一张卡：玩家可视化选，AI 自动取第一张；无卡返回 (null,-1)
+function chooseZoneCard(user, who, zone, title, cb) {
+  var arr = (battleState[who] && battleState[who][zone]) || [];
+  if (user === 'p1') { showTargetCards(who, zone, title, true, function (c, i) { cb(c, i); }); }
+  else { cb(arr.length ? arr[0] : null, arr.length ? 0 : -1); }
+}
+
+var SPECIAL_CARD_HANDLERS = {
+  // 特制手套：三选一
+  '特制手套': {
+    play: function (card, user, done) {
+      var opts = ['从牌组选1张卡加入手卡', '修改一次掷骰结果', '选对手墓地1张卡放回其牌组'];
+      function apply(ci) {
+        var p = battleState[user], foe = user === 'p1' ? 'p2' : 'p1';
+        if (ci === 0) {
+          chooseZoneCard(user, user, 'deck', '特制手套：从牌组选1张卡加入手卡', function (c, i) {
+            if (i >= 0) { p.deck.splice(i, 1); p.hand.push(c); addBattleLog(user, '【特制手套】将【' + c.name + '】加入手卡'); }
+            done();
+          });
+        } else if (ci === 1) {
+          p._modifyDiceNext = true;
+          addBattleLog(user, '【特制手套】标记下一次可修改掷骰结果');
+          done();
+        } else {
+          chooseZoneCard(user, foe, 'grave', '特制手套：选对手墓地1张卡放回其牌组', function (c, i) {
+            if (i >= 0) { battleState[foe].grave.splice(i, 1); battleState[foe].deck.push(c); addBattleLog(user, '【特制手套】将对手墓地【' + c.name + '】放回其牌组'); }
+            else addBattleLog(user, '【特制手套】对手墓地为空，该选项不适用');
+            done();
+          });
+        }
+      }
+      if (user === 'p1') { showChoiceModal('特制手套', card.name, card.effect || '', opts, apply); }
+      else { apply(battleState[user].deck.length ? 0 : 1); } // AI：能检索就检索，否则改骰
+    }
+  },
+  // 神乐铃：选目标区域内1张卡破坏并移出，按被移出总数+5造无序伤害
+  '神乐铃': {
+    play: function (card, user, done) {
+      chooseTargetPlayer(user, card, function (tp) {
+        chooseZoneCard(user, tp, 'permanent', '神乐铃：选目标区域内1张卡破坏并移出游戏', function (sc, i) {
+          if (i < 0) { addBattleLog(user, '【神乐铃】目标区域无卡，效果不适用'); done(); return; }
+          if (!battleState[tp].removedFromGame) battleState[tp].removedFromGame = [];
+          battleState[tp].permanent.splice(i, 1);
+          battleState[tp].removedFromGame.push(sc);
+          var n = battleState[tp].removedFromGame.length, dmg = n + 5;
+          addBattleLog(user, '【神乐铃】破坏并移出【' + sc.name + '】，造成' + dmg + '点无序伤害');
+          dealDamageWithResponse(tp, dmg, '神乐铃', done);
+        });
+      });
+    }
+  },
+  // 搜查令：查看目标手牌选1张临时移出3行动，按移出总数+1造理智伤害
+  '搜查令': {
+    play: function (card, user, done) {
+      chooseTargetPlayer(user, card, function (tp) {
+        chooseZoneCard(user, tp, 'hand', '搜查令：查看目标手牌，选1张3次行动内移出游戏', function (sc, i) {
+          if (i < 0) { addBattleLog(user, '【搜查令】目标无手牌，效果不适用'); done(); return; }
+          if (!battleState[tp].removedFromGame) battleState[tp].removedFromGame = [];
+          if (!battleState[tp].temporaryRemoved) battleState[tp].temporaryRemoved = [];
+          battleState[tp].hand.splice(i, 1);
+          sc._removeTurns = 3; battleState[tp].temporaryRemoved.push(sc);
+          var n = (battleState[tp].removedFromGame.length || 0) + battleState[tp].temporaryRemoved.length;
+          var dmg = n + 1;
+          addBattleLog(user, '【搜查令】将【' + sc.name + '】临时移出，造成' + dmg + '点理智伤害');
+          dealDamageWithResponse(tp, dmg, '搜查令', done);
+        });
+      });
+    }
+  },
+  // 破坏：选目标区域内1张卡破坏（送入对方墓地）
+  '破坏': {
+    play: function (card, user, done) {
+      chooseTargetPlayer(user, card, function (tp) {
+        chooseZoneCard(user, tp, 'permanent', '破坏：选目标区域内1张卡破坏', function (sc, i) {
+          if (i < 0) { addBattleLog(user, '【破坏】目标区域无卡，效果不适用'); done(); return; }
+          battleState[tp].permanent.splice(i, 1);
+          battleState[tp].grave.push(sc);
+          addBattleLog(user, '【破坏】破坏目标区域【' + sc.name + '】');
+          done();
+        });
+      });
+    }
+  }
+};
+
+function getSpecialHandler(card) {
+  if (!card) return null;
+  var n = card.name || '';
+  if (SPECIAL_CARD_HANDLERS[n]) return SPECIAL_CARD_HANDLERS[n];
+  var t = card.effect || card.text || '';
+  if (t.indexOf('破坏其区域内的一张卡') >= 0 || t.indexOf('破坏其区域内的1张卡') >= 0) return SPECIAL_CARD_HANDLERS['破坏'];
+  return null;
+}
+function isSpecialInteractiveCard(card) { return !!getSpecialHandler(card); }
+
+// 统一入口：付费→移除手牌→记技能→效果（玩家可视化/AI自动）→去向+被动钩子
+function settleSpecialCard(card, handIndex, user, outerDone) {
+  var p = battleState[user];
+  var h = getSpecialHandler(card);
+  if (!h) { if (outerDone) outerDone(); return; }
+  var actual = computeActualCost(card, user);
+  p.cost -= actual;
+  if (typeof handIndex === 'number' && handIndex >= 0) p.hand.splice(handIndex, 1);
+  recordSkillUse(card, user);
+  addBattleLog(user, '使用【' + card.name + '】（消耗' + actual + '费用）');
+  h.play(card, user, function () {
+    placeAfterUse(user, card, false);
+    postUsePassiveHooks(user, card);
+    checkBattleEnd(); updateBattleUI();
+    if (outerDone) outerDone();
+  });
 }
 
 // 继续卡牌使用流程
