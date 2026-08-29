@@ -2520,6 +2520,78 @@ function hasEnemyInAttackRange(card, player){
   return canReachByRange(spec, battleState[player].position||0, opp.position||0);
 }
 
+// ===== 统一响应/连锁窗口管理器（dice骰子待结算 / move移动待执行 / damage即将受伤 / rand随机事件）=====
+function rwOpen(type,payload){ if(!battleState)return; if(!battleState.resp)battleState.resp={dice:null,move:null,damage:null,rand:null}; battleState.resp[type]=(payload===undefined?true:payload); rwMirror(type); }
+function rwClose(type){ if(!battleState)return; if(!battleState.resp)battleState.resp={dice:null,move:null,damage:null,rand:null}; if(type){battleState.resp[type]=null;} else {battleState.resp={dice:null,move:null,damage:null,rand:null};} rwMirror(type); }
+function rwHas(type){ if(!battleState||!battleState.resp)return false; return type? !!battleState.resp[type] : Object.values(battleState.resp).some(Boolean); }
+function rwGet(type){ return (battleState&&battleState.resp&&battleState.resp[type])||null; }
+// 旧标志派生镜像：兼容历史读取点，同时修复“只设不清”（关窗即清零）
+function rwMirror(type){
+  if(!battleState)return; var r=battleState.resp||{};
+  if(!type||type==='dice'){ battleState._diceJustRolled=!!r.dice; battleState._pendingDiceResult=r.dice?r.dice.result:undefined; }
+  if(!type||type==='move'){ battleState._moveInProgress=!!r.move; battleState._pendingMove=r.move?r.move.amount:undefined; }
+  if(!type||type==='damage'){ battleState.damageResponseWindow=!!r.damage; battleState.pendingDamage=r.damage?r.damage.amount:0; battleState._pendingDamage=battleState.pendingDamage; battleState.pendingDamageTarget=r.damage?(r.damage.target||''):''; }
+}
+
+// ===== 统一卡牌发动合法性引擎 =====
+var PHASE_NAME={prepare:'准备阶段',main1:'主要阶段1',roll:'投骰阶段',main2:'主要阶段2',end:'结束阶段'};
+function chainBlockReason(name){
+  var m={
+    '侦探放大镜':'侦探放大镜是连锁类效果，需要在移动/掷骰/随机事件发生时连锁（增减位移量、打断移动、改骰子点数或随机结果），不能凭空发动',
+    '猎手爪链':'猎手爪链是连锁类效果，需要在其他玩家移动时连锁（打断移动），不能凭空发动',
+    '幸运护符':'幸运护符是连锁类效果，需要在即将受到伤害时连锁（抵消伤害），不能凭空发动',
+    '颠倒骰子':'颠倒骰子需要在投掷阶段或骰子刚投出尚未结算时使用，不能凭空发动',
+    '遥控骰子':'遥控骰子需要在投掷阶段、骰子刚投出尚未结算时使用，不能凭空发动'
+  };
+  return m[name]||'这是连锁类效果，需要在对应时点、存在作用对象时才能发动，不能凭空使用';
+}
+// 特例卡的额外发动条件：返回 {ok:false,reason} 或 true
+var CARD_PLAY_CONDITIONS={
+  '来自地狱的盒子':function(card,me,bs){ if((me.grave||[]).length<2) return {ok:false,reason:'来自地狱的盒子需要墓地中有至少2张卡才能发动'}; return true; }
+};
+function isDiceModifyCard(card){
+  var name=card.name||'',eff=card.effect||card.text||'';
+  return name==='遥控骰子'||name==='颠倒骰子'||name==='特制手套'||eff.indexOf('修改一次掷骰结果')>=0||eff.indexOf('修改骰子点数')>=0||eff.indexOf('改变一名玩家下一次移动的方向')>=0;
+}
+// 统一合法性：opts.fromFaceDown=true 表示从盖伏状态翻开（任意阶段可发，但当回合盖下不可发、连锁类仍需对象）
+function evaluatePlayable(card,player,opts){
+  opts=opts||{};
+  if(!card) return {ok:false,reason:'没有这张卡'};
+  if(!battleState||!battleState[player]) return {ok:false,reason:'战斗尚未开始'};
+  var me=battleState[player], name=card.name||'', eff=card.effect||card.text||'', phase=battleState.phase;
+  var fromFaceDown=(opts.fromFaceDown===true)||(card._activatedFromFaceDown===true);
+  var isSkill=card._category==='skill_cards';
+  var isChain=isChainOnlyCard(card);
+  // 1) 连锁响应类必须有作用对象（盖伏翻开同样需要对象，不能凭空）
+  if(isChain && !hasChainTarget(card)) return {ok:false,reason:chainBlockReason(name)};
+  // 2) 阶段限制
+  if(!fromFaceDown){
+    if(phase==='roll'){
+      if(!isDiceModifyCard(card)) return {ok:false,reason:'投掷阶段只能使用修改骰子点数/方向的连锁效果，角色技能卡也不能在投掷阶段发动'};
+    }else if(phase==='prepare'||phase==='end'){
+      if(!isSkill) return {ok:false,reason:(PHASE_NAME[phase]||'当前阶段')+'只能发动角色技能卡（每回合一次的高时点技能）或翻开盖伏卡'};
+    }
+  }else{
+    if(card._faceDownTurn===battleState.turn && card._faceDownPlayer===player)
+      return {ok:false,reason:'盖伏的卡在盖伏的当回合不能发动'};
+  }
+  // 3) 技能卡每回合一次
+  if(isSkill){
+    var used=me.usedSkillsThisTurn||[];
+    if(used.indexOf(name)>=0) return {ok:false,reason:'技能卡【'+name+'】本回合已经使用过了（每回合一次）'};
+  }
+  // 4) 费用
+  var cost=card.cost||0;
+  if(me.cost<cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost};
+  // 5) 攻击卡：范围内必须存在可攻击目标
+  if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
+    return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
+  // 6) 特例卡条件
+  var cond=CARD_PLAY_CONDITIONS[name];
+  if(cond){ var r=cond(card,me,battleState); if(r&&r.ok===false) return r; }
+  return {ok:true,reason:''};
+}
+
 var deckConfig = {
   p1: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) },
   p2: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) }
@@ -3847,6 +3919,7 @@ function initBattle() {
     damageResponseWindow: false,
     pendingDamage: 0,
     pendingDamageTarget: '',
+    resp: { dice: null, move: null, damage: null, rand: null },
     log: []
   };
   
@@ -4161,6 +4234,7 @@ function executeMoveEffect(effect) {
   var currentTile = MAP_TILES[p.position];
   if (currentTile && currentTile.type === 'again') {
     addBattleLog(player, '⚠️ 到达Again格！追加1个投掷阶段！');
+    rwClose('move'); rwClose('dice');
     battleState.phase = 'roll';
     battleState._diceRolledThisPhase = false; // 重置投骰标记，允许再次投骰
     var animArea = document.getElementById('diceAnimationArea');
@@ -4169,6 +4243,7 @@ function executeMoveEffect(effect) {
     return;
   }
   
+  rwClose('move'); rwClose('dice');
   battleState.phase = 'main2';
   battleState._diceRolledThisPhase = false; // 重置投骰标记
   var animArea2 = document.getElementById('diceAnimationArea');
@@ -4231,8 +4306,7 @@ function rollDice() {
       }
       
       // 设置连锁时点标志：骰子刚投出，遥控骰子/颠倒骰子等可连锁
-      battleState._diceJustRolled = true;
-      battleState._pendingDiceResult = finalDice;
+      rwOpen('dice', { result: finalDice });
       addBattleLog('p1', '投出' + finalDice + '点（连锁时点：可使用遥控骰子等效果修改点数）');
       
       // 延迟执行移动和格子效果
@@ -4248,7 +4322,7 @@ function rollDice() {
         
         // 创建移动效果并压入效果栈
         // 设置移动连锁标志：放大镜/猎手爪链等可连锁
-        battleState._pendingMove = moveAmount;
+        rwOpen('move', { amount: moveAmount, player: 'p1' });
         var moveEffect = {
           type: 'move',
           description: '移动' + moveAmount + '格（骰子结果' + finalDice + '点）',
@@ -4957,14 +5031,10 @@ function aiUseCardComplete(handIndex, callback) {
   var effectText = card.effect || card.text || '';
   var cardName = card.name || '';
   var cost = card.cost || 0;
-  
-  // 费用检查
-  if (battleState.p2.cost < cost) { if (callback) callback(); return; }
-  
-  // 纯反制类卡AI不在自己回合使用
-  var isPureCounter = (effectText.indexOf('抵消一次即将受到的伤害') >= 0) || 
-                       (effectText.indexOf('抵消') >= 0 && effectText.indexOf('伤害') >= 0 && effectText.indexOf('回') < 0);
-  if (isPureCounter) { if (callback) callback(); return; }
+
+  // 统一合法性校验（与玩家共用 evaluatePlayable：时点/连锁对象/阶段/费用/攻击范围/特例条件；AI 不合法直接跳过，不弹窗）
+  var __aiPlay = evaluatePlayable(card, 'p2');
+  if (!__aiPlay.ok) { if (callback) callback(); return; }
   
   // 自动选择目标：攻击卡/伤害卡目标为p1，增益/回复卡目标为p2自己
   var target = 'p1';
@@ -5081,8 +5151,9 @@ function aiPlayCards(maxActions, callback) {
     return;
   }
   
-  var playable = battleState.p2.hand.filter(function(c) { 
-    return (c.cost || 0) <= battleState.p2.cost; 
+  // 选卡阶段即用统一引擎过滤：时点/连锁对象/费用/攻击范围/特例条件全部合法才考虑
+  var playable = battleState.p2.hand.filter(function(c) {
+    return evaluatePlayable(c, 'p2').ok;
   });
   if (playable.length === 0) {
     if (callback) callback();
@@ -5141,8 +5212,7 @@ function aiExecuteMove(dice, callback) {
   var actualMove = Math.min(dice, 20);
   
   // 设置移动连锁时点：玩家可连锁发动盖伏的猎手爪链等
-  battleState._moveInProgress = true;
-  battleState._pendingMove = actualMove;
+  rwOpen('move', { amount: actualMove, player: 'p2' });
   battleState._movingPlayer = 'p2';
   
   // 检查玩家是否有可连锁的盖伏卡
@@ -5160,7 +5230,7 @@ function aiExecuteMove(dice, callback) {
   }
   
   var doMove = function() {
-    battleState._moveInProgress = false;
+    rwClose('move');
     p.position = (p.position + actualMove) % 42;
     addBattleLog(player, '移动' + actualMove + '格，从第' + oldPos + '格到第' + p.position + '格');
   
@@ -5229,7 +5299,7 @@ function aiExecuteMove(dice, callback) {
         addBattleLog('p1', '连锁发动盖伏的【' + selected.card.name + '】');
         // 猎手爪链：打断移动
         if (selected.card.name === '猎手爪链') {
-          battleState._moveInProgress = false;
+          rwClose('move');
           addBattleLog('p1', '【猎手爪链】打断AI的移动动作！');
           // 自己向AI方向前进3格
           var p1old = battleState.p1.position;
@@ -5249,7 +5319,7 @@ function aiExecuteMove(dice, callback) {
         if (selected.card.name === '侦探放大镜') {
           var mod = confirm('点击确定增加2格，取消减少2格') ? 2 : -2;
           actualMove = Math.max(0, actualMove + mod);
-          battleState._pendingMove = actualMove;
+          rwOpen('move', { amount: actualMove, player: 'p2' });
           addBattleLog('p1', '【侦探放大镜】位移量' + (mod > 0 ? '增加' : '减少') + '2格，AI实际移动' + actualMove + '格');
           battleState.p1.faceDownCards.splice(selected.index, 1);
           battleState.p1.grave.push(selected.card);
@@ -6013,32 +6083,12 @@ function updateBattleUI() {
       var isSkillPhase = isPlayerTurn && battleState.phase !== 'roll'; // 技能卡在非投掷阶段都可用
       if (isPlayerTurn && (isActionPhase || battleState.phase === 'prepare' || battleState.phase === 'end')) {
         var handHtml = battleState.p1.hand.map(function(card, i) {
-          var isSkillCard = card._category === 'skill_cards';
-          var isAttackCard = card._category === 'attack_cards' || (card.type && card.type.indexOf('攻击') >= 0);
-          var canClick = isActionPhase || (isSkillPhase && isSkillCard);
-          var attackBlocked = false;
-          var attackHint = '';
-          // 攻击卡范围检查
-          if (isAttackCard && isActionPhase) {
-            var atkRange = card.range || card.distance || '';
-            var p1p = battleState.p1.position || 0;
-            var p2p = battleState.p2.position || 0;
-            var dist = Math.abs(p1p - p2p);
-            var sameR = isSameRow(p1p, p2p);
-            if (atkRange.indexOf('同一行') >= 0 || atkRange.indexOf('同行') >= 0) {
-              if (!sameR) { attackBlocked = true; attackHint = '（目标不在同一行）'; }
-            } else if (atkRange.indexOf('前后') >= 0) {
-              var rm = atkRange.match(/前后(\d+)/);
-              var rn = rm ? parseInt(rm[1]) : 3;
-              if (dist > rn) { attackBlocked = true; attackHint = '（目标超出前后' + rn + '格）'; }
-            } else if (atkRange.indexOf('近距离') >= 0 || atkRange.indexOf('近战') >= 0) {
-              if (dist > 3) { attackBlocked = true; attackHint = '（目标超出3格近战范围）'; }
-            }
-          }
-          if (attackBlocked) canClick = false;
+          // 可用性统一走 evaluatePlayable：灰态/禁用与点击后拦截同一套规则，杜绝割裂
+          var pv = evaluatePlayable(card, 'p1');
+          var canClick = pv.ok;
           var clickHandler = canClick ? 'useCard(' + i + ')' : '';
-          var cardStyle = canClick ? '' : 'opacity:0.4;cursor:not-allowed;';
-          var phaseHint = isSkillCard ? '（技能卡可在任意阶段发动）' : attackHint;
+          var cardStyle = canClick ? '' : 'opacity:0.4;cursor:not-allowed;filter:grayscale(0.55);';
+          var phaseHint = canClick ? '' : '（不可用：' + pv.reason + '）';
           return '<div class="hand-card" onclick="' + clickHandler + '" oncontextmenu="handCardContextMenu(' + i + ');return false;" style="' + cardStyle + '" title="左键使用，右键查看效果：' + card.name + phaseHint + '">' +
             (card.cost !== undefined ? '<div class="hand-card-cost">' + card.cost + '</div>' : '') +
             (card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" class="hand-card-img" alt="' + card.name + '" >' : '') +
@@ -8287,9 +8337,7 @@ function dealDamageWithResponse(target, damage, source, callback) {
   
   // 如果是玩家受到伤害且有护符，打开受伤时点询问
   if (target === 'p1' && hasCharm) {
-    battleState.damageResponseWindow = true;
-    battleState.pendingDamage = damage;
-    battleState.pendingDamageTarget = target;
+    rwOpen('damage', { amount: damage, target: target });
     
     var confirmMsg = '即将受到' + damage + '点伤害！是否发动护符抵消伤害？\n\n（发动护符会消耗该卡，抵消本次伤害及附加效果）';
     if (confirm(confirmMsg)) {
@@ -8310,13 +8358,13 @@ function dealDamageWithResponse(target, damage, source, callback) {
         addBattleLog('p1', '护符效果：前进2格，当前位置第' + p.position + '格');
         triggerTileEffect('p1');
       }
-      battleState.damageResponseWindow = false;
+      rwClose('damage');
       updateBattleUI();
       if (callback) callback(0);
       return;
     } else {
       addBattleLog('p1', '选择不发动护符，受到' + damage + '点伤害');
-      battleState.damageResponseWindow = false;
+      rwClose('damage');
     }
   }
   
@@ -8375,20 +8423,16 @@ function hasChainTarget(card) {
   var name = card.name || '';
   var effect = card.effect || card.text || '';
   // 位移量增减/打断移动：需要有正在进行的移动
-  if (effect.indexOf('移动') >= 0 && (effect.indexOf('增减') >= 0 || effect.indexOf('打断') >= 0 || effect.indexOf('位移量') >= 0)) {
-    return battleState._moveInProgress || battleState._pendingMove;
+  if (effect.indexOf('移动') >= 0 && (effect.indexOf('增减') >= 0 || effect.indexOf('打断') >= 0 || effect.indexOf('位移量') >= 0 || effect.indexOf('方向') >= 0)) {
+    return rwHas('move');
   }
-  // 修改骰子点数：需要有刚投出的骰子
-  if (effect.indexOf('掷骰') >= 0 || effect.indexOf('骰子') >= 0 || name.indexOf('遥控骰子') >= 0) {
-    return battleState._diceJustRolled || battleState._pendingDiceResult;
+  // 修改骰子点数/方向：需要处于投骰阶段，或骰子刚投出尚未结算
+  if (effect.indexOf('掷骰') >= 0 || effect.indexOf('骰子') >= 0 || name.indexOf('遥控骰子') >= 0 || name.indexOf('颠倒骰子') >= 0) {
+    return battleState.phase === 'roll' || rwHas('dice');
   }
-  // 抵消伤害：需要有即将受到的伤害
+  // 抵消伤害：需要有即将受到的伤害窗口
   if (effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) {
-    return battleState._pendingDamage;
-  }
-  // 颠倒骰子：改变下一次移动方向，需要在投掷阶段
-  if (name.indexOf('颠倒骰子') >= 0) {
-    return battleState.phase === 'roll' || battleState._diceJustRolled;
+    return rwHas('damage');
   }
   return false;
 }
@@ -8886,118 +8930,14 @@ function useCardComplete(handIndex) {
   var effectText = card.effect || card.text || '';
   var cardName = card.name || '';
   
-  // 发动时机检查
-  var canUse = true;
-  var reason = '';
-  
-  // 遥控骰子：只能在投骰阶段使用（修改一次投掷动作中的所有点数）
-  if (cardName === '遥控骰子') {
-    if (battleState.phase !== 'roll') {
-      canUse = false;
-      var phaseNameMap = { prepare: '准备阶段', main1: '主要阶段1', roll: '投骰阶段', main2: '主要阶段2', end: '结束阶段' };
-      reason = '遥控骰子只能在投骰阶段使用！当前阶段：' + (phaseNameMap[battleState.phase] || battleState.phase);
-    }
-  }
-  
-  // 连锁类效果：必须有对应时点/对象才能发动（从盖伏状态发动时除外，盖伏卡可在任何时机发动）
-  if (canUse && isChainOnlyCard(card) && !card._activatedFromFaceDown) {
-    if (!hasChainTarget(card)) {
-      canUse = false;
-      if (cardName === '侦探放大镜') reason = '侦探放大镜是连锁类效果，需要在移动动作发生时连锁使用（修改位移量），不能凭空发动';
-      else if (cardName === '猎手爪链') reason = '猎手爪链是连锁类效果，需要在其他玩家移动时连锁使用（打断移动），不能凭空发动';
-      else if (cardName === '幸运护符') reason = '幸运护符是连锁类效果，需要在即将受到伤害时连锁使用（抵消伤害），不能凭空发动';
-      else if (cardName === '颠倒骰子') reason = '颠倒骰子需要在投掷阶段或骰子刚投出时使用，不能凭空发动';
-      else reason = '这是连锁类效果，需要在对应时点才能发动，不能凭空使用';
-    }
-  }
-  
-  // 特制手套：修改一次掷骰结果只能在投骰阶段使用
-  if (cardName === '特制手套' && effectText.indexOf('修改一次掷骰结果') >= 0) {
-    if (battleState.phase !== 'roll' && battleState.phase !== 'main1' && battleState.phase !== 'main2') {
-      canUse = false;
-      reason = '特制手套只能在主要阶段或投骰阶段使用！';
-    }
-  }
-  
-  // 阶段检查
-  if (canUse) {
-    var isSkillCard = card._category === 'skill_cards';
-    var isRollPhaseCard = ['遥控骰子'].indexOf(cardName) >= 0;
-    var canCover = effectText.indexOf('可盖伏') >= 0 || effectText.indexOf('其他玩家回合也能') >= 0;
-    
-    if (battleState.phase === 'roll') {
-      // 投掷阶段：只有遥控骰子等特定卡可用，技能卡不可用
-      if (!isRollPhaseCard && !canCover) {
-        canUse = false;
-        reason = '投掷阶段不能使用卡牌（技能卡也不能在投掷阶段发动）！';
-      }
-    } else if (battleState.phase === 'prepare' || battleState.phase === 'end') {
-      // 准备阶段/结束阶段：只有技能卡（高时点）或从盖伏状态发动的卡可使用
-      var fromFaceDown = card._activatedFromFaceDown === true;
-      if (!isSkillCard && !fromFaceDown) {
-        canUse = false;
-        var phaseNameMap2 = { prepare: '准备阶段', end: '结束阶段' };
-        reason = (phaseNameMap2[battleState.phase] || '当前阶段') + '只能发动角色技能卡（每回合一次的高时点技能）或翻开盖伏卡！';
-      }
-    }
-    // main1/main2阶段：所有卡都可使用（已有费用等检查）
-  }
-  
-  // 技能卡每回合一次限制
-  if (canUse && card._category === 'skill_cards') {
-    if (!battleState.p1.usedSkillsThisTurn) battleState.p1.usedSkillsThisTurn = [];
-    if (battleState.p1.usedSkillsThisTurn.indexOf(cardName) >= 0) {
-      canUse = false;
-      reason = '技能卡【' + cardName + '】本回合已经使用过了（每回合一次）！';
-    }
-    // 技能卡不可连锁：如果正在连锁处理中，不能发动
-    if (battleState._inChainResolution) {
-      canUse = false;
-      reason = '技能卡不能连锁其他效果发动！';
-    }
-  }
-  
-  if (!canUse) {
-    alert(reason);
-    return;
-  }
-  
-  var cost = card.cost || 0;
-  if (battleState.p1.cost < cost) {
-    alert('费用不足！需要' + cost + '费用，当前' + battleState.p1.cost + '费用');
-    return;
-  }
-  
+  // 统一发动合法性校验（连锁对象/阶段/技能一次/费用/攻击范围/特例条件）
+  var __play = evaluatePlayable(card, 'p1');
+  if(!__play.ok){ alert(__play.reason); return; }
+
   var isPermanent = card._category === 'item_permanent';
   var actionType = isPermanent ? '发动' : '使用';
   
   // 永续卡默认正面放置（右键可盖伏）
-  
-  // 攻击卡距离限制检查（统一走攻击范围引擎，严格按 attack_range 判定；范围内无目标则不可用）
-  if (card._category === 'attack_cards') {
-    if (!hasEnemyInAttackRange(card, 'p1')) {
-      alert('【' + card.name + '】攻击范围内没有可攻击的目标（范围：' + (card.attack_range || '无') + '），无法使用');
-      return;
-    }
-  }
-  
-  // 发动条件检查：驱散卡可以在任何时候使用（"在受到负面效果时也能发动"是指可作为反制，不是限制）
-  // 但纯反制类卡（如"抵消伤害"）只能在对应时点发动
-  var isPureCounter = (effectText.indexOf('抵消一次即将受到的伤害') >= 0) || 
-                       (effectText.indexOf('抵消') >= 0 && effectText.indexOf('伤害') >= 0 && effectText.indexOf('回') < 0 && effectText.indexOf('护盾') < 0);
-  if (isPureCounter && !battleState.damageResponseWindow) {
-    alert('【' + card.name + '】只能在受到伤害时作为反制发动！当前不是受伤时点。');
-    return;
-  }
-  
-  // 发动条件检查：纯抵消伤害类卡牌只能在受到伤害时发动
-  // 幸运护符（回同步+护盾）可以在任何时候使用，不限制
-  var isDamageCounterOnly = (effectText.indexOf('抵消一次即将受到的伤害') >= 0) ||
-                             (effectText.indexOf('抵消') >= 0 && effectText.indexOf('伤害') >= 0 && effectText.indexOf('回') < 0 && effectText.indexOf('护盾') < 0);
-  if (isDamageCounterOnly && !battleState.damageResponseWindow) {
-    alert('【' + card.name + '】只能在受到伤害时作为反制发动！当前不是受伤时点。');
-    return;
-  }
   
   // 特殊卡牌处理：特制手套 - 三选一效果
   if (cardName === '特制手套') {
