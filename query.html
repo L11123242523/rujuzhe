@@ -12025,10 +12025,11 @@ function onTeamSyncPick(){
   const L=document.getElementById('syncLeader'),M1=document.getElementById('syncM1'),M2=document.getElementById('syncM2');
   if(!L) return;
   const sl=_charSync(L.value), m1=_charSync(M1.value), m2=_charSync(M2.value);
-  const sum=sl+m1+m2, team=sum*2.5;
+  const sum=sl+m1+m2, raw=sum*2.5, team=Math.ceil(raw);  // ×2.5 后若出现 0.5 一律向上进一
   const initEl=document.getElementById('syncInit'); if(initEl) initEl.value=_fmt(team);
   const pv=document.getElementById('teamSyncPreview');
-  if(pv) pv.innerHTML=`队长 ${sl} ＋ 队员 ${m1} ＋ 队员 ${m2} ＝ ${sum}，×2.5 ＝ <b style="color:#ffd700">${_fmt(team)}</b> 点队伍同步值`;
+  const hasHalf=!Number.isInteger(raw);
+  if(pv) pv.innerHTML=`队长 ${sl} ＋ 队员 ${m1} ＋ 队员 ${m2} ＝ ${sum}，×2.5 ＝ ${_fmt(raw)}${hasHalf?`，<span style="color:#f59e0b">0.5 进一</span> `:''}＝ <b style="color:#ffd700">${_fmt(team)}</b> 点队伍同步值`;
   updateSyncCalc();
 }
 function importDmgToSync(){
@@ -13069,11 +13070,11 @@ function navChapter(dir){
     <!-- ===== 同步值计算器（血量结算） ===== -->
     <div style="margin-top:22px;border-top:1px solid #0f3460;padding-top:18px">
       <h3 style="color:#e94560;margin-bottom:6px">队伍同步值计算器（血量结算）</h3>
-      <div style="color:#888;font-size:12px;margin-bottom:12px">队伍同步值（即队伍生命）＝所选 3 名角色同步值之和 ×2.5；受伤时先扣护盾，护盾击穿后的部分才扣同步值，回复与其他增减益随后结算，下限为 0。</div>
+      <div style="color:#888;font-size:12px;margin-bottom:12px">队伍同步值（即队伍生命）＝所选 3 名角色同步值之和 ×2.5，结果出现 0.5 时向上进一；受伤时先扣护盾，护盾击穿后的部分才扣同步值，回复与其他增减益随后结算，下限为 0。</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div style="background:#16213e;padding:16px;border-radius:10px">
           <div style="margin-bottom:10px">
-            <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px">队伍构成（队长 ＋ 2 名队员；队伍同步值＝三人同步值之和 ×2.5）</label>
+            <label style="color:#aaa;font-size:13px;display:block;margin-bottom:4px">队伍构成（队长 ＋ 2 名队员；队伍同步值＝三人同步值之和 ×2.5，0.5 进一）</label>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
               <select id="syncLeader" title="队长" onchange="onTeamSyncPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:12px;width:100%;cursor:pointer"></select>
               <select id="syncM1" title="队员1" onchange="onTeamSyncPick()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:12px;width:100%;cursor:pointer"></select>
@@ -13082,7 +13083,7 @@ function navChapter(dir){
             <div id="teamSyncPreview" style="color:#4a9eff;font-size:12px;margin-top:6px;line-height:1.5"></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div><label style="color:#aaa;font-size:12px">队伍初始同步值（自动×2.5，可手动改）</label><input type="number" id="syncInit" value="30" min="0" step="0.5" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
+            <div><label style="color:#aaa;font-size:12px">队伍初始同步值（自动×2.5，可手动改）</label><input type="number" id="syncInit" value="30" min="0" step="1" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">当前护盾值</label><input type="number" id="syncShield" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">受到伤害</label><input type="number" id="syncDmg" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
             <div><label style="color:#aaa;font-size:12px">回复同步值(+)</label><input type="number" id="syncHeal" value="0" min="0" oninput="updateSyncCalc()" style="border:1px solid #0f3460;background:#1a1a2e;color:#eee;border-radius:6px;padding:7px;font-size:13px;width:100%"></div>
