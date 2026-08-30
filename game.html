@@ -4979,6 +4979,17 @@ function isRioCaptain(player) {
   var c = p && p.captain, nm = c ? (''+c.name) : '';
   return !!(nm.indexOf('里绪') >= 0 && nm.indexOf('水着') < 0);
 }
+// AI 里绪队长：每次“移动投掷”前自动用2枚六面骰替换（点数相加）。
+// 仅作用于通用移动骰（主投掷/Again追加/Twice·小春等追加投掷阶段）；
+// 若已有其他改骰指令（指定面数/枚数，如20面骰、碰碰冰茶）则不覆盖；判定伤害不走此处。
+function aiRioPreRoll(player) {
+  var ap = (typeof battleState!=='undefined') ? battleState[player] : null;
+  if (!ap) return;
+  if (isRioCaptain(player) && !ap._nextDiceSides && (ap._nextDiceCount||1) <= 1) {
+    ap._nextDiceSides = 6; ap._nextDiceCount = 2; ap._rioTwoDice = true;
+    addBattleLog(player, '【里绪被动】AI使用2枚六面骰替换（点数相加）');
+  }
+}
 function rollPlayerDice(player) {
   var p = battleState[player];
   var sides = p._nextDiceSides || 6, cnt = p._nextDiceCount || 1, d = 0, __rolls = [];
@@ -5481,10 +5492,7 @@ function aiTurn() {
       
       setTimeout(function() {
         var __aip = battleState.p2;
-        if (isRioCaptain('p2') && !__aip._nextDiceSides && (__aip._nextDiceCount||1) <= 1) {
-          __aip._nextDiceSides = 6; __aip._nextDiceCount = 2; __aip._rioTwoDice = true;
-          addBattleLog('p2', '【里绪被动】AI使用2枚六面骰替换（点数相加）');
-        }
+        aiRioPreRoll('p2');
         var dice = rollPlayerDice('p2');
         battleState._diceRolledThisPhase = true;
         var __aiRollTxt = (__aip._lastRolls && __aip._lastRolls.length>1) ? (__aip._lastRolls.join('+')+'='+dice) : (''+dice);
@@ -5659,6 +5667,7 @@ function aiExecuteMove(dice, callback) {
       battleState._diceRolledThisPhase = false;
       updateBattleUI();
       setTimeout(function() {
+        aiRioPreRoll('p2');
         var extraDice = rollPlayerDice('p2');
         battleState._diceRolledThisPhase = true;
         addBattleLog(player, '追加投掷投出' + extraDice + '点');
@@ -5673,6 +5682,7 @@ function aiExecuteMove(dice, callback) {
       addBattleLog(player, '追加一个掷骰阶段');
       battleState.phase = 'roll'; battleState._diceRolledThisPhase = false; updateBattleUI();
       setTimeout(function() {
+        aiRioPreRoll('p2');
         var twDice = rollPlayerDice('p2');
         battleState._diceRolledThisPhase = true;
         addBattleLog(player, '追加投掷投出' + twDice + '点');
