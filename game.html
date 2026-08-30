@@ -2360,6 +2360,26 @@ button:disabled{cursor:not-allowed;}
 .opponent-area{min-height:54px;}
 /* 连锁栏容器、步骤条等深色玻璃兜底 */
 #chainBar,.effect-step,.step-header{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;}
+/* —— 增益/效果栏 —— */
+.buff-bar{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;max-width:960px;margin:3px auto 0;padding:7px 12px;min-height:34px;border-radius:12px;background:rgba(255,255,255,.025);border:1px dashed var(--line);}
+.buff-bar.has{background:linear-gradient(165deg,rgba(255,255,255,.05),rgba(255,255,255,.014));border-style:solid;border-color:var(--line);box-shadow:var(--sh-sm);}
+.buff-group{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 9px;border-right:1px solid var(--line);}
+.buff-group:first-child{padding-left:0;}.buff-group:last-child{border-right:none;padding-right:0;}
+.buff-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid var(--line-2);white-space:nowrap;cursor:default;transition:transform .15s var(--ease),background .15s;line-height:1.4;}
+.buff-chip:hover{transform:translateY(-1px);background:rgba(255,255,255,.11);}
+.buff-ico{font-size:12px;line-height:1;}.buff-name{color:var(--dim);letter-spacing:.3px;}.buff-val{font-weight:800;font-variant-numeric:tabular-nums;}
+.buff-prog{display:inline-block;width:28px;height:5px;border-radius:99px;background:rgba(0,0,0,.45);overflow:hidden;margin-left:3px;}
+.buff-prog>i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--gold-hi),var(--gold-deep));transition:width .3s var(--ease);}
+.buff-empty{font-size:11px;color:var(--faint);letter-spacing:1.5px;}
+.tone-passive{border-color:rgba(231,199,140,.5);background:rgba(231,199,140,.08);}.tone-passive .buff-name{color:var(--gold);}
+.tone-sp{border-color:rgba(183,148,255,.45);background:rgba(183,148,255,.09);}.tone-sp .buff-ico{color:#cbb4ff;font-weight:800;}.tone-sp .buff-name{color:#d9ccff;}
+.tone-atk .buff-val{color:#ff8a8a;}.tone-san .buff-val{color:#5fd0e8;}.tone-jud .buff-val{color:#c4a8ff;}
+.tone-fire .buff-val{color:#f0a35e;}.tone-heal .buff-val,.tone-def .buff-val{color:#5fd48f;}
+.tone-pend{border-color:rgba(86,200,230,.42);background:rgba(86,200,230,.09);}.tone-pend .buff-name{color:#aee6f2;}.tone-pend .buff-val{color:#5fd0e8;}
+.tone-prog{border-color:rgba(231,199,140,.4);}.tone-prog .buff-name{color:var(--gold);}.tone-prog .buff-val{color:var(--gold-hi);}
+.tone-debuff{border-color:rgba(255,113,132,.55);background:rgba(255,113,132,.1);}.tone-debuff .buff-name,.tone-debuff .buff-val{color:#ff94a2;}
+#p2BuffBar{min-height:24px;padding:4px 10px;margin:4px auto 0;max-width:none;}
+#p2BuffBar .buff-chip{font-size:10.5px;padding:2px 8px;}
 /* ===== /UI 3.0 NIGHT FOIL ===== */
 
 </style>
@@ -2444,6 +2464,7 @@ button:disabled{cursor:not-allowed;}
   <div class="battle-main-area">
     <div class="opponent-area">
       <div class="permanent-slots" id="p2PermanentSlots"></div>
+      <div class="buff-bar" id="p2BuffBar"></div>
     </div>
     <!-- 简化横向地图（只显示玩家所在行） -->
     <div class="battle-map-container compact">
@@ -2504,6 +2525,9 @@ button:disabled{cursor:not-allowed;}
         </div>
       </div>
       
+      <!-- 增益/效果栏：角色被动·SP、数值增益、待命效果、进度记录 -->
+      <div class="buff-bar" id="p1BuffBar"></div>
+
       <!-- 投掷动画显示区域 -->
       <div class="dice-animation-area" id="diceAnimationArea" style="display:none;">
         <div class="dice-rolling" id="diceRolling">🎲</div>
@@ -4416,6 +4440,8 @@ function initBattle() {
   shuffleArray(p1Deck);
   shuffleArray(p2Deck);
   
+  var __cap1 = (deckConfig && deckConfig.p1 && (deckConfig.p1.captain || (deckConfig.p1.chars||[]).filter(Boolean)[0])) || null;
+  var __cap2 = (deckConfig && deckConfig.p2 && (deckConfig.p2.captain || (deckConfig.p2.chars||[]).filter(Boolean)[0])) || null;
   battleState = {
     turn: 1,
     currentPlayer: 'p1',
@@ -4423,8 +4449,8 @@ function initBattle() {
     effectStack: [],
     pendingEffect: null,
     effectChainActive: false,
-    p1: { sync: p1Sync, maxSync: p1Sync, fascination: 6, cost: 0, maxCost: 12, deck: p1Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
-    p2: { sync: p2Sync, maxSync: p2Sync, fascination: 6, cost: 0, maxCost: 12, deck: p2Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
+    p1: { captain: __cap1, sync: p1Sync, maxSync: p1Sync, fascination: 6, cost: 0, maxCost: 12, deck: p1Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
+    p2: { captain: __cap2, sync: p2Sync, maxSync: p2Sync, fascination: 6, cost: 0, maxCost: 12, deck: p2Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
     damageResponseWindow: false,
     pendingDamage: 0,
     pendingDamageTarget: '',
@@ -6412,6 +6438,93 @@ function triggerEventCard(player) {
   }
 }
 
+// ========== 增益/效果栏：集中登记当前生效的被动、SP、数值增益、待命效果与进度记录 ==========
+// 角色SP生效标志 -> [角色, 简述]
+var BUFF_SP_FLAGS = [
+  ['_tomaSP','冬马','使用攻击/技能卡后前进1-3格'],
+  ['_kaedeSP','入间枫','开局从3项效果中选2项适用'],
+  ['_kaedeMizugiSP','枫(水着)','自然回费+50%，理智伤害+1'],
+  ['_kotaroSP','光太郎','每回合献祭次数+1，首次献祭后三选一'],
+  ['_megumiSP','松山惠','可主动发动乐曲α/β/γ/δ'],
+  ['_yuiSP','结衣','攻击/侵略技能最终伤害+1，无视1护盾'],
+  ['_aoiSP','小野葵','自然回费+50%(向下)，暴击伤害+1'],
+  ['_lilithSP','里尔亚斯','献祭次数+1，每次献祭后回1同步'],
+  ['_rioSP','里绪','全队判定伤害+1'],
+  ['_rioMizugiSP','里绪(水着)','首次投掷回费、首次移动后抽2'],
+  ['_lilySP','莉莉','免疫经过类效果，每回合回收墓地最下方单次卡'],
+  ['_ruriSP','琉璃','判定取最大伤害后抽1卡回1音韵'],
+  ['_ruriMizugiSP','琉璃(水着)','热忱成员初始攻击+N，热忱造伤后回费'],
+  ['_edwardSP','露璐缇雅','作为2名破坏者计数'],
+  ['_frostSP','霜烬','自然回复+1，初始手牌+1'],
+  ['_kasumiSP','小仓霞','公共站/地铁直达下车点免判定免支付'],
+  ['_koharuSP','小春','可消耗先机追加掷骰阶段'],
+  ['_ioriSP','伊织','到达神社回5音韵并抽1馈赠卡'],
+  ['_sakuraSP','宫樱子','队伍攻击+2、克制伤害+1，造伤后回1同步'],
+  ['_yuSP','入间予','全队判定伤害+1，无序成员自然回费+1'],
+  ['_yuMizugiSP','予(水着)','理智伤害+1，理智[移动]道具后硬币判定造伤'],
+  ['_hinaSP','羽奈','[侵略]道具最终伤害+1'],
+  ['_ningSP','宁雨清','因效果加入手卡的卡费用-1'],
+  ['_senaSP','星奈(水着)','多段每命中一段前进1格并回1音韵']
+];
+function getActiveBuffs(user) {
+  var p = battleState ? battleState[user] : null; if (!p) return [];
+  var out = [];
+  function P(cat, icon, name, val, title, tone, prog) { out.push({ cat: cat, icon: icon, name: name, val: (val==null?'':val), title: title || name, tone: tone || cat, prog: prog || null }); }
+  // —— 队长被动（仅队长提供被动，常驻）——
+  if (p.captain && p.captain.name) P('passive', '✦', p.captain.name + '·被动', '', p.captain.passive || (p.captain.name+'队长被动'), 'passive');
+  // —— 已生效的角色SP（队长/符合条件的队员）——
+  for (var i = 0; i < BUFF_SP_FLAGS.length; i++) { var f = BUFF_SP_FLAGS[i]; if (p[f[0]]) P('passive', 'SP', f[1], '', f[2], 'sp'); }
+  // —— 数值增益 / 减益 ——
+  if (p.attackBuff > 0) P('stat','⚔️','攻击力','+'+p.attackBuff,'攻击力上升 '+p.attackBuff,'atk');
+  if (p.attackBuff < 0) P('debuff','⚔️','攻击力',''+p.attackBuff,'攻击力下降','debuff');
+  if ((p.defense||0) > 0) P('stat','🛡️','防御','+'+p.defense,'防御值上升，受到的伤害减少','def');
+  if ((p.defense||0) < 0) P('debuff','🛡️','防御',''+p.defense,'防御值下降（为负），受到的伤害增加','debuff');
+  if (p._intellectBonus) P('stat','🔷','理智伤害','+'+p._intellectBonus,'理智属性伤害增加 '+p._intellectBonus,'san');
+  if (p._judgeDamageBonus) P('stat','🎲','判定伤害','+'+p._judgeDamageBonus,'判定伤害增加 '+p._judgeDamageBonus,'jud');
+  if (p._attrBonus) P('stat','🎯','克制伤害','+'+p._attrBonus,'属性克制伤害增加 '+p._attrBonus,'jud');
+  if (p._critDamageBonus) P('stat','💥','暴击伤害','+'+p._critDamageBonus,'暴击伤害增加 '+p._critDamageBonus,'jud');
+  if (p._sacrificeBonus) P('stat','🔥','献祭次数','+'+p._sacrificeBonus,'每回合可额外献祭 '+p._sacrificeBonus+' 次','fire');
+  if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
+  if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加层数 '+p._shenleStack,'san');
+  // —— 待命：下一次触发的一次性效果 ——
+  if (p._nextAttackJudge) { var dn = p._nextAttackJudge.dice==='coin'?'硬币':(p._nextAttackJudge.dice==='d4'?'四面骰':'六面骰'); P('pending','🎯','下次造伤附带',dn,'下一次造成伤害时进行'+dn+'判定，正面/达标追加'+(p._nextAttackJudge.front||2)+'点判定伤害','pend'); }
+  if (p._preventNextDamage) P('pending','🛡️','抵消下次伤害','','下一次即将受到的伤害将被抵消','pend');
+  if (p._nextCostReduction) P('pending','💰','下次费用','-'+p._nextCostReduction,'下一张使用的卡费用减少'+p._nextCostReduction,'pend');
+  if (p._nextMoveAdjust) P('pending','👣','下次位移',(p._nextMoveAdjust>0?'+':'')+p._nextMoveAdjust,'下一次移动的位移量调整 '+(p._nextMoveAdjust>0?'+':'')+p._nextMoveAdjust,'pend');
+  if (p._fixedNextMove) P('pending','👣','下次固定移动',p._fixedNextMove+'格','下一次移动固定为 '+p._fixedNextMove+' 格','pend');
+  if (p._nextMoveReverse) P('pending','🔁','下次反向','','下一次移动方向反转','pend');
+  if (p._nextDiceSides) P('pending','🎲','下次投掷',(p._nextDiceCount||1)+'枚'+p._nextDiceSides+'面','下一次投掷改用 '+(p._nextDiceCount||1)+' 枚'+p._nextDiceSides+'面骰','pend');
+  if (p._preNextDamageLoss) P('pending','⚠️','造伤先扣同步',''+(p._preNextDamageLoss.amount||''),'下次造成伤害前先扣除目标同步','pend');
+  // —— 进度记录：累计移动 X/阈值，还差几格触发 ——
+  function PROG(field, thr, icon, name, cond) {
+    if (!cond) return; var v = p[field] || 0;
+    P('progress', icon, name, v+'/'+thr, '本回合已累计移动 '+v+' 格，再移动 '+Math.max(0,thr-v)+' 格触发效果', 'prog', { v: v, thr: thr });
+  }
+  var __capIsRio = p.captain && (p.captain.name||'').indexOf('里绪') >= 0;
+  PROG('_rioMoveCount', 8, '📈', '里绪累计', __capIsRio || !!p._rioSP);
+  PROG('_zhichiMoveCount', 8, '📏', '直尺累计', (p.permanent||[]).some(function(c){return c.name&&c.name.indexOf('直尺')>=0;}));
+  PROG('_koharuMoveCount', 5, '🌀', '小春累计', !!p._koharuSP);
+  return out;
+}
+function renderBuffBar(user) {
+  var el = document.getElementById(user==='p1'?'p1BuffBar':'p2BuffBar'); if (!el || !battleState) return;
+  var buffs = getActiveBuffs(user);
+  if (!buffs.length) { el.classList.remove('has'); el.innerHTML = '<span class="buff-empty">暂无生效增益 / 效果</span>'; return; }
+  el.classList.add('has');
+  var order = ['passive','stat','pending','progress','debuff'], html = '';
+  order.forEach(function (cat) {
+    var grp = buffs.filter(function(b){return b.cat===cat;}); if (!grp.length) return;
+    html += '<span class="buff-group">';
+    grp.forEach(function (b) {
+      var tt = (b.title||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+      var prog = b.prog ? ('<span class="buff-prog"><i style="width:'+Math.min(100,Math.round(100*b.prog.v/b.prog.thr))+'%"></i></span>') : '';
+      var val = (b.val!=='' ? '<span class="buff-val">'+b.val+'</span>' : '');
+      html += '<span class="buff-chip tone-'+b.tone+'" title="'+tt+'"><span class="buff-ico">'+b.icon+'</span><span class="buff-name">'+b.name+'</span>'+val+prog+'</span>';
+    });
+    html += '</span>';
+  });
+  el.innerHTML = html;
+}
 function updateBattleUI() {
   if (!battleState) return;
   
@@ -6449,6 +6562,8 @@ function updateBattleUI() {
     if (p1MotivationCenter) p1MotivationCenter.textContent = battleState.p1.motivation || 0;
     var p1ShieldCenter = document.getElementById('p1ShieldCenter');
     if (p1ShieldCenter) p1ShieldCenter.textContent = battleState.p1.shield || 0;
+    // 增益/效果栏刷新
+    renderBuffBar('p1'); renderBuffBar('p2');
     
     var turnInfoEl = document.getElementById('turnInfo');
     if (turnInfoEl) turnInfoEl.textContent = '回合 ' + battleState.turn;
@@ -8064,7 +8179,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
         if (battleState[target].sync < __hadSync && typeof triggerYaodaoOnDamage === 'function') triggerYaodaoOnDamage(user, afterDef);
         if (op.judge && battleState[target].sync < __hadSync && typeof triggerLanzhangAfterJudge === 'function') triggerLanzhangAfterJudge(user, target);
         if (done) done();
-      }, __opAttr(op, srcCard));
+      }, __opAttr(op, srcCard), user);
     }
     // 善意面具：使用攻击卡造伤害时可付金币，每500金币+1最终伤害（仅玩家交互，AI不付）
     var __maskAtk = __isAtk && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('善意面具') >= 0; });
@@ -8239,7 +8354,7 @@ function runOneOp(op, ctx, next) {
       if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('选择移动方向', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
       else { applyMove(user, op.steps); break; }
       return;
-    case 'buff_next_judge': p._nextAttackJudge = { dice: op.dice, front: op.front }; addBattleLog(user, '下一次造伤害附带' + op.dice + '判定'); break;
+    case 'buff_next_judge': p._nextAttackJudge = { dice: op.dice, front: op.front }; addBattleLog(user, '获得增益：下一次造伤害附带' + (op.dice==='coin'?'硬币':(op.dice==='d4'?'四面骰':'六面骰')) + '判定（正面/' + (op.front||2) + '点）'); break;
     case 'threat_sacrifice': {
       var tc = (q.hand || []).find(function (c) { return c.attribute === op.attr || (c.type && c.type.indexOf(op.attr) >= 0); });
       if (tc) { var ti = q.hand.indexOf(tc); q.hand.splice(ti, 1); q.grave.push(tc); q.cost = Math.min(q.cost + 2, q.maxCost); addBattleLog(user, '对手献祭【' + tc.name + '】视为一次献祭，回2音韵，免除伤害'); }
@@ -10291,13 +10406,14 @@ function judgeAnimate(user, spec, cb) {
   }, 70);
 }
 
-function dealDamageWithResponse(target, damage, source, callback, attackerAttr) {
+function dealDamageWithResponse(target, damage, source, callback, attackerAttr, attacker) {
   if (!battleState) {
     if (callback) callback(damage);
     return;
   }
   
   var p = battleState[target];
+  attacker = attacker || (battleState.currentPlayer || null); // 攻击者（附带判定增益挂在攻击者身上）
   if (!p) {
     if (callback) callback(damage);
     return;
@@ -10352,6 +10468,36 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr) 
     rwClose('damage'); updateBattleUI();
     if (callback) callback(0);
   }
+  // 攻击者“下一次造伤害附带判定”增益（如 夏日畅饮时间！②）：确实造成伤害后，播判定动画并按结果追加；一次性消耗
+  function __afterHitSettle(actualDamage) {
+    var atk = (attacker && battleState[attacker]) ? battleState[attacker] : null;
+    if (actualDamage > 0 && atk && atk._nextAttackJudge) {
+      var nj = atk._nextAttackJudge; delete atk._nextAttackJudge; // “下一次”=一次性，先取出清除
+      var __lblName = (source || '攻击') + '·附带判定';
+      var __done = function (bonus, rollText) {
+        if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
+        if (bonus > 0) {
+          // 递归追加判定伤害：无属性、不再触发同一增益（已清除），避免循环
+          dealDamageWithResponse(target, bonus, '附带判定伤害', function () { if (callback) callback(actualDamage); }, null, attacker);
+        } else {
+          addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
+          if (callback) callback(actualDamage);
+        }
+      };
+      if (nj.dice === 'coin') {
+        var __coinSettle = function (roll) { __done(roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll + (roll === '正面' ? ('，正面追加' + (nj.front || 2)) : '，背面0')); };
+        if (typeof judgeAnimate === 'function') judgeAnimate(attacker, { kind: 'coin', label: __lblName }, __coinSettle);
+        else __coinSettle(Math.random() < 0.5 ? '正面' : '反面');
+      } else {
+        var __sides = (nj.dice === 'd4') ? 4 : 6;
+        var __diceSettle = function (roll) { __done(roll, __sides + '面骰点数' + roll + '，追加' + roll); };
+        if (typeof judgeAnimate === 'function') judgeAnimate(attacker, { kind: 'dice', sides: __sides, label: __lblName }, __diceSettle);
+        else __diceSettle(applyDiceControl(attacker, Math.floor(Math.random() * __sides) + 1, __sides));
+      }
+      return;
+    }
+    if (callback) callback(actualDamage);
+  }
   // 正常承受伤害（先扣护盾再扣同步）
   function __normalHit() {
     var __baseDmg = damage;
@@ -10379,7 +10525,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr) 
       }
     }
     updateBattleUI(); checkBattleEnd();
-    if (callback) callback(actualDamage);
+    __afterHitSettle(actualDamage);
   }
   function __useCharm(fromFaceDown, idx) {
     var cc = fromFaceDown ? p.faceDownCards.splice(idx,1)[0] : p.hand.splice(idx,1)[0];
