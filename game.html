@@ -2012,30 +2012,30 @@ html, body { max-width: 100%; overflow-x: hidden; }
 
 /* ===== UI 2.0 DESIGN SYSTEM ===== */
 :root{
-  --bg-0:#080a16; --bg-1:#0e1226; --bg-2:#161b38;
-  --glass:rgba(255,255,255,.055); --glass-2:rgba(255,255,255,.09); --glass-3:rgba(255,255,255,.13);
-  --line:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.18);
-  --gold:#ffd36b; --gold-deep:#f0b13e; --gold-soft:rgba(255,211,107,.16);
-  --ink:#eef1fc; --dim:rgba(238,241,252,.64); --faint:rgba(238,241,252,.42);
-  --p1:#ff6b6b; --p2:#48dbfb;
+  --bg-0:#171c38; --bg-1:#1e2548; --bg-2:#28305c;
+  --glass:rgba(255,255,255,.09); --glass-2:rgba(255,255,255,.145); --glass-3:rgba(255,255,255,.205);
+  --line:rgba(255,255,255,.14); --line-2:rgba(255,255,255,.24);
+  --gold:#ffd982; --gold-deep:#f3b84c; --gold-soft:rgba(255,211,107,.20);
+  --ink:#f4f6ff; --dim:rgba(240,243,255,.82); --faint:rgba(240,243,255,.60);
+  --p1:#ff7d7d; --p2:#56dcfb;
   --r-lg:18px; --r:13px; --r-sm:9px;
-  --sh:0 10px 34px rgba(0,0,0,.38); --sh-sm:0 4px 16px rgba(0,0,0,.28);
+  --sh:0 10px 30px rgba(0,0,0,.26); --sh-sm:0 4px 14px rgba(0,0,0,.20);
   --ease:cubic-bezier(.22,.61,.36,1);
   --attr-wuxu:#9aa7b8; --attr-rechen:#ff6b6b; --attr-lizhi:#48dbfb; --attr-hundun:#b794ff;
 }
 /* 氛围背景：深色基底 + 两团柔和光晕 + 细网格 */
 body{
   background:
-    radial-gradient(1100px 620px at 12% -8%, rgba(108,92,231,.20), transparent 60%),
-    radial-gradient(1000px 600px at 100% 0%, rgba(72,219,251,.12), transparent 55%),
-    radial-gradient(900px 700px at 50% 118%, rgba(255,107,107,.10), transparent 60%),
-    linear-gradient(160deg,#0b0e1f 0%,#0a0d1c 45%,#070912 100%) !important;
+    radial-gradient(1200px 660px at 12% -8%, rgba(124,108,240,.30), transparent 62%),
+    radial-gradient(1100px 640px at 100% 0%, rgba(86,210,251,.20), transparent 58%),
+    radial-gradient(1000px 760px at 50% 118%, rgba(255,125,125,.16), transparent 62%),
+    linear-gradient(160deg,#20264c 0%,#1a2042 45%,#151a36 100%) !important;
   color:var(--ink);
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   letter-spacing:.2px;
 }
 body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
-  background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);
   background-size:42px 42px;mask-image:radial-gradient(circle at 50% 30%,#000 30%,transparent 80%);}
 .screen{position:relative;z-index:1;}
 /* 滚动条 */
@@ -2186,15 +2186,17 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 /* 背景：干净的暖墨渐变 + 顶部一缕香槟金光晕 + 极淡网格，去掉廉价三彩光 */
 body{
   background:
-    radial-gradient(1200px 480px at 50% -10%, rgba(231,199,140,.10), transparent 62%),
-    radial-gradient(900px 700px at 50% 120%, rgba(90,110,150,.08), transparent 60%),
-    linear-gradient(170deg,#0d1017 0%,#0a0c11 48%,#080a0e 100%) !important;
+    radial-gradient(1200px 520px at 50% -10%, rgba(231,199,140,.18), transparent 62%),
+    radial-gradient(1100px 760px at 12% 10%, rgba(124,108,240,.16), transparent 60%),
+    radial-gradient(1000px 720px at 100% 8%, rgba(86,210,251,.12), transparent 58%),
+    radial-gradient(900px 700px at 50% 120%, rgba(120,140,190,.14), transparent 60%),
+    linear-gradient(170deg,#262e5a 0%,#1f254c 48%,#191e40 100%) !important;
   color:var(--ink);
   font-family:'PingFang SC','Microsoft YaHei','HarmonyOS Sans SC',system-ui,-apple-system,sans-serif;
   letter-spacing:.2px;
 }
-body::before{opacity:.34;
-  background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+body::before{opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);
   background-size:46px 46px;}
 ::selection{background:rgba(231,199,140,.28);}
 ::-webkit-scrollbar{width:9px;height:9px;}
@@ -2380,6 +2382,32 @@ button:disabled{cursor:not-allowed;}
 .tone-debuff{border-color:rgba(255,113,132,.55);background:rgba(255,113,132,.1);}.tone-debuff .buff-name,.tone-debuff .buff-val{color:#ff94a2;}
 #p2BuffBar{min-height:24px;padding:4px 10px;margin:4px auto 0;max-width:none;}
 #p2BuffBar .buff-chip{font-size:10.5px;padding:2px 8px;}
+/* ===== UI 3.1 提亮精修层（更通透 / 更清晰 / 细腻高光） ===== */
+.battle-top-bar,.battle-bottom-bar{background:linear-gradient(180deg,rgba(40,47,90,.80),rgba(29,34,68,.78))!important;}
+.player-status-bar{background:linear-gradient(160deg,rgba(48,55,104,.72),rgba(33,39,78,.66))!important;border-color:rgba(255,217,130,.42)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),var(--sh-sm)!important;}
+.status-item{background:linear-gradient(160deg,rgba(255,255,255,.14),rgba(255,255,255,.05))!important;border-color:var(--line-2)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);}
+.status-item:hover{background:linear-gradient(160deg,rgba(255,255,255,.21),rgba(255,255,255,.08))!important;}
+.status-label{color:var(--dim)!important;}
+.opponent-area{background:linear-gradient(160deg,rgba(86,220,251,.17),rgba(86,220,251,.06))!important;border-color:rgba(86,220,251,.42)!important;}
+.permanent-area{background:linear-gradient(160deg,rgba(183,148,255,.19),rgba(124,108,240,.07))!important;border-color:rgba(183,148,255,.46)!important;}
+.battle-map-container,.hand-area{background:linear-gradient(165deg,rgba(255,255,255,.085),rgba(255,255,255,.03))!important;border:1px solid var(--line)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.07);}
+.side-zones>div,.deck-zone,.grave-zone{background:linear-gradient(160deg,rgba(255,255,255,.11),rgba(255,255,255,.04))!important;border:1px solid var(--line-2)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.08);}
+.deck-zone:hover,.grave-zone:hover{background:linear-gradient(160deg,rgba(255,217,130,.20),rgba(255,255,255,.07))!important;border-color:var(--gold)!important;}
+.compact-map{background:rgba(12,15,34,.46)!important;border:1px solid var(--line)!important;}
+.permanent-slot{background:rgba(255,255,255,.06)!important;border:1px dashed var(--line-2)!important;}
+.hand-card{background:linear-gradient(165deg,rgba(50,57,108,.94),rgba(31,37,76,.94))!important;border:1px solid var(--line-2)!important;box-shadow:0 6px 18px rgba(0,0,0,.30),inset 0 1px 0 rgba(255,255,255,.11)!important;}
+.hand-card:hover{transform:translateY(-10px)!important;border-color:var(--gold)!important;box-shadow:0 16px 36px rgba(0,0,0,.42),0 0 0 1px rgba(255,217,130,.55),inset 0 1px 0 rgba(255,255,255,.13)!important;}
+.modal-content,.modal{ }
+.modal-content{background:linear-gradient(165deg,#2e3566,#222850)!important;border:1px solid var(--line-2)!important;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.11)!important;}
+.card-item{background:linear-gradient(160deg,rgba(255,255,255,.11),rgba(255,255,255,.045))!important;border-color:var(--line)!important;}
+.main-menu button,.menu-btn{box-shadow:0 8px 22px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.20)!important;}
+.main-menu button:active,.menu-btn:active{transform:translateY(1px);}
+input,select,textarea{background:rgba(255,255,255,.09)!important;border:1px solid var(--line-2)!important;color:var(--ink)!important;}
+input::placeholder{color:var(--faint)!important;}
+.zone-label,.hand-label{color:var(--dim)!important;}
+.buff-bar{background:rgba(255,255,255,.05)!important;}
+.buff-bar.has{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(255,255,255,.035))!important;}
+.buff-chip{background:linear-gradient(160deg,rgba(255,255,255,.13),rgba(255,255,255,.05))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);}
 /* ===== /UI 3.0 NIGHT FOIL ===== */
 
 </style>
@@ -4442,6 +4470,8 @@ function initBattle() {
   
   var __cap1 = (deckConfig && deckConfig.p1 && (deckConfig.p1.captain || (deckConfig.p1.chars||[]).filter(Boolean)[0])) || null;
   var __cap2 = (deckConfig && deckConfig.p2 && (deckConfig.p2.captain || (deckConfig.p2.chars||[]).filter(Boolean)[0])) || null;
+  var __ta1 = (typeof __calcTeamAttribute==='function') ? __calcTeamAttribute(deckConfig && deckConfig.p1) : null;
+  var __ta2 = (typeof __calcTeamAttribute==='function') ? __calcTeamAttribute(deckConfig && deckConfig.p2) : null;
   battleState = {
     turn: 1,
     currentPlayer: 'p1',
@@ -4449,8 +4479,8 @@ function initBattle() {
     effectStack: [],
     pendingEffect: null,
     effectChainActive: false,
-    p1: { captain: __cap1, sync: p1Sync, maxSync: p1Sync, fascination: 6, cost: 0, maxCost: 12, deck: p1Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
-    p2: { captain: __cap2, sync: p2Sync, maxSync: p2Sync, fascination: 6, cost: 0, maxCost: 12, deck: p2Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
+    p1: { captain: __cap1, teamAttribute: __ta1, sync: p1Sync, maxSync: p1Sync, fascination: 6, cost: 0, maxCost: 12, deck: p1Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
+    p2: { captain: __cap2, teamAttribute: __ta2, sync: p2Sync, maxSync: p2Sync, fascination: 6, cost: 0, maxCost: 12, deck: p2Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
     damageResponseWindow: false,
     pendingDamage: 0,
     pendingDamageTarget: '',
@@ -8061,6 +8091,21 @@ function __attrBeats(att, def) {
   if (att === '混沌') return false;
   return ATTR_COUNTER[att] === def;
 }
+// 队伍属性裁决（规则）：①队伍中有≥2张同属性角色→队伍属性取该属性；②否则取队长卡属性
+function __calcTeamAttribute(cfg) {
+  if (!cfg) return null;
+  var chars = (cfg.chars || []).filter(Boolean), cnt = {};
+  for (var i = 0; i < chars.length; i++) { var a = chars[i].attribute; if (a) cnt[a] = (cnt[a] || 0) + 1; }
+  for (var k in cnt) { if (cnt[k] >= 2) return k; }
+  var cap = cfg.captain || chars[0];
+  return cap ? (cap.attribute || null) : null;
+}
+function getTeamAttribute(user) {
+  var p = (typeof battleState !== 'undefined') ? battleState[user] : null;
+  if (p && p.teamAttribute) return p.teamAttribute;
+  if (typeof deckConfig !== 'undefined' && deckConfig && deckConfig[user]) return __calcTeamAttribute(deckConfig[user]);
+  return p && p.captain ? p.captain.attribute : null;
+}
 function __duelJudge(a, b) {
   var aw = __attrBeats(a.attribute || a.attr, b.attribute || b.attr);
   var bw = __attrBeats(b.attribute || b.attr, a.attribute || a.attr);
@@ -8163,7 +8208,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
     }
     if (p._hinaSP && __isItem && __tags.indexOf('侵略') >= 0) base += 1;
     if (op.kind === 'sanity' && p._intellectBonus) base += p._intellectBonus;
-    if (p._attrBonus) { var __ua = __opAttr(op, srcCard), __ta = battleState[target].captain && battleState[target].captain.attribute; if (__ua && __ta && typeof __attrBeats === 'function' && __attrBeats(__ua, __ta)) base += p._attrBonus; }
+    if (p._attrBonus) { var __ua = __opAttr(op, srcCard), __ta = (typeof getTeamAttribute==='function') ? getTeamAttribute(target) : (battleState[target].captain && battleState[target].captain.attribute); if (__ua && __ta && typeof __attrBeats === 'function' && __attrBeats(__ua, __ta)) base += p._attrBonus; }
     function __deal(finalBase) {
       // 杂鱼！杂鱼！SP：只要此卡在墓地，防御值为负的玩家受到的最终伤害+1
       var __tgt = battleState[target];
@@ -8783,7 +8828,7 @@ function processSingleEffect(effectText, context, callback) {
     if (finalDamage < 0) finalDamage = 0;
     // 防御值为负时伤害增加，但设置合理上限防止异常
     if (finalDamage > damage + 30) finalDamage = damage + 30;
-    var __atkA = battleState[user].captain && battleState[user].captain.attribute, __defA = battleState[target].captain && battleState[target].captain.attribute;
+    var __atkA = (typeof getTeamAttribute==='function') ? getTeamAttribute(user) : (battleState[user].captain && battleState[user].captain.attribute), __defA = (typeof getTeamAttribute==='function') ? getTeamAttribute(target) : (battleState[target].captain && battleState[target].captain.attribute);
     if (__atkA && __defA && typeof __attrBeats === 'function' && __attrBeats(__atkA, __defA)) { finalDamage += 1; addBattleLog(user, '属性克制（' + __normAttr(__atkA) + '克' + __normAttr(__defA) + '），最终伤害+1'); }
     var actualDamage = finalDamage;
     var shieldDamage = 0;
@@ -10501,8 +10546,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   // 正常承受伤害（先扣护盾再扣同步）
   function __normalHit() {
     var __baseDmg = damage;
-    if (attackerAttr && p.captain && p.captain.attribute && typeof __attrBeats === 'function' && __attrBeats(attackerAttr, p.captain.attribute)) {
-      __baseDmg += 1; addBattleLog(target, '属性克制（' + __normAttr(attackerAttr) + '克' + __normAttr(p.captain.attribute) + '），本段伤害+1');
+    var __defTeamAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (p.captain && p.captain.attribute);
+    if (attackerAttr && __defTeamAttr && typeof __attrBeats === 'function' && __attrBeats(attackerAttr, __defTeamAttr)) {
+      __baseDmg += 1; addBattleLog(target, '属性克制（' + __normAttr(attackerAttr) + '克' + __normAttr(__defTeamAttr) + '），本段伤害+1');
     }
     var actualDamage = __baseDmg;
     if (p.shield && p.shield > 0) {
