@@ -4413,11 +4413,21 @@ function pushEffect(effect) {
 }
 
 // 收集某玩家在当前响应窗口下真正可连锁的卡（手牌+盖伏）：必须是连锁类卡、存在作用对象、费用足够、非盖伏当回合
-function collectChainable(player){
+function collectChainable(player, effect){
   var me=battleState[player]; if(!me) return [];
+  var stage = effect ? (effect._stage || effect.type || '') : '';
+  // 按“将要适用前”时点的阶段过滤：骰子结果窗口只收改点/反向类，移动窗口只收位移增减/打断类
+  function __matchStage(c){
+    if(!stage) return true;
+    var eff=c.effect||c.text||'', nm=c.name||'';
+    if(stage==='dice_result') return isDiceModifyCard(c);
+    if(stage==='move') { if(isDiceModifyCard(c)) return false; return /位移量|增减|打断/.test(eff)||nm.indexOf('侦探放大镜')>=0||nm.indexOf('猎手爪链')>=0; }
+    if(stage==='damage') return /抵消/.test(eff)&&/伤害/.test(eff);
+    return true;
+  }
   var out=[];
   function consider(c,from,index){
-    if(!c || !isChainOnlyCard(c) || !hasChainTarget(c)) return;
+    if(!c || !isChainOnlyCard(c) || !hasChainTarget(c) || !__matchStage(c)) return;
     if((c.cost||0)>(me.cost||0)) return;
     if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
     out.push({card:c,from:from,index:index});
@@ -4538,7 +4548,7 @@ function beforeEffectExecution(effect, callback) {
   function chained(){ passStreak=0; proceed(); }
   function pass(){ passStreak++; proceed(); }
   function askP1(){
-    var list=collectChainable('p1');
+    var list=collectChainable('p1',effect);
     if(!list.length){ pass(); return; }
     var choices=list.map(function(x){return '🔗 '+x.card.name+'（'+(x.card.cost||0)+'费）'+(x.from==='faceDown'?'[盖伏]':'');});
     choices.push('■ 不连锁');
@@ -4548,7 +4558,7 @@ function beforeEffectExecution(effect, callback) {
     });
   }
   function askP2(){
-    var list=collectChainable('p2');
+    var list=collectChainable('p2',effect);
     if(!list.length){ pass(); return; }
     var pick=aiDecideChain(list,effect);
     if(!pick){ pass(); return; }
@@ -4744,6 +4754,7 @@ function rollDice() {
   var __rp = battleState.p1;
   var __sides = __rp._nextDiceSides || 6, __cnt = __rp._nextDiceCount || 1; // 动画用面数
   var finalDice = rollPlayerDice('p1');
+  var __diceReverse = false;
   var rollCount = 0;
   var maxRolls = 15;
   
@@ -4776,6 +4787,21 @@ function rollDice() {
       addBattleLog('p1', '投出' + finalDice + '点（连锁时点：可使用遥控骰子等效果修改点数）');
       
       // 延迟执行移动和格子效果
+      // 骰子结果“将要适用前”时点：结果已展示，双方可连锁改点/反向，均不连锁才据此进入移动
+      function __beginDiceWindow() {
+        rwOpen('dice', { result: finalDice });
+        var diceEffect = { type:'dice_result', _stage:'dice_result', player:'p1', moveAmount:finalDice, diceResult:finalDice,
+          description:'骰子结果 '+finalDice+' 点将要适用（可连锁修改点数/方向）' };
+        pushEffect(diceEffect);
+        beforeEffectExecution(diceEffect, function(res){
+          rwClose('dice');
+          if(!res){ addBattleLog('p1','骰子效果被连锁取消，不移动'); battleState.phase='main2'; var __aa=document.getElementById('diceAnimationArea'); if(__aa)__aa.style.display='none'; updateBattleUI(); return; }
+          var __fd=(res.moveAmount!==undefined&&res.moveAmount!==null)?res.moveAmount:finalDice;
+          finalDice=__fd; __rp._lastRoll=__fd; __diceReverse=!!res._reverseDir;
+          if(__diceReverse) addBattleLog('p1','骰子移动方向被连锁反转');
+          __startMove();
+        });
+      }
       function __startMove() {
         // 检查是否有位移增益（能量饮料等）
         var moveAmount = finalDice;
@@ -4796,6 +4822,8 @@ function rollDice() {
         rwOpen('move', { amount: moveAmount, player: 'p1' });
         var moveEffect = {
           type: 'move',
+          _stage: 'move',
+          _reverseDir: !!__diceReverse,
           description: '移动' + moveAmount + '格（骰子结果' + finalDice + '点）',
           player: 'p1',
           moveAmount: moveAmount,
@@ -4839,9 +4867,9 @@ function rollDice() {
         showChoiceModal('莉莉被动·逝者之眼', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', ['保留 ' + finalDice + ' 点', '改为对立面 ' + __oppDice + ' 点'], function (o) {
           if (o === 1) { finalDice = __oppDice; __rp._lastRoll = __oppDice; addBattleLog('p1', '【莉莉被动】选择对立面值 ' + __oppDice + ' 作为最终结果'); }
           else addBattleLog('p1', '【莉莉被动】保留 ' + finalDice + ' 点');
-          setTimeout(__startMove, 300);
+          setTimeout(__beginDiceWindow, 300);
         });
-      } else { setTimeout(__startMove, 600); }
+      } else { setTimeout(__beginDiceWindow, 600); }
     }
   }, 80);
 }
@@ -5267,6 +5295,18 @@ function aiPlayCards(maxActions, callback) {
 function aiExecuteMove(dice, callback) {
   var player = 'p2';
   var p = battleState[player];
+  var __aiReverse=false;
+  // —— 骰子结果“将要适用前”时点：玩家可连锁修改 AI 的骰子点数/方向 ——
+  rwOpen('dice', { result: dice });
+  var __aiDiceEff={ type:'dice_result', _stage:'dice_result', player:'p2', moveAmount:dice, diceResult:dice, description:'AI 骰子结果 '+dice+' 点将要适用（可连锁修改点数/方向）' };
+  pushEffect(__aiDiceEff);
+  beforeEffectExecution(__aiDiceEff, function(res){
+    rwClose('dice');
+    if(!res){ addBattleLog('p2','AI 骰子效果被连锁取消，不移动'); if(callback) setTimeout(callback,300); return; }
+    __aiReverse=!!res._reverseDir;
+    __aiDoMove((res.moveAmount!==undefined&&res.moveAmount!==null)?res.moveAmount:dice);
+  });
+  function __aiDoMove(dice) {
   var actualMove = Math.min(dice, 20);
   // 结构化指令层：固定位移/增减/打断（与玩家一致）
   if (p._fixedNextMove) { actualMove = p._fixedNextMove; p._fixedNextMove = 0; }
@@ -5277,7 +5317,7 @@ function aiExecuteMove(dice, callback) {
   // 移动连锁时点（手牌+盖伏均可连锁，走统一双方连锁引擎）
   rwOpen('move', { amount: actualMove, player: 'p2' });
   battleState._movingPlayer = 'p2';
-  var moveEffect = { type:'move', description:'AI移动'+actualMove+'格（骰子结果'+dice+'点）',
+  var moveEffect = { type:'move', _stage:'move', _reverseDir:__aiReverse, description:'AI移动'+actualMove+'格（骰子结果'+dice+'点）',
     player:'p2', moveAmount:actualMove, diceResult:dice, dependencies:{diceResult:dice} };
   pushEffect(moveEffect);
 
@@ -5352,6 +5392,7 @@ function aiExecuteMove(dice, callback) {
     updateBattleUI();
     if (callback) setTimeout(callback, 300);
   });
+  } // __aiDoMove
 }
 
 // AI结束回合
@@ -5703,6 +5744,7 @@ function __breakerCount(player) {
 }
 function useCharacterPassive() {
   if (battleState.currentPlayer !== 'p1') return;
+  if (__resolveLocked()) return;
   if (battleState.phase === 'roll') { alert('投掷阶段不能发动角色技能'); return; }
   var p = battleState.p1, options = [], T = battleState.turn;
   if (p._kasumiPassive && !p._kasumiUsedThisTurn) {
@@ -6796,8 +6838,17 @@ var effectEngine = {
   pendingTimingCallback: null,
   effectLog: [],
   chainStack: [],
-  isProcessing: false
+  isProcessing: false,
+  _resolveDepth: 0 // 效果结算嵌套深度：>0 或连锁逆结算中，禁止手动插入发动
 };
+// 效果正在结算（含连锁逆结算）时，不允许手动另发效果；连锁询问发生在上锁之前，故不拦截合法连锁
+function __resolveLocked() {
+  if (typeof effectEngine!=='undefined' && effectEngine && (effectEngine._resolveDepth>0 || effectEngine._chainLock)) {
+    addBattleLog('system','效果正在结算中，结算完成前不能插入发动其他效果');
+    return true;
+  }
+  return false;
+}
 
 // ========== 效果解析器 ==========
 
@@ -7281,7 +7332,7 @@ function __opAnchors(op) {
     case 'draw': return ['抽'];
     case 'draw_gift': return ['馈赠'];
     case 'draw_omikuji': return ['御神签'];
-    case 'move': case 'move_choice': case 'move_pay_extra': case 'move_by_roll': case 'move_to_player': case 'move_to_tile': case 'buff_double_move': case 'buff_bonus_move_after': case 'adjust_next_move': case 'adjust_next_move_all': case 'fix_next_move': return ['前进','后退','移动','跃','位移'];
+    case 'move': case 'move_range': case 'move_choice': case 'move_pay_extra': case 'move_by_roll': case 'move_to_player': case 'move_to_tile': case 'buff_double_move': case 'buff_bonus_move_after': case 'adjust_next_move': case 'adjust_next_move_all': case 'fix_next_move': return ['前进','后退','移动','跃','位移'];
     case 'search': case 'return_all_deck': case 'recycle_last': return ['加入手卡','加入手牌','回收','检索','放回','选'];
     case 'discard': case 'sacrifice_now': return ['送入墓地','送墓','献祭','送入墓'];
     case 'gain_shield': case 'break_shield': return ['护盾'];
@@ -7406,6 +7457,9 @@ function __compileBody(t) {
   }
 
   // 移动
+  // 区间移动（前进3-6格 / 移动2~4格）：玩家在闭区间内选择具体格数
+  var __rangeM = t.match(/(前进|后退|向前[^^。；，]{0,4}|向后[^^。；，]{0,4}|移动)\s*(\d+)\s*[-–—~～]\s*(\d+)\s*格/);
+  if (__rangeM) { var __rb = /后退|向后/.test(__rangeM[1]); ops.push({ op: 'move_range', min: +__rangeM[2], max: +__rangeM[3], dir: __rb ? -1 : 1 }); }
   var dirStep = __matchNum(new RegExp('前进\\s*[/／]\\s*后退\\s*' + __NUM + '\\s*格'), t);
   var __payMoveM = t.match(/可额外[^。；;]*?每额外[^。；;]*?(\d+)\s*音韵[^。；;]*?[+＋]\s*(\d+)\s*格/);
   var __payMoveHandled = false;
@@ -7424,7 +7478,7 @@ function __compileBody(t) {
   if (adj != null) ops.push({ op: /所有玩家|全体/.test(t) ? 'adjust_next_move_all' : 'adjust_next_move', delta: adj });
   var fixm = t.match(/位移量固定为\s*(\d+)/); if (fixm) ops.push({ op: 'fix_next_move', n: +fixm[1] });
   if (/改变[^。；]*下一次移动的方向/.test(t)) ops.push({ op: 'change_direction' });
-  var direct = !__payMoveHandled && dirStep == null && (has('前进') || has('后退') || /向前|向后/.test(t) || new RegExp('移动\\s*' + __NUM + '\\s*格').test(t)) &&
+  var direct = !__payMoveHandled && !__rangeM && dirStep == null && (has('前进') || has('后退') || /向前|向后/.test(t) || new RegExp('移动\\s*' + __NUM + '\\s*格').test(t)) &&
     !has('位移量') && !has('移动动作') && !has('下次移动') && !has('追加') && !has('跃向') && !has('移动到') && !has('移动至');
   if (direct) {
     var back = /后退|向后/.test(t);
@@ -8163,7 +8217,12 @@ function runOneOp(op, ctx, next) {
   }
   next();
 }
-function runOps(ops, ctx, done) { var i = 0; (function step() { if (i >= ops.length) { if (done) done(); return; } runOneOp(ops[i++], ctx, step); })(); }
+function runOps(ops, ctx, done) {
+  var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
+  if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
+  var i = 0;
+  (function step() { if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); return; } runOneOp(ops[i++], ctx, step); })();
+}
 
 function dispatchStep(text, ctx, next) {
   var cls = classifyClause(text);
@@ -8271,7 +8330,9 @@ function dispatchStep(text, ctx, next) {
 
 
 
+
 function executeEffectSteps(steps, context, finalCallback, showLog) {
+  var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null; if(__ee2)__ee2._resolveDepth=(__ee2._resolveDepth||0)+1;
   effectEngine.effectLog = [];
   // 发动者为 AI(p2) 时进入自动结算：所有选卡/目标弹窗自动决策，避免 AI 回合卡死
   effectEngine.autoResolve = !!(context && context.user === 'p2');
@@ -8280,6 +8341,7 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
   function executeNextStep() {
     if (currentStep >= steps.length) {
       effectEngine.autoResolve = false; // 整条效果链结束复位
+      if(__ee2)__ee2._resolveDepth=Math.max(0,(__ee2._resolveDepth||1)-1);
       // 所有步骤执行完成
       if (showLog !== false) showEffectLog();
       if (finalCallback) finalCallback();
@@ -9355,10 +9417,12 @@ var GRAVE_SP_DEFS = [
     run: function (card, zone, redraw) {
       var p = battleState.p1, arr = p[zone] || [], ri = arr.indexOf(card); if (ri < 0) return;
       arr.splice(ri, 1); (p.removed = p.removed || []).push(card);
-      var steps = 3 + Math.floor(Math.random() * 4);
-      addBattleLog('p1', '【柔软枕头·SP】移出此卡，前进' + steps + '格');
-      executeMoveEffect({ player: 'p1', moveAmount: steps });
-      updateBattleUI(); redraw();
+      showChoiceModal('柔软枕头·SP','选择前进格数（3-6格）','把自身移出游戏后，在3~6格中选择本次前进距离',['前进3格','前进4格','前进5格','前进6格'],function(o){
+        var steps = 3 + o;
+        addBattleLog('p1', '【柔软枕头·SP】移出此卡，前进' + steps + '格');
+        executeMoveEffect({ player: 'p1', moveAmount: steps });
+        updateBattleUI(); redraw();
+      });
     }
   },
   { // 先哲之"馈赠"：移出自身，对一名其他玩家造4点热忱伤害
@@ -9377,6 +9441,8 @@ function __graveSPDef(card) { for (var i = 0; i < GRAVE_SP_DEFS.length; i++) { i
 function __graveSPAllowed() { return battleState.currentPlayer === 'p1' && (battleState.phase === 'main1' || battleState.phase === 'main2'); }
 function activateGraveSP(zone, idx) {
   var p = battleState.p1, arr = p[zone] || [], card = arr[idx]; if (!card) return;
+  if (zone !== 'grave') { alert('该效果需在这张卡位于墓地时发动（把自身从墓地移出游戏）；它已在移出游戏区，不能再次发动'); return; }
+  if (typeof effectEngine!=='undefined' && effectEngine && (effectEngine._resolveDepth>0 || effectEngine._chainLock)) { alert('效果结算中，不能插入发动'); return; }
   if (!__graveSPAllowed()) { alert('墓地SP只能在自己的主要阶段发动'); return; }
   var def = __graveSPDef(card); if (!def) return;
   if (!def.ok(p)) { alert(def.reason || '条件不满足'); return; }
@@ -9415,11 +9481,12 @@ function showGraveList(zone) {
     for (var i = 0; i < list.length; i++) {
       (function(card, idx){
         var realArr = zcur==='removed' ? removed : p.grave;
-        var def = __graveSPDef(card), canSP = def && __graveSPAllowed() && def.ok(p);
+        var def = __graveSPDef(card), canSP = def && zcur==='grave' && __graveSPAllowed() && def.ok(p);
         var div=document.createElement('div');
         div.className='card-list-item';
         div.style.cssText='width:130px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid '+(def?'#feca57':'rgba(255,255,255,0.2)')+';border-radius:6px;';
-        var spBtn = def ? ('<button data-sp="1" style="width:100%;margin-top:6px;padding:5px;font-size:11px;border:none;border-radius:4px;cursor:pointer;'+(canSP?'background:#feca57;color:#2d3436;font-weight:bold;':'background:#555;color:#aaa;cursor:not-allowed;')+'">⚡ '+(canSP?def.label:('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）'))+'</button>') : '';
+        var __spTxt = canSP ? ('⚡ '+def.label) : (zcur!=='grave' ? '◇ 已移出游戏，无法再发动' : ('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）'));
+        var spBtn = def ? ('<button data-sp="1" style="width:100%;margin-top:6px;padding:5px;font-size:11px;border:none;border-radius:4px;cursor:'+(canSP?'pointer':'not-allowed')+';'+(canSP?'background:#feca57;color:#2d3436;font-weight:bold;':'background:#555;color:#aaa;')+'">'+__spTxt+'</button>') : '';
         div.innerHTML='<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">'+(card.effect||'').substring(0,50)+'...</div>'+spBtn;
@@ -10194,13 +10261,13 @@ function hasChainTarget(card) {
   if (!card) return false;
   var name = card.name || '';
   var effect = card.effect || card.text || '';
-  // 位移量增减/打断移动：需要有正在进行的移动
-  if (effect.indexOf('移动') >= 0 && (effect.indexOf('增减') >= 0 || effect.indexOf('打断') >= 0 || effect.indexOf('位移量') >= 0 || effect.indexOf('方向') >= 0)) {
+  // 位移量增减/打断移动：需要有正在进行的移动（“改变方向”类不在此分支，归骰子/方向窗口）
+  if (effect.indexOf('移动') >= 0 && (effect.indexOf('增减') >= 0 || effect.indexOf('打断') >= 0 || effect.indexOf('位移量') >= 0)) {
     return rwHas('move');
   }
-  // 修改骰子点数/方向：需要处于投骰阶段，或骰子刚投出尚未结算
-  if (effect.indexOf('掷骰') >= 0 || effect.indexOf('骰子') >= 0 || name.indexOf('遥控骰子') >= 0 || name.indexOf('颠倒骰子') >= 0) {
-    return battleState.phase === 'roll' || rwHas('dice');
+  // 修改骰子点数 / 改变移动方向：投骰阶段、骰子结果将要适用窗口、移动将要执行窗口均可
+  if (effect.indexOf('掷骰') >= 0 || effect.indexOf('骰子') >= 0 || name.indexOf('遥控骰子') >= 0 || name.indexOf('颠倒骰子') >= 0 || /改变[^。；]*方向/.test(effect)) {
+    return battleState.phase === 'roll' || rwHas('dice') || rwHas('move');
   }
   // 抵消伤害：需要有即将受到的伤害窗口
   if (effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) {
@@ -10311,6 +10378,7 @@ function activateFaceDown(index, player) {
 // 3. 被动效果：自动触发，不需要发动
 function activatePermanentCard(index) {
   if (!battleState || battleState.currentPlayer !== 'p1') return;
+  if (__resolveLocked()) return;
   
   var card = battleState.p1.permanent[index];
   if (!card) return;
@@ -10720,6 +10788,7 @@ function executePermanentEffect(index) {
 // ========== 完整卡牌使用/发动流程 ==========
 
 function useCardComplete(handIndex) {
+  if (__resolveLocked()) return;
   // 对手回合：仅角色技能卡（全时点）可从手牌发动，其余卡无特殊说明一律不能手发
   if (battleState.currentPlayer !== 'p1') {
     var __oppCard = battleState.p1.hand[handIndex];
