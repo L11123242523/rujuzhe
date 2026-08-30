@@ -7552,6 +7552,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
     var __kz = String((op.kind||'') + ' ' + (op.attr||'')); var __isSanityOp = /理智|sanity/i.test(__kz);
     if (__isSanityOp && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) { base += 1; addBattleLog(user, '【风纪委员臂章】理智最终伤害+1'); }
     if (op.judge && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; })) { base += 1; addBattleLog(user, '【钢笔】判定伤害+1'); }
+    if (srcCard && srcCard.name && srcCard.name.indexOf('神乐铃') >= 0 && (p._shenleStack || 0) > 0) { var __sl = p._shenleStack; base += __sl; p._shenleStack = 0; addBattleLog(user, '【神乐铃】消耗' + __sl + '层墓地叠加，本次最终伤害+' + __sl); }
     if (srcCard && srcCard._category === 'attack_cards' && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('善意面具') >= 0; })) { base += 1; addBattleLog(user, '【善意面具·SP】攻击卡最终伤害+1'); }
     if (op.judge && p._judgeDamageBonus) base += p._judgeDamageBonus;
     var __tags = (srcCard && srcCard.tags) || [], __cat = srcCard && srcCard._category;
@@ -7564,7 +7565,10 @@ function applyDamageOps(user, target, op, done, srcCard) {
     if (op.kind === 'sanity' && p._intellectBonus) base += p._intellectBonus;
     if (p._attrBonus) { var __ua = __opAttr(op, srcCard), __ta = battleState[target].captain && battleState[target].captain.attribute; if (__ua && __ta && typeof __attrBeats === 'function' && __attrBeats(__ua, __ta)) base += p._attrBonus; }
     function __deal(finalBase) {
-      var afterDef = finalBase - (battleState[target].defense || 0); if (afterDef < 0) afterDef = 0; if (afterDef > finalBase + 30) afterDef = finalBase + 30;
+      // 杂鱼！杂鱼！SP：只要此卡在墓地，防御值为负的玩家受到的最终伤害+1
+      var __tgt = battleState[target];
+      if ((__tgt.defense || 0) < 0 && ['p1','p2'].some(function (q) { return (battleState[q].grave || []).some(function (c) { return c.name && c.name.indexOf('杂鱼') >= 0; }); })) { finalBase += 1; addBattleLog(user, '【杂鱼！杂鱼！·墓地SP】目标防御为负，最终伤害+1'); }
+      var afterDef = finalBase - (__tgt.defense || 0); if (afterDef < 0) afterDef = 0; if (afterDef > finalBase + 30) afterDef = finalBase + 30;
       var __hadSync = battleState[target].sync;
       dealDamageWithResponse(target, afterDef, op.source || '效果', function () {
         if (op.judge && p._ruriPassive && finalBase > 0) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(user, '【琉璃被动】判定伤害后回复1音韵'); }
@@ -7898,6 +7902,8 @@ function dispatchStep(text, ctx, next) {
   else if (ops.length) runOps(ops, ctx, next);
   else next();
 }
+
+
 
 
 
@@ -9043,6 +9049,48 @@ var GRAVE_SP_DEFS = [
       addBattleLog('p1', '【永奏进行曲·SP】支付4点同步值并把自身移出游戏，抽2张卡');
       updateBattleUI(); redraw();
     }
+  },
+  { // 一刀两断！打西瓜！：把一张手卡/区域卡送入墓地，墓地的此卡加入手卡
+    match: /一刀两断|打西瓜/, label: '送1张卡进墓，将此卡加入手卡',
+    ok: function (p) { return (p.hand || []).length + (p.permanent || []).length >= 1; }, reason: '没有可送入墓地的手卡或区域卡',
+    run: function (card, zone, redraw) {
+      var p = battleState.p1, cands = [];
+      (p.hand || []).forEach(function (c) { cands.push({ card: c, zone: 'hand' }); });
+      (p.permanent || []).forEach(function (c) { cands.push({ card: c, zone: 'permanent' }); });
+      if (!cands.length) return;
+      showCardPickerMulti(cands.map(function (x) { return x.card; }), '一刀两断：选一张卡送入墓地（墓地的此卡加入手卡）', function (ix) {
+        if (!ix || !ix.length) return;
+        var pick = cands[ix[0]], arr = p[pick.zone], pi = arr.indexOf(pick.card); if (pi < 0) return;
+        arr.splice(pi, 1); p.grave.push(pick.card);
+        if (typeof checkGraveTrigger === 'function') checkGraveTrigger('p1', pick.card, 'effect');
+        var si = p.grave.indexOf(card); if (si < 0) return;
+        p.grave.splice(si, 1); p.hand.push(card);
+        addBattleLog('p1', '【一刀两断！打西瓜！·SP】送1张卡进墓，将墓地的此卡加入手卡');
+        updateBattleUI(); redraw();
+      }, 1);
+    }
+  },
+  { // 柔软枕头：移出自身，前进3-6格
+    match: /柔软枕头/, label: '移出此卡，前进3-6格',
+    ok: function () { return true; }, reason: '',
+    run: function (card, zone, redraw) {
+      var p = battleState.p1, arr = p[zone] || [], ri = arr.indexOf(card); if (ri < 0) return;
+      arr.splice(ri, 1); (p.removed = p.removed || []).push(card);
+      var steps = 3 + Math.floor(Math.random() * 4);
+      addBattleLog('p1', '【柔软枕头·SP】移出此卡，前进' + steps + '格');
+      executeMoveEffect({ player: 'p1', moveAmount: steps });
+      updateBattleUI(); redraw();
+    }
+  },
+  { // 先哲之"馈赠"：移出自身，对一名其他玩家造4点热忱伤害
+    match: /先哲/, label: '移出此卡，对对手造成4点热忱伤害',
+    ok: function () { return true; }, reason: '',
+    run: function (card, zone, redraw) {
+      var p = battleState.p1, arr = p[zone] || [], ri = arr.indexOf(card); if (ri < 0) return;
+      arr.splice(ri, 1); (p.removed = p.removed || []).push(card);
+      addBattleLog('p1', '【先哲之馈赠·SP】移出此卡，对对手造成4点热忱伤害');
+      dealDamageWithResponse('p2', 4, '先哲之馈赠·SP', function () { updateBattleUI(); redraw(); }, '热忱');
+    }
   }
 ];
 function __graveSPDef(card) { for (var i = 0; i < GRAVE_SP_DEFS.length; i++) { if (GRAVE_SP_DEFS[i].match.test(card.name || '')) return GRAVE_SP_DEFS[i]; } return null; }
@@ -9578,6 +9626,11 @@ function checkGraveTrigger(player, card, reason) {
     else __hit(tp === 'p1' ? 'p2' : 'p1');
   })();
 
+  // 神乐铃 SP：每进入墓地一次，下次使用最终伤害+1（可叠加，上限9层）
+  if (cardName.indexOf('神乐铃') >= 0) {
+    p._shenleStack = Math.min(9, (p._shenleStack || 0) + 1);
+    addBattleLog(player, '【神乐铃·SP】进入墓地，下次使用最终伤害+1（当前叠加' + p._shenleStack + '层，上限9）');
+  }
   // 通用必发：卡面 sp 写“被献祭 / 因卡的效果送入墓地时回复自身X点音韵”（如鸣奏之"圣音"）
   if (sp && (reason === 'sacrifice' || reason === 'effect') && /被献祭|因卡的效果[^，。]*送入墓地|送入墓地时[^，。]*(回复|回)/.test(sp)) {
     var __rc = sp.match(/回复自身?\s*(\d+)\s*点音韵/);
@@ -9737,6 +9790,18 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr) 
     }
   }
   
+  // 墓地抵消卡：卡在墓地时，自己受到伤害后可把此卡移出游戏来抵消那次伤害（如 人格修正拳！SP）
+  var __graveNegIdx = -1, __graveNegCard = null;
+  for (var __gni = 0; __gni < (p.grave || []).length; __gni++) {
+    var __gnc = p.grave[__gni], __gnsp = __gnc.sp || '';
+    if (__gnsp.indexOf('抵消') >= 0 && __gnsp.indexOf('移出') >= 0 && /受到(的)?伤害|那次伤害/.test(__gnsp)) { __graveNegIdx = __gni; __graveNegCard = __gnc; break; }
+  }
+  function __useGraveNeg(idx) {
+    var nc = p.grave.splice(idx, 1)[0]; (p.removed = p.removed || []).push(nc);
+    addBattleLog(target, '发动墓地【' + nc.name + '】并将其移出游戏，抵消本次' + damage + '点伤害');
+    rwClose('damage'); updateBattleUI();
+    if (callback) callback(0);
+  }
   // 正常承受伤害（先扣护盾再扣同步）
   function __normalHit() {
     var __baseDmg = damage;
@@ -9778,26 +9843,34 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr) 
     if (callback) callback(0);
   }
 
-  // 玩家受伤：可视化询问是否发动护符
-  if (target === 'p1' && hasCharm) {
+  // 玩家受伤：可视化询问抵消方式（手牌/盖伏护符、墓地移出抵消）或承受
+  if (target === 'p1' && (hasCharm || __graveNegIdx >= 0)) {
     rwOpen('damage', { amount: damage, target: target });
-    showChoiceModal('受伤响应', '即将受到' + damage + '点伤害', '是否发动护符抵消本次伤害及附加效果（消耗该卡并前进2格）？', ['🛡️ 发动护符抵消', '承受本次伤害'], function(o) {
-      if (o === 0) {
+    var __negOpts = [], __negActs = [];
+    if (hasCharm) { __negOpts.push('🛡️ 发动护符抵消（消耗并前进2格）'); __negActs.push('charm'); }
+    if (__graveNegIdx >= 0) { __negOpts.push('⚡ 发动墓地【' + __graveNegCard.name + '】并移出游戏来抵消'); __negActs.push('grave'); }
+    __negOpts.push('承受本次伤害'); __negActs.push('take');
+    showChoiceModal('受伤响应', '即将受到' + damage + '点伤害', '可选择抵消方式，或承受本次伤害', __negOpts, function(o) {
+      var a = __negActs[o];
+      if (a === 'charm') {
         if (charmIndex >= 0) __useCharm(false, charmIndex);
         else if (faceDownCharmIndex >= 0) __useCharm(true, faceDownCharmIndex);
         else __normalHit();
+      } else if (a === 'grave') {
+        __useGraveNeg(__graveNegIdx);
       } else {
-        addBattleLog('p1', '选择不发动护符，受到' + damage + '点伤害');
+        addBattleLog('p1', '选择承受' + damage + '点伤害');
         rwClose('damage'); __normalHit();
       }
     });
     return;
-  } else if (target === 'p2' && hasCharm) {
+  } else if (target === 'p2' && (hasCharm || __graveNegIdx >= 0)) {
     // AI 自动伤害响应：致命、或会被压到危险线（<=8）时才消耗护符
     var aiCharm = null, aiFromFaceDown = false, aiCharmIdx = -1;
     if (charmIndex >= 0 && ((p.hand[charmIndex].cost || 0) <= p.cost)) { aiCharm = p.hand[charmIndex]; aiCharmIdx = charmIndex; }
     else if (faceDownCharmIndex >= 0) { aiCharm = p.faceDownCards[faceDownCharmIndex]; aiCharmIdx = faceDownCharmIndex; aiFromFaceDown = true; }
     var afterSync = p.sync - damage;
+    if (__graveNegIdx >= 0 && damage >= p.sync) { __useGraveNeg(__graveNegIdx); return; }
     if (aiCharm && (damage >= p.sync || afterSync <= 8)) {
       if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else { p.cost -= (aiCharm.cost||0); p.hand.splice(aiCharmIdx,1); }
       p.grave.push(aiCharm);
