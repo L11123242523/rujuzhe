@@ -4973,13 +4973,20 @@ function executeMoveEffect(effect) {
 }
 
 // 统一投掷：读取下次面数/枚数标记、神醉减半，玩家与AI共用
+// 普通现实间里绪担任队长（才有“2枚六面骰替换”被动；水着里绪无此效果）
+function isRioCaptain(player) {
+  var p = (typeof battleState!=='undefined') ? battleState[player] : null;
+  var c = p && p.captain, nm = c ? (''+c.name) : '';
+  return !!(nm.indexOf('里绪') >= 0 && nm.indexOf('水着') < 0);
+}
 function rollPlayerDice(player) {
   var p = battleState[player];
-  var sides = p._nextDiceSides || 6, cnt = p._nextDiceCount || 1, d = 0;
-  for (var k=0;k<cnt;k++) d += Math.floor(Math.random()*sides)+1;
-  if (cnt > 1) d = Math.max(1, Math.round(d/cnt));
+  var sides = p._nextDiceSides || 6, cnt = p._nextDiceCount || 1, d = 0, __rolls = [];
+  for (var k=0;k<cnt;k++){ var __rv=Math.floor(Math.random()*sides)+1; d += __rv; __rolls.push(__rv); }
+  // 多枚骰：点数“相加”（碰碰冰茶2枚6面骰、里绪被动2枚六面骰 => 2~12），不再取平均
+  p._lastRolls = __rolls;
   if (typeof StatusSys!=='undefined' && StatusSys.has(player,'神醉')) { var __b=d; d=Math.max(1,Math.floor(d/2)); p.statuses=p.statuses.filter(function(x){return x.type!=='神醉';}); addBattleLog(player,'【神醉】投掷点数减半 '+__b+'→'+d); }
-  p._lastRoll = d; p._nextDiceSides = 0; p._nextDiceCount = 1;
+  p._lastRoll = d; p._nextDiceSides = 0; p._nextDiceCount = 1; p._rioTwoDice = false;
   p._hinaMoveUsedThisAction = false; // 羽奈被动：新行动重置[移动]道具触发标记
   // 里绪(水着)SP：首次投掷后回复与点数相同的音韵值
   if (p._rioMizugiSP && !p._rioMizugiFirstRoll) { p._rioMizugiFirstRoll = true; p.cost = Math.min(p.cost + d, p.maxCost); addBattleLog(player, '【里绪(水着)SP】首次投掷回复' + d + '点音韵值'); }
@@ -4995,6 +5002,24 @@ function rollDice() {
     alert('本阶段已经投过骰子了！');
     return;
   }
+  // 【里绪被动】可用2枚六面骰替换原本骰子（点数相加2~12）；仅标准移动主骰、且不可用于判定伤害（此处为移动骰，允许）
+  var __rp0 = battleState.p1;
+  if (isRioCaptain('p1') && !__rp0._nextDiceSides && (__rp0._nextDiceCount||1) <= 1 && !__rp0._rioChooseAsked) {
+    __rp0._rioChooseAsked = true;
+    showChoiceModal('里绪被动 · 不用羡慕人家哦！',
+      '本次移动投掷，可使用 2 枚六面骰替换原本的 1 枚（两枚点数相加，2~12）',
+      '该替换不可用于判定伤害的伤害判定。请选择本次投掷方式：',
+      ['🎲 1 枚六面骰（1~6）', '🎲🎲 2 枚六面骰·点数相加（2~12）'],
+      function (idx) {
+        if (idx === 1) {
+          __rp0._nextDiceSides = 6; __rp0._nextDiceCount = 2; __rp0._rioTwoDice = true;
+          addBattleLog('p1', '【里绪被动】使用2枚六面骰替换，两枚点数相加作为移动格数');
+        }
+        rollDice(); // 重入：_rioChooseAsked 已置位，跳过弹窗直接投掷
+      });
+    return;
+  }
+  __rp0._rioChooseAsked = false;
   battleState._diceRolledThisPhase = true;
   
   // 显示投掷动画区域
@@ -5034,12 +5059,13 @@ function rollDice() {
         diceEl.textContent = (__sides===6)?(['⚀','⚁','⚂','⚃','⚄','⚅'][finalDice-1]):String(finalDice);
         diceEl.style.transform = 'rotate(0deg) scale(1.2)';
       }
+      var __rollText = (__rp._lastRolls && __rp._lastRolls.length > 1) ? (__rp._lastRolls.join('+') + '=' + finalDice) : ('' + finalDice);
       if (resultEl) {
-        resultEl.textContent = finalDice + ' 点';
+        resultEl.textContent = __rollText + ' 点';
         resultEl.style.display = 'block';
       }
       if (messageEl) {
-        messageEl.textContent = '投出 ' + finalDice + ' 点！';
+        messageEl.textContent = '投出 ' + __rollText + ' 点！';
       }
       
       // 设置连锁时点标志：骰子刚投出，遥控骰子/颠倒骰子等可连锁
@@ -5454,9 +5480,15 @@ function aiTurn() {
       updateBattleUI();
       
       setTimeout(function() {
+        var __aip = battleState.p2;
+        if (isRioCaptain('p2') && !__aip._nextDiceSides && (__aip._nextDiceCount||1) <= 1) {
+          __aip._nextDiceSides = 6; __aip._nextDiceCount = 2; __aip._rioTwoDice = true;
+          addBattleLog('p2', '【里绪被动】AI使用2枚六面骰替换（点数相加）');
+        }
         var dice = rollPlayerDice('p2');
         battleState._diceRolledThisPhase = true;
-        addBattleLog('p2', '投出' + dice + '点');
+        var __aiRollTxt = (__aip._lastRolls && __aip._lastRolls.length>1) ? (__aip._lastRolls.join('+')+'='+dice) : (''+dice);
+        addBattleLog('p2', '投出' + __aiRollTxt + '点');
         
         // 执行AI移动
         aiExecuteMove(dice, function() {
