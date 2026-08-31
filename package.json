@@ -1,0 +1,31 @@
+{
+  "name": "rujuzhe-online",
+  "version": "0.1.0",
+  "private": true,
+  "description": "入局者 TCG：Colyseus 权威联机服务器（前端静态页同仓，Render 部署本服务，GitHub Pages 托管前端）",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test:online": "node server/test/two_client_test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.16.25",
+    "@colyseus/schema": "^3.0.0",
+    "@colyseus/ws-transport": "^0.16.0",
+    "colyseus": "^0.16.5",
+    "cors": "^2.8.6",
+    "cos-nodejs-sdk-v5": "^3.0.0",
+    "express": "^4.22.2"
+  },
+  "devDependencies": {
+    "colyseus.js": "^0.16.22",
+    "playwright-core": "^1.62.1",
+    "wrangler": "^4.127.1"
+  },
+  "overrides": {
+    "@colyseus/greeting-banner": "^2.0.6"
+  }
+}

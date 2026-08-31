@@ -81,6 +81,7 @@
     if (opts.fromFaceDown) return { ok: true };
     if (opts.isSkill && phase !== 'roll') return { ok: true };
     if (phase === 'main1' || phase === 'main2') return { ok: true };
+    if (phase === 'roll' && opts.isMoveRoll) return { ok: true }; // 投掷/移动类主动道具在自己投掷阶段可发
     return { ok: false, reason: '当前阶段不能手动发动' };
   }
 

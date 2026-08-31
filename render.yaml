@@ -1,0 +1,17 @@
+# Render Blueprint —— 入局者权威联机服务器（免费档）
+# 首次：Render 控制台 New → Blueprint，连接 GitHub 仓库 L11123242523/rujuzhe 即可按本文件自动创建服务
+services:
+  - type: web
+    name: rujuzhe-server
+    runtime: node
+    plan: free                 # 免费档；被冷启动困扰再升级
+    region: singapore          # 新加坡，对国内延迟最低
+    branch: main
+    rootDir: .                 # 仓库根即服务根（package.json 在根）
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true           # main 有新提交即覆盖部署
+    envVars:
+      - key: NODE_ENV
+        value: production

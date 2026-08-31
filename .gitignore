@@ -1,0 +1,18 @@
+# 依赖
+node_modules/
+# 日志
+*.log
+npm-debug.log*
+# 系统
+.DS_Store
+# 本地部署工作副本 / 临时产物
+.deploy_rujuzhe/
+_srv*.js
+_min.js
+_eng*.html
+_ai.html
+_getappid.js
+# 云厂商本地凭证（严禁入库）
+.cos_env
+tools/.cos_env
+.env

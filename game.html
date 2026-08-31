@@ -2471,12 +2471,63 @@ body::before{opacity:.62;}
   <h1 class="game-title">RuJuZhe！BAGs</h1>
   <p class="game-subtitle">入 局 者</p>
   <div class="menu-buttons">
-    <button class="menu-btn btn-pve" onclick="startBattle()">⚔️ PvE 对战</button>
+    <button class="menu-btn btn-pve" onclick="startBattle()">⚔️ 单机对战</button>
+    <button class="menu-btn" style="background:linear-gradient(135deg,#2563eb,#0ea5e9);" onclick="showScreen('onlineLobby');Online.refreshLobby();">🌐 联机对战(PvP)</button>
     <button class="menu-btn btn-pve" onclick="alert('🚧 肉鸽模式开发中\n专属卡牌设计完成后开放')" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);opacity:0.6;cursor:not-allowed;">🚧 肉鸽模式（开发中）</button>
     <button class="menu-btn btn-deck" onclick="showScreen('deckBuilder')">🃏 卡组配置</button>
     <button class="menu-btn btn-cards" onclick="showScreen('cardViewer')">📖 卡牌图鉴</button>
     <button class="menu-btn btn-rules" onclick="showScreen('rulesScreen')">📜 游戏规则</button>
   </div>
+</div>
+
+<!-- 联机大厅 -->
+<div id="onlineLobby" class="screen">
+  <style>
+    .ol-wrap{max-width:560px;margin:24px auto;background:rgba(20,26,40,.92);border:1px solid rgba(120,160,255,.25);border-radius:16px;padding:22px 24px;color:#e8eefc;box-shadow:0 8px 32px rgba(0,0,0,.45);}
+    .ol-wrap h2{margin:0 0 4px;font-size:22px;}
+    .ol-wrap .ol-sub{color:#9fb0d0;font-size:13px;margin-bottom:16px;}
+    .ol-row{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap;}
+    .ol-row label{width:78px;color:#aebcd8;font-size:13px;}
+    .ol-row input{flex:1;min-width:160px;background:#11182b;border:1px solid #33405f;color:#e8eefc;border-radius:8px;padding:9px 11px;font-size:14px;}
+    .ol-btn{border:none;border-radius:9px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;color:#fff;background:linear-gradient(135deg,#2563eb,#0ea5e9);}
+    .ol-btn.gray{background:linear-gradient(135deg,#475569,#64748b);}
+    .ol-btn.green{background:linear-gradient(135deg,#16a34a,#22c55e);}
+    .ol-btn:disabled{opacity:.5;cursor:not-allowed;}
+    .ol-status{margin-top:14px;background:#0d1424;border:1px dashed #33405f;border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;min-height:64px;white-space:pre-wrap;}
+    .ol-roomid{font-family:monospace;font-size:18px;letter-spacing:2px;color:#7dd3fc;font-weight:700;}
+    #onlineChainBar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;display:none;min-width:340px;max-width:92vw;background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid #38bdf8;border-radius:14px;padding:12px 14px;color:#e8eefc;box-shadow:0 8px 30px rgba(0,0,0,.55);}
+    #onlineChainBar .oc-title{font-weight:700;color:#7dd3fc;margin-bottom:6px;font-size:14px;}
+    #onlineChainBar .oc-desc{font-size:13px;color:#cbd5e1;margin-bottom:10px;}
+    #onlineChainBar .oc-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    #onlineChainBar .oc-btns button{border:none;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;color:#fff;background:#334155;}
+    #onlineChainBar .oc-btns button.pass{background:#16a34a;}
+    #onlineChainBar select{background:#0b1220;color:#e8eefc;border:1px solid #334155;border-radius:7px;padding:6px;}
+  </style>
+  <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
+  <div class="ol-wrap">
+    <h2>🌐 联机对战</h2>
+    <div class="ol-sub">权威服务器托管：双方随机同源、结果一致。一人创建房间，把房号发给另一人加入。</div>
+    <div class="ol-row"><label>服务器</label><input id="olServer" placeholder="留空=与网页同源；本地调试 ws://localhost:2567"></div>
+    <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
+    <div class="ol-row">
+      <button class="ol-btn" onclick="Online.createRoom()">① 创建房间</button>
+      <input id="olRoomId" placeholder="输入对方房号" style="max-width:130px;">
+      <button class="ol-btn green" onclick="Online.joinRoom()">② 加入房间</button>
+    </div>
+    <div class="ol-status" id="olStatus">尚未连接服务器。</div>
+    <div class="ol-row" style="margin-top:14px;">
+      <button class="ol-btn green" id="olReadyBtn" onclick="Online.ready()" disabled>✓ 准备</button>
+      <button class="ol-btn gray" onclick="Online.copyRoomId()">复制房号</button>
+      <button class="ol-btn gray" onclick="Online.leave()">离开房间</button>
+    </div>
+  </div>
+</div>
+
+<!-- 联机连锁操作条（权威窗口） -->
+<div id="onlineChainBar">
+  <div class="oc-title" id="ocTitle">连锁窗口</div>
+  <div class="oc-desc" id="ocDesc"></div>
+  <div class="oc-btns" id="ocBtns"></div>
 </div>
 
 <!-- 对战界面 -->
@@ -2539,7 +2590,7 @@ body::before{opacity:.62;}
       <span class="mini-name">AI</span>
       <span class="mini-avatar p2">P2</span>
     </div>
-    <button class="battle-exit-btn" onclick="showScreen('mainMenu')">✕</button>
+    <button class="battle-exit-btn" onclick="if(typeof Online!=='undefined'&&Online.active){Online.leave();}showScreen('mainMenu')">✕</button>
   </div>
   <div class="battle-main-area">
     <div class="opponent-area">
@@ -3240,6 +3291,167 @@ var GameRNG = (typeof RJEngine!=='undefined' && RJEngine.createRNG) ? RJEngine.c
   return new R();
 })();
 function setGameSeed(seed){ if(GameRNG&&GameRNG.reseed) GameRNG.reseed(seed); return GameRNG; }
+
+/* ============================================================
+ * Online —— 联机(PvP)权威客户端层（Colyseus）
+ * 阶段1边界：打通 同房/同权威种子/权威投骰/双方连锁窗口 通道；
+ *   - 主机(host=先手)端正常推进自己的 p1 对局，投骰走服务器权威窗口；
+ *   - 加入端实时收到同样的窗口消息、可在连锁窗口中改点/pass（旁观+连锁）；
+ *   - 完整双向动作/卡组/隐藏信息同步在后续批次迁入权威房间。
+ * 单机时 Online.active=false，全部逻辑走原本地路径，互不影响。
+ * ============================================================ */
+var Online = {
+  active:false, isHost:false, connected:false,
+  client:null, room:null, mySession:'', oppSession:'', mySide:'p1',
+  seed:0, roomId:'', endpoint:'',
+  _libPromise:null, _pendingRoll:null, _win:null,
+  // 把输入 ws、wss、http、https 或留空，规范成网页 origin
+  _origin:function(raw){
+    var v=(raw||'').trim();
+    if(!v){ return location.origin && location.origin.indexOf('http')===0 ? location.origin : 'http://localhost:2567'; }
+    v=v.replace(/^wss:\/\//,'https://').replace(/^ws:\/\//,'http://');
+    return v.replace(/\/+$/,'');
+  },
+  status:function(t){ var el=document.getElementById('olStatus'); if(el) el.textContent=t; },
+  refreshLobby:function(){ this.status('填写服务器地址（Render 部署后的服务地址；本地调试填 ws://localhost:2567），创建房间或输入房号加入。'); },
+  // 动态加载同仓托管的 colyseus.js browser bundle（版本锁定，不依赖外部CDN）
+  loadLib:function(){
+    if(typeof window.Colyseus!=='undefined') return Promise.resolve(window.Colyseus);
+    if(this._libPromise) return this._libPromise;
+    var self=this;
+    this._libPromise=new Promise(function(resolve,reject){
+      var origin=self._origin(document.getElementById('olServer')?document.getElementById('olServer').value:'');
+      var s=document.createElement('script');
+      s.src=origin+'/vendor/colyseus.js';
+      s.onload=function(){ if(window.Colyseus) resolve(window.Colyseus); else reject(new Error('Colyseus 库加载失败')); };
+      s.onerror=function(){ reject(new Error('无法从 '+origin+' 加载 /vendor/colyseus.js，请确认服务器地址与服务已启动')); };
+      document.head.appendChild(s);
+    });
+    return this._libPromise;
+  },
+  _name:function(){ var el=document.getElementById('olName'); var n=el?el.value.trim():''; return n||('玩家'+Math.floor(Math.random()*900+100)); },
+  createRoom:function(){ var self=this; this._go(function(C){ self.client=new C.Client(self.endpoint); return self.client.joinOrCreate('rujuzhe',{name:self._name()}); },true); },
+  joinRoom:function(){
+    var id=(document.getElementById('olRoomId').value||'').trim();
+    if(!id){ alert('请输入对方房间号'); return; }
+    var self=this; this._go(function(C){ self.client=new C.Client(self.endpoint); return self.client.joinById(id,{name:self._name()}); },false);
+  },
+  _go:function(joinFn,isHost){
+    var self=this;
+    this.endpoint=this._origin(document.getElementById('olServer')?document.getElementById('olServer').value:'');
+    this.status('正在连接 '+this.endpoint+' …');
+    this.loadLib().then(function(C){
+      return joinFn(C);
+    }).then(function(room){
+      self._bind(room,isHost);
+    }).catch(function(e){ console.error(e); self.status('连接失败：'+(e&&e.message?e.message:e)); });
+  },
+  _bind:function(room,isHost){
+    var self=this;
+    this.room=room; this.connected=true; this.mySession=room.sessionId; this.roomId=room.roomId; this.isHost=isHost;
+    this.status((isHost?'已创建房间':'已加入房间')+'，房号：'+room.roomId+'\n等待双方准备…（把房号发给对手，对手输入后点加入）');
+    var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=false;
+    room.onStateChange(function(st){
+      var names=[]; if(st&&st.players) st.players.forEach(function(p){ names.push(p.name+(p.ready?'✓':'…')); if(p.sessionId!==self.mySession) self.oppSession=p.sessionId; });
+      var extra=self.roomId?('房号 '+self.roomId+'\n玩家：'+names.join(' / ')):'';
+      if(st&&st.phase==='lobby'){ var el=document.getElementById('olStatus'); if(el) el.textContent=extra+'\n'+(names.length===2?'双方到齐，点准备开始':'等待对手加入…'); }
+    });
+    room.onMessage('gameStart',function(m){ self._onGameStart(m); });
+    room.onMessage('windowOpen',function(m){ self._onWindowOpen(m); });
+    room.onMessage('awaitResponse',function(m){ self._onAwait(m); });
+    room.onMessage('windowResolved',function(m){ self._onWindowResolved(m); });
+    room.onMessage('opponentLeft',function(){ alert('对手已离开，对局结束'); self.leave(); try{ if(typeof showScreen==='function') showScreen('mainMenu'); }catch(_){} });
+  },
+  ready:function(){
+    if(!this.room) return;
+    // 准备前先校验本机卡组：避免空卡组时收到 gameStart 才被 startBattle 弹回配置页，
+    // 而服务器此时已进入 playing、不会重发 gameStart，导致永久卡死。
+    try{
+      if(typeof validateDeck==='function'){
+        var e1=validateDeck('p1');
+        if(e1.length){ alert('你的卡组不合法，无法准备：\n'+e1.join('\n')+'\n请先在卡组配置页配齐（3 角色 / 8 道具 / 4 携带）。'); try{showScreen('deckBuilder');}catch(_){} return; }
+        var e2=validateDeck('p2');
+        if(e2.length && typeof randomDeck==='function'){ randomDeck('p2'); }      // 本地并行推演用的对手位自动补齐
+        var e2b=validateDeck('p2');
+        if(e2b.length){ alert('对手位（本地推演）卡组缺失且自动补齐失败，请先在卡组配置页给玩家2随机配置。'); try{showScreen('deckBuilder');}catch(_){} return; }
+      }
+    }catch(e){ console.error('联机准备校验异常',e); }
+    this.room.send('ready',{name:this._name()}); this.status('已准备，等待对手…');
+  },
+  copyRoomId:function(){ if(!this.roomId){ alert('还未进入房间'); return; } var self=this;
+    if(navigator.clipboard) navigator.clipboard.writeText(this.roomId).then(function(){ self.status('房号已复制：'+self.roomId); },function(){ prompt('复制房号',self.roomId); });
+    else prompt('复制房号',this.roomId);
+  },
+  _onGameStart:function(m){
+    this.seed=m.seed; this.active=true;
+    setGameSeed(m.seed);                 // 双方同一权威种子 -> 本地推演确定一致
+    this.mySide=(m.firstPlayer===this.mySession)?'p1':'p2';
+    this.isHost=(m.firstPlayer===this.mySession);
+    this.status('对局开始！权威种子 '+m.seed+'，你是 '+(this.isHost?'先手(主机)':'后手')+'。');
+    try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
+  },
+  /* ---- 权威投骰：返回 Promise<最终点数>；窗口期间双方可连锁 ---- */
+  requestRoll:function(sides,count){
+    var self=this;
+    return new Promise(function(resolve){
+      if(!self.room){ resolve(null); return; }
+      self._pendingRoll=resolve;
+      if(self._rollTimer) clearTimeout(self._rollTimer);
+      // 兜底：15s 未收到权威锁定（网络抖动/服务器异常）则回退本地投掷，避免按钮永久死锁
+      self._rollTimer=setTimeout(function(){
+        if(self._pendingRoll){ self._pendingRoll=null; self._rollTimer=null;
+          try{ if(typeof addBattleLog==='function') addBattleLog('system','【联机】权威骰子响应超时，回退本地投掷'); }catch(_){}
+          resolve(null);
+        }
+      },15000);
+      self.room.send('requestRoll',{sides:sides||6,count:count||1});
+    });
+  },
+  passChain:function(){ if(this.room) this.room.send('passChain'); this._hideBar(); },
+  setDice:function(point){ if(this.room) this.room.send('chainSetDice',{point:point}); },
+  reverse:function(){ if(this.room) this.room.send('chainReverse'); },
+  _onWindowOpen:function(m){
+    this._win=m;
+    var mine=(m.firstResponder===this.mySession);
+    this._renderBar(m, mine, true);
+  },
+  _onAwait:function(m){
+    if(!this._win) return;
+    var mine=(m.awaiting===this.mySession);
+    this._renderBar(this._win, mine, false);
+  },
+  _onWindowResolved:function(m){
+    this._win=null; this._hideBar();
+    if(this._pendingRoll){ var r=this._pendingRoll; this._pendingRoll=null; if(this._rollTimer){clearTimeout(this._rollTimer);this._rollTimer=null;} r(m.value); }
+    if(typeof addBattleLog==='function') addBattleLog('system','【联机】骰子窗口锁定：'+m.value+'点'+(m.reversed?'（方向反转）':''));
+  },
+  _renderBar:function(m, mine, justOpened){
+    var bar=document.getElementById('onlineChainBar'); if(!bar) return;
+    var title=document.getElementById('ocTitle'), desc=document.getElementById('ocBtns')?document.getElementById('ocDesc'):null, btns=document.getElementById('ocBtns');
+    var init=m.initial||{};
+    var cur=init.current!==undefined?init.current:init.raw;
+    if(title) title.textContent = '🎲 骰子连锁窗口 · '+(mine?'轮到你响应':'等待对手响应…');
+    if(desc) desc.textContent='原始点数 '+(init.raw)+'，当前 '+cur+'。'+(justOpened?'结果将要适用前，双方可连锁改点/反转，均放弃后锁定。':'');
+    if(!btns) return; btns.innerHTML='';
+    if(mine){
+      // 放弃连锁
+      var pass=document.createElement('button'); pass.className='pass'; pass.textContent='■ 不连锁(通过)';
+      var self=this; pass.onclick=function(){ self.passChain(); }; btns.appendChild(pass);
+      // 遥控骰子：改成指定点数
+      var sel=document.createElement('select'); var __max=(init.max||init.sides||6); for(var i=1;i<=__max;i++){ var o=document.createElement('option');o.value=i;o.textContent=i;sel.appendChild(o);} sel.value=cur||1; btns.appendChild(sel);
+      var set=document.createElement('button'); set.textContent='🎯 遥控骰子改点'; set.onclick=function(){ self.setDice(parseInt(sel.value,10)); }; btns.appendChild(set);
+      // 颠倒骰子：反转
+      var rev=document.createElement('button'); rev.textContent='🔄 颠倒(反转方向)'; rev.onclick=function(){ self.reverse(); }; btns.appendChild(rev);
+    }
+    bar.style.display='block';
+  },
+  _hideBar:function(){ var b=document.getElementById('onlineChainBar'); if(b) b.style.display='none'; },
+  leave:function(){
+    try{ if(this.room) this.room.leave(true); }catch(e){}
+    this.room=null; this.client=null; this.connected=false; this.active=false; this._pendingRoll=null; if(this._rollTimer){clearTimeout(this._rollTimer);this._rollTimer=null;} this._hideBar();
+    var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=true;
+  }
+};
 var PHASE_NAME={prepare:'准备阶段',main1:'主要阶段1',roll:'投骰阶段',main2:'主要阶段2',end:'结束阶段'};
 function chainBlockReason(name){
   var m={
@@ -3258,6 +3470,14 @@ var CARD_PLAY_CONDITIONS={
 function isDiceModifyCard(card){
   var name=card.name||'',eff=card.effect||card.text||'';
   return name==='遥控骰子'||name==='颠倒骰子'||name==='特制手套'||eff.indexOf('修改一次掷骰结果')>=0||eff.indexOf('修改骰子点数')>=0||eff.indexOf('改变一名玩家下一次移动的方向')>=0;
+}
+// 投掷/移动类主动道具：自己投掷阶段也可主动发动（掷骰/前进/后退/移动/跳跃/位移类）；技能卡roll阶段仍禁、攻击卡走攻击门、需对象的连锁专用卡走连锁窗口
+function isMoveRollCard(card){
+  if(!card) return false;
+  if(card._category==='skill_cards'||card._category==='attack_cards') return false;
+  if(typeof isChainOnlyCard==='function' && isChainOnlyCard(card)) return false;
+  var t=((card.effect||card.text||'')+(card.name||''));
+  return /投掷|掷骰|掷一枚|掷\d+面|前进|后退|移动|跃|位移|再.*掷/.test(t);
 }
 // 通用资源条件：卡面要求“从某区域选卡”时，该区域必须非空（宁漏勿错，避免误拦合法卡）
 function checkCardResource(card,me,bs){
@@ -3312,7 +3532,7 @@ function evaluatePlayable(card,player,opts){
   // 2) 阶段限制
   if(!fromFaceDown){
     if(phase==='roll'){
-      if(!isDiceModifyCard(card)) return {ok:false,reason:'投掷阶段只能使用修改骰子点数/方向的连锁效果，角色技能卡也不能在投掷阶段发动'};
+      if(!isDiceModifyCard(card) && !isMoveRollCard(card)) return {ok:false,reason:'投掷阶段只能使用修改骰子点数/方向的连锁效果，或投掷/移动类道具；角色技能卡不能在投掷阶段发动'};
     }else if(phase==='prepare'||phase==='end'){
       if(!isSkill) return {ok:false,reason:(PHASE_NAME[phase]||'当前阶段')+'只能发动角色技能卡（每回合一次的高时点技能）或翻开盖伏卡'};
     }
@@ -4719,9 +4939,9 @@ function initBattle() {
     if (deckConfig.p2.chars[i] && (deckConfig.p2.chars[i].name || '').indexOf('雨清') >= 0) p2HasNing = true;
   }
   
-  // 初始抽牌（有宁雨清的不抽4张，由被动处理7选5）
+  // 初始抽牌：基础4张，先手（p1）多1张=5张；有宁雨清的不在这里抽，由被动处理7选5
   if (!p1HasNing) {
-    for (var i = 0; i < 4; i++) drawCard('p1');
+    for (var i = 0; i < 5; i++) drawCard('p1'); // 先手5张
   }
   if (!p2HasNing) {
     for (var i = 0; i < 4; i++) drawCard('p2');
@@ -4753,16 +4973,22 @@ function shuffleArray(arr) {
   return GameRNG.shuffleInPlace(arr);
 }
 
+// 统一牌库补充：牌库一空就立即把墓地所有卡按序倒置为新牌库（不洗牌；最后进墓者最先被抽）。返回是否还有卡可抽。
+function __refillDeckIfEmpty(player) {
+  var __p = battleState[player];
+  if (__p.deck && __p.deck.length > 0) return true;
+  if (__p.grave && __p.grave.length) {
+    __p.deck = __p.grave.splice(0, __p.grave.length);
+    addBattleLog(player, '♻️ 牌库已空，将墓地' + __p.deck.length + '张卡按序倒置为新牌库（最后进墓者最先被抽）');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    return true;
+  }
+  return false;
+}
 function drawCard(player) {
   var __p = battleState[player];
   if (__p.deck.length === 0) {
-    // 规则：牌库一空立即重置——把墓地所有卡“倒置”为新牌库（不洗牌，保持堆顺序：
-    // 墓地第一张=牌组第一张(牌组底)，墓地最后一张=牌组最后一张(牌组顶，最先被抽)）
-    if (__p.grave && __p.grave.length) {
-      __p.deck = __p.grave.splice(0, __p.grave.length);
-      addBattleLog(player, '♻️ 牌库已空，将墓地' + __p.deck.length + '张卡按序倒置为新牌库（最后进墓者最先被抽）');
-      if (typeof updateBattleUI === 'function') updateBattleUI();
-    } else { addBattleLog(player, '牌库与墓地均已空，无卡可抽'); return null; }
+    if (!__refillDeckIfEmpty(player)) { addBattleLog(player, '牌库与墓地均已空，无卡可抽'); return null; }
   }
   // 莉莉被动·逝者之眼：抽卡前可观看牌组最下方一张卡，并可选择从最上/最下抽（_lilyDrawFrom=bottom 时从底抽）
   if (__p._lilyPassive && __p.deck.length) { var __botCard = __p.deck[0]; addBattleLog(player, '【莉莉被动】牌组最下方为【' + (__botCard ? __botCard.name : '空') + '】'); }
@@ -4809,6 +5035,8 @@ function startTurn() {
   battleState._diceRolledThisPhase = false;
   battleState[player]._yongzouCount = 0; // 永奏进行曲每回合进墓计数
   battleState[player]._zhichiMoveCount = 0; // 直尺SP每回合移动累计
+  battleState[player]._rioMoveCount = 0; // 里绪被动单回合移动累计，每回合开始清零（回合结束也立即清）
+  battleState[player]._koharuMoveCount = 0; // 小春SP单回合移动累计，每回合清零
   
   // 重置每回合被动标记
   battleState[player]._kasumiUsedThisTurn = false;
@@ -4869,8 +5097,8 @@ function startTurn() {
   
   // 霞被动：整肃改为通过"角色技能"按钮随时发动（高时点），不在回合开始时自动询问
   
-  // 如果是AI，自动行动
-  if (player === 'p2') {
+  // 如果是AI，自动行动（联机时 p2 为远端真人，不由本地 AI 驱动，停留等待远端状态同步）
+  if (player === 'p2' && !(typeof Online!=='undefined' && Online.active)) {
     battleState.phase = 'main1';
     updateBattleUI();
     setTimeout(aiTurn, 600);
@@ -5023,6 +5251,8 @@ function resolveChainStack(effect, onDone) {
 function beforeEffectExecution(effect, callback) {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
   if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._chainLock) { callback(effect); return; }
+  // 联机：连锁由服务器权威窗口统一处理，本地不再弹单机连锁询问（避免本地 AI 替真人对手决定）
+  if (typeof Online!=='undefined' && Online.active) { callback(effect); return; }
   effect._chain = [];
   addBattleLog('system','【效果将要执行前时点】'+effect.description+'，双方可连锁');
   if (typeof renderChainBar === 'function') renderChainBar(effect);
@@ -5221,6 +5451,13 @@ function aiRioPreRoll(player) {
   }
 }
 function rollPlayerDice(player) {
+  // 联机：权威服务器窗口已锁定最终点数，直接采用（不走本地随机）
+  if (typeof Online!=='undefined' && Online.active && battleState[player] && battleState[player]._onlineAuthRoll!=null) {
+    var __auth = battleState[player]._onlineAuthRoll; battleState[player]._onlineAuthRoll=null;
+    var __ap = battleState[player]; __ap._lastRolls=[__auth]; __ap._lastRoll=__auth;
+    __ap._nextDiceSides=0; __ap._nextDiceCount=1;
+    return __auth;
+  }
   var p = battleState[player];
   var sides = p._nextDiceSides || 6, cnt = p._nextDiceCount || 1, d = 0, __rolls = [];
   for (var k=0;k<cnt;k++){ var __rv=GameRNG.dice(sides); d += __rv; __rolls.push(__rv); }
@@ -5261,6 +5498,17 @@ function rollDice() {
     return;
   }
   __rp0._rioChooseAsked = false;
+  // 联机：先走服务器权威骰子窗口（双方可连锁改点/反转），锁定后再重入走本地动画与移动
+  if (typeof Online!=='undefined' && Online.active && !battleState._onlineRolling) {
+    var __gP = battleState.p1, __gSides = __gP._nextDiceSides || 6, __gCnt = __gP._nextDiceCount || 1;
+    battleState._onlineRolling = true;
+    Online.requestRoll(__gSides, __gCnt).then(function(authVal){
+      battleState._onlineRolling = false;
+      if (authVal==null) { rollDice(); return; } // 网络失败回退本地
+      battleState.p1._onlineAuthRoll = authVal; rollDice();
+    });
+    return;
+  }
   battleState._diceRolledThisPhase = true;
   
   // 显示投掷动画区域
@@ -5642,6 +5890,8 @@ function endTurn() {
   
   // 重置蓝宝之杖每回合首次标记
   if (battleState.p1._lanzhangUsed) battleState.p1._lanzhangUsed = false;
+  // 单回合移动累计：回合结束立即归零（里绪/直尺）
+  battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
   
   addBattleLog('p1', '结束回合');
   
@@ -5938,6 +6188,8 @@ function aiEndTurn() {
     __ac._juanUsedTurn = false;
   }
   
+  // 单回合移动累计：AI回合结束立即归零（里绪/直尺）
+  battleState.p2._rioMoveCount = 0; battleState.p2._zhichiMoveCount = 0; battleState.p2._koharuMoveCount = 0;
   addBattleLog('p2', '结束回合');
   // 【时间定义】一轮=所有玩家各行动一次；2人局末位玩家(AI)行动完即一轮结束
   battleState.round = (battleState.round || 1) + 1;
@@ -6280,6 +6532,7 @@ function useCharacterPassive() {
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
   if (p._lilySP && p._lilySPTurn !== T) options.push({name: '莉莉·回收', desc: '墓地最下方1卡放回牌组最下方，若是单次卡可执行其效果', action: activateLilySP});
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p1') + '）', action: activateEdwardSP});
+  if ((p._guideCore || 0) > 0) options.push({name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', action: function(){ useGuideCore('p1'); }});
   if (options.length === 0) { alert('当前没有可发动的角色技能'); return; }
   showChoiceModal('角色技能', '选择本回合要发动的角色技能', '', options.map(function(o){ return o.name + '：' + o.desc; }), function(i) {
     if (i >= 0 && i < options.length) options[i].action();
@@ -6422,6 +6675,19 @@ function activateKasumiPassive() {
 }
 
 // 检查等级升级（Lv1→Lv5每级需当前等级-1点激励，Lv6起每级需7点，每级回2同步）
+// 引导核心：消耗1个，立即把激励点数补满到“当前等级升到下一级”所需（填满累计条），随即结算升级
+function useGuideCore(player) {
+  var p = battleState[player];
+  if (!(p._guideCore > 0)) { if (player === 'p1') alert('没有引导核心'); return false; }
+  if (!p.level) p.level = 1;
+  var __need = p.level <= 5 ? p.level : 7;
+  p._guideCore -= 1;
+  p.motivation = Math.max(p.motivation || 0, __need);
+  addBattleLog(player, '【引导核心】消耗1个，激励点数补满至' + __need + '（累计条已满，结算升级）');
+  checkLevelUp(player);
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+  return true;
+}
 function checkLevelUp(player) {
   if (!battleState) return;
   var p = battleState[player];
@@ -6783,6 +7049,7 @@ function getActiveBuffs(user) {
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
   if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加层数 '+p._shenleStack,'san');
   if (p._overload) P('stat','🎼','过载',(p._overload.until===-1?'永久':('剩'+p._overload.until+'行动')),'过载：持续期间内每因使用而让卡进入墓地的场合抽1张','fire');
+  if (p._guideCore>0) P('stat','🧭','引导核心','×'+p._guideCore,'持有'+p._guideCore+'个引导核心：在“角色技能”中使用，可立即填满当前激励累计条并升级','fire');
   // —— 待命：下一次触发的一次性效果 ——
   if (p._nextAttackJudge) { var dn = p._nextAttackJudge.dice==='coin'?'硬币':(p._nextAttackJudge.dice==='d4'?'四面骰':'六面骰'); P('pending','🎯','下次造伤附带',dn,'下一次造成伤害时进行'+dn+'判定，正面/达标追加'+(p._nextAttackJudge.front||2)+'点判定伤害','pend'); }
   if (p._preventNextDamage) P('pending','🛡️','抵消下次伤害','','下一次即将受到的伤害将被抵消','pend');
@@ -9465,6 +9732,7 @@ function processSingleEffect(effectText, context, callback) {
   } else if (effectText.indexOf('加入手卡') >= 0) {
     // 非选择性的加入手卡（如随机加入）
     var addedCard = null;
+    __refillDeckIfEmpty(user);
     if (battleState[user].deck && battleState[user].deck.length > 0) {
       addedCard = battleState[user].deck.shift();
     }
@@ -9975,9 +10243,10 @@ function useMusicCard(index) {
   
   // 三选一效果（玩家可视化选择）
   var options = [];
-  options.push({ label: '获得1点引导核心（回1费）', action: function() {
-    p.cost = Math.min(p.cost + 1, p.maxCost);
-    addBattleLog('p1', '乐谱卡效果：获得1点引导核心，回复1点音韵值，当前' + p.cost + '点');
+  options.push({ label: '获得1点引导核心', action: function() {
+    p._guideCore = (p._guideCore || 0) + 1;
+    addBattleLog('p1', '乐谱卡效果：获得1点引导核心（当前持有' + p._guideCore + '个；使用可填满当前激励点数累计条）');
+    updateBattleUI();
   }});
   options.push({ label: '抽取1张馈赠卡', action: function() {
     if (typeof drawGiftCard === 'function') drawGiftCard('p1');
@@ -9986,9 +10255,12 @@ function useMusicCard(index) {
   if (moveAmount > 0) {
     options.push({ label: '前进/后退' + moveAmount + '格', isMove: true });
   } else {
+    var __ovDur = (card.name.indexOf('谢幕') >= 0) ? -1 : 3; // 序幕持续3次自己行动，谢幕直到游戏结束
     options.push({ label: '进入过载状态（回2费）', action: function() {
+      p._overload = { until: __ovDur };
       p.cost = Math.min(p.cost + 2, p.maxCost);
-      addBattleLog('p1', '乐谱卡效果：进入过载状态，回复2点音韵值，当前' + p.cost + '点');
+      addBattleLog('p1', '乐谱卡效果：进入过载状态（' + (__ovDur === -1 ? '直到本场游戏结束' : '持续' + __ovDur + '次自己行动') + '），回复2点音韵值，当前' + p.cost + '点');
+      updateBattleUI();
     }});
   }
 
@@ -10514,7 +10786,7 @@ function kaedeSPSelect(player) {
   // AI 自动选择最通用的①回6音韵 + ②抽2张，不弹窗
   if (player === 'p2') {
     p.cost = Math.min(p.cost + 6, p.maxCost);
-    for (var ai = 0; ai < 2; ai++) { if (p.deck.length > 0) p.hand.push(p.deck.shift()); }
+    __refillDeckIfEmpty(player); for (var ai = 0; ai < 2; ai++) { __refillDeckIfEmpty(player); if (p.deck.length > 0) p.hand.push(p.deck.shift()); }
     p._kaedeSPPending = false;
     addBattleLog('p2', '【入间枫SP·AI】自动选择①回复6音韵、②抽2张卡');
     return;
@@ -10546,6 +10818,7 @@ function kaedeSPSelect(player) {
         addBattleLog(player, '【入间枫SP】回复6点音韵值，当前' + p.cost + '音韵');
       } else if (selected.id === 2) {
         for (var j = 0; j < 2; j++) {
+          __refillDeckIfEmpty(player);
           if (p.deck.length > 0) {
             var c = p.deck.shift();
             p.hand.push(c);
@@ -10606,6 +10879,7 @@ function kaedePassiveTrigger(player, usedCard) {
   
   // 2. 再抽1张卡展示，同色保留，异色送墓并回2音韵
   setTimeout(function() {
+    __refillDeckIfEmpty(player);
     if (p.deck.length > 0) {
       var showCard = p.deck.shift();
       addBattleLog(player, '【入间枫被动】展示抽到的卡【' + showCard.name + '】（属性：' + (showCard.attribute || '未知') + '）');
@@ -10664,12 +10938,11 @@ function checkGraveTrigger(player, card, reason) {
   }
 
   // 破损电子设备：进入墓地后可花2音韵回收
-  if (cardName.indexOf('破损电子设备') >= 0 || (sp && sp.indexOf('进入墓地后') >= 0 && sp.indexOf('回收') >= 0)) {
+  var __recyTxt = sp + effect; // 兼容回收文本落在 sp 或 effect
+  if (cardName.indexOf('破损电子设备') >= 0 || (__recyTxt && /进(入)?墓地后/.test(__recyTxt) && __recyTxt.indexOf('回收') >= 0)) {
     var recycleCost = 2;
-    if (sp) {
-      var costMatch = sp.match(/花费?(\d+)点音韵/);
-      if (costMatch) recycleCost = parseInt(costMatch[1]);
-    }
+    var __recyCostM = __recyTxt.match(/花(?:费)?\s*(\d+)\s*(?:点)?音韵/); // 兼容“花2音韵/花费2点音韵”
+    if (__recyCostM) recycleCost = parseInt(__recyCostM[1]);
     if (player === 'p1' && p.cost >= recycleCost) {
       var choices = ['花费' + recycleCost + '点音韵回收此卡', '不回收'];
       showChoiceModal('墓地回收·' + cardName, cardName, sp || effect, choices, function(choiceIdx) {
@@ -11275,7 +11548,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
   // 永奏进行曲：抽2，再选一张手卡/区域内卡送墓；AI 只抽2
   yongzouPlay: function (card, user, cb) {
     var p = battleState[user];
-    for (var i = 0; i < 2; i++) if (p.deck.length) { var c = p.deck.shift(); p.hand.push(c); addBattleLog(user, '【永奏进行曲】抽到【' + c.name + '】'); }
+    __refillDeckIfEmpty(user); for (var i = 0; i < 2; i++) { __refillDeckIfEmpty(user); if (p.deck.length) { var c = p.deck.shift(); p.hand.push(c); addBattleLog(user, '【永奏进行曲】抽到【' + c.name + '】'); } }
     if (user !== 'p1') { updateBattleUI(); cb && cb(); return; }
     var choices = [];
     p.hand.forEach(function (c) { choices.push('[手牌] ' + c.name); });
@@ -11716,6 +11989,11 @@ function placeAfterUse(user, card, isPerm) {
   if (isPerm) {
     if (p.permanent.length < 3) { p.permanent.push(card); addBattleLog(user, '【永续】' + card.name + '留在效果处理区'); }
     else { p.grave.push(card); addBattleLog(user, '效果处理区已满，' + card.name + '送入墓地'); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, card, 'use'); }
+  } else if (card._recycled && /放回牌组最下方|牌组最下方/.test((card.sp||'')+(card.effect||card.text||''))) {
+    // 回收卡（如破损电子设备）：回收后再次使用，放回牌组最下方而非进墓地（抽卡从牌组顶 pop，最下方=数组头部 unshift）
+    card._recycled = false;
+    p.deck.unshift(card);
+    addBattleLog(user, card.name + '为回收卡，本次使用后放回牌组最下方');
   } else {
     p.grave.push(card);
     addBattleLog(user, card.name + '送入墓地');
@@ -11819,9 +12097,10 @@ function settleCardExecution(card, user, target, opts, done) {
     placeAfterUse(user, card, isPerm);
     postUsePassiveHooks(user, card);
     // 过载：持续期间内，每“因为使用而让卡进入墓地”则抽1张（永续正常留场不触发；永续区满/被无效而进墓仍属因使用进墓）
-    if (p._overload && p.grave.indexOf(card) >= 0) {
+    // 过载：仅在自己回合内，每“因使用而让卡进入墓地”立即抽1（永续留场不触发；对手回合连锁用卡不触发）
+    if (p._overload && battleState.currentPlayer === user && p.grave.indexOf(card) >= 0) {
       var __ovDraw = (typeof drawCard === 'function') ? drawCard(user) : null;
-      if (__ovDraw) addBattleLog(user, '【过载】因使用【' + card.name + '】进入墓地，抽1张【' + __ovDraw.name + '】');
+      if (__ovDraw) addBattleLog(user, '【过载】自己回合内因使用【' + card.name + '】进入墓地，立即抽1张【' + __ovDraw.name + '】');
     }
     // 注：持续行动数在“自己回合开始”由 advanceActionLapse 统一流逝，不在用卡时递减
     checkBattleEnd();
