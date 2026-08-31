@@ -4750,7 +4750,12 @@ function collectChainable(player, effect){
     if(!stage) return true;
     var eff=c.effect||c.text||'', nm=c.name||'';
     if(stage==='dice_result') return isDiceModifyCard(c);
-    if(stage==='move') { if(isDiceModifyCard(c)) return false; return /位移量|增减|打断/.test(eff)||nm.indexOf('侦探放大镜')>=0||nm.indexOf('猎手爪链')>=0; }
+    if(stage==='move') {
+      // 移动将要执行时：纯改点卡(遥控/手套)已无原始骰子对象可排除；但改变方向卡(颠倒骰子)仍可反转本次移动
+      var __rev = nm.indexOf('颠倒骰子')>=0 || /改变[^。；]*方向/.test(eff);
+      if(isDiceModifyCard(c) && !__rev) return false;
+      return __rev || /位移量|增减|打断/.test(eff)||nm.indexOf('侦探放大镜')>=0||nm.indexOf('猎手爪链')>=0;
+    }
     if(stage==='damage') return /抵消/.test(eff)&&/伤害/.test(eff);
     return true;
   }
@@ -4770,8 +4775,8 @@ function applyChainCard(player,pick,effect,done){
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
   effect._chain = effect._chain || [];
   function payAndRemove(){
-    // 盖伏卡在盖伏放置时已支付费用，连锁翻开不再重复扣费
-    if(pick.from!=='faceDown') me.cost-=(c.cost||0);
+    // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
+    me.cost-=(c.cost||0);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     (me.grave=me.grave||[]).push(c);
   }
@@ -5326,7 +5331,7 @@ function showCardModal(card, inputType, label, min, max, canFaceDown) {
       '<button class="modal-btn" onclick="selectTarget(\'p2\')" style="flex:1;padding:15px;background:rgba(231,76,60,0.3);border:2px solid #e74c3c;border-radius:8px;cursor:pointer;color:#fff;">对手（玩家2）</button>' +
       '</div></div>';
   } else if (inputType === 'permanent') {
-    var faceDownBtn = canFaceDown ? '<button class="modal-btn" onclick="confirmPermanentUse(true)" style="flex:1;padding:15px;background:rgba(52,73,94,0.8);border:2px solid #34495e;border-radius:8px;cursor:pointer;color:#feca57;">盖伏放置（本回合无法发动，之后可随时发动）</button>' : '';
+    var faceDownBtn = canFaceDown ? '<button class="modal-btn" onclick="confirmPermanentUse(true)" style="flex:1;padding:15px;background:rgba(52,73,94,0.8);border:2px solid #34495e;border-radius:8px;cursor:pointer;color:#feca57;">盖伏放置（不耗费，翻开时付费；本回合不可发）</button>' : '';
     inputHtml = '<div class="modal-input-group">' +
       '<label class="modal-label">' + label + '</label>' +
       '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">' +
@@ -10630,8 +10635,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   for (var i = 0; i < p.hand.length; i++) {
     var card = p.hand[i];
     var effect = card.effect || '';
-    if ((effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) || 
-        (card.name && card.name.indexOf('护符') >= 0 && effect.indexOf('伤害') >= 0)) {
+    if (((effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) || 
+        (card.name && card.name.indexOf('护符') >= 0 && effect.indexOf('伤害') >= 0)) && p.cost >= (card.cost||0)) {
       hasCharm = true;
       charmIndex = i;
       break;
@@ -10644,8 +10649,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     for (var i = 0; i < p.faceDownCards.length; i++) {
       var card = p.faceDownCards[i];
       var effect = card.effect || '';
-      if ((effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) || 
-          (card.name && card.name.indexOf('护符') >= 0 && effect.indexOf('伤害') >= 0)) {
+      if (((effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) || 
+          (card.name && card.name.indexOf('护符') >= 0 && effect.indexOf('伤害') >= 0)) && p.cost >= (card.cost||0)) {
         hasCharm = true;
         faceDownCharmIndex = i;
         break;
@@ -10727,7 +10732,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   }
   function __useCharm(fromFaceDown, idx) {
     var cc = fromFaceDown ? p.faceDownCards.splice(idx,1)[0] : p.hand.splice(idx,1)[0];
-    if (!fromFaceDown) p.cost -= (cc.cost||0);
+    p.cost -= (cc.cost||0); // 盖伏翻开抵消时同样支付费用
     p.grave.push(cc);
     addBattleLog(target, '发动' + (fromFaceDown?'盖伏的':'') + '【' + cc.name + '】抵消' + damage + '点伤害及附加效果');
     p.position = (p.position + 2) % 42;
@@ -10762,11 +10767,11 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     // AI 自动伤害响应：致命、或会被压到危险线（<=8）时才消耗护符
     var aiCharm = null, aiFromFaceDown = false, aiCharmIdx = -1;
     if (charmIndex >= 0 && ((p.hand[charmIndex].cost || 0) <= p.cost)) { aiCharm = p.hand[charmIndex]; aiCharmIdx = charmIndex; }
-    else if (faceDownCharmIndex >= 0) { aiCharm = p.faceDownCards[faceDownCharmIndex]; aiCharmIdx = faceDownCharmIndex; aiFromFaceDown = true; }
+    else if (faceDownCharmIndex >= 0 && ((p.faceDownCards[faceDownCharmIndex].cost || 0) <= p.cost)) { aiCharm = p.faceDownCards[faceDownCharmIndex]; aiCharmIdx = faceDownCharmIndex; aiFromFaceDown = true; }
     var afterSync = p.sync - damage;
     if (__graveNegIdx >= 0 && damage >= p.sync) { __useGraveNeg(__graveNegIdx); return; }
     if (aiCharm && (damage >= p.sync || afterSync <= 8)) {
-      if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else { p.cost -= (aiCharm.cost||0); p.hand.splice(aiCharmIdx,1); }
+      p.cost -= (aiCharm.cost||0); if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else p.hand.splice(aiCharmIdx,1);
       p.grave.push(aiCharm);
       addBattleLog('p2', 'AI 发动【' + aiCharm.name + '】抵消' + damage + '点伤害');
       p.position = (p.position + 2) % 42;
@@ -10837,10 +10842,7 @@ function faceDownFromHand(index) {
   var card = battleState.p1.hand[index];
   if (!card) return;
   if (!canCardBeFaceDown(card)) { alert('这张卡不能盖伏'); return; }
-  var cost = card.cost || 0;
-  if (battleState.p1.cost < cost) { alert('费用不足，无法盖伏'); return; }
-  // 盖伏不需要在特定阶段（任何阶段都可以盖伏）
-  battleState.p1.cost -= cost;
+  // 规则：盖伏放置不支付费用，费用在之后翻开/连锁发动时才支付
   battleState.p1.hand.splice(index, 1);
   placeFaceDown(card, 'p1');
   updateBattleUI();
@@ -10852,7 +10854,7 @@ function handCardContextMenu(index) {
   var card = battleState.p1.hand[index];
   if (!card) return;
   if (canCardBeFaceDown(card) && battleState.currentPlayer === 'p1') {
-    showChoiceModal('手牌操作', card.name, '盖伏需支付' + (card.cost||0) + '费，背面朝上；当回合无法发动，之后可在任意时机发动', ['🔽 盖伏放置', '🔍 查看详情'], function(o) {
+    showChoiceModal('手牌操作', card.name, '盖伏不消耗费用（翻开/发动时才支付'+(card.cost||0)+'音韵），背面朝上；当回合无法发动，之后可在任意时机发动', ['🔽 盖伏放置', '🔍 查看详情'], function(o) {
       if (o === 0) faceDownFromHand(index); else showCardDetail(card);
     });
     return false;
@@ -10892,17 +10894,17 @@ function activateFaceDown(index, player) {
     return false;
   }
 
-  p.faceDownCards.splice(index, 1);
-  card._faceDown = false;
-  card._activatedFromFaceDown = true;
-  addBattleLog(player, '翻开并发动盖伏的【' + card.name + '】');
-
   var effectText = card.effect || card.text || '';
   var isPermanent = card._category === 'item_permanent';
   var cost = card.cost || 0;
+  // 盖伏时未付费，翻开发动时才支付；先校验费用再移出盖伏区，避免费用不足时丢卡
+  if (p.cost < cost) { alert('费用不足！翻开需要' + cost + '音韵，当前只有' + p.cost); return false; }
 
-  if (battleState.p1.cost < cost) { alert('费用不足！需要' + cost + '费用'); return; }
-  battleState.p1.cost -= cost;
+  p.faceDownCards.splice(index, 1);
+  card._faceDown = false;
+  card._activatedFromFaceDown = true;
+  addBattleLog(player, '翻开并发动盖伏的【' + card.name + '】，支付' + cost + '音韵');
+  p.cost -= cost;
 
   if (isPermanent) {
     var totalZone = battleState.p1.permanent.length + (battleState.p1.faceDownCards ? battleState.p1.faceDownCards.length : 0);
@@ -11345,7 +11347,19 @@ function useCardComplete(handIndex) {
   
   var card = battleState.p1.hand[handIndex];
   if (!card) return;
-  
+
+  // 玩家在永续卡弹窗选择了“盖伏放置”：盖伏不付费、不发动、不进连锁，直接背面进盖伏区（翻开时才付费发动）
+  var __wantFaceDown = pendingFaceDown; pendingFaceDown = false;
+  if (__wantFaceDown) {
+    if (!canCardBeFaceDown(card)) { alert('这张卡不能盖伏'); return; }
+    var __fdp = battleState.p1;
+    if ((__fdp.permanent||[]).length + (__fdp.faceDownCards||[]).length >= 3) { alert('效果处理区已满（3格），无法盖伏'); return; }
+    __fdp.hand.splice(handIndex, 1);
+    placeFaceDown(card, 'p1');
+    updateBattleUI();
+    return;
+  }
+
   var effectText = card.effect || card.text || '';
   var cardName = card.name || '';
   
