@@ -5096,7 +5096,7 @@ function executeMoveEffect(effect) {
     p._rioMoveCount = (p._rioMoveCount || 0) + actualMoveAmount;
     while (p._rioMoveCount >= 8) {
       p._rioMoveCount -= 8;
-      var rioDice = Math.floor(Math.random() * 4) + 1;
+      var rioDice = GameRNG.dice(4);
       var rioDamage = rioDice;
       if (p._judgeDamageBonus) rioDamage += p._judgeDamageBonus;
       addBattleLog(player, '【里绪被动】累计移动8格，4面骰投掷' + rioDice + '点，造成' + rioDamage + '点判定伤害');
@@ -5286,7 +5286,7 @@ function rollDice() {
   
   // 骰子滚动动画
   var rollInterval = setInterval(function() {
-    var randomNum = Math.floor(Math.random() * __sides) + 1;
+    var randomNum = GameRNG.dice(__sides);
     if (diceEl) {
       if (diceEl) diceEl.textContent = (__sides===6)?(['⚀','⚁','⚂','⚃','⚄','⚅'][randomNum-1]):String(randomNum);
       diceEl.style.transform = 'rotate(' + (Math.random() * 360) + 'deg) scale(' + (0.8 + Math.random() * 0.4) + ')';
@@ -5557,7 +5557,7 @@ function checkMoveTriggers(player, steps) {
     p._rioMoveCount = (p._rioMoveCount || 0) + steps;
     while (p._rioMoveCount >= 8) {
       p._rioMoveCount -= 8;
-      var judgeDice = Math.floor(Math.random() * 4) + 1;
+      var judgeDice = GameRNG.dice(4);
       // 判定伤害适用控骰能力（最多20%，即点数±1）
       judgeDice = applyDiceControl(player, judgeDice, 4);
       var judgeDamage = judgeDice;
@@ -5798,7 +5798,7 @@ function aiPlayCards(maxActions, callback) {
     // 8. 对手护盾足以全额吃掉本卡伤害时，降低纯伤害卡优先级
     if (dmg > 0 && (foe.shield || 0) >= dmg) score -= 15;
     // 9. 微小扰动，避免每局打法固化
-    score += Math.random() * 6;
+    score += GameRNG.next() * 6;
     return score;
   }
   // 缓存评分避免排序比较器重复随机
@@ -5863,7 +5863,7 @@ function aiExecuteMove(dice, callback) {
       p._rioMoveCount = (p._rioMoveCount || 0) + mv;
       while (p._rioMoveCount >= 8) {
         p._rioMoveCount -= 8;
-        var rioDice = Math.floor(Math.random() * 4) + 1;
+        var rioDice = GameRNG.dice(4);
         rioDice = applyDiceControl(player, rioDice, 4);
         var rioDamage = rioDice;
         if (p._judgeDamageBonus) rioDamage += p._judgeDamageBonus;
@@ -5987,7 +5987,7 @@ function actCalibrate() {
     return;
   }
   
-  var roll = Math.floor(Math.random() * 20) + 1;
+  var roll = GameRNG.dice(20);
   var success = roll >= 14;
   
   if (success) {
@@ -6047,7 +6047,7 @@ function triggerTileEffect(player) {
       addBattleLog(player, '到达GAME格 - 支付500金币猜硬币（剩余' + p.gold + '金币）');
       var __gamePlay = function (guess) {
         judgeAnimate(player, { kind: 'coin', label: 'GAME 猜硬币' }, function (coin) {
-          var pick = guess || (Math.random() < 0.5 ? '正面' : '反面');
+          var pick = guess || (GameRNG.coin() ? '正面' : '反面');
           if (pick === coin) {
             addBattleLog(player, '🎮 你猜【' + pick + '】，硬币为【' + coin + '】→ 猜中！抽2张牌');
             for (var _gi = 0; _gi < 2; _gi++) { var drawnGame = drawCard(player); if (drawnGame) addBattleLog(player, '抽到第' + (_gi + 1) + '张【' + drawnGame.name + '】'); }
@@ -6073,7 +6073,7 @@ function triggerTileEffect(player) {
       if (!__kasumiRide && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); break; }
       if (__kasumiRide) addBattleLog(player, '【小仓霞SP】乘坐' + tile.name + '免支付、免判定');
       else p.gold -= __goldPrice(p, 200);
-      var busDice = (typeof rollPlayerDice === 'function') ? (function(){var __v=Math.floor(Math.random()*4)+1;return typeof applyDiceControl==='function'?applyDiceControl(player,__v,4):__v;})() : (Math.floor(Math.random()*4)+1);
+      var busDice = (typeof rollPlayerDice === 'function') ? (function(){var __v=GameRNG.dice(4);return typeof applyDiceControl==='function'?applyDiceControl(player,__v,4):__v;})() : (GameRNG.dice(4));
       p._ridingThisAction = true; // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
       var oldPos2 = p.position;
       p.position = (p.position + busDice) % 42;
@@ -6085,7 +6085,7 @@ function triggerTileEffect(player) {
       var __hasClosed = (p.closedTile !== undefined && p.closedTile !== null);
       var __pickNonCorner = function () {
         var cand = []; for (var ti = 0; ti < MAP_TILES.length; ti++) if (!MAP_TILES[ti].big) cand.push(ti);
-        return cand[Math.floor(Math.random() * cand.length)];
+        return GameRNG.pick(cand);
       };
       if (player === 'p1' && battleState.currentPlayer === 'p1') {
         var __popts = __hasClosed ? ['开启已关闭的第' + p.closedTile + '格', '改关另一个格子', '不执行'] : ['关闭一个格子（四角不可关）', '不执行'];
@@ -6101,7 +6101,7 @@ function triggerTileEffect(player) {
           updateBattleUI();
         });
       } else {
-        if (__hasClosed && Math.random() < 0.5) { addBattleLog(player, '配电室：AI开启第' + p.closedTile + '格'); p.closedTile = null; }
+        if (__hasClosed && GameRNG.coin()) { addBattleLog(player, '配电室：AI开启第' + p.closedTile + '格'); p.closedTile = null; }
         else { var act = __pickNonCorner(); p.closedTile = act; addBattleLog(player, '配电室：AI关闭第' + act + '格【' + MAP_TILES[act].name + '】（非四角）'); }
       }
       break; }
@@ -6176,7 +6176,7 @@ function triggerTileEffect(player) {
           });
         });
       } else {
-        if (p.hand.length > 0) { var aiIdx = Math.floor(Math.random()*p.hand.length); var ac = p.hand.splice(aiIdx,1)[0]; p.grave.push(ac); var ad = drawCard(player); addBattleLog(player, '易物：AI将【' + ac.name + '】送墓，抽到【' + (ad?ad.name:'无') + '】'); }
+        if (p.hand.length > 0) { var aiIdx = GameRNG.int(p.hand.length); var ac = p.hand.splice(aiIdx,1)[0]; p.grave.push(ac); var ad = drawCard(player); addBattleLog(player, '易物：AI将【' + ac.name + '】送墓，抽到【' + (ad?ad.name:'无') + '】'); }
       }
       break;
     case 'airport': {
@@ -6468,7 +6468,7 @@ function checkLevelUp(player) {
         } else {
           var __tgt = player === 'p1' ? 'p2' : 'p1';
           if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, '判定'); __supOnce(remain - 1); });
-          else { dealDamageWithResponse(__tgt, 1 + Math.floor(Math.random() * 4), '供给者四面骰', function () {}); __supOnce(remain - 1); }
+          else { dealDamageWithResponse(__tgt, 1 + GameRNG.dice(4), '供给者四面骰', function () {}); __supOnce(remain - 1); }
         }
       });
     }
@@ -6514,7 +6514,7 @@ function drawGiftCard(player) {
     addBattleLog(player, '【共鸣者】本次馈赠卡池已剔除 200$');
   }
   p._giftStreak = (p._giftStreak || 0) + 1;
-  var card = giftPool[Math.floor(Math.random() * giftPool.length)];
+  var card = GameRNG.pick(giftPool);
   var __giftGuarantee = (card.name.indexOf('和声') < 0 && p._giftStreak >= 6); // 连续6次未中和声→第6次附赠和声
   if (card.name.indexOf('和声') >= 0) p._giftStreak = 0; // 中途抽到和声即重置保底计数
   if (__giftGuarantee) p._giftStreak = 0;
@@ -6563,7 +6563,7 @@ function drawOmikuji(player) {
     {name: '绪吉', effect: '和声校准≥12成功，降2入迷+回6音韵', type: 'calibrate', difficulty: '≥12', reduce: 2, refund: 6, inspire: 7}
   ];
   
-  var card = omikujiPool[Math.floor(Math.random() * omikujiPool.length)];
+  var card = GameRNG.pick(omikujiPool);
   addBattleLog(player, '抽到御神签【' + card.name + '】 - ' + card.effect);
   
   // 御神签获得激励点数
@@ -6597,7 +6597,7 @@ function drawOmikuji(player) {
           p.cost = Math.min(p.cost + card.refund, p.maxCost);
           addBattleLog(player, '选择回复' + card.refund + '音韵值，当前' + p.cost + '音韵');
         } else {
-          var move = Math.floor(Math.random() * (card.move[1] - card.move[0] + 1)) + card.move[0];
+          var move = GameRNG.range(card.move[0], card.move[1]);
           p.position = (p.position + move) % 42;
           addBattleLog(player, '选择前进' + move + '格，当前位置第' + p.position + '格');
           triggerTileEffect(player);
@@ -6607,11 +6607,11 @@ function drawOmikuji(player) {
       });
     } else {
       // AI随机选择
-      if (Math.random() < 0.5) {
+      if (GameRNG.coin()) {
         p.cost = Math.min(p.cost + card.refund, p.maxCost);
         addBattleLog(player, 'AI选择回复' + card.refund + '音韵值');
       } else {
-        var move = Math.floor(Math.random() * (card.move[1] - card.move[0] + 1)) + card.move[0];
+        var move = GameRNG.range(card.move[0], card.move[1]);
         p.position = (p.position + move) % 42;
         addBattleLog(player, 'AI选择前进' + move + '格');
         triggerTileEffect(player);
@@ -6666,7 +6666,7 @@ function performCalibration(player, difficulty, reduce) {
   if (!battleState) return false;
   var p = battleState[player];
   
-  var roll = Math.floor(Math.random() * 20) + 1;
+  var roll = GameRNG.dice(20);
   var success = false;
   
   if (difficulty === '>10') success = roll > 10;
@@ -6717,7 +6717,7 @@ function triggerEventCard(player) {
   }
   
   // 随机抽取一张事件卡
-  var event = JSON.parse(JSON.stringify(allEvents[Math.floor(Math.random() * allEvents.length)]));
+  var event = JSON.parse(JSON.stringify(GameRNG.pick(allEvents)));
   event._category = 'event_cards';
   event.cost = 0;
   
@@ -8336,7 +8336,7 @@ function applyMove(user, signedN) {
     var foe = user === 'p1' ? 'p2' : 'p1';
     while (p._rioMoveCount >= 8) {
       p._rioMoveCount -= 8;
-      var rd = applyDiceControl(user, Math.floor(Math.random() * 4) + 1, 4);
+      var rd = applyDiceControl(user, GameRNG.dice(4), 4);
       if (p._judgeDamageBonus) rd += p._judgeDamageBonus;
       dealDamageWithResponse(foe, Math.max(0, rd - (battleState[foe].defense || 0)), '里绪被动');
     }
@@ -8404,7 +8404,7 @@ function startDuel(user, foe, done) {
   if (!me || !op) { if (done) done(); return; }
   if (typeof isSameRow === 'function' && me.position != null && op.position != null && !isSameRow(me.position, op.position)) { addBattleLog(user, '目标与自己不在同一行，决斗不成立'); if (done) done(); return; }
   function __resolve(mCard) {
-    var oCard = (op.hand && op.hand.length) ? op.hand[Math.floor(Math.random() * op.hand.length)] : null;
+    var oCard = (op.hand && op.hand.length) ? GameRNG.pick(op.hand) : null;
     if (!mCard || !oCard) { addBattleLog(user, '有一方无手牌可出示，决斗不成立'); if (done) done(); return; }
     var mi = me.hand.indexOf(mCard); if (mi >= 0) me.hand.splice(mi, 1);
     var oi = op.hand.indexOf(oCard); if (oi >= 0) op.hand.splice(oi, 1);
@@ -8446,7 +8446,7 @@ function triggerLanzhangAfterJudge(user, target) {
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
   if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
-  else __settle(Math.random() < 0.5 ? '正面' : '反面');
+  else __settle(GameRNG.coin() ? '正面' : '反面');
 }
 // 妖刀五月雨：自己单次造成≥5伤害后，每回合一次选①破坏场上1卡②抽1，均自失3同步
 function triggerYaodaoOnDamage(user, dmg) {
@@ -8554,8 +8554,8 @@ function applyDamageOps(user, target, op, done, srcCard) {
       if (op.dice === 'coin') judgeAnimate(user, { kind: 'coin', label: (op.source || '硬币判定') }, __afterRoll);
       else { var __sx = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; judgeAnimate(user, { kind: 'dice', sides: __sx, label: __sx + '面骰判定伤害' }, __afterRoll); }
     } else {
-      if (op.dice === 'coin') __afterRoll(Math.random() < 0.5 ? '正面' : '反面');
-      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __afterRoll(applyDiceControl(user, Math.floor(Math.random() * __m) + 1, __m)); }
+      if (op.dice === 'coin') __afterRoll(GameRNG.coin() ? '正面' : '反面');
+      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __afterRoll(applyDiceControl(user, GameRNG.dice(__m), __m)); }
     }
   } else __settle(op.base || 0);
 }
@@ -8761,7 +8761,7 @@ function runOneOp(op, ctx, next) {
     case 'change_direction': p._nextMoveReverse = true; break;
     case 'add_roll_phase': p._extraRollPhase = (p._extraRollPhase || 0) + 1; addBattleLog(user, '追加一个掷骰阶段'); break;
     case 'modify_dice': p._modifyDiceNext = true; break;
-    case 'roll_dice': { var __sd = op.sides || 6; var __rv = 1 + Math.floor(Math.random() * __sd); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }
+    case 'roll_dice': { var __sd = op.sides || 6; var __rv = GameRNG.dice(__sd); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }
     case 'set_dice_sides': p._nextDiceSides = op.sides; p._nextDiceCount = op.count || 1; p._nextJudgeAdj = op.judgeAdj || 0; addBattleLog(user, '下次投掷改为' + (op.count || 1) + '枚' + op.sides + '面骰'); break;
     case 'regen_sync': p._regen = { amount: op.amount, turns: op.turns }; addBattleLog(user, '持续回复：每回合回' + op.amount + '同步，持续' + op.turns + '回合'); break;
     case 'interrupt_move': { var iw = op.who === 'self' ? user : target; battleState[iw]._moveInterrupted = true; addBattleLog(user, '打断' + (iw === user ? '自己' : '目标') + '移动'); break; }
@@ -8821,7 +8821,7 @@ function runOneOp(op, ctx, next) {
       if (__ld) { var __gi = __drT.grave.indexOf(__ld); var __ok = !op.when || (__ld.attribute || '').indexOf(op.when) >= 0 || (__ld.type || '').indexOf(op.when) >= 0;
         if (__ok && __gi >= 0) { __drT.grave.splice(__gi, 1); (__drT.removed = __drT.removed || []).push(__ld); addBattleLog(user, '被破坏的【' + __ld.name + '】符合[' + (op.when || '任意') + ']，改为移出游戏'); } }
       break; }
-    case 'knock_off': { var h = q.hand; if (h.length) { var ri = Math.floor(Math.random() * h.length), rc = h.splice(ri, 1)[0]; q.grave.push(rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
+    case 'knock_off': { var h = q.hand; if (h.length) { var ri = GameRNG.int(h.length), rc = h.splice(ri, 1)[0]; q.grave.push(rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
     case 'gain_core': p._guidanceCore = (p._guidanceCore || 0) + op.n; addBattleLog(user, '获得' + op.n + '点引导核心'); break;
     case 'gain_motivation': p.motivation = (p.motivation || 0) + op.n; if (typeof checkLevelUp === 'function') checkLevelUp(user); break;
     case 'overload': { p._overload = { until: op.duration }; p.cost = Math.min(p.maxCost || 12, p.cost + 2); addBattleLog(user, '进入过载状态，回复2点音韵值' + (op.duration === -1 ? '（直到游戏结束）' : op.duration ? '（持续' + op.duration + '次行动）' : '')); break; }
@@ -8836,7 +8836,7 @@ function runOneOp(op, ctx, next) {
         if (br && br.length) runOps(br, ctx, next); else next();
       };
       if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定' }, __settleJB);
-      else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, Math.floor(Math.random() * __sides) + 1, __sides) : Math.floor(Math.random() * __sides) + 1; __settleJB(__rr); }
+      else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, GameRNG.dice(__sides), __sides) : GameRNG.dice(__sides); __settleJB(__rr); }
       return;
     }
     case 'return_pick_bottom': {
@@ -8844,7 +8844,7 @@ function runOneOp(op, ctx, next) {
       var __rpPut = function (card) { var ii = __rpMe.hand.indexOf(card); if (ii >= 0) __rpMe.hand.splice(ii, 1); __rpMe.deck.push(card); addBattleLog(user, '将【' + card.name + '】放回牌组最下方'); };
       if (user === 'p1' && typeof showTargetCards === 'function' && __rpMe.hand.length) {
         showTargetCards('p1', 'hand', '选择' + (op.need || 1) + '张手牌放回牌组最下方', true, function (card) { if (card) __rpPut(card); if (typeof updateBattleUI === 'function') updateBattleUI(); next(); });
-      } else { if (__rpMe.hand.length) __rpPut(__rpMe.hand[Math.floor(Math.random() * __rpMe.hand.length)]); next(); }
+      } else { if (__rpMe.hand.length) __rpPut(GameRNG.pick(__rpMe.hand)); next(); }
       return;
     }
     case 'optional': {
@@ -9094,7 +9094,7 @@ function processSingleEffect(effectText, context, callback) {
     if (effectText.indexOf('判定伤害') >= 0) {
       if (effectText.indexOf('硬币') >= 0 || effectText.indexOf('正反面') >= 0) {
         // 硬币判定：正面造成伤害，反面不造成
-        var coinResult = Math.random() > 0.5 ? '正面' : '反面';
+        var coinResult = (GameRNG.coin() ? '反面' : '正面');
         if (coinResult === '正面') {
           effectEngine.effectLog.push({
             label: '【硬币判定】',
@@ -9111,7 +9111,7 @@ function processSingleEffect(effectText, context, callback) {
         }
       } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
         // 四面骰判定：1-4点
-        damage = Math.floor(Math.random() * 4) + 1;
+        damage = GameRNG.dice(4);
         // 判定伤害适用控骰能力（最多20%，即点数±1）
         damage = applyDiceControl(user, damage, 4);
         effectEngine.effectLog.push({
@@ -9121,7 +9121,7 @@ function processSingleEffect(effectText, context, callback) {
         });
       } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
         // 六面骰判定：1-6点
-        damage = Math.floor(Math.random() * 6) + 1;
+        damage = GameRNG.dice(6);
         // 判定伤害适用控骰能力（最多20%，即点数±1）
         damage = applyDiceControl(user, damage, 6);
         effectEngine.effectLog.push({
@@ -9285,7 +9285,7 @@ function processSingleEffect(effectText, context, callback) {
       battleState[user]._rioMoveCount = (battleState[user]._rioMoveCount || 0) + Math.abs(actualMoveAmount);
       while (battleState[user]._rioMoveCount >= 8) {
         battleState[user]._rioMoveCount -= 8;
-        var rioDice = Math.floor(Math.random() * 4) + 1;
+        var rioDice = GameRNG.dice(4);
         // 判定伤害适用控骰能力（最多20%，即点数±1）
         rioDice = applyDiceControl(user, rioDice, 4);
         var rioDamage = rioDice;
@@ -9730,8 +9730,8 @@ function useEventCard(index) {
       
     case '即兴演出':
       // 投2枚6面骰，<8回3费，=8回1入迷，>8降1入迷
-      var d1 = Math.floor(Math.random() * 6) + 1;
-      var d2 = Math.floor(Math.random() * 6) + 1;
+      var d1 = GameRNG.dice(6);
+      var d2 = GameRNG.dice(6);
       var sum = d1 + d2;
       addBattleLog('p1', '即兴演出：投出' + d1 + '+' + d2 + '=' + sum + '点');
       if (sum < 8) {
@@ -9786,7 +9786,7 @@ function useEventCard(index) {
       
     case '独奏': {
       // 一次20面骰，满足的条件“全部”并列适用（不是择一）：①偶数回2费 ②个位为4的正整数倍数(个位4/8)降1入迷 ③4的倍数回2费 ④≥16降1入迷
-      var d20 = Math.floor(Math.random() * 20) + 1;
+      var d20 = GameRNG.dice(20);
       addBattleLog('p1', '独奏：20面骰投出' + d20 + '点，满足的条件全部适用');
       if (d20 % 2 === 0) { p.cost = Math.min(p.cost + 2, p.maxCost); addBattleLog('p1', '独奏①偶数：回复2音韵，当前' + p.cost); }
       if (d20 % 10 === 4 || d20 % 10 === 8) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog('p1', '独奏②个位为4的正整数倍数：降1入迷，当前' + p.fascination); }
@@ -9799,9 +9799,9 @@ function useEventCard(index) {
     case '王车易位':
       // 交换两个格子效果，持续两轮
       if (!battleState._swappedTiles) battleState._swappedTiles = [];
-      var tile1 = Math.floor(Math.random() * 42);
-      var tile2 = Math.floor(Math.random() * 42);
-      while (tile2 === tile1) tile2 = Math.floor(Math.random() * 42);
+      var tile1 = GameRNG.int(42);
+      var tile2 = GameRNG.int(42);
+      while (tile2 === tile1) tile2 = GameRNG.int(42);
       
       // 保存原始状态
       var original1 = { type: MAP_TILES[tile1].type, name: MAP_TILES[tile1].name };
@@ -9830,9 +9830,9 @@ function useEventCard(index) {
         break;
       }
       p.gold -= __goldPrice(p, 500);
-      var gd1 = Math.floor(Math.random() * 6) + 1;
-      var gd2 = Math.floor(Math.random() * 6) + 1;
-      var gd3 = Math.floor(Math.random() * 6) + 1;
+      var gd1 = GameRNG.dice(6);
+      var gd2 = GameRNG.dice(6);
+      var gd3 = GameRNG.dice(6);
       addBattleLog('p1', '赌徒游戏：支付500金币，投出' + gd1 + '+' + gd2 + '+' + gd3);
       var diceArr = [gd1, gd2, gd3];
       var counts = {};
@@ -9856,13 +9856,13 @@ function useEventCard(index) {
     case '躁动之心':
       // 3次校准（12面≥6，8面≥6，6面≥6）
       var successCount = 0;
-      var cal1 = Math.floor(Math.random() * 12) + 1;
+      var cal1 = GameRNG.dice(12);
       if (cal1 >= 6) successCount++;
       addBattleLog('p1', '躁动之心：第1次校准12面骰出' + cal1 + '点，' + (cal1 >= 6 ? '成功' : '失败'));
-      var cal2 = Math.floor(Math.random() * 8) + 1;
+      var cal2 = GameRNG.dice(8);
       if (cal2 >= 6) successCount++;
       addBattleLog('p1', '躁动之心：第2次校准8面骰出' + cal2 + '点，' + (cal2 >= 6 ? '成功' : '失败'));
-      var cal3 = Math.floor(Math.random() * 6) + 1;
+      var cal3 = GameRNG.dice(6);
       if (cal3 >= 6) successCount++;
       addBattleLog('p1', '躁动之心：第3次校准6面骰出' + cal3 + '点，' + (cal3 >= 6 ? '成功' : '失败'));
       if (successCount > 0) {
@@ -10846,12 +10846,12 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       if (nj.dice === 'coin') {
         var __coinSettle = function (roll) { __done(roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll + (roll === '正面' ? ('，正面追加' + (nj.front || 2)) : '，背面0')); };
         if (typeof judgeAnimate === 'function') judgeAnimate(attacker, { kind: 'coin', label: __lblName }, __coinSettle);
-        else __coinSettle(Math.random() < 0.5 ? '正面' : '反面');
+        else __coinSettle(GameRNG.coin() ? '正面' : '反面');
       } else {
         var __sides = (nj.dice === 'd4') ? 4 : 6;
         var __diceSettle = function (roll) { __done(roll, __sides + '面骰点数' + roll + '，追加' + roll); };
         if (typeof judgeAnimate === 'function') judgeAnimate(attacker, { kind: 'dice', sides: __sides, label: __lblName }, __diceSettle);
-        else __diceSettle(applyDiceControl(attacker, Math.floor(Math.random() * __sides) + 1, __sides));
+        else __diceSettle(applyDiceControl(attacker, GameRNG.dice(__sides), __sides));
       }
       return;
     }
@@ -11760,7 +11760,7 @@ function postUsePassiveHooks(user, card) {
   }
   // 枫：使用战术/增益卡后移动1-4并抽1展示（玩家选方向，AI 默认前进）
   if (p._kaedePassive && card.tags && (card.tags.indexOf('战术') >= 0 || card.tags.indexOf('增益') >= 0)) {
-    var moveAmt = Math.floor(Math.random() * 4) + 1;
+    var moveAmt = GameRNG.dice(4);
     function kaedeMove(direction) {
       var oldPos = p.position;
       p.position = ((p.position + moveAmt * direction) % 42 + 42) % 42;
@@ -11784,7 +11784,7 @@ function postUsePassiveHooks(user, card) {
   }
   // 冬马SP：使用攻击卡或技能卡之后前进1-3格
   if (p._tomaSP && card && (card._category === 'attack_cards' || card._category === 'skill_cards')) {
-    var __tomaSteps = 1 + Math.floor(Math.random() * 3);
+    var __tomaSteps = GameRNG.range(1, 3);
     p.position = ((p.position + __tomaSteps) % 42 + 42) % 42;
     addBattleLog(user, '【现实间冬马SP】使用攻击/技能卡后前进' + __tomaSteps + '格');
     if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
@@ -11796,7 +11796,7 @@ function postUsePassiveHooks(user, card) {
       if (face === '正面') { dealDamageWithResponse(__ymFoe, 2, '予(水着)SP'); addBattleLog(user, '【予(水着)SP】硬币正面，造成2点伤害'); }
       else addBattleLog(user, '【予(水着)SP】硬币背面，不造成伤害');
     });
-    else { if (Math.random() < 0.5) dealDamageWithResponse(__ymFoe, 2, '予(水着)SP'); }
+    else { if (GameRNG.coin()) dealDamageWithResponse(__ymFoe, 2, '予(水着)SP'); }
   }
   // 羽奈被动：用[移动]道具卡后对一名玩家造1理智伤害（一次行动仅1次，rollPlayerDice 处重置标记）
   if (p._hinaPassive && card && /item/.test(card._category || '') && (card.tags || []).indexOf('移动') >= 0 && !p._hinaMoveUsedThisAction) {
