@@ -3048,7 +3048,16 @@ function canReachByRange(specOrText, fromPos, toPos){
   }
 }
 // 该攻击卡是否需要敌方目标
-function attackNeedsEnemy(card){ return parseAttackRange(card&&card.attack_range).kind!=='noneed'; }
+function attackNeedsEnemy(card){
+  if(!card) return false;
+  // 显式标注无需目标（治疗/增益/驱散等）直接豁免
+  if(parseAttackRange(card&&card.attack_range).kind==='noneed') return false;
+  // 规则：只有“造伤在效果最前面”的攻击卡，发动时才要求范围内存在敌人；
+  // 首个分句是前进/后退/移动/跳跃/抽牌/回复/获得/献祭等非造伤动作的，不在发动时做范围限制（结算时再按文本处理）
+  var t=(card.effect||card.text||'').replace(/^\s*[\[【][^\]】]*[\]】]\s*/,'').trim();
+  var first=(t.split(/[，。；,;、]/)[0]||'');
+  return /造成|造.*伤害|伤害/.test(first);
+}
 // player 的对手是否处于该攻击卡范围内（无需目标的治疗/增益/驱散恒为 true）
 function hasEnemyInAttackRange(card, player){
   var spec=parseAttackRange(card&&card.attack_range);
@@ -4593,11 +4602,12 @@ function shuffleArray(arr) {
 function drawCard(player) {
   var __p = battleState[player];
   if (__p.deck.length === 0) {
-    // 规则：牌库用完时把墓地的卡洗切（倒置）成为新牌库
+    // 规则：牌库一空立即重置——把墓地所有卡“倒置”为新牌库（不洗牌，保持堆顺序：
+    // 墓地第一张=牌组第一张(牌组底)，墓地最后一张=牌组最后一张(牌组顶，最先被抽)）
     if (__p.grave && __p.grave.length) {
       __p.deck = __p.grave.splice(0, __p.grave.length);
-      if (typeof shuffleArray === 'function') shuffleArray(__p.deck);
-      addBattleLog(player, '♻️ 牌库已空，将墓地' + __p.deck.length + '张卡洗切为新牌库');
+      addBattleLog(player, '♻️ 牌库已空，将墓地' + __p.deck.length + '张卡按序倒置为新牌库（最后进墓者最先被抽）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
     } else { addBattleLog(player, '牌库与墓地均已空，无卡可抽'); return null; }
   }
   // 莉莉被动·逝者之眼：抽卡前可观看牌组最下方一张卡，并可选择从最上/最下抽（_lilyDrawFrom=bottom 时从底抽）
@@ -4760,7 +4770,8 @@ function applyChainCard(player,pick,effect,done){
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
   effect._chain = effect._chain || [];
   function payAndRemove(){
-    me.cost-=(c.cost||0);
+    // 盖伏卡在盖伏放置时已支付费用，连锁翻开不再重复扣费
+    if(pick.from!=='faceDown') me.cost-=(c.cost||0);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     (me.grave=me.grave||[]).push(c);
   }
@@ -5411,22 +5422,14 @@ function checkMoveTriggers(player, steps) {
 }
 
 function drawByCost() {
-  if (battleState.turn !== 1 || battleState.phase === 'roll' || battleState.phase === 'end') {
-    addBattleLog('只能在自己回合的主要阶段使用音韵抽卡', 'system');
-    return;
-  }
-  if (battleState.p1.cost < 3) {
-    addBattleLog('音韵值不足，需要3点音韵值', 'system');
-    return;
-  }
-  if (battleState.p1.deck.length === 0) {
-    addBattleLog('牌组已空，无法抽卡', 'system');
-    return;
-  }
-  
+  // 核心规则：自己回合的主要阶段(main1/main2)，支付3音韵抽1；走 drawCard 以触发牌库倒置重置与抽牌被动
+  if (battleState.currentPlayer !== 'p1') { addBattleLog('只能在自己回合使用音韵抽卡', 'system'); return; }
+  if (battleState.phase !== 'main1' && battleState.phase !== 'main2') { addBattleLog('只能在主要阶段使用音韵抽卡', 'system'); return; }
+  if (battleState.p1.cost < 3) { addBattleLog('音韵值不足，需要3点音韵值', 'system'); return; }
+  if (battleState.p1.deck.length === 0 && (!battleState.p1.grave || battleState.p1.grave.length === 0)) { addBattleLog('牌库与墓地均已空，无卡可抽', 'system'); return; }
   battleState.p1.cost -= 3;
-  var card = battleState.p1.deck.shift();
-  battleState.p1.hand.push(card);
+  var card = drawCard('p1');
+  if (!card) return;
   addBattleLog('支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'), 'p1');
   updateBattleUI();
   checkHandLimit();
@@ -8267,7 +8270,9 @@ function __inTileRange(user, tp, aoe) {
   if (aoe.dir === '后方') return back >= 1 && back <= aoe.range;
   return (fwd >= 1 && fwd <= aoe.range) || (back >= 1 && back <= aoe.range);
 }
-function __opAttr(op, card) { if (card && card.attribute) return card.attribute; if (op.kind === 'fervor') return '热忱'; if (op.kind === 'sanity') return '理智'; return null; }
+function __opAttr(op, card) { if (card && card.attribute) return card.attribute; if (op.kind === 'fervor') return '热忱'; if (op.kind === 'sanity') return '理智'; if (op.kind === 'chaos') return '无序'; return null; }
+// 队伍是否编入名称含 key 的角色（队长/队员皆可）
+function teamHasChar(player, key) { try { return (deckConfig[player].chars || []).some(function (c) { return c && c.name && c.name.indexOf(key) >= 0; }); } catch (e) { return false; } }
 // 蓝宝之杖·命：每回合首次造成判定伤害后，对同一目标追加一次硬币判定（正面2点判定伤害）
 function triggerLanzhangAfterJudge(user, target) {
   var p = battleState[user]; if (!p || p._lanzhangUsed) return;
@@ -8313,16 +8318,33 @@ function triggerYaodaoOnDamage(user, dmg) {
     } else { drawCard('p1'); addBattleLog('p1', '【妖刀五月雨】抽1张，自失3同步'); updateBattleUI(); }
   });
 }
+// 统一数值型进攻增益（两条造伤路径共用，避免增伤漏算/重复算）：
+// 攻击力加成 / 判定伤害+ / 理智伤害+ / 属性克制(基础克制+1 与 克制伤害+_attrBonus)
+// opt: {judge:是否判定伤害, attr:攻击属性, kind:op.kind, target:受击方}
+function __offensiveBuffSum(user, opt) {
+  opt = opt || {};
+  var p = battleState[user], add = 0, logs = [];
+  if (p.attackBuff) { add += p.attackBuff; }
+  if (opt.judge && p._judgeDamageBonus) { add += p._judgeDamageBonus; logs.push('判定伤害+' + p._judgeDamageBonus); }
+  if ((opt.kind === 'sanity' || /理智/.test(opt.attr || '')) && p._intellectBonus) { add += p._intellectBonus; logs.push('理智伤害+' + p._intellectBonus); }
+  var atkA = opt.attr || ((typeof getTeamAttribute === 'function') ? getTeamAttribute(user) : (p.captain && p.captain.attribute));
+  var tgt = battleState[opt.target], defA = tgt ? ((typeof getTeamAttribute === 'function') ? getTeamAttribute(opt.target) : (tgt.captain && tgt.captain.attribute)) : null;
+  if (atkA && defA && typeof __attrBeats === 'function' && __attrBeats(atkA, defA)) {
+    add += 1; logs.push('属性克制+1');
+    if (p._attrBonus) { add += p._attrBonus; logs.push('克制伤害+' + p._attrBonus); }
+  }
+  return { add: add, logs: logs, atkAttr: atkA, defAttr: defA };
+}
 function applyDamageOps(user, target, op, done, srcCard) {
   var p = battleState[user];
   function __settle(base) {
-    if (p.attackBuff) base += p.attackBuff;
+    var __ub = __offensiveBuffSum(user, { judge: op.judge, attr: __opAttr(op, srcCard), kind: op.kind, target: target });
+    base += __ub.add; __ub.logs.forEach(function (lg) { addBattleLog(user, '【增伤】' + lg); });
     var __kz = String((op.kind||'') + ' ' + (op.attr||'')); var __isSanityOp = /理智|sanity/i.test(__kz);
     if (__isSanityOp && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) { base += 1; addBattleLog(user, '【风纪委员臂章】理智最终伤害+1'); }
     if (op.judge && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; })) { base += 1; addBattleLog(user, '【钢笔】判定伤害+1'); }
     if (srcCard && srcCard.name && srcCard.name.indexOf('神乐铃') >= 0 && (p._shenleStack || 0) > 0) { var __sl = p._shenleStack; base += __sl; p._shenleStack = 0; addBattleLog(user, '【神乐铃】消耗' + __sl + '层墓地叠加，本次最终伤害+' + __sl); }
     if (srcCard && srcCard._category === 'attack_cards' && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('善意面具') >= 0; })) { base += 1; addBattleLog(user, '【善意面具·SP】攻击卡最终伤害+1'); }
-    if (op.judge && p._judgeDamageBonus) base += p._judgeDamageBonus;
     var __tags = (srcCard && srcCard.tags) || [], __cat = srcCard && srcCard._category;
     var __isAtk = __cat === 'attack_cards', __isSkill = __cat === 'skill_cards', __isItem = __cat && /item/.test(__cat);
     if (p._yuiSP && (__isAtk || (__isSkill && __tags.indexOf('侵略') >= 0))) {
@@ -8330,8 +8352,6 @@ function applyDamageOps(user, target, op, done, srcCard) {
       if ((battleState[target].shield || 0) > 0) { battleState[target].shield = Math.max(0, battleState[target].shield - 1); addBattleLog(user, '【结衣SP】最终伤害+1，无视1点护盾'); }
     }
     if (p._hinaSP && __isItem && __tags.indexOf('侵略') >= 0) base += 1;
-    if (op.kind === 'sanity' && p._intellectBonus) base += p._intellectBonus;
-    if (p._attrBonus) { var __ua = __opAttr(op, srcCard), __ta = (typeof getTeamAttribute==='function') ? getTeamAttribute(target) : (battleState[target].captain && battleState[target].captain.attribute); if (__ua && __ta && typeof __attrBeats === 'function' && __attrBeats(__ua, __ta)) base += p._attrBonus; }
     function __deal(finalBase) {
       // 杂鱼！杂鱼！SP：只要此卡在墓地，防御值为负的玩家受到的最终伤害+1
       var __tgt = battleState[target];
@@ -8711,15 +8731,33 @@ function runOps(ops, ctx, done) {
   (function step() { if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); return; } runOneOp(ops[i++], ctx, step); })();
 }
 
+// 解析句中“（可以/可…）”这类可选择是否执行的附带效果：玩家逐一选择执行/不执行；
+// 执行→去掉括号与“可以”，把动作并入文本；不执行→删除该括号片段。AI/自动结算默认执行。
+function __resolveOptionalParens(text, ctx, done) {
+  var re = /[（(]\s*可以?\s*([^）)]*)[）)]/;
+  var m = text.match(re);
+  if (!m) { done(text); return; }
+  var inner = m[1].trim();
+  var isAuto = (ctx && ctx.user === 'p2') || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
+  function applyText(doIt) {
+    var rep = doIt ? (inner + '，') : '';
+    var t2 = text.replace(re, rep);
+    __resolveOptionalParens(t2, ctx, done); // 递归处理下一个可选括号
+  }
+  if (isAuto || typeof showChoiceModal !== 'function') { applyText(true); return; }
+  showChoiceModal('可选效果', '是否执行该附带效果？', inner, ['执行：' + inner, '不执行'], function (i) { applyText(i === 0); });
+}
 function dispatchStep(text, ctx, next) {
-  var cls = classifyClause(text);
-  var perm = ctx && ctx.card && ctx.card._category === 'item_permanent';
-  if (cls === 'flavor' || cls === 'trigger') { next(); return; }
-  if (perm && cls === 'passive') { next(); return; } // 仅永续卡跳过常驻被动句
-  var ops = compileStepOps(text, perm);
-  if (ops === null) processSingleEffect(text, ctx, next);
-  else if (ops.length) runOps(ops, ctx, next);
-  else next();
+  __resolveOptionalParens(text, ctx, function (finalText) {
+    var cls = classifyClause(finalText);
+    var perm = ctx && ctx.card && ctx.card._category === 'item_permanent';
+    if (cls === 'flavor' || cls === 'trigger') { next(); return; }
+    if (perm && cls === 'passive') { next(); return; } // 仅永续卡跳过常驻被动句
+    var ops = compileStepOps(finalText, perm);
+    if (ops === null) processSingleEffect(finalText, ctx, next);
+    else if (ops.length) runOps(ops, ctx, next);
+    else next();
+  });
 }
 
 
@@ -8891,11 +8929,8 @@ function processSingleEffect(effectText, context, callback) {
   if ((effectText.indexOf('造成') >= 0 || effectText.indexOf('造') >= 0) && effectText.indexOf('伤害') >= 0) {
     // 优先从"造成"后提取数字，其次从"造"后提取，最后从"伤害"前提取
     var damage = extractNumber(effectText, '造成') || extractNumber(effectText, '造') || extractNumber(effectText, '伤害') || 2;
-    // 加上攻击加成
-    if (battleState[user].attackBuff) {
-      damage += battleState[user].attackBuff;
-    }
-    // 判定伤害特殊处理：区分不同判定工具（硬币、四面骰、六面骰）
+    var __textCoinFail = false; // 硬币判定反面：最终伤害锁定0，不再叠加任何增伤
+    // 判定伤害特殊处理：区分不同判定工具（硬币、四面骰、六面骰）；增伤统一在判定后由 __offensiveBuffSum 加一次
     if (effectText.indexOf('判定伤害') >= 0) {
       if (effectText.indexOf('硬币') >= 0 || effectText.indexOf('正反面') >= 0) {
         // 硬币判定：正面造成伤害，反面不造成
@@ -8907,7 +8942,7 @@ function processSingleEffect(effectText, context, callback) {
             class: 'effect-step step-result'
           });
         } else {
-          damage = 0;
+          damage = 0; __textCoinFail = true;
           effectEngine.effectLog.push({
             label: '【硬币判定】',
             text: '硬币投掷结果：反面，不造成伤害',
@@ -8935,15 +8970,13 @@ function processSingleEffect(effectText, context, callback) {
           class: 'effect-step step-result'
         });
       }
-      // 加上攻击加成（判定伤害也受攻击加成影响）
-      if (battleState[user].attackBuff) {
-        damage += battleState[user].attackBuff;
-      }
-      // 予SP：全队判定伤害+1
-      if (battleState[user]._judgeDamageBonus) {
-        damage += battleState[user]._judgeDamageBonus;
-      }
     }
+    // 统一叠加数值型进攻增益（攻击力/判定+/理智+/克制），硬币反面为0时不叠加
+    if (!__textCoinFail) {
+      var __txtCard = context.card || null;
+      var __ubTxt = __offensiveBuffSum(user, { judge: effectText.indexOf('判定伤害') >= 0, attr: (__txtCard && __txtCard.attribute) || null, kind: (/理智/.test(effectText) ? 'sanity' : (/热忱/.test(effectText) ? 'fervor' : (/无序|混沌/.test(effectText) ? 'chaos' : null))), target: target });
+      damage += __ubTxt.add; __ubTxt.logs.forEach(function (lg) { addBattleLog(user, '【增伤】' + lg); });
+    } else { damage = 0; }
     // 伤害公式：最终伤害 = 基础伤害 - 防御值（防御为负时伤害增加），然后护盾吸收
     var targetDefense = (battleState[target].defense === undefined || battleState[target].defense === null) ? 0 : battleState[target].defense;
     if (isNaN(targetDefense)) targetDefense = 0;
@@ -8951,8 +8984,6 @@ function processSingleEffect(effectText, context, callback) {
     if (finalDamage < 0) finalDamage = 0;
     // 防御值为负时伤害增加，但设置合理上限防止异常
     if (finalDamage > damage + 30) finalDamage = damage + 30;
-    var __atkA = (typeof getTeamAttribute==='function') ? getTeamAttribute(user) : (battleState[user].captain && battleState[user].captain.attribute), __defA = (typeof getTeamAttribute==='function') ? getTeamAttribute(target) : (battleState[target].captain && battleState[target].captain.attribute);
-    if (__atkA && __defA && typeof __attrBeats === 'function' && __attrBeats(__atkA, __defA)) { finalDamage += 1; addBattleLog(user, '属性克制（' + __normAttr(__atkA) + '克' + __normAttr(__defA) + '），最终伤害+1'); }
     var actualDamage = finalDamage;
     var shieldDamage = 0;
     if (battleState[target].shield && battleState[target].shield > 0) {
@@ -9593,23 +9624,17 @@ function useEventCard(index) {
       addBattleLog('p1', '大风：所有玩家下次位移效果-2');
       break;
       
-    case '独奏':
-      // 投20面骰，偶数回2费，4的倍数回2费，≥16降1入迷
+    case '独奏': {
+      // 一次20面骰，满足的条件“全部”并列适用（不是择一）：①偶数回2费 ②个位为4的正整数倍数(个位4/8)降1入迷 ③4的倍数回2费 ④≥16降1入迷
       var d20 = Math.floor(Math.random() * 20) + 1;
-      addBattleLog('p1', '独奏：投20面骰出' + d20 + '点');
-      if (d20 % 2 === 0) {
-        p.cost = Math.min(p.cost + 2, p.maxCost);
-        addBattleLog('p1', '独奏：偶数，回复2点音韵值，当前' + p.cost + '点');
-      }
-      if (d20 % 4 === 0) {
-        p.cost = Math.min(p.cost + 2, p.maxCost);
-        addBattleLog('p1', '独奏：4的倍数，再回复2点音韵值，当前' + p.cost + '点');
-      }
-      if (d20 >= 16) {
-        p.fascination = Math.max(0, p.fascination - 1);
-        addBattleLog('p1', '独奏：≥16，降低1点入迷值，当前' + p.fascination + '点');
-      }
+      addBattleLog('p1', '独奏：20面骰投出' + d20 + '点，满足的条件全部适用');
+      if (d20 % 2 === 0) { p.cost = Math.min(p.cost + 2, p.maxCost); addBattleLog('p1', '独奏①偶数：回复2音韵，当前' + p.cost); }
+      if (d20 % 10 === 4 || d20 % 10 === 8) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog('p1', '独奏②个位为4的正整数倍数：降1入迷，当前' + p.fascination); }
+      if (d20 % 4 === 0) { p.cost = Math.min(p.cost + 2, p.maxCost); addBattleLog('p1', '独奏③为4的倍数：回复2音韵，当前' + p.cost); }
+      if (d20 >= 16) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog('p1', '独奏④≥16：降1入迷，当前' + p.fascination); }
+      if (teamHasChar('p1', '惠')) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog('p1', '独奏[松山惠]：额外降1入迷，当前' + p.fascination); }
       break;
+    }
       
     case '王车易位':
       // 交换两个格子效果，持续两轮
@@ -9975,7 +10000,8 @@ function showGraveList(zone) {
         var div=document.createElement('div');
         div.className='card-list-item';
         div.style.cssText='width:130px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid '+(def?'#feca57':'rgba(255,255,255,0.2)')+';border-radius:6px;';
-        var __spTxt = canSP ? ('⚡ '+def.label) : (zcur!=='grave' ? '◇ 已移出游戏，无法再发动' : ('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）'));
+        var __spTxt = '';
+        if (def) { __spTxt = canSP ? ('⚡ '+def.label) : (zcur!=='grave' ? '◇ 已移出游戏，无法再发动' : ('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）')); }
         var spBtn = def ? ('<button data-sp="1" style="width:100%;margin-top:6px;padding:5px;font-size:11px;border:none;border-radius:4px;cursor:'+(canSP?'pointer':'not-allowed')+';'+(canSP?'background:#feca57;color:#2d3436;font-weight:bold;':'background:#555;color:#aaa;')+'">'+__spTxt+'</button>') : '';
         div.innerHTML='<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
