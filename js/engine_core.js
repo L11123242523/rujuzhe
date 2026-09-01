@@ -87,7 +87,7 @@
 
   /* ============================ 响应/连锁窗口机 ============================
    * 四类“结果已出现、但尚未适用”的窗口，双方可在此连锁，连续两方放弃才适用。 */
-  var WINDOWS = { DICE: 'dice_result', MOVE: 'move', DAMAGE: 'damage', RAND: 'rand' };
+  var WINDOWS = { DICE: 'dice_result', MOVE: 'move', DAMAGE: 'damage', RAND: 'rand', EFFECT: 'effect_activate' };
   // 连锁卡分类（纯文本判定，唯一事实源，UI 的 isChainOnlyCard/__matchStage 都委托到这里）
   //   dice_set     修改骰子点数（遥控骰子/特制手套）
   //   reverse      改变移动方向（颠倒骰子）
@@ -104,10 +104,12 @@
     var isMoveAdjust = /让一次移动|一次移动的位移量|位移量增减|打断一名玩家的移动|打断一次移动/.test(eff) ||
       name.indexOf('侦探放大镜') >= 0 || name.indexOf('猎手爪链') >= 0;
     var isNegate = eff.indexOf('抵消') >= 0 && eff.indexOf('伤害') >= 0;
+    var isNegateEffect = name.indexOf('崩塌之乌托邦') >= 0 || (/效果无效/.test(eff) && /发动了?[^。；]{0,24}时/.test(eff));
     if (isReverse) return 'reverse';
     if (isDiceSet) return 'dice_set';
     if (isMoveAdjust) return 'move_adjust';
     if (isNegate) return 'negate_damage';
+    if (isNegateEffect) return 'negate_effect';
     return null;
   }
   function isChainCard(card) { return classifyChainCard(card) !== null; }
@@ -119,6 +121,7 @@
         return cardKind === 'reverse' || cardKind === 'move_adjust';
       case 'damage':      return cardKind === 'negate_damage';
       case 'rand':        return cardKind === 'dice_set';
+      case 'effect_activate': return cardKind === 'negate_effect';
       default: return false;
     }
   }
