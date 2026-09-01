@@ -56,6 +56,18 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     // 3d 合法基线：按硬需求(无序2+每非混沌角色属性2)动态构造8张，应无报错
     const legalItems=(function(){const req={'无序':2};goodChars.map(findC).forEach(c=>{if(c.attribute!=='混沌')req[c.attribute]=(req[c.attribute]||0)+2;});const pool=allCards.filter(c=>c._category==='item_permanent'||c._category==='item_single');const res=[],used={};let pn=0;Object.keys(req).forEach(attr=>{let n=req[attr];pool.forEach(c=>{if(n>0&&!used[c.name]&&c.attribute===attr&&(c._category!=='item_permanent'||pn<2)){used[c.name]=1;if(c._category==='item_permanent')pn++;res.push(c.name);n--;}});});return res;})();
     out.legalItemN=legalItems.length;
+    // 已选6张合法倾向(无序2/热忱2/理智2)，留2空槽应被补成2张理智→合法8张
+    const __ip=allCards.filter(c=>c._category==='item_single');
+    function pickAttr(a,n){return __ip.filter(c=>c.attribute===a).slice(0,n);}
+    const shotCur=pickAttr('无序',2).concat(pickAttr('热忱',2)).concat(pickAttr('理智',2)).concat([null,null]);
+    const shotKept=shotCur.filter(Boolean).map(c=>c.name);
+    const filled=autoFillItems(goodChars.map(findC),shotCur);
+    const fReq={'无序':2};goodChars.map(findC).forEach(c=>{if(c.attribute!=='混沌')fReq[c.attribute]=(fReq[c.attribute]||0)+2;});
+    const fHave={};filled.forEach(c=>{if(c)fHave[c.attribute]=(fHave[c.attribute]||0)+1;});
+    out.fillOk=filled.filter(Boolean).length===8 && Object.keys(fReq).every(a=>(fHave[a]||0)>=fReq[a]);
+    out.fillKept=shotKept.every(n=>filled.some(c=>c&&c.name===n));
+    out.fillSlots=filled.filter(Boolean).length===8;
+    out.fillPerm=filled.filter(c=>c&&c._category==='item_permanent').length<=2;
     setDeck(legalItems,legalCarry.slice(0,4));
     out.v_clean=validateDeck('p1');
 
@@ -79,6 +91,10 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
   ok(R.v_attrLack===true,'validateDeck 拦截道具属性配额不足');
   ok(R.legalItemN===8,'合法道具按硬需求凑满8张(实='+R.legalItemN+')');
   ok(R.v_clean.length===0,'合法基线无报错: '+(R.v_clean.join(';')||'无'));
+  ok(R.fillOk===true,'autoFill把截图缺额补成合法8张');
+  ok(R.fillKept===true,'autoFill保留用户已选的6张');
+  ok(R.fillSlots===true,'autoFill把2空槽补满到8张');
+  ok(R.fillPerm===true,'autoFill永续≤2');
   ok(R.team_blockPouxi===false,'战斗内水着队不能发动普通予剖析');
   ok(R.team_allowShuiqiang===true,'战斗内水着队可发动予(水着)水枪');
   ok(errs.length===0,'无页面错误: '+(errs.join(';')||'无'));

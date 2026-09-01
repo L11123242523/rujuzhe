@@ -2593,7 +2593,7 @@ window.__CARD_DATA__ = {
     {
       "name": "Huginn&Muninn",
       "cost": 5,
-      "attribute": "战术",
+      "attribute": "混沌",
       "type": "永续",
       "effect": "一红一蓝，一明一暗。发动时作为效果处理：对一名其他玩家造成3点混沌属性伤害并让自身攻击力+3。一局游戏只能使用一次：支付3点音韵值发动，从墓地或移出游戏的卡中选一张[侵略]标签的卡加入手卡。那之后造成的最终伤害+1。",
       "score": 7.9,
@@ -2730,7 +2730,7 @@ window.__CARD_DATA__ = {
     {
       "name": "镌刻的艺术",
       "cost": 4,
-      "attribute": "战术",
+      "attribute": "混沌",
       "type": "永续",
       "effect": "这份思念是否过于沉重？发动时作为效果处理：从牌组或移出游戏的卡中选一张[侵略]标签的卡加入手卡。每个自己的回合可以发动一次，支付4点同步值来回复2点音韵值（自己的同步值低于50%后发动会让回复的音韵值增加100%）。自己每失去4点同步值都会让队伍攻击力+1。",
       "score": 7.6,
@@ -2834,7 +2834,7 @@ window.__CARD_DATA__ = {
     {
       "name": "智能手机",
       "cost": 4,
-      "attribute": "丰沛",
+      "attribute": "理智",
       "type": "永续",
       "effect": "掘弃按键后将拥有超大屏幕的手机，你会喜欢上它所提供的付费功能的。发动时作为效果处理：获得2000金币。等价交换：每个自己的回合可以发动一次（可以扣除500金币来增加发动次数），扣除700金币从以下效果中选择一项适用：①上升1点攻击力②选一张手卡送入墓地，对一名玩家造成3点理智属性伤害。",
       "score": 7.6,
@@ -2941,7 +2941,7 @@ window.__CARD_DATA__ = {
     {
       "name": "设计师的直尺",
       "cost": 4,
-      "attribute": "移动",
+      "attribute": "理智",
       "type": "永续",
       "effect": "直尺，仅此。发动时作为效果处理：前进4格。每个自己回合可以发动一次，支付音韵值来前进，每支付1点音韵值来前进1格。SP：单回合内每移动8格后适用效果：对一名其他玩家造成2点理智属性伤害。（队伍中有两名以上[位移手]角色时造成的基础理智属性伤害提升至3点）",
       "score": 8.2,
@@ -3016,7 +3016,7 @@ window.__CARD_DATA__ = {
     {
       "name": "\"狼牙鹰爪\"",
       "cost": 7,
-      "attribute": "侵略",
+      "attribute": "热忱",
       "type": "永续",
       "card_type": "道具/永续",
       "image_url": "assets/images/card_langya_yingzhua.webp",
@@ -3042,7 +3042,7 @@ window.__CARD_DATA__ = {
     {
       "name": "\"巧匠之手\"",
       "cost": 5,
-      "attribute": "战术",
+      "attribute": "混沌",
       "type": "永续",
       "card_type": "道具/永续",
       "image_url": "assets/images/img_iYccn3axZ6.webp",
@@ -3068,7 +3068,7 @@ window.__CARD_DATA__ = {
     {
       "name": "核心的供给者",
       "cost": 5,
-      "attribute": "丰沛",
+      "attribute": "混沌",
       "type": "永续",
       "card_type": "道具/永续",
       "image_url": "assets/images/img_iTclHZs9kb.webp",
@@ -4154,7 +4154,7 @@ window.__CARD_DATA__ = {
     {
       "name": "\"崩塌之乌托邦\"",
       "cost": "1+",
-      "attribute": "反制",
+      "attribute": "混沌",
       "type": "单次",
       "card_type": "道具/单次",
       "image_url": "assets/images/img_rkxp2U3sUX.webp",
@@ -4180,7 +4180,7 @@ window.__CARD_DATA__ = {
     {
       "name": "先哲之\"馈赠\"",
       "cost": 1,
-      "attribute": "侵略",
+      "attribute": "热忱",
       "type": "单次",
       "card_type": "道具/单次",
       "image_url": "assets/images/img_Wk4wr3SIRr.webp",
