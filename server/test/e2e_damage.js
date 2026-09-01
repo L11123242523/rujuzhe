@@ -30,10 +30,18 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     reset('无序','理智');await hit(2,'无序',{});
     out.B_counterOnce=40-battleState.p2.sync;
 
-    // C 攻击力全额计入括号内：attackBuff2 - def1 + base0，同属性不克制 =>1
+    // C 攻击力÷2向下取整：2攻=+1，被1防抵消 =>0
     reset('理智','理智');battleState.p1.attackBuff=2;battleState.p2.defense=1;
     await hit(0,'理智',{});
     out.C_attack=40-battleState.p2.sync;
+    // C2 不足2点攻击力不增加伤害：1攻 def0 base0 =>0
+    reset('理智','理智');battleState.p1.attackBuff=1;
+    await hit(0,'理智',{});
+    out.C2_oneAtk=40-battleState.p2.sync;
+    // C3 3点攻击力向下取整=+1：def0 base0 =>1
+    reset('理智','理智');battleState.p1.attackBuff=3;
+    await hit(0,'理智',{});
+    out.C3_threeAtk=40-battleState.p2.sync;
 
     // D 判定伤害吃属性克制（旧文本层判定丢克制）：理智克热忱，def10，base1，无判定增伤 => core0+克制1=1
     reset('理智','热忱');battleState.p2.defense=10;
@@ -64,7 +72,9 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
   ok(R.foundCalm,'卡牌库含镇定药片');
   ok(R.A_highDefBonus===3,'A 高防下判定增伤+克制不被防御吃掉（扣3） got '+R.A_highDefBonus);
   ok(R.B_counterOnce===3,'B 属性克制全局只+1（扣3） got '+R.B_counterOnce);
-  ok(R.C_attack===1,'C 攻击力全额计入括号内（扣1） got '+R.C_attack);
+  ok(R.C_attack===0,'C 2攻=+1被1防抵消（扣0） got '+R.C_attack);
+  ok(R.C2_oneAtk===0,'C2 1点攻击力不足2点不增伤（扣0） got '+R.C2_oneAtk);
+  ok(R.C3_threeAtk===1,'C3 3攻向下取整=+1（扣1） got '+R.C3_threeAtk);
   ok(R.D_judgeCounter===1,'D 判定伤害吃到属性克制（扣1） got '+R.D_judgeCounter);
   ok(R.E_calmBoost===4,'E 镇定药片送墓最终+2（扣4） got '+R.E_calmBoost);
   ok(R.E_calmToGrave===true,'E 镇定药片送墓后进入墓地');
