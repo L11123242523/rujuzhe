@@ -8,7 +8,7 @@ let pass=0,fail=0; const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fa
 (async()=>{
   const browser=await chromium.launch({executablePath:EXE,headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
   const page=await browser.newPage({viewport:{width:1440,height:900}});
-  const errs=[];page.on('pageerror',e=>errs.push(e.message));
+  const errs=[];page.on('pageerror',e=>errs.push(e.message));page.on('dialog',d=>d.dismiss().catch(()=>{}));
   // 所有选择类弹窗自动选第一项/自动确认，避免异步挂起
   await page.addInitScript(()=>{ window.__autoChoose=true; });
   await page.goto('file:///home/user/.super_doubao/super-doubao-runtime/workspace/rujuzhe_game.html',{waitUntil:'load'});
@@ -22,10 +22,11 @@ let pass=0,fail=0; const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fa
     // 配合法双方，并把光太郎放进 p1 队员位
     randomDeck('p1');randomDeck('p2');
     const kotaro=window.cardData.characters.find(c=>c.name&&c.name.indexOf('光太郎')>=0);
-    if(kotaro) deckConfig.p1.chars[1]=kotaro;
+    if(kotaro){ let __try=0; do{ deckConfig.p1.chars[1]=kotaro; if(!validateDeck('p1').length)break; randomDeck('p1'); }while(++__try<15); }
     out.validate=[validateDeck('p1').length,validateDeck('p2').length];
     startBattle();
-    await new Promise(r=>setTimeout(r,700));
+    // 轮询等待战斗状态就绪（startBattle 内含初始选择/发牌异步链，headless 高负载时偏慢，最多等15s）
+    for (let w=0; w<300 && !(typeof battleState!=='undefined' && battleState && battleState.p1 && battleState.p2); w++) await new Promise(r=>setTimeout(r,50));
     const p=battleState.p1;
 
     // ---- bug2: 光太郎队员SP 献祭次数+1，可连续献祭2次 ----
@@ -68,11 +69,14 @@ let pass=0,fail=0; const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fa
     placeAfterUse('p1',rc,false);
     out.recycle={inDeck:p.deck.length===1,inGrave:p.grave.length===0,recycledCleared:rc._recycled===false};
 
-    // ---- bug5: 过载在自己回合因用卡进墓立即抽1 ----
+    // ---- bug5: 过载在自己回合因用卡进墓立即抽1（隔离干净状态，先排空前置步骤遗留的异步抽牌队列）----
+    await new Promise(r=>setTimeout(r,500));
+    Object.keys(p).forEach(k=>{ if(/SP|Passive/.test(k) && typeof p[k]==='boolean') p[k]=false; });
+    p.hand=[]; p.grave=[]; p.permanent=[]; p.removed=[];
     p._overload={until:3}; p.deck=[{name:'N1',cost:1}]; const beforeHand=p.hand.length;
     const oc={name:'过载测试卡',cost:0,_category:'item_single',effect:'获得1000金币'};
     settleCardExecution(oc,'p1','p2',{actualCost:0},()=>{});
-    await new Promise(r=>setTimeout(r,800));
+    await new Promise(r=>setTimeout(r,900));
     out.overload={handGain:p.hand.length-beforeHand};
 
     // ---- bug2 补充：效果处理路径 sacrificeCards 也吃加次数（一次送2张均成功）----
