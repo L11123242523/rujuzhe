@@ -3905,20 +3905,27 @@ function buildSmartDeck(arch) {
     if (team.some(function(t) { return t.attribute === c.attribute; })) v += 0.6;
     return v;
   }
-  function rankItems(cat) {
-    return allCards.filter(function(c) { return c._category === cat; })
-      .map(function(c) { return { c: c, s: itemScore(c) }; })
-      .sort(function(a, b) { return b.s - a.s; });
+  // 道具属性硬约束（对齐查询页规则）：默认2张无序 + 每名非混沌角色对应属性2张；混沌角色不占硬需求(留灵活位)；永续≤2、不重复
+  var allItems = allCards.filter(function(c) { return c._category === 'item_permanent' || c._category === 'item_single'; });
+  var attrReq = { '无序': 2 };
+  team.forEach(function(t) { if (t.attribute && t.attribute !== '混沌') attrReq[t.attribute] = (attrReq[t.attribute] || 0) + 2; });
+  var items = [], usedItem = {}, itemPermN = 0;
+  function __isPerm(c) { return c._category === 'item_permanent'; }
+  function takeItems(pool, need) {
+    var ranked = pool.slice().sort(function(a, b) { return itemScore(b) - itemScore(a); });
+    for (var ii = 0; ii < ranked.length && need > 0; ii++) {
+      var c = ranked[ii];
+      if (usedItem[c.name]) continue;
+      if (__isPerm(c) && itemPermN >= 2) continue;
+      usedItem[c.name] = 1; if (__isPerm(c)) itemPermN++; items.push(c); need--;
+    }
   }
-  var perms = rankItems('item_permanent'), singles = rankItems('item_single');
-  var items = [];
-  var permCount = Math.min(2, perms.length);
-  for (var pi = 0; pi < permCount; pi++) items.push(perms[pi].c);
-  // 单次补到8：低费(<=2)优先保证润滑，再按分数
-  var low = [], high = [];
-  singles.forEach(function(x) { ((x.c.cost || 0) <= 2 ? low : high).push(x); });
-  var ordered = low.concat(high);
-  for (var oi = 0; items.length < 8 && oi < ordered.length; oi++) items.push(ordered[oi].c);
+  // 1) 先按硬需求从对应属性桶选够
+  Object.keys(attrReq).forEach(function(attr) {
+    takeItems(allItems.filter(function(c) { return c.attribute === attr; }), attrReq[attr]);
+  });
+  // 2) 灵活位补到8（特殊属性道具/任意四属性，混沌角色的空缺在此填补，仍受永续≤2）
+  takeItems(allItems, 8 - items.length);
   // 携带卡：必须属于所选角色；流派契合+评分；优先2攻2技，至少1攻击
   function belongs(c) { return cardBelongsToTeam(c, teamNames); }
   var carryPool = allCards.filter(function(c) {
@@ -3975,6 +3982,14 @@ function validateDeck(player) {
   Object.keys(inm).forEach(function(n){ if(inm[n]>1) errs.push('同名道具不能重复：'+n); });
   var permN=items.filter(function(c){return c._category==='item_permanent';}).length;
   if(permN>2) errs.push('永续道具最多2张（当前'+permN+'张）');
+  // 道具属性配额：默认2无序 + 每名非混沌角色对应属性2张；混沌角色可带任意属性(灵活位)
+  var attrNeed={'无序':2};
+  chars.forEach(function(c){ if(c.attribute && c.attribute!=='混沌') attrNeed[c.attribute]=(attrNeed[c.attribute]||0)+2; });
+  var attrHave={};
+  items.forEach(function(c){ if(c.attribute) attrHave[c.attribute]=(attrHave[c.attribute]||0)+1; });
+  Object.keys(attrNeed).forEach(function(a){
+    if((attrHave[a]||0)<attrNeed[a]) errs.push('【'+a+'】属性道具不足：需要'+attrNeed[a]+'张，当前'+(attrHave[a]||0)+'张（规则：2无序+每名非混沌角色对应属性2张，混沌角色为灵活位）');
+  });
   var cnm={}; carries.forEach(function(c){cnm[c.name]=(cnm[c.name]||0)+1;});
   Object.keys(cnm).forEach(function(n){ if(cnm[n]>1) errs.push('同名携带卡不能重复：'+n); });
   return errs;
