@@ -4996,6 +4996,7 @@ function __refillDeckIfEmpty(player) {
   return false;
 }
 function drawCard(player) {
+  runTiming(TIMING.ON_DRAW, { player: player });
   var __p = battleState[player];
   if (__p.deck.length === 0) {
     if (!__refillDeckIfEmpty(player)) { addBattleLog(player, '牌库与墓地均已空，无卡可抽'); return null; }
@@ -5329,7 +5330,7 @@ function rioTriggerOnce(player) {
       dealDamageWithResponse(foe, dmg + zeal, '现实间里绪被动', function () {
         if (p._ruriPassive) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(player, '【琉璃被动】判定伤害后回复1点音韵值'); }
         if (typeof updateBattleUI === 'function') updateBattleUI();
-      }, '热忱', player);
+      }, '热忱', player, { judge: true, kind: 'fervor' });
     });
   }
   if (player === 'p1') {
@@ -5339,6 +5340,7 @@ function rioTriggerOnce(player) {
   } else { __fire(); } // AI：有1音韵即自动发动
 }
 function executeMoveEffect(effect) {
+  runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
   if (!effect) return;
   if (effect.cancelled) { addBattleLog(effect.player || 'p1', '本次移动已被连锁打断，不执行移动'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
   var moveAmount = effect.moveAmount;
@@ -6702,8 +6704,8 @@ function checkLevelUp(player) {
           }, 1);
         } else {
           var __tgt = player === 'p1' ? 'p2' : 'p1';
-          if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, '判定'); __supOnce(remain - 1); });
-          else { dealDamageWithResponse(__tgt, 1 + GameRNG.dice(4), '供给者四面骰', function () {}); __supOnce(remain - 1); }
+          if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
+          else { dealDamageWithResponse(__tgt, 1 + GameRNG.dice(4), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }
         }
       });
     }
@@ -8669,7 +8671,7 @@ function triggerLanzhangAfterJudge(user, target) {
   function __settle(face) {
     var ok = face === '正面' || face === true || face === 1;
     addBattleLog(user, '【蓝宝之杖·命】首次判定伤害后追加硬币判定：' + (ok ? '正面，造成2点判定伤害' : '反面，不造成伤害'));
-    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); });
+    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, null, user, { judge: true });
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
   if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
@@ -8708,6 +8710,85 @@ function triggerYaodaoOnDamage(user, dmg) {
 // 统一数值型进攻增益（两条造伤路径共用，避免增伤漏算/重复算）：
 // 攻击力加成 / 判定伤害+ / 理智伤害+ / 属性克制(基础克制+1 与 克制伤害+_attrBonus)
 // opt: {judge:是否判定伤害, attr:攻击属性, kind:op.kind, target:受击方}
+// ============================================================
+// 标准连锁时点总线（16时点）。自动诱发（被动/SP）用 onTiming 订阅、runTiming 触发；
+// 需要双方连锁询问的窗口仍复用 beforeEffectExecution/collectChainable（按 _stage 过滤）。
+// 无订阅者时 runTiming 为零开销直通。
+// ============================================================
+const TIMING = {
+  ON_DRAW: 'on_draw',                              // 玩家抽卡时
+  ON_ADD_HAND: 'on_add_hand',                      // 玩家将卡加入手卡（检索）
+  ON_TO_GRAVE: 'on_to_grave',                      // 玩家将卡送入墓地
+  ON_REMOVE: 'on_remove',                          // 玩家将卡移出游戏
+  ON_REMOVE_TO_HAND: 'on_remove_to_hand',          // 玩家将移出游戏的卡加入手卡
+  ON_ACTIVATE: 'on_activate',                      // 玩家发动效果
+  ON_APPLY: 'on_apply',                            // 玩家发动的效果进入适用时点（无连锁）
+  ON_EFFECT_DONE: 'on_effect_done',                // 玩家适用的效果结算完成后
+  ON_MOVE_PENDING: 'on_move_pending',              // 玩家的移动产生但还未适用
+  BEFORE_DAMAGE: 'before_damage',                  // 玩家造成伤害前
+  ON_DAMAGE: 'on_damage',                          // 玩家造成伤害时
+  AFTER_DAMAGE: 'after_damage',                    // 玩家造成伤害后
+  BEFORE_HURT: 'before_hurt',                      // 玩家受到伤害前
+  ON_HURT: 'on_hurt',                              // 玩家受到伤害时
+  AFTER_HURT: 'after_hurt',                        // 玩家受到伤害后
+  ON_RECOVER_COST: 'on_recover_cost'               // 玩家回复音韵值
+};
+var __timingHooks = {};
+function onTiming(point, fn) { if (!point || typeof fn !== 'function') return; (__timingHooks[point] = __timingHooks[point] || []).push(fn); }
+function runTiming(point, ctx, cb) {
+  var hs = __timingHooks[point] || []; var i = 0;
+  function __next() { if (i >= hs.length) { if (cb) cb(); return; } var fn = hs[i++]; try { fn(ctx || {}, __next); } catch (e) { console.error('runTiming error', point, e); __next(); } }
+  __next();
+}
+// ============================================================
+// 唯一权威伤害计算：严格按网站规则公式
+//   每段 = max(0, 基础 + 攻击力 - 防御) ；括号外再加：属性克制(每段+1) + 各类最终增伤
+// 关键：防御只能削“基础+攻击力”，削不到克制与最终增伤（旧实现把增伤也减防御，等于增伤被吃掉）。
+// opt: {base 基础/骰点, judge 是否判定伤害, attr 进攻属性, kind(sanity/fervor/chaos),
+//        srcCard 造成伤害的卡, extraFinal 交互追加的最终加值(如善意面具金币), coinFail 硬币反面 }
+// ============================================================
+function computeDamageValue(user, target, opt) {
+  opt = opt || {};
+  var ap = battleState[user], tp = battleState[target] || {};
+  var logs = [];
+  if (opt.coinFail) return { value: 0, logs: ['硬币判定为反面，不造成伤害'], attr: null, core: 0, tags: [], isAtk: false, isItem: false, isSkill: false, kind: null, pierce: false };
+  var base = opt.base || 0;
+  // 括号内：基础 + 攻击力 - 防御
+  var atk = ap.attackBuff || 0;
+  var def = (tp.defense === undefined || tp.defense === null) ? 0 : tp.defense; if (isNaN(def)) def = 0;
+  var core = base + atk - def; if (core < 0) core = 0;
+  var final = core;
+  // 进攻属性：显式 > 卡牌属性 > 队伍属性
+  var sc = opt.srcCard;
+  var attr = opt.attr || (sc && sc.attribute) || ((typeof getTeamAttribute === 'function') ? getTeamAttribute(user) : (ap.captain && ap.captain.attribute)) || null;
+  var defAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (tp.captain && tp.captain.attribute) || null;
+  var kind = opt.kind || __kindOf(attr || '');
+  // 括号外①：属性克制，每段+1（被克制不减少）；混沌规则在 __attrBeats 内
+  if (attr && defAttr && typeof __attrBeats === 'function' && __attrBeats(attr, defAttr)) {
+    final += 1; logs.push('属性克制（' + __normAttr(attr) + '克' + __normAttr(defAttr) + '）最终+1');
+    if (ap._attrBonus) { final += ap._attrBonus; logs.push('克制伤害+' + ap._attrBonus); }
+  }
+  // 括号外②：判定伤害+
+  if (opt.judge && ap._judgeDamageBonus) { final += ap._judgeDamageBonus; logs.push('判定伤害+' + ap._judgeDamageBonus); }
+  // 括号外③：理智伤害+
+  if (kind === 'sanity' && ap._intellectBonus) { final += ap._intellectBonus; logs.push('理智伤害+' + ap._intellectBonus); }
+  var perm = ap.permanent || [];
+  function hasPerm(k) { return perm.some(function (c) { return c.name && c.name.indexOf(k) >= 0; }); }
+  var tags = (sc && sc.tags) || [], cat = sc && sc._category;
+  var isAtk = cat === 'attack_cards', isSkill = cat === 'skill_cards', isItem = cat && /item/.test(cat);
+  // 括号外④：各类“最终伤害+N”
+  if (kind === 'sanity' && hasPerm('风纪委员')) { final += 1; logs.push('风纪委员臂章·理智最终+1'); }
+  if (opt.judge && hasPerm('钢笔')) { final += 1; logs.push('钢笔·判定最终+1'); }
+  if (sc && sc.name && sc.name.indexOf('神乐铃') >= 0 && (ap._shenleStack || 0) > 0) { var sl = ap._shenleStack; final += sl; ap._shenleStack = 0; logs.push('神乐铃消耗' + sl + '层，最终+' + sl); }
+  if (isAtk && hasPerm('善意面具')) { final += 1; logs.push('善意面具·攻击卡最终+1'); }
+  var pierce = false;
+  if (ap._yuiSP && (isAtk || (isSkill && tags.indexOf('侵略') >= 0))) { final += 1; pierce = true; logs.push('结衣SP最终+1（无视1护盾）'); }
+  if (ap._hinaSP && isItem && tags.indexOf('侵略') >= 0) { final += 1; logs.push('羽奈SP·[侵略]道具最终+1'); }
+  if ((tp.defense || 0) < 0 && ['p1','p2'].some(function (q) { return (battleState[q].grave || []).some(function (c) { return c.name && c.name.indexOf('杂鱼') >= 0; }); })) { final += 1; logs.push('杂鱼！杂鱼！·目标负防最终+1'); }
+  if (opt.extraFinal) { final += opt.extraFinal; logs.push('交互追加最终+' + opt.extraFinal); }
+  if (final < 0) final = 0;
+  return { value: final, logs: logs, attr: attr, core: core, defense: def, atk: atk, base: base, kind: kind, tags: tags, isAtk: isAtk, isItem: isItem, isSkill: isSkill, pierce: pierce };
+}
 function __offensiveBuffSum(user, opt) {
   opt = opt || {};
   var p = battleState[user], add = 0, logs = [];
@@ -8725,47 +8806,35 @@ function __offensiveBuffSum(user, opt) {
 function applyDamageOps(user, target, op, done, srcCard) {
   var p = battleState[user];
   function __settle(base) {
-    var __ub = __offensiveBuffSum(user, { judge: op.judge, attr: __opAttr(op, srcCard), kind: op.kind, target: target });
-    base += __ub.add; __ub.logs.forEach(function (lg) { addBattleLog(user, '【增伤】' + lg); });
-    var __kz = String((op.kind||'') + ' ' + (op.attr||'')); var __isSanityOp = /理智|sanity/i.test(__kz);
-    if (__isSanityOp && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) { base += 1; addBattleLog(user, '【风纪委员臂章】理智最终伤害+1'); }
-    if (op.judge && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; })) { base += 1; addBattleLog(user, '【钢笔】判定伤害+1'); }
-    if (srcCard && srcCard.name && srcCard.name.indexOf('神乐铃') >= 0 && (p._shenleStack || 0) > 0) { var __sl = p._shenleStack; base += __sl; p._shenleStack = 0; addBattleLog(user, '【神乐铃】消耗' + __sl + '层墓地叠加，本次最终伤害+' + __sl); }
-    if (srcCard && srcCard._category === 'attack_cards' && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('善意面具') >= 0; })) { base += 1; addBattleLog(user, '【善意面具·SP】攻击卡最终伤害+1'); }
+    // 增伤/克制/防御全部交由统一出口内的 computeDamageValue 按公式结算，这里只给基础值/属性/来源卡
+    var __attr = __opAttr(op, srcCard);
     var __tags = (srcCard && srcCard.tags) || [], __cat = srcCard && srcCard._category;
-    var __isAtk = __cat === 'attack_cards', __isSkill = __cat === 'skill_cards', __isItem = __cat && /item/.test(__cat);
-    if (p._yuiSP && (__isAtk || (__isSkill && __tags.indexOf('侵略') >= 0))) {
-      base += 1;
-      if ((battleState[target].shield || 0) > 0) { battleState[target].shield = Math.max(0, battleState[target].shield - 1); addBattleLog(user, '【结衣SP】最终伤害+1，无视1点护盾'); }
-    }
-    if (p._hinaSP && __isItem && __tags.indexOf('侵略') >= 0) base += 1;
-    function __deal(finalBase) {
-      // 杂鱼！杂鱼！SP：只要此卡在墓地，防御值为负的玩家受到的最终伤害+1
-      var __tgt = battleState[target];
-      if ((__tgt.defense || 0) < 0 && ['p1','p2'].some(function (q) { return (battleState[q].grave || []).some(function (c) { return c.name && c.name.indexOf('杂鱼') >= 0; }); })) { finalBase += 1; addBattleLog(user, '【杂鱼！杂鱼！·墓地SP】目标防御为负，最终伤害+1'); }
-      var afterDef = finalBase - (__tgt.defense || 0); if (afterDef < 0) afterDef = 0; if (afterDef > finalBase + 30) afterDef = finalBase + 30;
-      var __hadSync = battleState[target].sync;
-      dealDamageWithResponse(target, afterDef, op.source || '效果', function () {
-        if (op.judge && p._ruriPassive && finalBase > 0) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(user, '【琉璃被动】判定伤害后回复1音韵'); }
+    var __isItem = __cat && /item/.test(__cat);
+    var __hadSync = battleState[target].sync;
+    var __coinFail = op.dice === 'coin' && !base; // 硬币反面锁定0伤害
+    function __deal(extraFinal) {
+      dealDamageWithResponse(target, base, op.source || '效果', function () {
+        if (op.judge && p._ruriPassive && base > 0) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(user, '【琉璃被动】判定伤害后回复1音韵'); }
         if (p._sakuraHealSync && battleState[target].sync < __hadSync) { p.sync = Math.min(p.sync + 1, p.maxSync || 999); addBattleLog(user, '【宫樱子SP】造成伤害后回复1点同步'); }
-        if (p._ruriMizugiSP && op.kind === 'fervor' && battleState[target].sync < __hadSync) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(user, '【琉璃(水着)SP】造成热忱伤害后回复1点音韵'); }
-        // 羽奈被动：用[侵略]道具造伤害后追加1段1理智伤害（直接走底层，不再递归触发）
-        if (p._hinaPassive && __isItem && __tags.indexOf('侵略') >= 0 && battleState[target].sync < __hadSync) { dealDamageWithResponse(target, 1, '雨宫羽奈被动·追加', null, '理智'); addBattleLog(user, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); }
-        if (battleState[target].sync < __hadSync && typeof triggerYaodaoOnDamage === 'function') triggerYaodaoOnDamage(user, afterDef);
+        if (p._ruriMizugiSP && op.kind === 'fervor' && battleState[target].sync < __hadSync) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(user, '【琉璃(水着)SP】造成热忱伤害后回1音韵'); }
+        // 羽奈被动：[侵略]道具造伤后追加1段1理智伤害（每段单独吃克制/增伤，故不走 raw）
+        if (p._hinaPassive && __isItem && __tags.indexOf('侵略') >= 0 && battleState[target].sync < __hadSync) { dealDamageWithResponse(target, 1, '雨宫羽奈被动·追加', null, '理智', user, { kind: 'sanity' }); addBattleLog(user, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); }
+        if (battleState[target].sync < __hadSync && typeof triggerYaodaoOnDamage === 'function') triggerYaodaoOnDamage(user, base);
         if (op.judge && battleState[target].sync < __hadSync && typeof triggerLanzhangAfterJudge === 'function') triggerLanzhangAfterJudge(user, target);
         if (done) done();
-      }, __opAttr(op, srcCard), user);
+      }, __attr, user, { judge: !!op.judge, srcCard: srcCard, kind: op.kind, extraFinal: extraFinal || 0, coinFail: __coinFail });
     }
-    // 善意面具：使用攻击卡造伤害时可付金币，每500金币+1最终伤害（仅玩家交互，AI不付）
+    // 善意面具：攻击卡造伤害时可付金币，每500金币+1最终伤害（仅玩家交互，AI不付）
+    var __isAtk = __cat === 'attack_cards';
     var __maskAtk = __isAtk && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('善意面具') >= 0; });
     var __goldLvl = Math.floor((p.gold || 0) / 500);
     if (user === 'p1' && __maskAtk && __goldLvl >= 1 && typeof showChoiceModal === 'function') {
       var __mopts = ['不使用金币增伤']; for (var __gk = 1; __gk <= Math.min(__goldLvl, 5); __gk++) __mopts.push('支付' + (__gk * 500) + '金币，最终伤害+' + __gk);
       showChoiceModal('善意面具·金币增伤', '本次攻击造伤，每500金币+1最终伤害', '当前金币' + p.gold, __mopts, function (oi) {
-        if (oi > 0) { p.gold -= oi * 500; base += oi; addBattleLog(user, '【善意面具】支付' + (oi * 500) + '金币，最终伤害+' + oi + '（剩余' + p.gold + '金币）'); }
-        __deal(base);
+        if (oi > 0) { p.gold -= oi * 500; addBattleLog(user, '【善意面具】支付' + (oi * 500) + '金币，最终伤害+' + oi + '（剩余' + p.gold + '金币）'); }
+        __deal(oi || 0);
       });
-    } else __deal(base);
+    } else __deal(0);
   }
   if (op.judge) {
     var __afterRoll = function (roll) {
@@ -9038,7 +9107,7 @@ function runOneOp(op, ctx, next) {
     case 'destroy_pick': {
       var dw = op.who === 'self' ? user : target, dl2 = collectZoneCards(dw, [op.zone], null, null);
       pickFromList(user, dl2, '选择要破坏的卡', 1, function (picks) {
-        picks.forEach(function (pk) { var arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(pk.card); } else { battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { dealDamageWithResponse(dw, 2, '血之佑戒反噬（无来源热忱）', null, '热忱'); addBattleLog(dw, '【血之佑戒·红泪拉克莎】自己的卡被破坏，受到2点无来源热忱伤害'); } } addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + '【' + pk.card.name + '】'); });
+        picks.forEach(function (pk) { var arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(pk.card); runTiming(TIMING.ON_REMOVE, { player: dw, card: pk.card }); } else { battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { dealDamageWithResponse(dw, 2, '血之佑戒反噬（无来源热忱）', null, '热忱'); addBattleLog(dw, '【血之佑戒·红泪拉克莎】自己的卡被破坏，受到2点无来源热忱伤害'); } } addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + '【' + pk.card.name + '】'); });
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
       }); return;
@@ -9312,103 +9381,39 @@ function processSingleEffect(effectText, context, callback) {
   function finish() { if (__finished) return; __finished = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } callback(); }
   function hold() { if (isAuto) return; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } }
   
-  // 伤害效果（支持"造成X伤害"和"造X伤害"两种格式）
+  // 伤害效果：统一走 dealDamageWithResponse（公式增伤/属性克制/防御 + 护符抵消 + 护盾 + 造伤前诱发 + 造伤后时点）
   if ((effectText.indexOf('造成') >= 0 || effectText.indexOf('造') >= 0) && effectText.indexOf('伤害') >= 0) {
-    // 优先从"造成"后提取数字，其次从"造"后提取，最后从"伤害"前提取
     var damage = extractNumber(effectText, '造成') || extractNumber(effectText, '造') || extractNumber(effectText, '伤害') || 2;
-    var __textCoinFail = false; // 硬币判定反面：最终伤害锁定0，不再叠加任何增伤
-    // 判定伤害特殊处理：区分不同判定工具（硬币、四面骰、六面骰）；增伤统一在判定后由 __offensiveBuffSum 加一次
-    if (effectText.indexOf('判定伤害') >= 0) {
-      var __judgeLabel = (context.card && context.card.name) ? (context.card.name + '·判定') : '伤害判定';
+    var __isJudge = effectText.indexOf('判定伤害') >= 0, __coinFail = false;
+    var __judgeLabel = (context.card && context.card.name) ? (context.card.name + '·判定') : '伤害判定';
+    if (__isJudge) {
       if (effectText.indexOf('硬币') >= 0 || effectText.indexOf('正反面') >= 0) {
-        // 硬币判定：正面造成伤害，反面不造成
         var coinResult = (GameRNG.coin() ? '反面' : '正面');
-        // 播放硬币判定动画（fixed=已同步确定的结果，动画只做展示，不重复掷骰/不重复耗随机）
         if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', fixed: coinResult, label: __judgeLabel }, function () {});
-        if (coinResult === '正面') {
-          effectEngine.effectLog.push({
-            label: '【硬币判定】',
-            text: '硬币投掷结果：正面，造成' + damage + '点伤害',
-            class: 'effect-step step-result'
-          });
-        } else {
-          damage = 0; __textCoinFail = true;
-          effectEngine.effectLog.push({
-            label: '【硬币判定】',
-            text: '硬币投掷结果：反面，不造成伤害',
-            class: 'effect-step step-result'
-          });
-        }
+        if (coinResult !== '正面') { damage = 0; __coinFail = true; }
+        effectEngine.effectLog.push({ label: '【硬币判定】', text: '硬币结果' + coinResult + (coinResult === '正面' ? ('，造成' + damage + '点') : '，不造成伤害'), class: 'effect-step step-result' });
       } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
-        // 四面骰判定：1-4点
-        damage = GameRNG.dice(4);
-        // 判定伤害适用控骰能力（最多20%，即点数±1）
-        damage = applyDiceControl(user, damage, 4);
+        damage = applyDiceControl(user, GameRNG.dice(4), 4);
         if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 4, fixed: damage, label: __judgeLabel }, function () {});
-        effectEngine.effectLog.push({
-          label: '【四面骰判定】',
-          text: '四面骰投掷' + damage + '点',
-          class: 'effect-step step-result'
-        });
+        effectEngine.effectLog.push({ label: '【四面骰判定】', text: '四面骰' + damage + '点', class: 'effect-step step-result' });
       } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
-        // 六面骰判定：1-6点
-        damage = GameRNG.dice(6);
-        // 判定伤害适用控骰能力（最多20%，即点数±1）
-        damage = applyDiceControl(user, damage, 6);
+        damage = applyDiceControl(user, GameRNG.dice(6), 6);
         if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 6, fixed: damage, label: __judgeLabel }, function () {});
-        effectEngine.effectLog.push({
-          label: '【六面骰判定】',
-          text: '六面骰投掷' + damage + '点',
-          class: 'effect-step step-result'
-        });
+        effectEngine.effectLog.push({ label: '【六面骰判定】', text: '六面骰' + damage + '点', class: 'effect-step step-result' });
       }
     }
-    // 统一叠加数值型进攻增益（攻击力/判定+/理智+/克制），硬币反面为0时不叠加
-    if (!__textCoinFail) {
-      var __txtCard = context.card || null;
-      var __ubTxt = __offensiveBuffSum(user, { judge: effectText.indexOf('判定伤害') >= 0, attr: (__txtCard && __txtCard.attribute) || null, kind: (/理智/.test(effectText) ? 'sanity' : (/热忱/.test(effectText) ? 'fervor' : (/无序|混沌/.test(effectText) ? 'chaos' : null))), target: target });
-      damage += __ubTxt.add; __ubTxt.logs.forEach(function (lg) { addBattleLog(user, '【增伤】' + lg); });
-    } else { damage = 0; }
-    // 伤害公式：最终伤害 = 基础伤害 - 防御值（防御为负时伤害增加），然后护盾吸收
-    var targetDefense = (battleState[target].defense === undefined || battleState[target].defense === null) ? 0 : battleState[target].defense;
-    if (isNaN(targetDefense)) targetDefense = 0;
-    var finalDamage = damage - targetDefense;
-    if (finalDamage < 0) finalDamage = 0;
-    // 防御值为负时伤害增加，但设置合理上限防止异常
-    if (finalDamage > damage + 30) finalDamage = damage + 30;
-    var actualDamage = finalDamage;
-    var shieldDamage = 0;
-    if (battleState[target].shield && battleState[target].shield > 0) {
-      shieldDamage = Math.min(battleState[target].shield, finalDamage);
-      battleState[target].shield -= shieldDamage;
-      actualDamage = finalDamage - shieldDamage;
-    }
-    battleState[target].sync = Math.max(0, battleState[target].sync - actualDamage);
-    var damageMsg = '对' + (target === 'p1' ? '玩家1' : '玩家2') + '造成' + damage + '点伤害';
-    if (targetDefense !== 0) {
-      damageMsg += '（防御' + targetDefense + '，最终' + finalDamage + '）';
-    }
-    if (shieldDamage > 0) {
-      damageMsg += '（护盾抵消' + shieldDamage + '点，实际受到' + actualDamage + '点）';
-    }
-    damageMsg += '，剩余' + battleState[target].sync + '同步值，护盾' + (battleState[target].shield || 0) + '，防御' + (battleState[target].defense || 0);
-    effectEngine.effectLog.push({
-      label: '【效果结果】',
-      text: damageMsg,
-      class: 'effect-step step-result'
-    });
-    addBattleLog('damage', '造成' + damage + '点伤害！' + (shieldDamage > 0 ? '（护盾抵消' + shieldDamage + '点）' : ''));
-    
-    // 琉璃被动：每次造成判定伤害后回自身1音韵
-    if (effectText.indexOf('判定伤害') >= 0 && battleState[user]._ruriPassive && damage > 0) {
-      battleState[user].cost = Math.min(battleState[user].cost + 1, battleState[user].maxCost);
-      effectEngine.effectLog.push({
-        label: '【琉璃被动】',
-        text: '造成判定伤害后回复1点音韵值，当前' + battleState[user].cost + '点',
-        class: 'effect-step step-result'
-      });
-      addBattleLog(user, '【琉璃被动】判定伤害后回复1点音韵值');
-    }
+    var __txtCard = context.card || null;
+    var __dmgKind = /理智/.test(effectText) ? 'sanity' : (/热忱/.test(effectText) ? 'fervor' : (/无序|混沌/.test(effectText) ? 'chaos' : null));
+    var __hadSync = battleState[target].sync;
+    hold(); // 伤害含抵消弹窗/判定动画，暂停自动推进，结算完成后再 finish
+    dealDamageWithResponse(target, damage, (__txtCard && __txtCard.name) || '效果', function () {
+      if (__isJudge && battleState[user]._ruriPassive && damage > 0 && battleState[target].sync < __hadSync) {
+        battleState[user].cost = Math.min(battleState[user].cost + 1, battleState[user].maxCost);
+        addBattleLog(user, '【琉璃被动】判定伤害后回复1点音韵值');
+      }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      finish();
+    }, (__txtCard && __txtCard.attribute) || null, user, { judge: __isJudge, srcCard: __txtCard, kind: __dmgKind, coinFail: __coinFail });
   }
   
   // 回复同步值：必须是“回复…X点同步值/生命”的紧邻搭配，排除“支付X点同步值来回复音韵值”这类共现误判
@@ -9741,7 +9746,7 @@ function processSingleEffect(effectText, context, callback) {
           var realDI = battleState[target].permanent.indexOf(destCands[di]);
           if (realDI >= 0) {
             var destroyed = battleState[target].permanent.splice(realDI, 1)[0];
-            if (banishDest) { if (!battleState[target].removed) battleState[target].removed = []; battleState[target].removed.push(destroyed); }
+            if (banishDest) { if (!battleState[target].removed) battleState[target].removed = []; battleState[target].removed.push(destroyed); runTiming(TIMING.ON_REMOVE, { player: target, card: destroyed }); }
             else battleState[target].grave.push(destroyed);
             effectEngine.effectLog.push({ label: '【效果结果】', text: (banishDest ? '破坏并移出' : '破坏') + '卡【' + destroyed.name + '】', class: 'effect-step step-result' });
             addBattleLog(user, (banishDest ? '破坏并移出' : '破坏') + '【' + destroyed.name + '】');
@@ -10842,6 +10847,7 @@ function kaedePassiveTrigger(player, usedCard) {
 
 // 检查卡牌进入墓地时的触发效果
 function checkGraveTrigger(player, card, reason) {
+  runTiming(TIMING.ON_TO_GRAVE, { player: player, card: card, reason: reason || "" });
   if (!battleState || !card) return;
   reason = reason || 'sacrifice';
   var p = battleState[player];
@@ -10978,7 +10984,7 @@ function judgeAnimate(user, spec, cb) {
   }, 70);
 }
 
-function dealDamageWithResponse(target, damage, source, callback, attackerAttr, attacker) {
+function dealDamageWithResponse(target, damage, source, callback, attackerAttr, attacker, opts) {
   if (!battleState) {
     if (callback) callback(damage);
     return;
@@ -10989,6 +10995,39 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   if (!p) {
     if (callback) callback(damage);
     return;
+  }
+  // ===== 统一伤害公式：调用方只给基础值，这里统一结算 攻击力/防御/属性克制/各类最终增伤（opts.raw=已是最终值，不再叠加）=====
+  var __dmgCalc = null;
+  if (!(opts && opts.raw)) {
+    __dmgCalc = computeDamageValue(attacker, target, { base: damage, judge: opts && opts.judge, attr: attackerAttr, srcCard: opts && opts.srcCard, kind: opts && opts.kind, extraFinal: opts && opts.extraFinal });
+    damage = __dmgCalc.value; (__dmgCalc.logs || []).forEach(function (lg) { addBattleLog(attacker, '【增伤】' + lg); });
+  }
+  var __pierceShield = (__dmgCalc && __dmgCalc.pierce) || (opts && opts.pierceShield) || false;
+  // 造成伤害前时点：攻击者可从手牌送墓，触发“造伤害时…送墓…最终伤害+N”的SP（如镇定药片），成片适用同类记述
+  function __attackerHandTimingBoost(__then) {
+    var ab = attacker ? battleState[attacker] : null;
+    if (!ab || attacker === target || !(ab.hand || []).length) return __then(0);
+    var cands = [];
+    ab.hand.forEach(function (c) {
+      var sp = c.sp || '';
+      var m = sp.match(/造(?:成)?伤害时[^。；]*?(?:送墓|送入墓地)[^。；]*?最终伤害[+＋](\d+)/);
+      if (m && (ab.cost || 0) >= (c.cost || 0)) cands.push({ card: c, bonus: +m[1] });
+    });
+    if (!cands.length) return __then(0);
+    function __use(ci) {
+      var pk = cands[ci], j = ab.hand.indexOf(pk.card); if (j < 0) return __then(0);
+      ab.hand.splice(j, 1); (ab.grave = ab.grave || []).push(pk.card);
+      damage += pk.bonus; addBattleLog(attacker, '【' + pk.card.name + '·SP】造成伤害时从手牌送墓，最终伤害+' + pk.bonus);
+      if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, pk.card, 'hand_sp');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      __then(pk.bonus);
+    }
+    if (attacker === 'p1') {
+      var oo = cands.map(function (pk) { return '送墓【' + pk.card.name + '】最终伤害+' + pk.bonus; }); oo.push('不使用');
+      showChoiceModal('造成伤害前', '本次即将造成' + damage + '点伤害', '可从手牌送墓触发增伤SP（镇定药片类）', oo, function (i) { if (i < cands.length) __use(i); else __then(0); });
+    } else {
+      var __tp = battleState[target]; if (cands[0] && damage + cands[0].bonus >= (__tp.sync || 0)) __use(0); else __then(0);
+    }
   }
   // 结构化指令层：抵消下一次即将受到的伤害（prevent_next_damage）
   if (p._preventNextDamage) {
@@ -11050,7 +11089,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
         if (bonus > 0) {
           // 递归追加判定伤害：无属性、不再触发同一增益（已清除），避免循环
-          dealDamageWithResponse(target, bonus, '附带判定伤害', function () { if (callback) callback(actualDamage); }, null, attacker);
+          dealDamageWithResponse(target, bonus, '附带判定伤害', function () { if (callback) callback(actualDamage); }, null, attacker, { raw: true });
         } else {
           addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
           if (callback) callback(actualDamage);
@@ -11072,12 +11111,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   }
   // 正常承受伤害（先扣护盾再扣同步）
   function __normalHit() {
-    var __baseDmg = damage;
-    var __defTeamAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (p.captain && p.captain.attribute);
-    if (attackerAttr && __defTeamAttr && typeof __attrBeats === 'function' && __attrBeats(attackerAttr, __defTeamAttr)) {
-      __baseDmg += 1; addBattleLog(target, '属性克制（' + __normAttr(attackerAttr) + '克' + __normAttr(__defTeamAttr) + '），本段伤害+1');
-    }
-    var actualDamage = __baseDmg;
+    var actualDamage = damage; // 属性克制/各类增伤已在 computeDamageValue 统一结算，此处不再重复加克制
+    if (__pierceShield && (p.shield || 0) > 0) { p.shield = Math.max(0, p.shield - 1); addBattleLog(target, '无视1点护盾（结衣SP）'); }
     if (p.shield && p.shield > 0) {
       if (p.shield >= actualDamage) {
         p.shield -= actualDamage;
@@ -11089,13 +11124,19 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         p.shield = 0;
       }
     }
+    var __dmgCtx = { attacker: attacker, target: target, amount: actualDamage, source: source, attr: (__dmgCalc && __dmgCalc.attr) || attackerAttr || null };
     if (actualDamage > 0) {
+      runTiming(TIMING.BEFORE_HURT, __dmgCtx);   // 受到伤害前
+      runTiming(TIMING.ON_DAMAGE, __dmgCtx);     // 造成伤害时（攻击者视角）
+      runTiming(TIMING.ON_HURT, __dmgCtx);       // 受到伤害时（受击者视角）
       p.sync = Math.max(0, p.sync - actualDamage);
       addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + actualDamage + '点伤害，剩余同步值' + p.sync);
       if ((p.permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) {
         p.cost = Math.min(p.cost + 1, p.maxCost);
         addBattleLog(target, '【血之佑戒·红泪拉克莎】受到伤害后回复1点音韵（当前' + p.cost + '）');
       }
+      runTiming(TIMING.AFTER_DAMAGE, __dmgCtx);  // 造成伤害后
+      runTiming(TIMING.AFTER_HURT, __dmgCtx);    // 受到伤害后
     }
     updateBattleUI(); checkBattleEnd();
     __afterHitSettle(actualDamage);
@@ -11112,6 +11153,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     if (callback) callback(0);
   }
 
+  // 受伤响应（护符/墓地抵消/承受）整体包为 __goResponse，由“造成伤害前手牌诱发”结束后进入
+  function __goResponse() {
   // 玩家受伤：可视化询问抵消方式（手牌/盖伏护符、墓地移出抵消）或承受
   if (target === 'p1' && (hasCharm || __graveNegIdx >= 0)) {
     rwOpen('damage', { amount: damage, target: target });
@@ -11152,6 +11195,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     }
   }
   __normalHit();
+  }
+  // 造成伤害前时点：攻击者手牌送墓增伤（镇定药片类）结算后，再进入受伤响应/承受
+  __attackerHandTimingBoost(function () { __goResponse(); });
 }
 
 // ========== 盖伏功能 ==========
@@ -11607,7 +11653,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
     showCardPickerMulti(h, '巧匠之手：选一张手卡献祭（移出游戏，一局一次）', function (hi) {
       if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
       var real = p.hand.indexOf(h[hi]); if (real < 0) { updateBattleUI(); return; }
-      var sac = p.hand.splice(real, 1)[0]; if (!p.removed) p.removed = []; p.removed.push(sac);
+      var sac = p.hand.splice(real, 1)[0]; if (!p.removed) p.removed = []; p.removed.push(sac); runTiming(TIMING.ON_REMOVE, { player: player, card: sac });
       addBattleLog('p1', '【巧匠之手】【' + sac.name + '】献祭并移出游戏');
       var pool = p.removed.filter(function (c) { return c !== sac; });
       if (!pool.length) { addBattleLog('p1', '【巧匠之手】没有其他被移出的卡可回收'); updateBattleUI(); return; }
@@ -12011,10 +12057,10 @@ function postUsePassiveHooks(user, card) {
   if (p._yuMizugiSP && card && card.attribute === '理智' && (card.tags || []).indexOf('移动') >= 0 && /item/.test(card._category || '')) {
     var __ymFoe = user === 'p1' ? 'p2' : 'p1';
     if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', label: '予(水着)SP 硬币判定' }, function (face) {
-      if (face === '正面') { dealDamageWithResponse(__ymFoe, 2, '予(水着)SP'); addBattleLog(user, '【予(水着)SP】硬币正面，造成2点伤害'); }
+      if (face === '正面') { dealDamageWithResponse(__ymFoe, 2, '予(水着)SP', null, null, user, { judge: true }); addBattleLog(user, '【予(水着)SP】硬币正面，造成2点伤害'); }
       else addBattleLog(user, '【予(水着)SP】硬币背面，不造成伤害');
     });
-    else { if (GameRNG.coin()) dealDamageWithResponse(__ymFoe, 2, '予(水着)SP'); }
+    else { if (GameRNG.coin()) dealDamageWithResponse(__ymFoe, 2, '予(水着)SP', null, null, user, { judge: true }); }
   }
   // 羽奈被动：用[移动]道具卡后对一名玩家造1理智伤害（一次行动仅1次，rollPlayerDice 处重置标记）
   if (p._hinaPassive && card && /item/.test(card._category || '') && (card.tags || []).indexOf('移动') >= 0 && !p._hinaMoveUsedThisAction) {
