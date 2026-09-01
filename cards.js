@@ -1069,7 +1069,7 @@ window.__CARD_DATA__ = {
         "设计师的直尺"
       ],
       "combo_notes": "适用资源运转队/位移队/位移队。搭配高费卡或爆发卡，提供音韵支持。搭配移动倍增/控骰卡最大化位移收益",
-      "image_url": "assets/images/img_ZHjGwRrQmE.webp",
+      "image_url": "assets/images/card_fang_qingsongxie.webp",
       "character_full": "松山惠",
       "attack_range": "前后3格内一名玩家",
       "range_adjustment": 0.0,
@@ -2146,9 +2146,9 @@ window.__CARD_DATA__ = {
       "cost": 5,
       "attribute": "热忱",
       "type": "领域",
-      "effect": "展开自身前后4格领域，持续3次行动。领域内友方：热忱克制伤害+100%，攻击+50%，判定伤害+2。新领域覆盖旧领域。",
+      "effect": "琉璃展开范围为自身前后4格的领域，持续3次行动。所有在领域范围内的友方单位获得以下效果：热忱属性的克制伤害增加100%，攻击力增加50%，造成的判定伤害+2。（新获得的领域效果会覆盖原有的领域效果）",
       "sp": "",
-      "lv": "Lv1/4/7/10: 5/4/3/2",
+      "lv": "COST：Lv1/4/7/10(Max)，5/4/3/2",
       "score": 7.3,
       "grade": "A",
       "archetypes": [
@@ -2164,7 +2164,7 @@ window.__CARD_DATA__ = {
         "入间予"
       ],
       "combo_notes": "适用判定伤害队/热忱快攻队/位移队。搭配判定增伤/回费卡形成判定循环。搭配移动倍增/控骰卡最大化位移收益。搭配攻击增伤/破甲卡提升输出效率",
-      "image_url": "assets/images/img_0PdJIYEiwY.webp",
+      "image_url": "assets/images/card_biyi_lianli.webp",
       "character_full": "琉璃(水着)",
       "_category": "skill_cards",
       "dims": {
@@ -3018,8 +3018,8 @@ window.__CARD_DATA__ = {
       "attribute": "侵略",
       "type": "永续",
       "card_type": "道具/永续",
-      "image_url": "assets/images/img_cdT3OVgPih.webp",
-      "effect": "传说中的欺诈之神洛基曾使用过的武器。发动时作为效果处理：从墓地中选一张[侵略]标签的卡加入手卡，然后可以选一张卡送入墓地并抽一张。一回合一次，选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。受到的最终伤害+1，造成的最终伤害+1。",
+      "image_url": "assets/images/card_langya_yingzhua.webp",
+      "effect": "传说中的欺诈之神洛基曾使用的匕首。发动时作为效果处理：从墓地中选一张[侵略]标签的卡加入手卡，然后可以选一张卡送入墓地并抽一张。一回合一次，选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。受到的最终伤害+1，造成的最终伤害+1。",
       "tags": [
         "侵略",
         "永续",
