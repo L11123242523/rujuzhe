@@ -3512,10 +3512,10 @@ function checkCardResource(card,me,bs){
 // 同名不同形态（如 现实间里绪 / 里绪(水着)）互不通用——除非两个形态都编入队伍，否则不能混用技能卡。
 function teamHasCardCharacter(player, card) {
   var team = ((typeof deckConfig !== 'undefined') && deckConfig[player] && deckConfig[player].chars) || [];
-  function names() { return team.map(function (ch) { return ch && ch.name ? ch.name : ''; }); }
-  if (card.character_full) { return names().indexOf(card.character_full) >= 0; }
-  if (card.character) { return names().some(function (nm) { return nm === card.character || nm.indexOf(card.character) >= 0; }); }
-  return true; // 无归属信息的技能卡不拦截，避免误伤
+  var names = team.map(function (ch) { return ch && ch.name ? ch.name : ''; });
+  // 同名不同形态不通用：统一走精确归属；无任何归属信息的卡不拦截以免误伤
+  if (card.character_full || card.character) return cardBelongsToTeam(card, names);
+  return true;
 }
 function evaluatePlayable(card,player,opts){
   opts=opts||{};
@@ -3795,27 +3795,17 @@ function openCardPicker(player, type, index) {
   if (type === 'chars') {
     availableCards = allCards.filter(function(c) { return c._category === 'characters'; });
   } else if (type === 'items') {
-    availableCards = allCards.filter(function(c) { return c._category === 'item_permanent' || c._category === 'item_single'; });
+    var usedItemNames = deckConfig[player].items.filter(Boolean).map(function(c){return c.name;});
+    availableCards = allCards.filter(function(c) { return (c._category === 'item_permanent' || c._category === 'item_single') && usedItemNames.indexOf(c.name) < 0; });
   } else if (type === 'carries') {
     // 携带卡只能选已选角色的攻击卡和技能卡
     var selectedChars = deckConfig[player].chars.filter(function(c) { return c !== null; });
     var charNames = selectedChars.map(function(c) { return c.name; });
+    var usedCarryNames = deckConfig[player].carries.filter(Boolean).map(function(c){return c.name;});
     availableCards = allCards.filter(function(c) {
       if (c._category !== 'attack_cards' && c._category !== 'skill_cards') return false;
-      // 检查卡牌是否属于已选角色
-      if (c.character) {
-        for (var i = 0; i < charNames.length; i++) {
-          if (charNames[i].indexOf(c.character) >= 0 || c.character.indexOf(charNames[i]) >= 0) {
-            return true;
-          }
-        }
-      }
-      if (c.character_full) {
-        for (var i = 0; i < charNames.length; i++) {
-          if (charNames[i] === c.character_full) return true;
-        }
-      }
-      return false;
+      if (usedCarryNames.indexOf(c.name) >= 0) return false; // 同名携带不重复
+      return cardBelongsToTeam(c, charNames); // 同名不同形态不通用，精确归属
     });
   }
   
@@ -3843,11 +3833,21 @@ function openCardPicker(player, type, index) {
 function selectCard(cardIndex) {
   var card = allCards[cardIndex];
   if (!card) return;
-  
-  deckConfig[pickerState.player][pickerState.type][pickerState.index] = card;
-  
+  var pl = pickerState.player, ty = pickerState.type, idx = pickerState.index, cfg = deckConfig[pl];
+  function others(){ return cfg[ty].filter(function(c,k){ return c && k !== idx; }); }
+  if (ty === 'chars') {
+    if (others().some(function(c){ return c.name === card.name; })) { alert('该角色已在队伍中，不能重复选择'); return; }
+  } else if (ty === 'items') {
+    if (others().some(function(c){ return c.name === card.name; })) { alert('同名道具不能重复加入'); return; }
+    if (card._category === 'item_permanent' && others().filter(function(c){return c._category==='item_permanent';}).length >= 2) { alert('永续道具最多只能携带2张'); return; }
+  } else if (ty === 'carries') {
+    if (others().some(function(c){ return c.name === card.name; })) { alert('同名携带卡不能重复加入'); return; }
+    var __nm = cfg.chars.filter(Boolean).map(function(c){return c.name;});
+    if (!cardBelongsToTeam(card, __nm)) { alert('携带卡【'+card.name+'】不属于所选3名角色（同名不同形态不通用）'); return; }
+  }
+  cfg[ty][idx] = card;
   closeCardPicker();
-  renderDeckSide(pickerState.player);
+  renderDeckSide(pl);
 }
 
 // ========== 智能编组 ==========
@@ -3868,6 +3868,13 @@ function archOf(card, arch) {
 }
 function cScore(c) { return (typeof c.score === 'number' && !isNaN(c.score)) ? c.score : 5; }
 function nameHit(a, b) { return a && b && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0); }
+// 【唯一权威】卡牌是否属于所选队伍：同名不同形态不通用，只认 character_full 与角色名完全相等；缺 full 时仅短名全等，不做包含匹配
+function cardBelongsToTeam(card, teamNames) {
+  if (!card) return false;
+  if (card.character_full) return teamNames.indexOf(card.character_full) >= 0;
+  if (card.character) return teamNames.some(function (n) { return n === card.character; });
+  return false;
+}
 
 // 按流派智能构筑：队长=流派核心，队员优先combo，道具优先点名/流派/评分并兼顾费用曲线
 function buildSmartDeck(arch) {
@@ -3913,13 +3920,7 @@ function buildSmartDeck(arch) {
   var ordered = low.concat(high);
   for (var oi = 0; items.length < 8 && oi < ordered.length; oi++) items.push(ordered[oi].c);
   // 携带卡：必须属于所选角色；流派契合+评分；优先2攻2技，至少1攻击
-  function belongs(c) {
-    return teamNames.some(function(n) {
-      if (c.character_full && c.character_full === n) return true;
-      if (c.character && nameHit(n, c.character)) return true;
-      return false;
-    });
-  }
+  function belongs(c) { return cardBelongsToTeam(c, teamNames); }
   var carryPool = allCards.filter(function(c) {
     return (c._category === 'attack_cards' || c._category === 'skill_cards') && belongs(c);
   }).map(function(c) { return { c: c, s: cScore(c) + (archOf(c, arch) ? 2 : 0) }; })
@@ -3958,13 +3959,7 @@ function recommendDeck(player) {
 }
 // ========== 构筑校验 + 卡组码 ==========
 function nonNull(a){ return (a||[]).filter(function(c){return c!==null && !!c;}); }
-function carryBelongs(c, names){
-  return names.some(function(n){
-    if (c.character_full && c.character_full === n) return true;
-    if (c.character && (n.indexOf(c.character) >= 0 || c.character.indexOf(n) >= 0)) return true;
-    return false;
-  });
-}
+function carryBelongs(c, names){ return cardBelongsToTeam(c, names); }
 // 返回问题数组（空数组合法）
 function validateDeck(player) {
   var cfg = deckConfig[player], errs = [];
@@ -3975,7 +3970,13 @@ function validateDeck(player) {
   var cn = {}; chars.forEach(function(c){ cn[c.name]=(cn[c.name]||0)+1; });
   Object.keys(cn).forEach(function(n){ if (cn[n]>1) errs.push('角色重复：'+n); });
   var names = chars.map(function(c){return c.name;});
-  carries.forEach(function(c){ if (!carryBelongs(c, names)) errs.push('携带卡【'+c.name+'】不属于所选的3名角色'); });
+  carries.forEach(function(c){ if (!carryBelongs(c, names)) errs.push('携带卡【'+c.name+'】不属于所选的3名角色（同名不同形态不通用）'); });
+  var inm={}; items.forEach(function(c){inm[c.name]=(inm[c.name]||0)+1;});
+  Object.keys(inm).forEach(function(n){ if(inm[n]>1) errs.push('同名道具不能重复：'+n); });
+  var permN=items.filter(function(c){return c._category==='item_permanent';}).length;
+  if(permN>2) errs.push('永续道具最多2张（当前'+permN+'张）');
+  var cnm={}; carries.forEach(function(c){cnm[c.name]=(cnm[c.name]||0)+1;});
+  Object.keys(cnm).forEach(function(n){ if(cnm[n]>1) errs.push('同名携带卡不能重复：'+n); });
   return errs;
 }
 function exportDeckCode() {
@@ -4000,7 +4001,9 @@ function importDeckCode() {
   deckConfig.p1.items = it.concat(Array(Math.max(0,8-it.length)).fill(null)).slice(0,8);
   deckConfig.p1.carries = ck.concat(Array(Math.max(0,4-ck.length)).fill(null)).slice(0,4);
   renderDeckSide('p1');
-  alert(miss.length ? ('以下卡未在卡库找到（已留空，请手动补全）：\n'+miss.join('、')) : '卡组导入成功');
+  var __ve = validateDeck('p1');
+  var __head = miss.length ? ('以下卡未在卡库找到（已留空，请手动补全）：\n'+miss.join('、')) : '卡组导入成功';
+  alert(__head + (__ve.length ? ('\n\n⚠ 当前卡组不合法（开战前请修正）：\n'+__ve.join('\n')) : ''));
 }
 
 // ========== 对战 ==========
