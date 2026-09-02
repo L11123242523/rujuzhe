@@ -5046,9 +5046,10 @@ function initBattle() {
     if (deckConfig.p2.chars[i] && (deckConfig.p2.chars[i].name || '').indexOf('雨清') >= 0) p2HasNing = true;
   }
   
-  // 初始抽牌：基础4张，先手（p1）多1张=5张；有宁雨清的不在这里抽，由被动处理7选5
+  // 初始抽牌：双方统一起手4张；先手多出的1张由其第一回合“准备阶段抽1”自然获得（先手=5）。
+  // 有宁雨清的不在这里抽，由被动处理7选5
   if (!p1HasNing) {
-    for (var i = 0; i < 5; i++) drawCard('p1'); // 先手5张
+    for (var i = 0; i < 4; i++) drawCard('p1'); // 起手4张
   }
   if (!p2HasNing) {
     for (var i = 0; i < 4; i++) drawCard('p2');
@@ -5436,12 +5437,12 @@ function rioTriggerOnce(player) {
     p.cost -= 1;
     // 四面骰判定动画（judgeAnimate 内部已套用最多20%控骰；AI 直接给结果）
     judgeAnimate(player, { kind: 'dice', sides: 4, label: '现实间里绪·四面骰判定' }, function (roll) {
-      var dmg = roll;
-      if (p._judgeDamageBonus) dmg += p._judgeDamageBonus;
+      // 注意：判定增伤(_judgeDamageBonus)只在统一出口 computeDamageValue 里加一次，
+      // 这里不得再手动加进 base（否则里绪四面骰会吃到两次判定增伤）
       var isFirst = !p._rioFirstTriggerThisTurn; p._rioFirstTriggerThisTurn = true;
       var zeal = isFirst ? 1 : 0;
-      addBattleLog(player, '【现实间里绪被动】支付1音韵，四面骰判定' + roll + '点' + (p._judgeDamageBonus ? '（判定增伤后' + dmg + '点）' : '') + (zeal ? '，本回合首次附加1点热忱属性伤害' : ''));
-      dealDamageWithResponse(foe, dmg + zeal, '现实间里绪被动', function () {
+      addBattleLog(player, '【现实间里绪被动】支付1音韵，四面骰判定' + roll + '点' + (zeal ? '，本回合首次附加1点热忱属性伤害' : '') + '（判定增伤在统一伤害结算时计入）');
+      dealDamageWithResponse(foe, roll + zeal, '现实间里绪被动', function () {
         if (p._ruriPassive) { p.cost = Math.min(p.cost + 1, p.maxCost); addBattleLog(player, '【琉璃被动】判定伤害后回复1点音韵值'); }
         if (typeof updateBattleUI === 'function') updateBattleUI();
       }, '热忱', player, { judge: true, kind: 'fervor' });
@@ -8140,6 +8141,10 @@ function compileStepOps(text, permanent) {
   if (!text) return null;
   var core = normalizeClause(text);
   if (!core) return null;
+  // Twice 特化（确定性，避免“追加…，或…重新判定”被通用子句拆分偶发吞掉追加指令）：为所选玩家追加一个掷骰阶段
+  if (/追加(?:一个)?掷?骰?阶段/.test(core) && /一名玩家|指定玩家|为.{0,4}玩家/.test(core)) {
+    return [{ op: 'add_roll_phase', toTarget: true }];
+  }
   __CTX_FORCE_REMOVED = /破坏[\s\S]{0,24}移出(?:本局)?游戏/.test(core) && !/[①②③④⑤⑥][\s\S]{0,16}移出(?:本局)?游戏/.test(core); // 编号分支内的移出属条件路由，不做无条件去向
   if (/[①②③④⑤⑥]/.test(core)) {
     // 默认圈号=玩家单选（历史行为，零回归）；仅当首个圈号前引导语明确“获得：/行动内：”等并列全享、且无选择词/非条件路由时，才顺序执行全部
@@ -8914,7 +8919,8 @@ function computeDamageValue(user, target, opt) {
   var defAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (tp.captain && tp.captain.attribute) || null;
   var kind = opt.kind || __kindOf(attr || '');
   // 括号外①：属性克制，每段+1（被克制不减少）；混沌规则在 __attrBeats 内
-  if (attr && defAttr && typeof __attrBeats === 'function' && __attrBeats(attr, defAttr)) {
+  // 规则：判定伤害不吃属性克制增伤（含克制伤害+N、领域克制强化），故 opt.judge 时整段跳过
+  if (!opt.judge && attr && defAttr && typeof __attrBeats === 'function' && __attrBeats(attr, defAttr)) {
     var __cadd = 1;
     if (__dom.counterAdd && (!__dom.counterAttr || __normAttr(attr) === __normAttr(__dom.counterAttr))) { __cadd += __dom.counterAdd; logs.push('领域克制强化（' + __normAttr(__dom.counterAttr) + '）克制部分+' + __dom.counterAdd); }
     final += __cadd; logs.push('属性克制（' + __normAttr(attr) + '克' + __normAttr(defAttr) + '）最终+' + __cadd);
@@ -9214,7 +9220,7 @@ function runOneOp(op, ctx, next) {
     case 'adjust_next_move_all': ['p1', 'p2'].forEach(function (w) { var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta; }); addBattleLog(user, '所有玩家下次位移' + (op.delta > 0 ? '+' : '') + op.delta + '格'); break;
     case 'fix_next_move': p._fixedNextMove = op.n; break;
     case 'change_direction': p._nextMoveReverse = true; break;
-    case 'add_roll_phase': p._extraRollPhase = (p._extraRollPhase || 0) + 1; addBattleLog(user, '追加一个掷骰阶段'); break;
+    case 'add_roll_phase': { var __rw = op.toTarget ? target : user, __rp = battleState[__rw]; __rp._extraRollPhase = (__rp._extraRollPhase || 0) + 1; addBattleLog(user, '为' + (__rw === user ? '自己' : (__rw === 'p1' ? '玩家1' : '玩家2')) + '追加一个掷骰阶段'); break; }
     case 'modify_dice': p._modifyDiceNext = true; break;
     case 'roll_dice': { var __sd = op.sides || 6; var __rv = GameRNG.dice(__sd); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }
     case 'set_dice_sides': p._nextDiceSides = op.sides; p._nextDiceCount = op.count || 1; p._nextJudgeAdj = op.judgeAdj || 0; addBattleLog(user, '下次投掷改为' + (op.count || 1) + '枚' + op.sides + '面骰'); break;

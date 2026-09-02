@@ -21,7 +21,7 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     function reset(a1,a2){if(!battleState)battleState={};battleState.phase='main1';battleState.currentPlayer='p1';battleState.p1=mk(a1);battleState.p2=mk(a2);window.__pick=0;}
     function hit(base,attr,opts){return new Promise(res=>{dealDamageWithResponse('p2',base,'测试',()=>res(),attr,'p1',opts||{});setTimeout(()=>res(),30);});}
 
-    // A 高防5：判定增伤+2、理智克热忱+1，括号内 core=max(0,3-5)=0，括号外共+3 => 扣3（旧实现增伤被防御吃掉=0）
+    // A 高防5：判定增伤+2，判定伤害【不吃】属性克制；括号内 core=max(0,3-5)=0，括号外仅判定增伤+2 => 扣2（增伤不被防御吃掉）
     reset('理智','热忱');battleState.p2.defense=5;battleState.p1._judgeDamageBonus=2;
     await hit(3,'理智',{judge:true,kind:'sanity'});
     out.A_highDefBonus=40-battleState.p2.sync;
@@ -43,7 +43,7 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     await hit(0,'理智',{});
     out.C3_threeAtk=40-battleState.p2.sync;
 
-    // D 判定伤害吃属性克制（旧文本层判定丢克制）：理智克热忱，def10，base1，无判定增伤 => core0+克制1=1
+    // D 判定伤害【不吃】属性克制：理智克热忱，def10，base1，无判定增伤 => core0、无克制 => 0
     reset('理智','热忱');battleState.p2.defense=10;
     await hit(1,'理智',{judge:true,kind:'sanity'});
     out.D_judgeCounter=40-battleState.p2.sync;
@@ -70,12 +70,12 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     return out;
   });
   ok(R.foundCalm,'卡牌库含镇定药片');
-  ok(R.A_highDefBonus===3,'A 高防下判定增伤+克制不被防御吃掉（扣3） got '+R.A_highDefBonus);
+  ok(R.A_highDefBonus===2,'A 高防下判定增伤不被防御吃掉、判定不吃克制（扣2） got '+R.A_highDefBonus);
   ok(R.B_counterOnce===3,'B 属性克制全局只+1（扣3） got '+R.B_counterOnce);
   ok(R.C_attack===0,'C 2攻=+1被1防抵消（扣0） got '+R.C_attack);
   ok(R.C2_oneAtk===0,'C2 1点攻击力不足2点不增伤（扣0） got '+R.C2_oneAtk);
   ok(R.C3_threeAtk===1,'C3 3攻向下取整=+1（扣1） got '+R.C3_threeAtk);
-  ok(R.D_judgeCounter===1,'D 判定伤害吃到属性克制（扣1） got '+R.D_judgeCounter);
+  ok(R.D_judgeCounter===0,'D 判定伤害不吃属性克制（扣0） got '+R.D_judgeCounter);
   ok(R.E_calmBoost===4,'E 镇定药片送墓最终+2（扣4） got '+R.E_calmBoost);
   ok(R.E_calmToGrave===true,'E 镇定药片送墓后进入墓地');
   ok(R.E_title==='造成伤害前','E 触发“造成伤害前”时点弹窗 got '+R.E_title);
