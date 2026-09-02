@@ -5296,8 +5296,12 @@ function applyChainCard(player,pick,effect,done){
   if(name.indexOf('遥控骰子')>=0||name.indexOf('特制手套')>=0 || eff.indexOf('修改一次掷骰结果')>=0 || eff.indexOf('修改骰子点数')>=0){
     payAndRemove();
     function setV(v){ effect._chain.push({kind:'set',by:player,name:name,from:__orig(),to:v}); afterUse(); }
-    if(player==='p1') showChoiceModal(name,'将本次结果改为几点（锁定原始值'+__orig()+'）',effect.description||'',['1','2','3','4','5','6'],function(i){ setV(i+1); });
-    else setV(6);
+    // 修改范围=实际使用的“单枚骰子”面数；多枚骰投掷也只把最终点数设为所选值（不逐枚相加，如2枚6面改成6即最终=6而非12）
+    var __setSides = effect._diceSides || 6, __setCnt = effect._diceCount || 1, __setOpts = [];
+    for (var __si = 1; __si <= __setSides; __si++) __setOpts.push(String(__si));
+    var __setHint = (__setCnt > 1) ? ('（本次为'+__setCnt+'枚'+__setSides+'面骰，改成所选值即为最终点数，不逐枚相加）') : '';
+    if(player==='p1') showChoiceModal(name,'将本次最终点数改为几点（锁定原始值'+__orig()+'）'+__setHint,effect.description||'',__setOpts,function(i){ setV(i+1); });
+    else setV(__setSides);
   } else if(name.indexOf('颠倒骰子')>=0 || (eff.indexOf('改变')>=0&&eff.indexOf('方向')>=0)){
     payAndRemove(); effect._chain.push({kind:'reverse',by:player,name:name}); afterUse();
   } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
@@ -5463,6 +5467,39 @@ function rioTriggerOnce(player) {
       ['支付1音韵发动', '不发动'], function (i) { if (i === 0) __fire(); });
   } else { __fire(); } // AI：有1音韵即自动发动
 }
+// 统一的“移动后被动累计”：直尺SP（每累计8格造理智伤）+ 小春（每累计5格/经过玩家得先机）。
+// 掷骰主移动(executeMoveEffect)与卡牌效果移动(applyMove)都必须调用，避免卡牌移动漏累计。
+function accumulateMovePassives(player, amount, oldPos) {
+  var p = battleState[player]; if (!p) return;
+  var amt = Math.abs(amount || 0); if (!amt) return;
+  // 设计师直尺SP：单回合每累计移动8格，对一名其他玩家造2理智（队伍≥2名[位移]角色→3）
+  var __zhichiCard = (p.permanent || []).find(function (c) { return c.name && c.name.indexOf('直尺') >= 0; });
+  if (__zhichiCard) {
+    p._zhichiMoveCount = (p._zhichiMoveCount || 0) + amt;
+    var __zteam = ((typeof deckConfig !== 'undefined') && deckConfig[player] && deckConfig[player].chars || []).filter(Boolean);
+    var __zmov = __zteam.filter(function (c) { return (c.roles || []).some(function (r) { return (r || '').indexOf('位移') >= 0; }); }).length;
+    var __zdmg = __zmov >= 2 ? 3 : 2, __zfoe = player === 'p1' ? 'p2' : 'p1';
+    while (p._zhichiMoveCount >= 8) {
+      p._zhichiMoveCount -= 8;
+      dealDamageWithResponse(__zfoe, __zdmg, '设计师直尺SP·累计移动8格', null, '理智');
+      addBattleLog(player, '【直尺SP】单回合累计移动8格，对其他玩家造成' + __zdmg + '点理智伤害');
+    }
+  }
+  // 小春被动：累计位移5格或经过玩家获得1点先机（上限6）
+  if (p._koharuPassive) {
+    p._koharuMoveCount = (p._koharuMoveCount || 0) + amt;
+    while (p._koharuMoveCount >= 5) {
+      p._koharuMoveCount -= 5;
+      if ((p._xianji || 0) < 6) { p._xianji = (p._xianji || 0) + 1; addBattleLog(player, '【小春被动·侦探直觉】累计位移5格，获得1点先机（当前' + p._xianji + '点）'); }
+    }
+    if (oldPos != null) {
+      var otherPlayer = (player === 'p1') ? 'p2' : 'p1', otherPos = battleState[otherPlayer].position, passed = false;
+      var dir = amount >= 0 ? 1 : -1;
+      for (var step = 1; step <= amt; step++) { if (((oldPos + dir * step) % 42 + 42) % 42 === otherPos) { passed = true; break; } }
+      if (passed && (p._xianji || 0) < 6) { p._xianji = (p._xianji || 0) + 1; addBattleLog(player, '【小春被动·侦探直觉】经过其他玩家，获得1点先机（当前' + p._xianji + '点）'); }
+    }
+  }
+}
 function executeMoveEffect(effect) {
   runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
   if (!effect) return;
@@ -5493,45 +5530,9 @@ function executeMoveEffect(effect) {
   
   // 里绪被动：单回合内每累计移动8格后对一名玩家造成4面骰判定伤害
   rioAccumulateMove(player, actualMoveAmount);
-  
-  // 设计师直尺SP：单回合每累计移动8格，对一名其他玩家造2理智（队伍≥2名[位移]角色→3）
-  var __zhichiCard = (p.permanent || []).find(function (c) { return c.name && c.name.indexOf('直尺') >= 0; });
-  if (__zhichiCard) {
-    p._zhichiMoveCount = (p._zhichiMoveCount || 0) + actualMoveAmount;
-    var __zteam = ((typeof deckConfig !== 'undefined') && deckConfig[player] && deckConfig[player].chars || []).filter(Boolean);
-    var __zmov = __zteam.filter(function (c) { return (c.roles || []).some(function (r) { return (r || '').indexOf('位移') >= 0; }); }).length;
-    var __zdmg = __zmov >= 2 ? 3 : 2, __zfoe = player === 'p1' ? 'p2' : 'p1';
-    while (p._zhichiMoveCount >= 8) {
-      p._zhichiMoveCount -= 8;
-      dealDamageWithResponse(__zfoe, __zdmg, '设计师直尺SP·累计移动8格', null, '理智');
-      addBattleLog(player, '【直尺SP】单回合累计移动8格，对其他玩家造成' + __zdmg + '点理智伤害');
-    }
-  }
-  // 小春被动：累计位移5格或经过玩家获得1点先机（上限6）
-  if (p._koharuPassive) {
-    p._koharuMoveCount = (p._koharuMoveCount || 0) + actualMoveAmount;
-    while (p._koharuMoveCount >= 5) {
-      p._koharuMoveCount -= 5;
-      if ((p._xianji || 0) < 6) {
-        p._xianji = (p._xianji || 0) + 1;
-        addBattleLog(player, '【小春被动·侦探直觉】累计位移5格，获得1点先机（当前' + p._xianji + '点）');
-      }
-    }
-    var otherPlayer = (player === 'p1') ? 'p2' : 'p1';
-    var otherPos = battleState[otherPlayer].position;
-    var passed = false;
-    for (var step = 1; step <= actualMoveAmount; step++) {
-      if ((oldPos + step) % 42 === otherPos) {
-        passed = true;
-        break;
-      }
-    }
-    if (passed && (p._xianji || 0) < 6) {
-      p._xianji = (p._xianji || 0) + 1;
-      addBattleLog(player, '【小春被动·侦探直觉】经过其他玩家，获得1点先机（当前' + p._xianji + '点）');
-    }
-  }
-  
+  // 直尺SP / 小春被动：统一累计（掷骰主移动）
+  accumulateMovePassives(player, moveDir * actualMoveAmount, oldPos);
+
   // 触发格子效果
   triggerTileEffect(player);
   
@@ -5610,6 +5611,7 @@ function rollPlayerDice(player) {
   for (var k=0;k<cnt;k++){ var __rv=GameRNG.dice(sides); d += __rv; __rolls.push(__rv); }
   // 多枚骰：点数“相加”（碰碰冰茶2枚6面骰、里绪被动2枚六面骰 => 2~12），不再取平均
   p._lastRolls = __rolls;
+  p._lastDiceSides = sides; p._lastDiceCount = cnt; // 记录本次实际使用的单枚面数/枚数，供改点连锁确定合法范围
   if (typeof StatusSys!=='undefined' && StatusSys.has(player,'神醉')) { var __b=d; d=Math.max(1,Math.floor(d/2)); p.statuses=p.statuses.filter(function(x){return x.type!=='神醉';}); addBattleLog(player,'【神醉】投掷点数减半 '+__b+'→'+d); }
   p._lastRoll = d; p._nextDiceSides = 0; p._nextDiceCount = 1; p._rioTwoDice = false;
   p._hinaMoveUsedThisAction = false; // 羽奈被动：新行动重置[移动]道具触发标记
@@ -5713,6 +5715,7 @@ function rollDice() {
       function __beginDiceWindow() {
         rwOpen('dice', { result: finalDice });
         var diceEffect = { type:'dice_result', _stage:'dice_result', player:'p1', moveAmount:finalDice, diceResult:finalDice,
+          _diceSides: __sides, _diceCount: __cnt,
           description:'骰子结果 '+finalDice+' 点将要适用（可连锁修改点数/方向）' };
         pushEffect(diceEffect);
         beforeEffectExecution(diceEffect, function(res){
@@ -5938,7 +5941,9 @@ function checkMoveTriggers(player, steps) {
   
   // 现实间里绪队长被动：累计移动→每8格可支付1音韵发动四面骰判定造伤（水着里绪/队员不触发，统一函数内判定）
   rioAccumulateMove(player, steps);
-  
+  // 直尺SP / 小春先机：同样按本次位移量累计
+  accumulateMovePassives(player, steps, p.position);
+
   // 重置单回合移动计数（在结束回合时重置）
 }
 
@@ -6005,14 +6010,27 @@ function endTurn() {
   if (battleState.p1._lanzhangUsed) battleState.p1._lanzhangUsed = false;
   // 单回合移动累计：回合结束立即归零（里绪/直尺）
   battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
-  
-  addBattleLog('p1', '结束回合');
-  
-  // 切换到AI
-  battleState.currentPlayer = 'p2';
-  battleState.turn++;
-  updateBattleUI();
-  setTimeout(startTurn, 500);
+
+  function __endTurnTail() {
+    addBattleLog('p1', '结束回合');
+    // 切换到AI
+    battleState.currentPlayer = 'p2';
+    battleState.turn++;
+    updateBattleUI();
+    setTimeout(startTurn, 500);
+  }
+  // 狡黠之跃 Lv4追加：回合结束前可跳回发动前位置，跳回不触发格子效果
+  if (battleState.p1._pendingJumpReturn != null) {
+    var __back = battleState.p1._pendingJumpReturn; battleState.p1._pendingJumpReturn = null;
+    if (typeof showChoiceModal === 'function') {
+      showChoiceModal('狡黠之跃 · Lv4追加', '是否跳回发动前所在的第' + __back + '格？（跳回不触发格子效果）', '', ['跳回原位', '留在当前格'], function (i) {
+        if (i === 0) { var __old = battleState.p1.position; battleState.p1.position = __back; addBattleLog('p1', '【狡黠之跃Lv4】从第' + __old + '格跳回第' + __back + '格（不触发格子）'); updateBattleUI(); }
+        __endTurnTail();
+      });
+      return;
+    }
+  }
+  __endTurnTail();
 }
 
 
@@ -6183,7 +6201,7 @@ function aiExecuteMove(dice, callback) {
   var __aiReverse=false;
   // —— 骰子结果“将要适用前”时点：玩家可连锁修改 AI 的骰子点数/方向 ——
   rwOpen('dice', { result: dice });
-  var __aiDiceEff={ type:'dice_result', _stage:'dice_result', player:'p2', moveAmount:dice, diceResult:dice, description:'AI 骰子结果 '+dice+' 点将要适用（可连锁修改点数/方向）' };
+  var __aiDiceEff={ type:'dice_result', _stage:'dice_result', player:'p2', moveAmount:dice, diceResult:dice, _diceSides: p._lastDiceSides||6, _diceCount: p._lastDiceCount||1, description:'AI 骰子结果 '+dice+' 点将要适用（可连锁修改点数/方向）' };
   pushEffect(__aiDiceEff);
   beforeEffectExecution(__aiDiceEff, function(res){
     rwClose('dice');
@@ -6285,6 +6303,8 @@ function aiEndTurn() {
   
   // 单回合移动累计：AI回合结束立即归零（里绪/直尺）
   battleState.p2._rioMoveCount = 0; battleState.p2._zhichiMoveCount = 0; battleState.p2._koharuMoveCount = 0;
+  // 狡黠之跃 Lv4追加：AI 直接跳回发动前位置（不触发格子）
+  if (battleState.p2._pendingJumpReturn != null) { var __ab = battleState.p2._pendingJumpReturn; battleState.p2._pendingJumpReturn = null; var __ao = battleState.p2.position; battleState.p2.position = __ab; addBattleLog('p2', '【狡黠之跃Lv4】从第' + __ao + '格跳回第' + __ab + '格（不触发格子）'); }
   addBattleLog('p2', '结束回合');
   // 【时间定义】一轮=所有玩家各行动一次；2人局末位玩家(AI)行动完即一轮结束
   battleState.round = (battleState.round || 1) + 1;
@@ -8163,6 +8183,10 @@ function compileStepOps(text, permanent) {
     }
     return [{ op: 'add_roll_phase', toTarget: true }];
   }
+  // 风纪委员的手段 特化：向前快速移动3格 + 终点(Lv7含路径)其他玩家处破坏其一张卡（每次移动仅一张）
+  if (/快速移动\s*3\s*格/.test(core) && /破坏(?:其|.*?)一张卡/.test(core)) {
+    return [{ op: 'move', n: 3 }, { op: 'fengji_destroy' }];
+  }
   __CTX_FORCE_REMOVED = /破坏[\s\S]{0,24}移出(?:本局)?游戏/.test(core) && !/[①②③④⑤⑥][\s\S]{0,16}移出(?:本局)?游戏/.test(core); // 编号分支内的移出属条件路由，不做无条件去向
   if (/[①②③④⑤⑥]/.test(core)) {
     // 默认圈号=玩家单选（历史行为，零回归）；仅当首个圈号前引导语明确“获得：/行动内：”等并列全享、且无选择词/非条件路由时，才顺序执行全部
@@ -8387,12 +8411,13 @@ function __compileBody(t) {
       else if (has('4面骰') || has('四面骰')) dice = 'd4';
       else if (has('6面骰') || has('六面骰')) dice = 'd6';
       else if (has('20面骰')) dice = 'd20';
+      else dice = 'fixed'; // 无骰种的“X点判定伤害”=固定值，不掷骰
     }
     var n = __matchNum(new RegExp('(?:造(?:成)?|给予)\\s*(?:其|一名玩家)?\\s*' + __NUM + '\\s*点?'), t);
     var kind = has('无序') ? 'chaos' : (has('理智') ? 'sanity' : (has('热忱') ? 'fervor' : (has('混沌') ? 'chaos' : null)));
     if (/多段|(\d)\s*段伤害/.test(t)) {
       var hits = [];
-      var hm = t.match(new RegExp(__NUM + '点判定伤害')); if (hm) hits.push({ judge: true, dice: 'd6', base: __toNum(hm[1]) });
+      var hm = t.match(new RegExp(__NUM + '点判定伤害')); if (hm) { var __hd = (has('硬币') || has('正反面')) ? 'coin' : (has('4面骰') || has('四面骰')) ? 'd4' : (has('6面骰') || has('六面骰')) ? 'd6' : has('20面骰') ? 'd20' : 'fixed'; hits.push({ judge: true, dice: __hd, base: __toNum(hm[1]) }); }
       var sm2 = t.match(new RegExp(__NUM + '点理智(?:属性)?伤害')); if (sm2) hits.push({ judge: false, base: __toNum(sm2[1]), kind: 'sanity' });
       var cm2 = t.match(new RegExp(__NUM + '点(?:无序|热忱|混沌)(?:属性)?伤害')); if (cm2) hits.push({ judge: false, base: __toNum(cm2[1]) });
       if (hits.length) ops.push({ op: 'damage_multi', hits: hits }); else uncovered.push('multi');
@@ -8722,6 +8747,7 @@ function resolveBarrierOnMove(user, oldPos, newPos, dir) {
 // 统一移动底层
 function applyMove(user, signedN) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
+  p._lastMoveFrom = oldPos; p._lastMoveSteps = n; // 记录移动前位置/步数，供“路径上”类效果（风纪委员Lv7）使用
   var __dest = ((p.position + n) % 42 + 42) % 42;
   p.position = resolveBarrierOnMove(user, oldPos, __dest, __dir);
   addBattleLog(user, (n >= 0 ? '前进' : '后退') + Math.abs(n) + '格，第' + oldPos + '格→第' + p.position + '格');
@@ -8731,6 +8757,7 @@ function applyMove(user, signedN) {
     addBattleLog(user, '经过起点：获得400金币、1点音韵值');
   }
   rioAccumulateMove(user, n);
+  accumulateMovePassives(user, n, oldPos); // 卡牌效果移动同样累计直尺SP/小春先机
   if (p._rioMizugiSP && !p._rioMizugiFirstMove) {
     p._rioMizugiFirstMove = true;
     if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
@@ -9044,6 +9071,8 @@ function applyDamageOps(user, target, op, done, srcCard) {
     } else __deal(0);
   }
   if (op.judge) {
+    // 固定值判定伤害（无骰种，如清凉时间“1点判定伤害”）：不掷骰、无波动，直接按固定值结算，但仍属判定伤害（吃判定增伤、不吃属性克制）
+    if (op.dice === 'fixed') { __settle(op.base || 1); return; }
     var __afterRoll = function (roll, __cancelled) {
       if (__cancelled || roll === null || roll === undefined) { addBattleLog(user, '本次判定被连锁无效，不造成伤害'); __deal(0); return; }
       var base;
@@ -9237,11 +9266,29 @@ function runOneOp(op, ctx, next) {
       return;
     }
     case 'swim_ring': {
+      // 沿方向飞掷：最远 op.range 格，命中第一个玩家后继续沿同方向飞，可再命中后续玩家（每人各吃一次伤害+破甲）；全程无命中则飞满销毁
       function ring(dir) {
-        var d = ((q.position - p.position) + 42) % 42;
-        var hit = dir > 0 ? (d >= 1 && d <= op.range) : (d >= 42 - op.range && d <= 41);
-        if (hit) { addBattleLog(user, '泳圈命中'); applyDamageOps(user, target, { judge: false, base: op.damage, kind: 'sanity' }, function () { q.defense = (q.defense || 0) - op.def; next(); }); }
-        else { addBattleLog(user, '泳圈未命中'); next(); }
+        var L = (typeof ringLen === 'function') ? ringLen() : (MAP_TILES ? MAP_TILES.length : 42);
+        var hits = [];
+        Object.keys(battleState).forEach(function (k) {
+          if (!/^p\d+$/.test(k) || k === user) return;
+          var qp = battleState[k]; if (!qp || (qp.sync || 0) <= 0) return;
+          var dd = ((qp.position - p.position) % L + L) % L;
+          var dist = dir > 0 ? dd : ((dd === 0) ? 0 : L - dd);
+          if (dist >= 1 && dist <= op.range) hits.push({ k: k, dist: dist });
+        });
+        hits.sort(function (a, b) { return a.dist - b.dist; });
+        if (!hits.length) { addBattleLog(user, '泳圈沿方向飞满' + op.range + '格未触碰任何玩家，飞行物销毁'); next(); return; }
+        var hi = 0;
+        (function hitNext() {
+          if (hi >= hits.length) { addBattleLog(user, '泳圈飞行结束（共命中' + hits.length + '名玩家）'); next(); return; }
+          var hk = hits[hi++].k, hq = battleState[hk];
+          applyDamageOps(user, hk, { judge: false, base: op.damage, kind: 'sanity' }, function () {
+            hq.defense = (hq.defense || 0) - op.def;
+            addBattleLog(user, '泳圈命中【' + (hk === 'p1' ? '我方' : '对手') + '】，造成' + op.damage + '理智伤害并降低' + op.def + '点防御，随后继续沿方向飞行');
+            hitNext();
+          });
+        })();
       }
       if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('泳圈飞掷方向', '', '', ['向前飞掷', '向后飞掷'], function (o) { ring(o === 1 ? -1 : 1); });
       else ring(1);
@@ -9254,7 +9301,10 @@ function runOneOp(op, ctx, next) {
     }
     case 'move_to_player': { var before = p.position; p.position = q.position; addBattleLog(user, '移动到目标所在第' + p.position + '格（原第' + before + '格）'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user); break; }
     case 'move_to_tile': {
-      if (op.kind === 'opposite') { p.position = (p.position + 21) % 42; addBattleLog(user, '跃向对行相同位置第' + p.position + '格'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user); break; }
+      if (op.kind === 'opposite') { var __oppFrom = p.position; p.position = (p.position + 21) % 42; addBattleLog(user, '跃向对行相同位置第' + p.position + '格'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
+        // 狡黠之跃 Lv4追加：本回合结束前可跳回发动前位置，且跳回不触发格子效果
+        if ((p.level || 1) >= 4) { p._pendingJumpReturn = __oppFrom; addBattleLog(user, '【Lv4追加】已登记：本回合结束前可跳回第' + __oppFrom + '格（不触发格子）'); }
+        break; }
       if (op.kind === 'nearest_interactive' || op.kind === 'game') {
         var __want = op.kind === 'game' ? function (tl) { return tl && tl.type === 'game'; } : function (tl) { return tl && ['item', 'bus', 'subway', 'power'].indexOf(tl.type) >= 0; };
         var __L = (typeof ringLen === 'function') ? ringLen() : (MAP_TILES ? MAP_TILES.length : 42), __tgt = -1;
@@ -9338,6 +9388,40 @@ function runOneOp(op, ctx, next) {
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
       }); return;
+    }
+    case 'fengji_destroy': {
+      // 风纪委员的手段：终点处有其他玩家可破坏其一张卡；Lv7追加=快速移动路径上（不含起点、含终点）的其他玩家也可，每次移动仅破坏一张
+      var __fl = p.level || 1, __ff = p._lastMoveFrom, __fs = p._lastMoveSteps != null ? p._lastMoveSteps : 3;
+      var __fL = (typeof ringLen === 'function') ? ringLen() : (MAP_TILES ? MAP_TILES.length : 42);
+      function __onRoute(pos) {
+        if (__ff == null) return pos === p.position;
+        if (__fl < 7) return pos === p.position; // 未到Lv7：仅终点
+        for (var s = 1; s <= Math.max(1, Math.abs(__fs)); s++) { var g = (((__ff + (__fs >= 0 ? s : -s)) % __fL) + __fL) % __fL; if (g === pos) return true; }
+        return pos === p.position;
+      }
+      var __fc = [];
+      Object.keys(battleState).forEach(function (k) { if (!/^p\d+$/.test(k) || k === user) return; var qp = battleState[k]; if (!qp || (qp.sync || 0) <= 0) return; if (__onRoute(qp.position)) __fc.push(k); });
+      if (!__fc.length) { addBattleLog(user, '快速移动' + (__fl >= 7 ? '路径' : '终点') + '上没有其他玩家，不破坏卡'); next(); return; }
+      function __doDestroy(dw) {
+        var dl = collectZoneCards(dw, ['permanent', 'faceDownCards']);
+        if (!dl.length) { addBattleLog(user, (dw === 'p1' ? '我方' : '对手') + '场上没有可破坏的卡'); next(); return; }
+        pickFromList(user, dl, '选择要破坏的一张卡（每次移动仅一张）', 1, function (picks) {
+          if (!picks || !picks.length) { next(); return; }
+          var pk = picks[0], arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card);
+          if (ix >= 0) {
+            arr.splice(ix, 1); battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card;
+            if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect');
+            if ((battleState[dw].permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) { dealDamageWithResponse(dw, 2, '血之佑戒反噬（无来源热忱）', null, '热忱'); addBattleLog(dw, '【血之佑戒·红泪拉克莎】自己的卡被破坏，受到2点无来源热忱伤害'); }
+            addBattleLog(user, '破坏' + (dw === 'p1' ? '我方' : '对手') + '场上的【' + pk.card.name + '】');
+          }
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+          next();
+        });
+      }
+      if (__fc.length === 1) __doDestroy(__fc[0]);
+      else if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('风纪委员的手段', '移动路径上有多名玩家，选择破坏谁的一张卡（仅一张）', '', __fc.map(function (k) { return k === 'p1' ? '我方' : '对手' + k.slice(1); }), function (ci) { __doDestroy(__fc[ci]); });
+      else __doDestroy(__fc[0]);
+      return;
     }
     case 'destroy_route': {
       var __drT = battleState[target], __ld = __drT && __drT._lastDestroyed;
@@ -11228,8 +11312,9 @@ function applyJudgeChain(side, pick, je, done) {
   if (kind === 'dice_set') {
     __pay();
     function __set(v) { je.val = v; addBattleLog(side, '【' + name + '】把本次判定结果改为 ' + v); done(); }
-    if (side === 'p1') showChoiceModal(name, '将本次判定结果改为几点', '当前结果 ' + je.val, ['1', '2', '3', '4', '5', '6'], function (i) { __set(i + 1); });
-    else __set(6);
+    var __js = (je.spec && je.spec.sides) || 6, __jopts = []; for (var __ji = 1; __ji <= __js; __ji++) __jopts.push(String(__ji));
+    if (side === 'p1') showChoiceModal(name, '将本次判定结果改为几点', '当前结果 ' + je.val, __jopts, function (i) { __set(i + 1); });
+    else __set(__js);
     return;
   }
   __pay(); done();
@@ -11418,8 +11503,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       var __done = function (bonus, rollText) {
         if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
         if (bonus > 0) {
-          // 递归追加判定伤害：无属性、不再触发同一增益（已清除），避免循环
-          dealDamageWithResponse(target, bonus, '附带判定伤害', function () { if (callback) callback(actualDamage); }, null, attacker, { raw: true });
+          // 递归追加“判定伤害”：走统一公式（judge:true）以吃到攻击力/判定增伤/钢笔等，但不吃属性克制；_nextAttackJudge 已清除不会循环
+          dealDamageWithResponse(target, bonus, '附带判定伤害', function () { if (callback) callback(actualDamage); }, null, attacker, { judge: true });
         } else {
           addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
           if (callback) callback(actualDamage);

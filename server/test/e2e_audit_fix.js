@@ -21,7 +21,7 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('PASS',m);}else{fail
   a=ops('命运之回声');
   out.echo={perm:a.filter(o=>o.op==='destroy_pick'&&o.zone==='permanent').length,hand:a.filter(o=>o.op==='destroy_pick'&&o.zone==='hand').length};
   out.jiaoxia=JSON.stringify(ops('狡黠之跃'));
-  a=ops('风纪委员的手段'); out.fengji=a.some(o=>o.op==='move'&&o.n===3)&&a.some(o=>o.op==='destroy_pick');
+  a=ops('风纪委员的手段'); out.fengji=a.some(o=>o.op==='move'&&o.n===3)&&a.some(o=>o.op==='fengji_destroy');
   a=ops('Twice'); out.twice=a[0]&&a[0].op==='choice';
   return out;
  });
