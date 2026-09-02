@@ -5249,7 +5249,12 @@ function collectChainable(player, effect){
   // 按“将要适用前”时点的阶段过滤：骰子结果窗口只收改点/反向类，移动窗口只收位移增减/打断类
   function __matchStage(c){
     if(!stage) return true;
-    if (typeof RJEngine!=='undefined' && RJEngine.chainableAt) { var __k=RJEngine.classifyChainCard(c); if(!__k) return false; return RJEngine.chainableAt(stage,__k); }
+    if (typeof RJEngine!=='undefined' && RJEngine.chainableAt) {
+      var __k=RJEngine.classifyChainCard(c); if(!__k) return false;
+      // 硬币判定不可被"改点"类卡修改（遥控骰子/特制手套只作用于骰子）；Twice 重判硬币仍可
+      if ((stage==='rand_result'||stage==='rand') && effect && effect.spec && effect.spec.kind==='coin' && __k==='dice_set') return false;
+      return RJEngine.chainableAt(stage,__k);
+    }
     var eff=c.effect||c.text||'', nm=c.name||'';
     if(stage==='dice_result') return isDiceModifyCard(c);
     if(stage==='move') {
@@ -11543,6 +11548,7 @@ function applyJudgeChain(side, pick, je, done) {
     return;
   }
   if (kind === 'dice_set') {
+    if (je.spec && je.spec.kind === 'coin') { addBattleLog(side, '硬币判定不可修改点数'); done(); return; }
     __pay();
     function __set(v) { je.val = v; addBattleLog(side, '【' + name + '】把本次判定结果改为 ' + v); done(); }
     var __js = (je.spec && je.spec.sides) || 6, __jopts = []; for (var __ji = 1; __ji <= __js; __ji++) __jopts.push(String(__ji));
@@ -11732,6 +11738,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var atk = (attacker && battleState[attacker]) ? battleState[attacker] : null;
     if (!(actualDamage > 0 && atk && atk._nextAttackJudge) || opts.segment) { __finish(actualDamage); return; }
     var nj = atk._nextAttackJudge; delete atk._nextAttackJudge; // “下一次”=一次性，先取出清除
+    addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已触发并消耗（后续伤害不再附带）');
+    addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已触发并消耗（后续伤害不再附带）');
     var __lblName = (source || '攻击') + '·附带判定';
     function __applyBonus(bonus, rollText) {
       if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
@@ -11799,7 +11807,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     }
     p.shield = __ignore + __effShield; // 被无视的护盾保留 + 生效护盾抵消后的余量
     // “下一次攻击无视N护盾”为一次性增益，命中后消耗
-    if (attacker && battleState[attacker] && battleState[attacker]._nextAttackPierce) battleState[attacker]._nextAttackPierce = 0;
+    if (attacker && battleState[attacker] && battleState[attacker]._nextAttackPierce) { battleState[attacker]._nextAttackPierce = 0; addBattleLog(attacker, '【一次性增益】无视护盾点数已消耗'); }
     var __dmgCtx = { attacker: attacker, target: target, amount: actualDamage, source: source, attr: (__dmgCalc && __dmgCalc.attr) || attackerAttr || null };
     if (actualDamage > 0) {
       runTiming(TIMING.BEFORE_DAMAGE, __dmgCtx); // 造成伤害前（攻击者视角）
@@ -12197,7 +12205,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
         p.sync = Math.max(0, p.sync - 3);
         addBattleLog(user, '【妖刀五月雨】自己失3同步（当前' + p.sync + '）');
         updateBattleUI(); cb && cb();
-      });
+      }, '混沌', user);
     }
     if (user === 'p1' && battleState.p2.permanent.length) {
       showTargetCards('p2', 'permanent', '妖刀五月雨：选择对方场上1张卡破坏', true, function (sc, si) {
