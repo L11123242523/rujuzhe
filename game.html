@@ -11732,32 +11732,40 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     rwClose('damage'); updateBattleUI();
     __finish(0);
   }
-  // 攻击者“下一次造伤害附带判定”增益（如 夏日畅饮时间！②）：确实造成伤害后播判定动画并按结果追加；一次性消耗
-  // 追加伤害只做数值结算（本地护盾/同步扣减+时点钩子），不再递归整条伤害管线，避免二次响应窗/二次胜负判定/误触发
+  // 攻击者“下一次造伤害附带判定”增益（如 夏日畅饮时间！②）：一次性消耗——下一次攻击命中与否都消耗；
+  // 附带判定只在确实造成伤害时结算（正面/N点判定伤害），未命中则仅消耗不附带。
   function __afterHitSettle(actualDamage) {
     var atk = (attacker && battleState[attacker]) ? battleState[attacker] : null;
-    if (!(actualDamage > 0 && atk && atk._nextAttackJudge) || opts.segment) { __finish(actualDamage); return; }
-    var nj = atk._nextAttackJudge; delete atk._nextAttackJudge; // “下一次”=一次性，先取出清除
-    addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已触发并消耗（后续伤害不再附带）');
-    addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已触发并消耗（后续伤害不再附带）');
-    var __lblName = (source || '攻击') + '·附带判定';
-    function __applyBonus(bonus, rollText) {
-      if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
-      if (bonus > 0) {
-        // 附带判定吃攻击力/判定增伤（computeDamageValue judge:true），不吃属性克制（attr:null）
-        var __bc = computeDamageValue(attacker, target, { base: bonus, judge: true, attr: null, srcCard: null, kind: null });
-        __applyBonusLocal(__bc.value, '附带判定');
-      } else {
-        addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
+    var __nj = atk ? atk._nextAttackJudge : null;
+    if (__nj && !opts.segment) {
+      var nj = __nj; delete atk._nextAttackJudge;
+      addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已消耗（命中与否均消耗，后续攻击不再附带）');
+      if (actualDamage > 0) {
+        var __lblName = (source || '攻击') + '·附带判定';
+        function __applyBonus(bonus, rollText) {
+          if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
+          if (bonus > 0) {
+            // 判定伤害：吃攻击力÷2/防御/判定增伤，仅不吃属性克制增伤
+            var __bc = computeDamageValue(attacker, target, { base: bonus, judge: true, attr: null, srcCard: null, kind: null });
+            __applyBonusLocal(__bc.value, '附带判定');
+          } else {
+            addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
+          }
+          __finish(actualDamage);
+        }
+        if (nj.dice === 'coin') {
+          judgePerform(attacker, { kind: 'coin', label: __lblName }, function (roll) { __applyBonus(roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll); });
+        } else {
+          var __sides = (nj.dice === 'd4') ? 4 : 6;
+          judgePerform(attacker, { kind: 'dice', sides: __sides, label: __lblName }, function (roll) { if (roll == null) roll = 0; __applyBonus(roll, __sides + '面骰点数' + roll + '，追加' + roll); });
+        }
+        return;
       }
+      addBattleLog(attacker, '本次未造成实际伤害，附带判定不触发（增益已消耗）');
       __finish(actualDamage);
+      return;
     }
-    if (nj.dice === 'coin') {
-      judgePerform(attacker, { kind: 'coin', label: __lblName }, function (roll) { __applyBonus(roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll); });
-    } else {
-      var __sides = (nj.dice === 'd4') ? 4 : 6;
-      judgePerform(attacker, { kind: 'dice', sides: __sides, label: __lblName }, function (roll) { if (roll == null) roll = 0; __applyBonus(roll, __sides + '面骰点数' + roll + '，追加' + roll); });
-    }
+    __finish(actualDamage);
   }
   // 段内追加伤害：本地数值结算（不递归、不再开响应窗）
   function __applyBonusLocal(bd, label) {
