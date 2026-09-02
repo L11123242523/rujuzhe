@@ -2687,7 +2687,6 @@ body::before{opacity:.62;}
     <button class="battle-action-btn btn-end" id="btnEndTurn" onclick="endTurn()" style="display:none;">⏭️ 结束回合</button>
     <button class="battle-action-btn btn-passive" id="btnPassive" onclick="useCharacterPassive()" style="display:none;background:linear-gradient(135deg,#f39c12,#e67e22);color:#fff;">⚡ 角色技能</button>
     <button class="battle-action-btn btn-sacrifice" id="btnSacrifice" onclick="doSacrifice()" style="display:none;background:linear-gradient(135deg,#8e44ad,#c0392b);color:#fff;">🔥 献祭</button>
-    <button class="battle-action-btn btn-calibrate" id="btnCalibrate" onclick="actCalibrate()" style="display:none;background:linear-gradient(135deg,#00b894,#00cec9);color:#fff;">🎵 校准</button>
     <button class="battle-action-btn btn-log" onclick="toggleBattleLog()">📜 战斗日志</button>
   </div>
   <div class="battle-log-panel" id="battleLogPanel">
@@ -5144,7 +5143,6 @@ function startTurn() {
     battleState[__rs]._lanzhangUsed = false;
     battleState[__rs]._yaodaoTriggered = false;
     battleState[__rs]._megumiSacBonusThisTurn = 0; // 惠δ本回合临时献祭次数加成（每回合开始清零）
-    battleState[__rs]._calibrateUsedThisTurn = false; // 主动校准每回合一次
   }
 
   var player = battleState.currentPlayer;
@@ -5264,6 +5262,7 @@ function collectChainable(player, effect){
     return true;
   }
   var out=[];
+  var __myTurn = battleState.currentPlayer === player;
   function consider(c,from,index){
     if(!c) return;
     var __kd=(typeof RJEngine!=='undefined'&&RJEngine.classifyChainCard)?RJEngine.classifyChainCard(c):null;
@@ -5279,7 +5278,14 @@ function collectChainable(player, effect){
     if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
     out.push({card:c,from:from,index:index});
   }
-  (me.hand||[]).forEach(function(c,i){consider(c,'hand',i);});
+  (me.hand||[]).forEach(function(c,i){
+    // 对手回合：手牌连锁卡需卡面明确写"其他玩家回合也能从手卡发动"（如怪怪幽灵吊坠），否则只能盖伏后（下回合起）发动
+    if (!__myTurn) {
+      var __ht = (c.effect||'') + (c.sp||'') + (c.text||'');
+      if (!/其他玩家回合[^。；]{0,10}从手卡|对手回合[^。；]{0,10}从手卡/.test(__ht)) return;
+    }
+    consider(c,'hand',i);
+  });
   (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
   return out;
 }
@@ -6424,13 +6430,10 @@ function checkBattleEnd() {
 // 校准降入迷（20面骰≥14成功，成功降2点入迷值）
 function actCalibrate() {
   if (!battleState || battleState.currentPlayer !== 'p1') return;
-  if (battleState._over) return;
   if (battleState.phase !== 'main1' && battleState.phase !== 'main2') {
     alert('当前阶段不能校准！');
     return;
   }
-  if (battleState.p1._calibrateUsedThisTurn) { alert('本回合已校准过（每回合一次）'); return; }
-  battleState.p1._calibrateUsedThisTurn = true;
   
   var roll = GameRNG.dice(20);
   var success = roll >= 14;
@@ -7405,8 +7408,8 @@ function updateBattleUI() {
             var bgGradient = isMusic ? 'linear-gradient(135deg,#fd79a8,#e84393)' : 'linear-gradient(135deg,#a29bfe,#6c5ce7)';
             var cardType = isMusic ? '乐谱卡' : '事件卡';
             var icon = isMusic ? '🎵' : '📜';
-            // 事件卡/乐谱卡在主要阶段可用，其他阶段半透明
-            var evCanClick = isActionPhase && isPlayerTurn; // 事件/乐谱无全时点，对手回合不可手发
+            // 事件卡全时点：自己回合主要阶段 / 对手回合任意阶段可点；乐谱卡仅自己回合主要阶段
+            var evCanClick = isMusic ? (isActionPhase && isPlayerTurn) : ((isActionPhase && isPlayerTurn) || !isPlayerTurn);
             var evStyle = evCanClick ? '' : 'opacity:0.4;cursor:not-allowed;';
             var evClick = evCanClick ? clickHandler : '';
             return '<div class="hand-card event-card" onclick="' + evClick + '" style="' + evStyle + '" title="【' + cardType + '】' + card.name + ' - ' + (card.effect||'').substring(0,80) + '（' + cardType + '不占用手牌上限）">' +
@@ -7529,12 +7532,6 @@ function updateBattleUI() {
       if (btnNext) btnNext.style.display = 'none';
       if (btnRoll) btnRoll.style.display = 'none';
       if (btnEnd) btnEnd.style.display = 'none';
-    }
-    // 校准按钮：自己回合的主要阶段1/2可用，每回合一次
-    var btnCal = document.getElementById('btnCalibrate');
-    if (btnCal) {
-      var __canCal = (battleState.currentPlayer === 'p1') && (battleState.phase === 'main1' || battleState.phase === 'main2') && !battleState.p1._calibrateUsedThisTurn && !battleState._over;
-      btnCal.style.display = __canCal ? 'inline-block' : 'none';
     }
   } catch(e) {
     console.error('updateBattleUI buttons error:', e);
@@ -8703,12 +8700,12 @@ function __compileBody(t) {
   if (/抵消一次即将受到的伤害|抵消一次[^。；]*伤害/.test(t)) ops.push({ op: 'prevent_next_damage' });
 
   // 检索 / 回收 / 放回
-  var exm = t.match(/([一-龥]{2,4})以外/);
+  var exm = t.match(/(无序|热忱|理智|混沌)以外/); // 仅四属性可作排除项，修复把"加入无序/选这张卡"误捕获为属性
   if (/加入手卡|加入手牌|加入[^。；，]{0,14}(?:道具卡|卡)|回收/.test(t)) {
     var sources = __parseSources(t); if (!sources.length) sources = ['deck'];
     var tags = __parseTags(t), cats = __parseCats(t);
     var need = __matchNum(new RegExp('(?:选|将)?[^。；，]{0,8}' + __NUM + '\\s*张'), t) || 1;
-    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, excludeAttr: exm ? exm[1] : null, need: need, to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
+    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, excludeAttr: exm ? exm[1] : null, excludeSelf: /这张卡以外|自身以外|此卡以外/.test(t), need: need, to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
   }
   // 下次造伤附带判定
   var nj = t.match(/下一次造伤害附带(硬币|四面骰|六面骰|4面骰|6面骰)判定伤害/);
@@ -9500,6 +9497,7 @@ function runOneOp(op, ctx, next) {
     case 'prevent_next_damage': p._preventNextDamage = true; addBattleLog(user, '登记：抵消下一次即将受到的伤害'); break;
     case 'search': {
       var sw = op.who === 'target' ? target : user, list = collectZoneCards(sw, op.sources, op.tags, op.cats, op.excludeAttr);
+      if (op.excludeSelf) list = list.filter(function (x) { return x.card !== ctx.card; }); // "这张卡以外"排除自身
       var __doSearchPick = function () {
       pickFromList(user, list, '选择' + op.need + '张卡' + (op.to === 'deck' ? '放回牌组' : '加入手卡'), op.need, function (picks) {
         picks.forEach(function (pk) { var arr = battleState[sw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'hand') { pk.card._addedByEffect = true; battleState[sw].hand.push(pk.card); __emitAddHand(sw, pk.card, pk.zone); } else battleState[sw].deck.push(pk.card); if (sw === user) p._lastSearchCard = pk.card; addBattleLog(user, (op.to === 'hand' ? '加入手卡：' : '放回牌组：') + pk.card.name); });
@@ -10354,10 +10352,11 @@ function hideChainBar() { var b = document.getElementById('chainBar'); if (b) b.
 
 function closeEffectLog() { hideResolveTimeline(); }
 
-// 使用事件卡（事件卡不占用手牌上限，使用后放入公共墓地）
+// 使用事件卡（事件卡不占用手牌上限，使用后放入公共墓地；事件卡为全时点：自己回合主要阶段、对手回合任意阶段均可连锁发动）
 function useEventCard(index) {
-  if (!battleState || battleState.currentPlayer !== 'p1') return;
+  if (!battleState) return;
   if (typeof effectEngine !== 'undefined' && effectEngine && (effectEngine._resolveDepth > 0 || effectEngine._chainLock)) { addBattleLog('system', '效果结算中，暂时不能使用事件卡'); return; }
+  var __oppTurn = battleState.currentPlayer !== 'p1';
   
   var card = battleState.p1.eventCards ? battleState.p1.eventCards[index] : null;
   if (!card) {
@@ -10393,8 +10392,8 @@ function useEventCard(index) {
     return;
   }
   
-  // 阶段检查：事件卡只能在主要阶段使用（除了有特殊时点的卡）
-  if (battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
+  // 阶段检查：事件卡全时点——对手回合任意阶段可连锁发动；自己回合需主要阶段（有特殊时点的卡除外）
+  if (!__oppTurn && battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
       effectText.indexOf('受到伤害时') < 0 && effectText.indexOf('移动时') < 0) {
     alert('当前阶段不能使用事件卡，请在主要阶段使用！');
     return;
@@ -11698,11 +11697,19 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     return (e.indexOf('抵消') >= 0 && e.indexOf('伤害') >= 0) || (c.name && c.name.indexOf('护符') >= 0 && e.indexOf('伤害') >= 0);
   }
   for (var i = 0; i < p.hand.length; i++) {
-    if (__isCharmCard(p.hand[i]) && p.cost >= (parseInt(p.hand[i].cost, 10) || 0)) __charmList.push({ card: p.hand[i], idx: i });
+    if (!__isCharmCard(p.hand[i]) || p.cost < (parseInt(p.hand[i].cost, 10) || 0)) continue;
+    // 对手回合：手牌护符需卡面明确允许从手卡发动；否则只能盖伏后（下回合起）发动
+    if (battleState.currentPlayer !== target) {
+      var __ht2 = (p.hand[i].effect||'') + (p.hand[i].sp||'') + (p.hand[i].text||'');
+      if (!/其他玩家回合[^。；]{0,10}从手卡|对手回合[^。；]{0,10}从手卡/.test(__ht2)) continue;
+    }
+    __charmList.push({ card: p.hand[i], idx: i });
   }
   if (p.faceDownCards) {
     for (var i2 = 0; i2 < p.faceDownCards.length; i2++) {
-      if (__isCharmCard(p.faceDownCards[i2]) && p.cost >= (parseInt(p.faceDownCards[i2].cost, 10) || 0)) __fdCharmList.push({ card: p.faceDownCards[i2], idx: i2 });
+      var __fc = p.faceDownCards[i2];
+      if (__fc._faceDownTurn === battleState.turn && __fc._faceDownPlayer === target) continue; // 盖伏当回合不可发动
+      if (__isCharmCard(__fc) && p.cost >= (parseInt(__fc.cost, 10) || 0)) __fdCharmList.push({ card: __fc, idx: i2 });
     }
   }
   var hasCharm = __charmList.length + __fdCharmList.length > 0;
@@ -11815,8 +11822,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     p.cost -= (parseInt(cc.cost,10)||0); // 盖伏翻开抵消时同样支付费用（"1+/2+"费用卡取基数，避免 NaN 污染）
     moveCardToGrave(target, cc, 'use');
     addBattleLog(target, '发动' + (fromFaceDown?'盖伏的':'') + '【' + cc.name + '】抵消' + damage + '点伤害及附加效果');
-    applyMove(target, 2); // 护符前进2格走统一移动底层（路障/累计/格子效果一致）
-    addBattleLog(target, '护符效果：前进2格，当前位置第' + p.position + '格');
+    // 各卡抵消后的附带效果按卡面区分（修复全部硬编码成"前进2格"）
+    if (cc.name.indexOf('怪怪幽灵吊坠') >= 0) { recoverCost(target, 1, '怪怪幽灵吊坠'); addBattleLog(target, '【怪怪幽灵吊坠】抵消后回复1点音韵'); }
+    else { applyMove(target, 2); addBattleLog(target, '护符效果：前进2格，当前位置第' + p.position + '格'); }
     rwClose('damage'); updateBattleUI();
     __finish(0);
   }
@@ -11847,7 +11855,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       p.cost -= (parseInt(aiCharm.cost,10)||0); if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else p.hand.splice(aiCharmIdx,1);
       moveCardToGrave('p2', aiCharm, 'use');
       addBattleLog('p2', 'AI 发动【' + aiCharm.name + '】抵消' + damage + '点伤害');
-      applyMove('p2', 2); // 护符前进2格走统一移动底层
+      if (aiCharm.name.indexOf('怪怪幽灵吊坠') >= 0) { recoverCost('p2', 1, '怪怪幽灵吊坠'); }
+      else applyMove('p2', 2); // 护符前进2格走统一移动底层
       updateBattleUI();
       __finish(0);
       return;
