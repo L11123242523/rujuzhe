@@ -105,8 +105,10 @@
       name.indexOf('侦探放大镜') >= 0 || name.indexOf('猎手爪链') >= 0;
     var isNegate = eff.indexOf('抵消') >= 0 && eff.indexOf('伤害') >= 0;
     var isNegateEffect = name.indexOf('崩塌之乌托邦') >= 0 || (/效果无效/.test(eff) && /发动了?[^。；]{0,24}时/.test(eff));
+    var isRerollJudge = name === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
     if (isReverse) return 'reverse';
     if (isDiceSet) return 'dice_set';
+    if (isRerollJudge) return 'reroll_judge';
     if (isMoveAdjust) return 'move_adjust';
     if (isNegate) return 'negate_damage';
     if (isNegateEffect) return 'negate_effect';
@@ -116,11 +118,12 @@
   // 某窗口下该类连锁卡能否介入（纯规则）
   function chainableAt(windowStage, cardKind) {
     switch (windowStage) {
-      case 'dice_result': return cardKind === 'dice_set' || cardKind === 'reverse';
+      case 'dice_result': return cardKind === 'dice_set' || cardKind === 'reverse' || cardKind === 'reroll_judge';
       case 'move':        // 移动将执行：纯改点已无原始骰子对象；改方向/增减/打断仍可
         return cardKind === 'reverse' || cardKind === 'move_adjust';
       case 'damage':      return cardKind === 'negate_damage';
-      case 'rand':        return cardKind === 'dice_set';
+      case 'rand':        // 随机/判定结果将适用：改点、重判可介入
+      case 'rand_result': return cardKind === 'dice_set' || cardKind === 'reroll_judge';
       case 'effect_activate': return cardKind === 'negate_effect';
       default: return false;
     }
