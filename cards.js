@@ -2613,16 +2613,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_d6WbOr2gL9.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": [
-        "战术",
-        "永续",
-        "直伤",
-        "混沌",
-        "攻击力上升",
-        "回收",
-        "侵略",
-        "最终伤害"
-      ],
+      "tags": ["战术","侵略"],
       "dims": {
         "power": 8.5,
         "cost": 6.8,
@@ -2750,15 +2741,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_VK0GAj3BqV.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": [
-        "战术",
-        "永续",
-        "检索",
-        "侵略",
-        "卖血",
-        "回复音韵",
-        "攻击力上升"
-      ],
+      "tags": ["战术","侵略"],
       "dims": {
         "power": 9.3,
         "cost": 6.8,
@@ -2856,14 +2839,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_1oUPlAbKu4.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": [
-        "丰沛",
-        "永续",
-        "金币",
-        "攻击力上升",
-        "伤害",
-        "送墓"
-      ],
+      "tags": ["丰沛"],
       "dims": {
         "power": 8.0,
         "cost": 7.2,
@@ -2963,13 +2939,7 @@ window.__CARD_DATA__ = {
       "sp": "",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": [
-        "移动",
-        "永续",
-        "位移",
-        "付费移动",
-        "移动伤害"
-      ],
+      "tags": ["移动"],
       "dims": {
         "power": 8.8,
         "cost": 7.8,
