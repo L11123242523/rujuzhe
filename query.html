@@ -2303,12 +2303,10 @@ function updateDamageCurveDisplay(){
     const spWorksAsMember = /作为队员.*生效|队员.*也.*生效|队员.*可用/.test(sp);
     if(isCaptain){
       if(name === '现实间里绪' || /累计移动.*格.*判定伤害/.test(passive)){
-        // 里绪被动：移动8格触发4面骰判定伤害(平均2.5)，首次触发附加1点热忱伤害；可用2枚六面骰替换原本骰子(不可用于判定伤害)
+        // 里绪被动(最新卡面)：每累计移动8格，付1音韵打四面骰判定(均2.5)、或付2音韵改为六面骰判定(均3.5)；无首次附加热忱；此处按四面骰估
         const liXuBaseDmg = 2.5 + judgeDmgBonus;
-        const liXuFirstBonus = 1; // 每回合首次触发附加1点热忱伤害
-        const liXuDmg = liXuBaseDmg + liXuFirstBonus;
-        movePassiveDmg += liXuDmg;
-        moveDmgDetail.push(`里绪被动(队长): 移动8格触发4面骰判定伤害(平均${liXuBaseDmg.toFixed(1)},首次+1热忱),预估+${liXuDmg.toFixed(1)}`);
+        movePassiveDmg += liXuBaseDmg;
+        moveDmgDetail.push(`里绪被动(队长): 每累计移动8格付1音韵四面骰判定(均2.5,可付2音韵改六面骰均3.5),预估+${liXuBaseDmg.toFixed(1)}`);
       }
     }
     if(isCaptain || (spWorksAsMember && !moveMemberSpUsed)){

@@ -40,8 +40,8 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
 
     // —— 场景3：累计8格→付费1+四面骰动画+造伤 ——
     deckConfig.p1.chars=[rio,other,other];
-    battleState.p1._rioPassive=true;battleState.p1._rioMoveCount=0;battleState.p1._rioFirstTriggerThisTurn=false;
-    battleState.p1._judgeDamageBonus=0; // 隔离SP判定增伤，纯净验证“四面骰+首次热忱”
+    battleState.p1._rioPassive=true;battleState.p1._rioMoveCount=0;
+    battleState.p1._judgeDamageBonus=0; // 隔离SP判定增伤，纯净验证四面骰判定（新卡面无首次热忱）
     battleState.p1.cost=5;battleState.p2.sync=30;
     let animSpec=null,dmgCalls=[];
     const realAnim=window.judgeAnimate;
@@ -53,9 +53,9 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
     out.payCost=battleState.p1.cost;                 // 5-1=4
     out.animSides=animSpec&&animSpec.sides;          // 4
     out.animKind=animSpec&&animSpec.kind;            // dice
-    out.dmgDealt=dmgCalls.length&&dmgCalls[0].d;     // 3骰+首次1热忱=4
+    out.dmgDealt=dmgCalls.length&&dmgCalls[0].d;     // 四面骰3点（无首次热忱、判定增伤0）=3
     // 选择“不发动”：不付费不造伤
-    battleState.p1._rioMoveCount=8;battleState.p1.cost=5;dmgCalls=[];window.__pick=1;
+    battleState.p1._rioMoveCount=8;battleState.p1.cost=5;dmgCalls=[];window.__pick=2; // 第三项=不发动
     rioAccumulateMove('p1',8);await new Promise(r=>setTimeout(r,30));
     out.declineCost=battleState.p1.cost; out.declineDmg=dmgCalls.length;
     window.__pick=0;window.judgeAnimate=realAnim;
@@ -75,7 +75,7 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('  ✓',m);}else{fai
   ok(R.passiveMizugi===false,'被动：里绪(水着)队长不触发普通里绪移动累计');
   ok(R.payCost===4,'里绪被动：发动支付1音韵（5→4）');
   ok(R.animKind==='dice'&&R.animSides===4,'里绪被动：走四面骰判定动画');
-  ok(R.dmgDealt===4,'里绪被动：四面骰3点+本回合首次1热忱=4点');
+  ok(R.dmgDealt===3,'里绪被动：付1音韵四面骰3点=3伤（新卡面无首次热忱）');
   ok(R.declineCost===5&&R.declineDmg===0,'里绪被动：选“不发动”不付费不造伤');
   ok(R.processAnimSides===4,'通用判定造伤（摸头杀类）播四面骰动画');
   ok(errs.length===0,'页面无致命JS错误'+(errs.length?('：'+errs.slice(0,2)):''));

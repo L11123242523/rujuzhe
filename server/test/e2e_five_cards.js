@@ -16,9 +16,9 @@ const A=[];const ok=(c,m)=>A.push((c?'PASS ':'FAIL ')+m);
   accumulateMovePassives('p1',4,null);
   out.koharu4=battleState.p1._xianji; // 期望1
   battleState.p1._xianji=0;battleState.p1._koharuMoveCount=0;accumulateMovePassives('p1',3,null);out.koharu3=battleState.p1._xianji; // 期望0
-  // 2 莉莉SP：墓地[非单次(较上), 单次(最下)] pop单次后最下非单次=>执行+回费
+  // 2 莉莉SP：墓地最下方=grave[0]先取；[单次(最下,grave0), 非单次(grave1)] 取走单次后新最下方非单次=>执行+回费
   let dispatch=0;dispatchStep=(t,c,cb)=>{dispatch++;cb&&cb();};
-  battleState.p1.grave=[{name:'非单次',_category:'item_permanent'},{name:'单次',_category:'item_single',effect:'x'}];
+  battleState.p1.grave=[{name:'单次',_category:'item_single',effect:'x'},{name:'非单次',_category:'item_permanent'}];
   battleState.p1._lilySP=true;battleState.turn=1;
   activateLilySP();
   out.lilyOkCost=battleState.p1.cost;out.lilyOkDispatch=dispatch;out.lilyOkDeck=battleState.p1.deck.length; // 6,1,1

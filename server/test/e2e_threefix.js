@@ -32,7 +32,7 @@ function ok(c,m){if(c){pass++;console.log('PASS',m);}else{fail++;console.log('FA
  // 里绪四面骰：判定增伤仅一次（清空手牌走判定快速路径，避免自我连锁干扰）
  const r2=await pg.evaluate(async()=>{
    const p=battleState.p1,q=battleState.p2;
-   p.hand=[];p.faceDownCards=[];p.cost=5;p._judgeDamageBonus=1;p._rioFirstTriggerThisTurn=false;
+   p.hand=[];p.faceDownCards=[];p.cost=5;p._judgeDamageBonus=1;
    q.sync=30;q.defense=0;q.shield=0;
    judgeAnimate=(u,o,cb)=>cb(2);
    const before=q.sync;
@@ -40,7 +40,7 @@ function ok(c,m){if(c){pass++;console.log('PASS',m);}else{fail++;console.log('FA
    await new Promise(r=>setTimeout(r,600));
    return {lost:before-q.sync};
  });
- ok(r2.lost===4,'里绪四面骰判定增伤仅一次=4伤（实际'+r2.lost+'）');
+ ok(r2.lost===3,'里绪四面骰roll2+判定增伤1=3伤（新卡面无首次热忱，实际'+r2.lost+'）');
 
  // Twice：二选一，选分支0=追加投掷阶段；作用对象为所选玩家
  const r3=await pg.evaluate(async()=>{
