@@ -8682,7 +8682,7 @@ function normalizeClause(raw) {
   t = t.replace(/(\d+\s*格)[。；;]\s*(?=可额外)/g, '$1，'); // “N格。可额外…加格”合并同句，供 move_pay_extra 识别
   t = t.replace(/[。；;]\s*(?=[（(][^）)]*额外(?:消耗|耗))/g, '，'); // “伤害。（…额外消耗…）”合并同句，供 damage payExtra 识别
   t = t.replace(/自己的?回合(才能|可以)?(使用|发动|从手卡发动)?[，,：:]?/g, '');
-  t = t.replace(/选一名玩家(?=\s*抽)/g, '【其他玩家】'); // 绿宝之杖①：让“其他玩家”抽（1v1=对手，2v2=对手/队友，不含自己）
+  t = t.replace(/选一名玩家(?=\s*抽)/g, '【选玩家抽】'); // 绿宝之杖①：弹一个选玩家框，点谁谁抽（不区分友敌/模式）
   t = t.replace(/选择一名玩家(才能(使用|发动))?[。，,：:]?/g, '');
   t = t.replace(/选一名玩家[，,：:]?/g, '');
   t = t.replace(/[，,。：:；;]\s*[，,。：:；;]+/g, '，');
@@ -8838,7 +8838,7 @@ function compileOrderedList(core, permanent) {
 }
 // 生成“选择一项”弹窗里每支的简短文字（保留①②③圈号与首句，超长截断），避免选项无文字
 function __branchLabel(txt, idx) {
-  var first = (txt || '').split(/[。；;]/)[0].trim().replace(/【其他玩家】/g, '让其他玩家');
+  var first = (txt || '').split(/[。；;]/)[0].trim().replace(/【选玩家抽】/g, '');
   var marks = ['①','②','③','④','⑤','⑥'];
   var s = (marks[idx] || (idx + 1) + '.') + first;
   return s.length > 32 ? s.slice(0, 32) + '…' : s;
@@ -9110,7 +9110,7 @@ function __compileBody(t) {
     var __isLvSeg = /^Lv\d+追加/.test(t.replace(/^\s*/, '')); // 纯 Lv 追加句的抽牌已由 ifLevel 专用指令处理，不走通用抽牌
     if (has('馈赠')) ops.push({ op: 'draw_gift' });
     else if (has('御神签')) ops.push({ op: 'draw_omikuji' });
-    else if (!has('乐谱') && !has('事件') && !__isLvSeg) { var dn = __matchNum(new RegExp('抽\\s*' + __NUM), t); var __otherDraw = /【其他玩家】/.test(t); ops.push({ op: 'draw', n: (dn == null ? 1 : dn), who: __otherDraw ? 'other' : undefined }); }
+    else if (!has('乐谱') && !has('事件') && !__isLvSeg) { var dn = __matchNum(new RegExp('抽\\s*' + __NUM), t); var __pickDraw = /【选玩家抽】/.test(t); ops.push({ op: 'draw', n: (dn == null ? 1 : dn), who: __pickDraw ? 'pick_player' : undefined }); }
   }
   if (has('入迷')) {
     var fm = __matchNum(new RegExp('(?:降低|回复|恢复|减少)[\\s\\S]{0,10}?' + __NUM + '\\s*点?入迷'), t);
@@ -9972,13 +9972,13 @@ function runOneOp(op, ctx, next) {
     case 'draw': {
       if (op.ifLevel && ((p.level || 1) < op.ifLevel)) { addBattleLog(user, '等级未到 Lv' + op.ifLevel + '，该追加抽牌不适用'); break; }
       function __doDraw(__dw) { var __drawn = []; for (var __di = 0; __di < op.n; __di++) { var __dc = drawCard(__dw); if (__dc) __drawn.push(__dc); } playDrawAnim(__dw, __drawn, next); }
-      if (op.who === 'other') { // 绿宝之杖①：让“其他玩家”抽——1v1唯一目标=对手，直接锁定不弹框；2v2才弹出对手+队友供选（不含自己）
-        var __oth = (typeof otherPlayers === 'function') ? otherPlayers(user) : [permOther(user)];
-        if (__oth.length >= 2 && user === 'p1' && typeof showChoiceModal === 'function') {
-          showChoiceModal('选择抽牌的玩家', '绿宝之杖·择', '由哪名其他玩家抽' + op.n + '张（不含你自己）', __oth.map(playerDisplayName), function (oi) { if (oi == null || oi < 0) { next(); return; } __doDraw(__oth[oi]); });
+      if (op.who === 'pick_player') { // 绿宝之杖①：统一弹一个选玩家框，列出所有在场玩家，点谁谁抽（不区分友敌/1v1/2v2）
+        var __pp = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'].filter(function (k) { return battleState[k]; });
+        if (user === 'p1' && typeof showChoiceModal === 'function') {
+          showChoiceModal('选择抽牌的玩家', '绿宝之杖·择', '选择一名玩家抽' + op.n + '张', __pp.map(playerDisplayName), function (oi) { if (oi == null || oi < 0 || !__pp[oi]) { next(); return; } __doDraw(__pp[oi]); });
           return;
         }
-        __doDraw(__oth[0] || permOther(user)); return;
+        __doDraw(user); return; // AI 默认自己抽
       }
       var __dw = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target : user; // C19 “其抽/该玩家抽”主语=所选目标
       __doDraw(__dw); // 抽卡动画结束（=抽卡后的“那之后”隔断）再继续
@@ -12865,9 +12865,9 @@ function permanentHasActiveEffect(card) {
   return !!(st && st.active && st.active.handler);
 }
 function permOther(user) { return user === 'p1' ? 'p2' : 'p1'; }
-// 除自己外、当前在场的所有玩家（1v1 只有对手；将来 2v2 含队友与两名对手）
-function otherPlayers(user) { return ['p1','p2','p3','p4'].filter(function(k){return k!==user&&battleState[k];}); }
-function playerDisplayName(k) { return ({ p1: '你', p2: '对手' })[k] || ('玩家' + k); }
+// 当前所有在场玩家（不区分阵营/模式，供“选一名玩家”类效果统一列选项）
+function allInGamePlayers() { var __bs = battleState || {}; return ['p1','p2','p3','p4'].filter(function(k){return __bs[k];}); }
+function playerDisplayName(k) { return ({ p1: '你', p2: '对手', p3: '玩家3', p4: '玩家4' })[k] || ('玩家' + k); }
 
 // ---------- 打出瞬间（onPlay）：玩家/AI 共用 ----------
 function resolvePermanentOnPlay(card, user, cb) {
@@ -13092,13 +13092,15 @@ var PERMANENT_ACTIVE_HANDLERS = {
     showChoiceModal('绿宝之杖·择', card.name, '选择一项发动',
       ['① 选一名玩家抽1张，你后退2格', '② 选你效果处理区1张送墓，你前进3格', '③ 选墓地1张加入手卡，再选手牌1张送墓（同色/同费回1音韵）'], function (ci) {
         if (ci === 0) {
-          // 选“其他玩家”抽：1v1 直接对手（不弹框）；2v2 才在对手/队友间选，均不含自己
-          var __oth1 = (typeof otherPlayers === 'function') ? otherPlayers('p1') : ['p2'];
-          var wd = __oth1[0] || 'p2'; drawCard(wd);
-          var __oldG1 = p.position;
-          p.position = (p.position - 2 + 42) % 42;
-          addBattleLog('p1', '【绿宝之杖·择】① ' + ((typeof playerDisplayName === 'function') ? playerDisplayName(wd) : '对手') + '抽1，你后退到第' + p.position + '格');
-          checkMoveTriggers('p1', -2, __oldG1); triggerTileEffect('p1'); updateBattleUI();
+          // 统一弹一个选玩家框：列出所有在场玩家，点谁谁抽，随后自己后退2格
+          var __pp1 = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'];
+          showChoiceModal('绿宝之杖·择 ①', '选择抽牌的玩家', '你随后后退2格', __pp1.map(playerDisplayName), function (wi) {
+            var wd = __pp1[wi] || 'p1'; drawCard(wd);
+            var __oldG1 = p.position;
+            p.position = (p.position - 2 + 42) % 42;
+            addBattleLog('p1', '【绿宝之杖·择】① ' + playerDisplayName(wd) + '抽1，你后退到第' + p.position + '格');
+            checkMoveTriggers('p1', -2, __oldG1); triggerTileEffect('p1'); updateBattleUI();
+          });
         } else if (ci === 1) {
           if (!p.permanent.length) { addBattleLog('p1', '【绿宝之杖·择】② 效果处理区无卡'); updateBattleUI(); return; }
           var c2 = p.permanent.slice();
