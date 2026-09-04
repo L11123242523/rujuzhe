@@ -5378,6 +5378,74 @@ function aiDecideChain(list, effect){
 // 连锁卡发动时只压栈并快照它锁定的原始对象值；双方都不再连锁后，从最后一张往前结算。
 // 数值类(set/add)结算时若当前值已不等于其锁定的原始值（被更后发动、更先结算的连锁改变），即丢失对象、不处理；
 // 动作类(reverse/cancel)在动作已被打断时同样丢失对象。
+// ============================================================
+// 统一连锁编排器 resolveSimultaneous（参考游戏王·大师决斗 SEGOC + 逆结算）
+// 同一时点有【多个效果同时满足】时调用本函数，而不是在业务流程里写死顺序立即执行。
+// candidates: [{ key, label, owner:'p1'/'p2', mandatory:true=必发自动入链/false=选发(可决定是否发动与顺序),
+//                alive():结算前返回false=丢失目标不处理, fire(done):结算时执行，完成后必须调用 done() }]
+// 组链顺序（MD 口径）：回合方必发 → 对方必发 → 回合方选发(玩家逐个点选，点选顺序即 C1、C2…) → 对方选发(AI/玩家2决定)；
+// 组链完成后统一【从最后一个往前逆序结算】，每个节点结算前再做 alive 丢失目标校验。
+// ============================================================
+function resolveSimultaneous(tp, candidates, allDone) {
+  candidates = (candidates || []).filter(Boolean);
+  if (!candidates.length) { if (typeof allDone === 'function') allDone(); return; }
+  var foe = tp === 'p1' ? 'p2' : 'p1';
+  var chain = [];
+  function avail(o) { return candidates.filter(function (c) { return c.owner === o && chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); }); }
+  function logChain() {
+    addBattleLog('system', '【连锁组成】' + chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + (c.owner === 'p1' ? '你' : 'AI') + '·' + c.label; }).join('  →  '));
+  }
+  // 逆序结算
+  function settle() {
+    if (!chain.length) { if (typeof allDone === 'function') allDone(); return; }
+    logChain();
+    addBattleLog('system', '═══ 连锁逆结算（共' + chain.length + '个效果）═══');
+    var i = chain.length - 1;
+    function step() {
+      if (i < 0) { addBattleLog('system', '═══ 连锁全部结算完成 ═══'); if (typeof allDone === 'function') allDone(); return; }
+      var node = chain[i--];
+      if (typeof node.alive === 'function' && !node.alive()) { addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理'); setTimeout(step, 120); return; }
+      addBattleLog(node.owner, '▸ 逆结算 C' + (i + 2) + '【' + node.label + '】');
+      var done = false;
+      function next() { if (done) return; done = true; setTimeout(step, 140); }
+      try { if (typeof node.fire === 'function') node.fire(next); else next(); }
+      catch (e) { console.error('resolveSimultaneous node error', node && node.label, e); next(); }
+    }
+    step();
+  }
+  // 回合方选发效果：玩家逐个点选，点选顺序即连锁顺序；选“结束”关闭
+  function tpOptionalPick(after) {
+    var pool = avail(tp).filter(function (c) { return !c.mandatory; });
+    if (!pool.length) { after(); return; }
+    if (tp !== 'p1') {
+      // AI：选发效果保守地全部发动（顺序按候选序）
+      pool.forEach(function (c) { chain.push(c); }); after(); return;
+    }
+    function ask() {
+      var rest = avail(tp).filter(function (c) { return !c.mandatory; });
+      if (!rest.length) { after(); return; }
+      var opts = rest.map(function (c) { return '↧ 加入连锁：' + c.label; });
+      opts.push('■ 结束，按当前顺序结算');
+      showChoiceModal('多个效果同时满足 · 安排连锁', '已在连锁中：' + (chain.length ? chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + c.label; }).join('、') : '无'),
+        '按你点选的先后顺序成为 C1、C2……（后选的先结算）', opts, function (idx) {
+          if (idx === null || idx === undefined || idx >= rest.length) { after(); return; }
+          chain.push(rest[idx]); updateBattleUI && updateBattleUI(); ask();
+        });
+    }
+    ask();
+  }
+  // 对方选发（AI 决定；真人 p2 时同玩家选择流程，当前对战 AI 托管）
+  function foeOptionalPick(after) {
+    var pool = avail(foe).filter(function (c) { return !c.mandatory; });
+    pool.forEach(function (c) { chain.push(c); }); after();
+  }
+  // 1) 回合方必发自动入链
+  avail(tp).filter(function (c) { return c.mandatory; }).forEach(function (c) { chain.push(c); });
+  // 2) 对方必发自动入链
+  avail(foe).filter(function (c) { return c.mandatory; }).forEach(function (c) { chain.push(c); });
+  // 3) 回合方选发排序 → 4) 对方选发 → 逆结算
+  tpOptionalPick(function () { foeOptionalPick(function () { settle(); }); });
+}
 function resolveChainStack(effect, onDone) {
   var stack = effect._chain || [];
   if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = true;
@@ -9314,50 +9382,52 @@ function __opAttr(op, card) { if (card && card.attribute) return card.attribute;
 // 队伍是否编入名称含 key 的角色（队长/队员皆可）
 function teamHasChar(player, key) { try { return (deckConfig[player].chars || []).some(function (c) { return c && c.name && c.name.indexOf(key) >= 0; }); } catch (e) { return false; } }
 // 蓝宝之杖·命：每回合首次造成判定伤害后，对同一目标追加一次硬币判定（正面2点判定伤害）
-function triggerLanzhangAfterJudge(user, target) {
-  var p = battleState[user]; if (!p || p._lanzhangUsed) return;
+function triggerLanzhangAfterJudge(user, target, done) {
+  function __d() { if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof done === 'function') done(); }
+  var p = battleState[user]; if (!p || p._lanzhangUsed) { __d(); return; }
   var has = (p.permanent || []).some(function (c) { return c.name && /蓝宝|蓝杖/.test(c.name); });
-  if (!has) return;
+  if (!has) { __d(); return; }
   p._lanzhangUsed = true; // 每回合首次，无论正反都消耗本次机会
   function __settle(face, __cancelled) {
-    if (__cancelled || face == null) { addBattleLog(user, '【蓝宝之杖·命】追加硬币判定被连锁无效，不造成伤害'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
+    if (__cancelled || face == null) { addBattleLog(user, '【蓝宝之杖·命】追加硬币判定被连锁无效，不造成伤害'); __d(); return; }
     var ok = face === '正面' || face === true || face === 1;
     addBattleLog(user, '【蓝宝之杖·命】首次判定伤害后追加硬币判定：' + (ok ? '正面，造成2点判定伤害' : '反面，不造成伤害'));
-    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, null, user, { judge: true, segment: true });
-    if (typeof updateBattleUI === 'function') updateBattleUI();
+    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { __d(); }, null, user, { judge: true, segment: true });
+    else __d();
   }
   if (user === 'p1' && typeof judgePerform === 'function') judgePerform('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
   else if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
   else __settle(GameRNG.coin() ? '正面' : '反面');
 }
 // 妖刀五月雨：自己单次造成≥5伤害后，每回合一次选①破坏场上1卡②抽1，均自失3同步
-function triggerYaodaoOnDamage(user, dmg) {
-  if (dmg == null || dmg < 5) return;
-  var p = battleState[user]; if (!p || p._yaodaoTriggered) return;
+function triggerYaodaoOnDamage(user, dmg, done) {
+  function __d() { if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof done === 'function') done(); }
+  if (dmg == null || dmg < 5) { __d(); return; }
+  var p = battleState[user]; if (!p || p._yaodaoTriggered) { __d(); return; }
   var has = (p.permanent || []).some(function (c) { return c.name && /妖刀|五月雨/.test(c.name); });
-  if (!has) return;
+  if (!has) { __d(); return; }
   function __lose() { p.sync = Math.max(0, p.sync - 3); }
   if (user !== 'p1' || typeof showChoiceModal !== 'function') {
     p._yaodaoTriggered = true; __lose();
     if (typeof drawCard === 'function') drawCard(user);
     addBattleLog(user, '【妖刀五月雨】单次造成' + dmg + '伤，选择抽1，自失3同步');
-    if (typeof updateBattleUI === 'function') updateBattleUI(); return;
+    __d(); return;
   }
   showChoiceModal('妖刀五月雨', '本次单次造成' + dmg + '点伤害（≥5），每回合一次，选择一项（均自失3同步）', '', ['①破坏场上1张卡', '②抽1张卡', '不发动'], function (i) {
-    if (i === 2) return;
+    if (i === 2) { __d(); return; }
     p._yaodaoTriggered = true; __lose();
     if (i === 0) {
       var pool = [], side = [];
       ['p1', 'p2'].forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
-      if (!pool.length) { addBattleLog('p1', '【妖刀五月雨】场上无卡可破坏，自失3同步'); updateBattleUI(); return; }
+      if (!pool.length) { addBattleLog('p1', '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
       showCardPickerMulti(pool, '妖刀五月雨：选择场上1张卡破坏', function (idx) {
         var ids = Array.isArray(idx) ? idx[0] : idx;
-        if (ids == null || ids < 0) { updateBattleUI(); return; }
+        if (ids == null || ids < 0) { __d(); return; }
         var c = pool[ids], sd = side[ids], arr = battleState[sd].permanent, ri = arr.indexOf(c);
         if (ri >= 0) { arr.splice(ri, 1); moveCardToGrave(sd, c, 'destroy'); addBattleLog('p1', '【妖刀五月雨】破坏' + (sd === 'p1' ? '我方' : '对方') + '场上【' + c.name + '】，自失3同步'); }
-        updateBattleUI();
+        __d();
       }, 1);
-    } else { drawCard('p1'); addBattleLog('p1', '【妖刀五月雨】抽1张，自失3同步'); updateBattleUI(); }
+    } else { drawCard('p1'); addBattleLog('p1', '【妖刀五月雨】抽1张，自失3同步'); __d(); }
   });
 }
 // 统一数值型进攻增益（两条造伤路径共用，避免增伤漏算/重复算）：
@@ -12205,23 +12275,24 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   }
   // 统一结算收尾：伤害后触发（琉璃/宫樱子/琉璃水着/羽奈/妖刀/蓝宝）→ 胜负判定 → 释放锁 → 回调
   function __finish(actual) {
+    function __tail() { updateBattleUI(); checkBattleEnd(); __relD(); if (callback) callback(actual); }
     if (!opts.segment && actual > 0 && attacker) {
       var __ap = battleState[attacker];
       if (__ap) {
         var __hit = p.sync < __hadSync; // 本次实际扣减了同步
-        if (opts.judge && __ap._ruriPassive) { recoverCost(attacker, 1, '琉璃被动'); addBattleLog(attacker, '【琉璃被动】判定伤害后回复1音韵'); }
-        if (__ap._sakuraHealSync && __hit) { __ap.sync = Math.min(__ap.sync + 1, __ap.maxSync || 999); addBattleLog(attacker, '【宫樱子SP】造成伤害后回复1点同步'); }
-        if (__ap._ruriMizugiSP && opts.kind === 'fervor' && __hit) { recoverCost(attacker, 1, '琉璃(水着)SP'); addBattleLog(attacker, '【琉璃(水着)SP】造成热忱伤害后回1音韵'); }
         var __sc = opts.srcCard, __tags = __sc ? (__sc.tags || []) : [], __cat = __sc ? __sc._category : '';
-        if (__ap._hinaPassive && __cat && /item/.test(__cat) && __tags.indexOf('侵略') >= 0 && __hit) { __applyBonusLocal(1, '雨宫羽奈被动·追加'); addBattleLog(attacker, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); }
-        if (!__ap._yaodaoTriggered && actual >= 5 && typeof triggerYaodaoOnDamage === 'function') triggerYaodaoOnDamage(attacker, actual);
-        if (opts.judge && __hit && __ap._lanzhangPassive && !__ap._lanzhangUsed && typeof triggerLanzhangAfterJudge === 'function') triggerLanzhangAfterJudge(attacker, target);
+        // 造伤后同时满足的多个被动/SP：不再写死顺序立即执行，统一收集为连锁候选，由玩家决定选发顺序后逆结算
+        var __cands = [];
+        if (opts.judge && __ap._ruriPassive) __cands.push({ key: 'ruri', label: '琉璃被动·判定后回1音韵', owner: attacker, mandatory: true, fire: function (d) { recoverCost(attacker, 1, '琉璃被动'); addBattleLog(attacker, '【琉璃被动】判定伤害后回复1音韵'); d(); } });
+        if (__ap._sakuraHealSync && __hit) __cands.push({ key: 'sakura', label: '宫樱子SP·回复1同步', owner: attacker, mandatory: true, fire: function (d) { __ap.sync = Math.min(__ap.sync + 1, __ap.maxSync || 999); addBattleLog(attacker, '【宫樱子SP】造成伤害后回复1点同步'); d(); } });
+        if (__ap._ruriMizugiSP && opts.kind === 'fervor' && __hit) __cands.push({ key: 'ruriM', label: '琉璃(水着)SP·热忱造伤回1音韵', owner: attacker, mandatory: true, fire: function (d) { recoverCost(attacker, 1, '琉璃(水着)SP'); addBattleLog(attacker, '【琉璃(水着)SP】造成热忱伤害后回1音韵'); d(); } });
+        if (__ap._hinaPassive && __cat && /item/.test(__cat) && __tags.indexOf('侵略') >= 0 && __hit) __cands.push({ key: 'hina', label: '羽奈被动·[侵略]道具追加1理智', owner: attacker, mandatory: true, fire: function (d) { __applyBonusLocal(1, '雨宫羽奈被动·追加'); addBattleLog(attacker, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); d(); } });
+        if (!__ap._yaodaoTriggered && actual >= 5 && typeof triggerYaodaoOnDamage === 'function') __cands.push({ key: 'yaodao', label: '妖刀五月雨·造伤≥5选①破坏②抽1', owner: attacker, mandatory: false, alive: function () { return !battleState[attacker]._yaodaoTriggered; }, fire: function (d) { triggerYaodaoOnDamage(attacker, actual, d); } });
+        if (opts.judge && __hit && __ap._lanzhangPassive && !__ap._lanzhangUsed && typeof triggerLanzhangAfterJudge === 'function') __cands.push({ key: 'lanzhang', label: '蓝宝之杖·命·追加硬币判定', owner: attacker, mandatory: false, alive: function () { var q = battleState[attacker]; return !!q._lanzhangPassive && !q._lanzhangUsed; }, fire: function (d) { triggerLanzhangAfterJudge(attacker, target, d); } });
+        if (__cands.length) { resolveSimultaneous(attacker, __cands, __tail); return; }
       }
     }
-    updateBattleUI();
-    checkBattleEnd();
-    __relD();
-    if (callback) callback(actual);
+    __tail();
   }
   // 正常承受伤害（先扣护盾再扣同步）
   function __normalHit() {
