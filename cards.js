@@ -128,7 +128,7 @@ window.__CARD_DATA__ = {
       "_category": "characters",
       "sync_value": 5,
       "dims": {
-        "power": 8.0,
+        "power": 8,
         "flex": 6.8,
         "synergy": 7.5,
         "stable": 7.6
@@ -170,7 +170,7 @@ window.__CARD_DATA__ = {
         "power": 8.1,
         "flex": 7.5,
         "synergy": 8.4,
-        "stable": 7.0
+        "stable": 7
       },
       "growth": 0.2,
       "brief": "核心级，收益直接、泛用度高，资源运转队组件。"
@@ -320,7 +320,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 8.3,
         "flex": 7.7,
-        "synergy": 8.0,
+        "synergy": 8,
         "stable": 7.3
       },
       "growth": 0.2,
@@ -395,7 +395,7 @@ window.__CARD_DATA__ = {
         "power": 7.6,
         "flex": 7.8,
         "synergy": 8.4,
-        "stable": 7.0
+        "stable": 7
       },
       "growth": 0.2,
       "brief": "强势，收益直接、泛用度高，判定伤害队组件。"
@@ -435,7 +435,7 @@ window.__CARD_DATA__ = {
       ],
       "_category": "characters",
       "dims": {
-        "power": 8.0,
+        "power": 8,
         "flex": 7.1,
         "synergy": 8.4,
         "stable": 7.6
@@ -472,9 +472,9 @@ window.__CARD_DATA__ = {
       "sync_value": 5,
       "type": "术士/破坏者",
       "dims": {
-        "power": 8.0,
-        "flex": 7.0,
-        "synergy": 8.0,
+        "power": 8,
+        "flex": 7,
+        "synergy": 8,
         "stable": 6.9
       },
       "growth": 0.1,
@@ -728,8 +728,8 @@ window.__CARD_DATA__ = {
       "sync_value": 4,
       "dims": {
         "power": 7.8,
-        "flex": 7.0,
-        "synergy": 9.0,
+        "flex": 7,
+        "synergy": 9,
         "stable": 7.1
       },
       "brief": "强势，收益直接、流派协同强，位移队组件。"
@@ -814,7 +814,7 @@ window.__CARD_DATA__ = {
       "attribute": "理智",
       "passive": "自信少女的连续攻势：使用理智属性的卡造成伤害后追加1段1点理智属性伤害，那之后可以前进1-3格。此外，单回合内累计移动了8格的场合可以回收墓地一张[移动]或[战术]标签的道具卡。",
       "sp": "小队中每名成员自然回复的音韵值增加50%（向下），造成的理智属性伤害+1。这个效果即使作为队员编组也会生效。这个效果会与其他队员的编组类效果冲突。",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "archetypes": [
         "位移队"
@@ -955,7 +955,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_iUyI2lzUe6.webp",
       "character_full": "现实间冬马",
       "attack_range": "无（治疗卡）",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 7.6,
@@ -994,7 +994,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_lYL7RgQUOC.webp",
       "character_full": "入间枫",
       "attack_range": "前后4格内一名玩家",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 7.3,
@@ -1038,7 +1038,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 6.7,
         "flex": 5.5,
-        "synergy": 6.0,
+        "synergy": 6,
         "stable": 6.4
       },
       "brief": "合格可用，收益直接，较挑构筑与时机，泛用组件，光太郎专属。"
@@ -1073,7 +1073,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/card_fang_qingsongxie.webp",
       "character_full": "松山惠",
       "attack_range": "前后3格内一名玩家",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 7.7,
@@ -1119,7 +1119,7 @@ window.__CARD_DATA__ = {
         "power": 6.9,
         "flex": 6.7,
         "synergy": 7.1,
-        "stable": 8.0
+        "stable": 8
       },
       "brief": "优秀，收益直接，快攻侵略队组件，结衣专属。"
     },
@@ -1191,7 +1191,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_F65crB5KU9.webp",
       "character_full": "里尔亚斯·斯塔芙莉娅斯特",
       "attack_range": "前后4格内一名玩家",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 8.2,
@@ -1230,7 +1230,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_uVrQLrUbyb.webp",
       "character_full": "现实间里绪",
       "attack_range": "前移5格后前后3格内一名玩家",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 7.3,
@@ -1309,7 +1309,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_rytBHz0SiP.webp",
       "character_full": "小沙香琉璃",
       "attack_range": "前后4格内一名玩家",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 9.4,
@@ -1350,7 +1350,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_9FUfMuUIbJ.webp",
       "character_full": "琉璃(水着)",
       "attack_range": "前方6格内所有玩家(AOE)",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 8.2,
@@ -1509,7 +1509,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_CEYwyNKafJ.webp",
       "character_full": "小野伊织",
       "attack_range": "无（驱散卡）",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 6.6,
@@ -1566,7 +1566,7 @@ window.__CARD_DATA__ = {
       "type": "侵略",
       "effect": "对同一行内的一名其他玩家造成1点无序属性伤害，并且附加一次4面骰判定伤害。",
       "sp": "若目标包含枫则基础伤害提升至2点。",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "baseDamage": 3.5,
       "segments": 1,
@@ -1633,7 +1633,7 @@ window.__CARD_DATA__ = {
         "power": 8.7,
         "flex": 6.5,
         "synergy": 7.6,
-        "stable": 8.0
+        "stable": 8
       },
       "brief": "强势，收益直接，位移队组件，予(水着)专属。"
     },
@@ -1705,7 +1705,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_e6yk5jnQa0.webp",
       "character_full": "宁雨清",
       "attack_range": "无（增益卡）",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 6.2,
@@ -1824,7 +1824,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_AzVyk90HGB.webp",
       "character_full": "枫(水着)",
       "attack_range": "前/后方飞行物最远4格，命中后继续飞行(穿透)",
-      "range_adjustment": 0.0,
+      "range_adjustment": 0,
       "_category": "attack_cards",
       "dims": {
         "power": 7.8,
@@ -1897,8 +1897,8 @@ window.__CARD_DATA__ = {
       "_category": "skill_cards",
       "dims": {
         "power": 7.1,
-        "flex": 7.0,
-        "synergy": 7.0,
+        "flex": 7,
+        "synergy": 7,
         "stable": 7.8
       },
       "brief": "优秀，收益直接，位移队组件，枫专属。"
@@ -2013,7 +2013,7 @@ window.__CARD_DATA__ = {
       "effect": "为一名玩家追加一个掷骰阶段。Lv4追加：使用后让自己抽一张。Lv7追加：使用后让目标抽一张。",
       "sp": "",
       "lv": "Lv1/4: 3/2",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "archetypes": [
         "位移队"
@@ -2136,7 +2136,7 @@ window.__CARD_DATA__ = {
         "power": 6.4,
         "flex": 7.6,
         "synergy": 7.4,
-        "stable": 8.0
+        "stable": 8
       },
       "growth": 0.2,
       "brief": "优秀，收益直接、泛用度高，位移队组件，莉莉专属。"
@@ -2275,7 +2275,7 @@ window.__CARD_DATA__ = {
         "power": 6.4,
         "flex": 7.6,
         "synergy": 7.2,
-        "stable": 8.0
+        "stable": 8
       },
       "growth": 0.2,
       "brief": "优秀，收益直接、泛用度高，位移队组件，霞专属。"
@@ -2375,7 +2375,7 @@ window.__CARD_DATA__ = {
       "character_full": "宫樱子",
       "_category": "skill_cards",
       "dims": {
-        "power": 7.0,
+        "power": 7,
         "flex": 7.6,
         "synergy": 7.7,
         "stable": 8.6
@@ -2414,7 +2414,7 @@ window.__CARD_DATA__ = {
         "power": 6.4,
         "flex": 7.6,
         "synergy": 7.7,
-        "stable": 8.0
+        "stable": 8
       },
       "brief": "优秀，收益直接、泛用度高，判定伤害队组件，予专属。"
     },
@@ -2482,7 +2482,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 7.2,
         "flex": 6.3,
-        "synergy": 7.0,
+        "synergy": 7,
         "stable": 7.6
       },
       "growth": 0.3,
@@ -2518,7 +2518,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 8.2,
         "flex": 7.2,
-        "synergy": 8.0,
+        "synergy": 8,
         "stable": 8.6
       },
       "brief": "核心级，收益直接，资源运转队组件，雨清专属。"
@@ -2551,7 +2551,7 @@ window.__CARD_DATA__ = {
       "_category": "skill_cards",
       "dims": {
         "power": 8.3,
-        "flex": 7.0,
+        "flex": 7,
         "synergy": 7.5,
         "stable": 8.4
       },
@@ -2585,8 +2585,8 @@ window.__CARD_DATA__ = {
         "power": 8.5,
         "cost": 6.4,
         "flex": 7.1,
-        "synergy": 7.0,
-        "stable": 8.0
+        "synergy": 7,
+        "stable": 8
       },
       "brief": "强势，收益直接、泛用度高，控场队组件。"
     },
@@ -2613,7 +2613,10 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_d6WbOr2gL9.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": ["战术","侵略"],
+      "tags": [
+        "战术",
+        "侵略"
+      ],
       "dims": {
         "power": 8.5,
         "cost": 6.8,
@@ -2629,7 +2632,7 @@ window.__CARD_DATA__ = {
       "attribute": "理智",
       "type": "战术",
       "effect": "发动时作为效果处理：从牌组、墓地将一张攻击卡或技能卡加入手卡。那之后可以选一张手卡送入墓地然后抽一张。使用攻击卡和技能卡所需要的音韵值-1。造成的判定伤害+1。",
-      "score": 8.0,
+      "score": 8,
       "grade": "S",
       "archetypes": [
         "判定伤害队"
@@ -2660,7 +2663,7 @@ window.__CARD_DATA__ = {
       "attribute": "热忱",
       "type": "声乐",
       "effect": "发动时作为效果处理：抽取一张馈赠卡。只要此卡以正面形式存在区域内则使用者获得效果：持有者抽到[Noise]和[和声]的概率增加（持有者在抽取馈赠卡时，馈赠卡卡池中不会出现[200$]，其余卡数量不变）。",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "archetypes": [
         "破局队"
@@ -2679,7 +2682,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 6.8,
         "cost": 6.9,
-        "flex": 7.0,
+        "flex": 7,
         "synergy": 6.9,
         "stable": 7.7
       },
@@ -2741,7 +2744,10 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_VK0GAj3BqV.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": ["战术","侵略"],
+      "tags": [
+        "战术",
+        "侵略"
+      ],
       "dims": {
         "power": 9.3,
         "cost": 6.8,
@@ -2774,7 +2780,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_aGVPDZCwUr.webp",
       "_category": "item_permanent",
       "dims": {
-        "power": 9.0,
+        "power": 9,
         "cost": 7.2,
         "flex": 6.8,
         "synergy": 7.9,
@@ -2809,8 +2815,8 @@ window.__CARD_DATA__ = {
         "power": 6.7,
         "cost": 6.7,
         "flex": 7.4,
-        "synergy": 7.0,
-        "stable": 8.0
+        "synergy": 7,
+        "stable": 8
       },
       "brief": "优秀，收益直接、泛用度高，快攻侵略队组件。"
     },
@@ -2839,12 +2845,14 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_1oUPlAbKu4.webp",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": ["丰沛"],
+      "tags": [
+        "丰沛"
+      ],
       "dims": {
-        "power": 8.0,
+        "power": 8,
         "cost": 7.2,
         "flex": 7.4,
-        "synergy": 8.0,
+        "synergy": 8,
         "stable": 7.2
       },
       "brief": "强势，收益直接，金币队组件。"
@@ -2855,7 +2863,7 @@ window.__CARD_DATA__ = {
       "attribute": "热忱",
       "type": "丰沛",
       "effect": "发动时作为效果处理：立即回复3点音韵值，之后每回合回复2点音韵值，但自己每次被破坏卡后都会受到没有攻击来源的2点热忱属性伤害。受到伤害后回复1点音韵值。",
-      "score": 8.0,
+      "score": 8,
       "grade": "S",
       "archetypes": [
         "破局流",
@@ -2909,7 +2917,7 @@ window.__CARD_DATA__ = {
         "power": 9.4,
         "cost": 7.4,
         "flex": 6.7,
-        "synergy": 7.0,
+        "synergy": 7,
         "stable": 8.1
       },
       "brief": "强势，收益直接、费用效率出色，控场队组件。"
@@ -2939,11 +2947,13 @@ window.__CARD_DATA__ = {
       "sp": "",
       "_category": "item_permanent",
       "card_type": "道具/永续",
-      "tags": ["移动"],
+      "tags": [
+        "移动"
+      ],
       "dims": {
         "power": 8.8,
         "cost": 7.8,
-        "flex": 7.0,
+        "flex": 7,
         "synergy": 9.1,
         "stable": 8.3
       },
@@ -2992,11 +3002,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/card_langya_yingzhua.webp",
       "effect": "传说中的欺诈之神洛基曾使用的匕首。发动时作为效果处理：从墓地中选一张[侵略]标签的卡加入手卡，然后可以选一张卡送入墓地并抽一张。一回合一次，选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。受到的最终伤害+1，造成的最终伤害+1。",
       "tags": [
-        "侵略",
-        "永续",
-        "墓地回收",
-        "墓地发动",
-        "伤害增减"
+        "侵略"
       ],
       "score": 7.8,
       "grade": "A+",
@@ -3018,20 +3024,16 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_iYccn3axZ6.webp",
       "effect": "锻造！锻造！锻造！发动时作为效果处理：立即进行一次献祭动作，那次献祭完成后可以抽一张。每回合的献祭次数+1。一局游戏只能发动一次：选一张手卡献祭，被献祭的那张卡不去墓地而是移出游戏。那之后可以选那张卡以外的自己被移出游戏的卡加入手卡。",
       "tags": [
-        "战术",
-        "永续",
-        "献祭",
-        "献祭次数",
-        "移出游戏回收"
+        "战术"
       ],
-      "score": 8.0,
+      "score": 8,
       "grade": "S",
       "dims": {
         "power": 8.5,
         "cost": 7.6,
         "flex": 7.7,
-        "synergy": 8.0,
-        "stable": 8.0
+        "synergy": 8,
+        "stable": 8
       },
       "brief": "核心级，收益直接。"
     },
@@ -3044,14 +3046,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_iTclHZs9kb.webp",
       "effect": "振聋发聩的轰鸣声是为了迎接神的到来。发动时作为效果处理：获取1点引导核心。每个自己回合可以发动一次：获得3点激励点数。每次提升等级后可以从以下效果中选择一项适用：①队伍攻击力+1②选移出游戏的一张卡加入手卡（限一次）③对一名玩家造成一次四面骰判定伤害。",
       "tags": [
-        "丰沛",
-        "永续",
-        "引导核心",
-        "激励点数",
-        "升级",
-        "攻击力上升",
-        "回收",
-        "判定伤害"
+        "丰沛"
       ],
       "score": 7.7,
       "grade": "A+",
@@ -3123,7 +3118,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 7.4,
         "cost": 9.4,
-        "flex": 7.0,
+        "flex": 7,
         "synergy": 6.8,
         "stable": 7.3
       },
@@ -3231,7 +3226,7 @@ window.__CARD_DATA__ = {
       "type": "战术",
       "effect": "自己回合使用，下一次移动完成后追加3格移动",
       "sp": "因卡效果加入手卡时立即前进/后退1-5格；在其他玩家回合触发时还能对一名玩家造3热忱伤害",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "archetypes": [
         "位移队"
@@ -3249,7 +3244,7 @@ window.__CARD_DATA__ = {
       "_category": "item_single",
       "dims": {
         "power": 6.4,
-        "cost": 8.0,
+        "cost": 8,
         "flex": 6.9,
         "synergy": 6.6,
         "stable": 7.4
@@ -3280,8 +3275,8 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_MSJ42tn2pr.webp",
       "_category": "item_single",
       "dims": {
-        "power": 6.0,
-        "cost": 9.0,
+        "power": 6,
+        "cost": 9,
         "flex": 7.1,
         "synergy": 6.3,
         "stable": 7.6
@@ -3314,7 +3309,7 @@ window.__CARD_DATA__ = {
       "_category": "item_single",
       "dims": {
         "power": 7.6,
-        "cost": 8.0,
+        "cost": 8,
         "flex": 7.4,
         "synergy": 8.2,
         "stable": 7.5
@@ -3504,7 +3499,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_oG0h5KxjBT.webp",
       "_category": "item_single",
       "dims": {
-        "power": 7.0,
+        "power": 7,
         "cost": 9.7,
         "flex": 7.1,
         "synergy": 7.1,
@@ -3710,7 +3705,7 @@ window.__CARD_DATA__ = {
       "attribute": "理智",
       "type": "战术",
       "effect": "自己回合从手卡发动，三选一：①从牌组选1张卡加入手卡 ②修改一次掷骰结果 ③选对手墓地1张卡放回其牌组。可盖伏在其他玩家回合使用",
-      "score": 8.0,
+      "score": 8,
       "grade": "S",
       "archetypes": [
         "泛用",
@@ -3824,7 +3819,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 6.1,
         "cost": 8.4,
-        "flex": 7.0,
+        "flex": 7,
         "synergy": 6.8,
         "stable": 7.8
       },
@@ -3856,7 +3851,7 @@ window.__CARD_DATA__ = {
       "_category": "item_single",
       "dims": {
         "power": 6.1,
-        "cost": 8.0,
+        "cost": 8,
         "flex": 6.2,
         "synergy": 6.1,
         "stable": 7.4
@@ -4031,7 +4026,7 @@ window.__CARD_DATA__ = {
       "type": "移动",
       "effect": "打断自己正在进行的移动，之后立即前往地图任意一格。适用后自己下一次移动位移量固定为1(不可驱散)",
       "sp": "每有1名位移手使用时费用-1(最多-2)",
-      "score": 7.0,
+      "score": 7,
       "grade": "A",
       "archetypes": [
         "位移队"
@@ -4114,10 +4109,10 @@ window.__CARD_DATA__ = {
       "_category": "item_single",
       "dims": {
         "power": 5.3,
-        "cost": 7.0,
+        "cost": 7,
         "flex": 7.1,
         "synergy": 6.2,
-        "stable": 7.0
+        "stable": 7
       },
       "brief": "合格可用，收益直接、泛用度高，控场队组件。"
     },
@@ -4130,11 +4125,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_rkxp2U3sUX.webp",
       "effect": "终究是黄粱一梦罢了。当有玩家发动了包含把卡（道具卡、事件卡、馈赠卡、乐谱卡）加入手卡或送入墓地的效果时可以把这张卡送入墓地来发动，那个效果无效。",
       "tags": [
-        "反制",
-        "单次",
-        "无效化",
-        "检索反制",
-        "墓地发动"
+        "反制"
       ],
       "score": 7.3,
       "grade": "A",
@@ -4156,12 +4147,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_Wk4wr3SIRr.webp",
       "effect": "一位先哲的密藏，上面详尽记述了她伟大的思想以及……体术。自己的回合才能使用。抽一张卡然后选自己的手卡或区域内的至多两张卡送入墓地。SP：把墓地的这张卡移出游戏可以发动，对一名其他玩家造成4点热忱属性伤害。",
       "tags": [
-        "侵略",
-        "单次",
-        "抽卡",
-        "送墓",
-        "墓地发动",
-        "伤害"
+        "侵略"
       ],
       "score": 8.1,
       "grade": "S",
@@ -4209,7 +4195,7 @@ window.__CARD_DATA__ = {
       "dims": {
         "power": 3.9,
         "flex": 5.2,
-        "synergy": 4.0,
+        "synergy": 4,
         "stable": 5.2
       },
       "brief": "偏特化，收益直接、泛用度高。"
@@ -4292,7 +4278,7 @@ window.__CARD_DATA__ = {
       "inspire": 4,
       "_category": "gift_cards",
       "dims": {
-        "power": 4.0,
+        "power": 4,
         "flex": 7.5,
         "synergy": 6.2,
         "stable": 7.4
@@ -4348,9 +4334,9 @@ window.__CARD_DATA__ = {
       "effect": "获得时立即给予3点激励点数。三选一：获得1点引导核心；抽取1张馈赠卡；前进/后退2格。",
       "_category": "music_cards",
       "dims": {
-        "power": 4.0,
+        "power": 4,
         "flex": 5.2,
-        "synergy": 4.0,
+        "synergy": 4,
         "stable": 5.2
       },
       "brief": "偏特化，收益直接、泛用度高。"
@@ -4397,9 +4383,9 @@ window.__CARD_DATA__ = {
       "_category": "music_cards",
       "dims": {
         "power": 5.3,
-        "flex": 6.0,
+        "flex": 6,
         "synergy": 4.8,
-        "stable": 6.0
+        "stable": 6
       },
       "brief": "合格可用，收益直接、泛用度高，协同依赖低。"
     },
@@ -4420,7 +4406,7 @@ window.__CARD_DATA__ = {
       "effect": "获得时立即给予6点激励点数。三选一：获得1点引导核心；抽取1张馈赠卡；前进/后退5格。",
       "_category": "music_cards",
       "dims": {
-        "power": 6.0,
+        "power": 6,
         "flex": 6.4,
         "synergy": 5.2,
         "stable": 6.4
@@ -4475,15 +4461,15 @@ window.__CARD_DATA__ = {
       "effect": "触发者立即瞬移至最近的交互格，那之后获得500$。交互格：商城、公交/地铁站、配电室和标明可交互的格子。[入间枫]总是被各种甜品吸引，其触发时改为前往任意一个交互格且获得1000$，若[入间予]也在场则改为获得[入间予]2000$。",
       "image": "assets/images/img_N1w8AiTdJN.webp",
       "image_url": "assets/images/img_KlpWEtQ3do.webp",
-      "score": 6.0,
+      "score": 6,
       "grade": "B",
       "archetypes": [],
       "_category": "event_cards",
       "dims": {
         "power": 6.1,
         "flex": 5.8,
-        "synergy": 6.0,
-        "stable": 6.0
+        "synergy": 6,
+        "stable": 6
       },
       "brief": "合格可用，收益直接，较挑构筑与时机。"
     },
@@ -4559,15 +4545,15 @@ window.__CARD_DATA__ = {
       "effect": "终止所有的移动动作。触发后，所有玩家下次执行的位移效果-2。[现实间里绪]与[木原光太郎]不受此事件影响。",
       "image": "assets/images/img_jV73D6KuZa.webp",
       "image_url": "assets/images/img_vd2h3iGpbb.webp",
-      "score": 5.0,
+      "score": 5,
       "grade": "C",
       "archetypes": [],
       "_category": "event_cards",
       "dims": {
-        "power": 5.0,
-        "flex": 5.0,
-        "synergy": 5.0,
-        "stable": 5.0
+        "power": 5,
+        "flex": 5,
+        "synergy": 5,
+        "stable": 5
       },
       "brief": "偏特化，收益直接。"
     },
@@ -4580,14 +4566,14 @@ window.__CARD_DATA__ = {
       "effect": "触发者进行一次掷骰动作（使用一枚20面骰）根据点数执行满足条件的效果：1.偶数，回复2点音韵值；2.个位数字为4的正整数倍数，降低自身1点入迷值；3.为4的正整数倍数，回复2点音韵值；4.≥16，降低自身1点入迷值。[松山惠]触发此事件时立即降低自身1点入迷值。",
       "image": "assets/images/img_87sC24sldD.webp",
       "image_url": "assets/images/img_dA4qry3waW.webp",
-      "score": 5.0,
+      "score": 5,
       "grade": "C",
       "archetypes": [],
       "_category": "event_cards",
       "dims": {
         "power": 5.4,
-        "flex": 5.0,
-        "synergy": 5.0,
+        "flex": 5,
+        "synergy": 5,
         "stable": 4.4
       },
       "brief": "偏特化，收益直接、泛用度高，吃判定/略有波动。"
@@ -4622,14 +4608,14 @@ window.__CARD_DATA__ = {
       "effect": "触发者支付500金币，投掷3枚6面骰，若结果：①有两个数字相同，获得2000金币；②有三个数字相同，获得3000金币；③没有数字相同，后退一步。[木原]家族成员在进行该游戏时，可以投掷4枚6面骰。",
       "image": "assets/images/img_pbGTUDQGn6.webp",
       "image_url": "assets/images/img_oflxrBF4j3.webp",
-      "score": 5.0,
+      "score": 5,
       "grade": "C",
       "archetypes": [],
       "_category": "event_cards",
       "dims": {
         "power": 5.3,
-        "flex": 5.0,
-        "synergy": 5.0,
+        "flex": 5,
+        "synergy": 5,
         "stable": 4.5
       },
       "brief": "偏特化，收益直接、泛用度高，吃判定/略有波动。"
@@ -4687,13 +4673,13 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_MRGVhU53ZN.webp",
       "inspiration": 6,
       "grade": "A",
-      "score": 7.0,
+      "score": 7,
       "inspire": 6,
       "_category": "omikuji",
       "dims": {
         "power": 7.4,
-        "flex": 7.0,
-        "synergy": 7.0,
+        "flex": 7,
+        "synergy": 7,
         "stable": 6.4
       },
       "brief": "优秀，收益直接、泛用度高。"
@@ -4707,7 +4693,7 @@ window.__CARD_DATA__ = {
       "image_url": "assets/images/img_EVV6OYujed.webp",
       "inspiration": 6,
       "grade": "C",
-      "score": 4.0,
+      "score": 4,
       "inspire": 6,
       "_category": "omikuji",
       "dims": {
@@ -4751,8 +4737,8 @@ window.__CARD_DATA__ = {
       "inspire": 4,
       "_category": "omikuji",
       "dims": {
-        "power": 5.0,
-        "flex": 5.0,
+        "power": 5,
+        "flex": 5,
         "synergy": 4.9,
         "stable": 4.1
       },
