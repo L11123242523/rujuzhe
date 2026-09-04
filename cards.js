@@ -2996,7 +2996,7 @@ window.__CARD_DATA__ = {
       "brief": "强势，收益直接、费用效率出色，资源运转队组件。"
     },
     {
-      "name": "\"狼牙鹰爪\"",
+      "name": "狼牙鹰爪",
       "cost": 7,
       "attribute": "热忱",
       "type": "永续",
@@ -3015,10 +3015,11 @@ window.__CARD_DATA__ = {
         "synergy": 7.8,
         "stable": 7.8
       },
-      "brief": "强势，收益直接。"
+      "brief": "强势，收益直接。",
+      "_category": "item_permanent"
     },
     {
-      "name": "\"巧匠之手\"",
+      "name": "巧匠之手",
       "cost": 5,
       "attribute": "混沌",
       "type": "永续",
@@ -3037,7 +3038,8 @@ window.__CARD_DATA__ = {
         "synergy": 8,
         "stable": 8
       },
-      "brief": "核心级，收益直接。"
+      "brief": "核心级，收益直接。",
+      "_category": "item_permanent"
     },
     {
       "name": "核心的供给者",
@@ -3059,7 +3061,8 @@ window.__CARD_DATA__ = {
         "synergy": 7.7,
         "stable": 7.2
       },
-      "brief": "强势，收益直接、泛用度高。"
+      "brief": "强势，收益直接、泛用度高。",
+      "_category": "item_permanent"
     }
   ],
   "item_single": [
@@ -4086,7 +4089,7 @@ window.__CARD_DATA__ = {
       "brief": "优秀，收益直接、费用效率出色，位移队组件。"
     },
     {
-      "name": "\"拦路者\"",
+      "name": "拦路者",
       "cost": 3,
       "attribute": "无序",
       "type": "移动",
@@ -4119,7 +4122,7 @@ window.__CARD_DATA__ = {
       "brief": "合格可用，收益直接、泛用度高，控场队组件。"
     },
     {
-      "name": "\"崩塌之乌托邦\"",
+      "name": "崩塌之乌托邦",
       "cost": "1+",
       "attribute": "混沌",
       "type": "单次",
@@ -4138,7 +4141,8 @@ window.__CARD_DATA__ = {
         "synergy": 7.2,
         "stable": 7.2
       },
-      "brief": "优秀，收益直接。"
+      "brief": "优秀，收益直接。",
+      "_category": "item_single"
     },
     {
       "name": "先哲之\"馈赠\"",
@@ -4160,7 +4164,8 @@ window.__CARD_DATA__ = {
         "synergy": 7.9,
         "stable": 7.9
       },
-      "brief": "核心级，收益直接。"
+      "brief": "核心级，收益直接。",
+      "_category": "item_single"
     }
   ],
   "gift_cards": [

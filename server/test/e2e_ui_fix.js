@@ -39,7 +39,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
   // ---------- B 盖伏 ----------
   await page.evaluate(()=>{
-    const fd=allCards.find(c=>c.name==='幸运护符');
+    const fd=allCards.find(c=>c._category==='item_single'&&typeof isChainOnlyCard==='function'&&!isChainOnlyCard(c)&&/^[0-9]+$/.test(String(c.cost))&&!/盖伏/.test(c.effect||''));
     const p=battleState.p1;
     p.hand=[{name:'无关卡甲',cost:0,_category:'item_single',effect:'获得1金币'},{name:'无关卡乙',cost:0,_category:'item_single',effect:'获得1金币'}];
     p.grave=[];p.permanent=[];p.faceDownCards=[];

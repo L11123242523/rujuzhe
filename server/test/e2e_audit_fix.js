@@ -9,9 +9,10 @@ let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++;console.log('PASS',m);}else{fail
  const C=await pg.evaluate(()=>{
   const ops=nm=>compileStepOps((allCards.find(x=>x.name===nm)||{effect:''}).effect,false);
   const count=(arr,op)=>arr.filter(o=>o.op===op).length;
+  const deepCount=(arr,op)=>{let n=0;(arr||[]).forEach(o=>{if(o.op===op)n++;['inner','then','options','effects','branch'].forEach(k=>{if(Array.isArray(o[k]))n+=deepCount(o[k],op);});if(Array.isArray(o.branches))o.branches.forEach(br=>{if(Array.isArray(br))n+=deepCount(br,op);});});return n;};
   const out={};
   let a=ops('人格修正拳！');
-  out.renge={knock:count(a,'knock_off'),lose:count(a,'lose_cost'),judge:a.some(o=>o.op==='damage'&&o.judge)};
+  out.renge={knock:deepCount(a,'knock_off'),lose:deepCount(a,'lose_cost'),judge:a.some(o=>o.op==='damage'&&o.judge)};
   a=ops('你呀你呀'); out.ni=a.some(o=>o.op==='next_attack_pierce'&&o.amount===3)&&a.some(o=>o.op==='def_up');
   a=ops('打起精神来！');
   out.dqs={add:a.find(o=>o.op==='add_roll_phase')&&a.find(o=>o.op==='add_roll_phase').toTarget===true,
