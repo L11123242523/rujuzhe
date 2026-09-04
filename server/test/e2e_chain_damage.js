@@ -9,7 +9,7 @@ const A=[];const ok=(c,m)=>A.push((c?'PASS ':'FAIL ')+m);
   addBattleLog=()=>{};updateBattleUI=()=>{};checkBattleEnd=()=>{};
   judgePerform=(u,s,cb)=>cb(s.kind==='coin'?'正面':6);
   // 编排器选发窗：把妖刀也加入（选第0项=妖刀）；妖刀自己的选项窗选②抽1(i=1)
-  const queue=[0,1];
+  const queue=[0,0,0,1]; // 必发排序2次(3必发,末个自动)+选发选妖刀+妖刀选②抽1
   showChoiceModal=(t,d,x,o,cb)=>{const k=queue.shift();cb(k===undefined?o.length-1:k);};
   showCardPickerMulti=(c,ti,cb,n)=>cb([0]);
   const mk=()=>({hand:[],deck:[{n:1},{n:2}],grave:[],removed:[],permanent:[],faceDownCards:[],sync:30,maxSync:99,cost:5,maxCost:12,shield:0,defense:0,gold:0,position:0,teamAttribute:'热忱'});
