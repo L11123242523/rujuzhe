@@ -6071,10 +6071,10 @@ function resolveSimultaneous(tp, candidates, allDone) {
       if (i < 0) { addBattleLog('system', '═══ 连锁全部结算完成 ═══'); if (typeof ChainAnim !== 'undefined') ChainAnim.end(); if (typeof allDone === 'function') allDone(); return; }
       var idx = i, node = chain[i--];
       if (typeof ChainAnim !== 'undefined') ChainAnim.resolving(idx, node.label);
-      if (typeof node.alive === 'function' && !node.alive()) { if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, true, node.label); addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理'); setTimeout(step, 320); return; }
+      if (typeof node.alive === 'function' && !node.alive()) { if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, true, node.label); addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理'); setTimeout(step, 170); return; }
       addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
       var fired = false;
-      function next() { if (fired) return; fired = true; if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, false, node.label); setTimeout(step, 320); }
+      function next() { if (fired) return; fired = true; if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, false, node.label); setTimeout(step, 170); }
       try { if (typeof node.fire === 'function') node.fire(next); else next(); }
       catch (e) { console.error('resolveSimultaneous node error', node && node.label, e); next(); }
     }
@@ -7681,6 +7681,8 @@ function doSacrifice() {
     }
     p.cost = Math.min(p.cost + recover, p.maxCost);
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
+    // 立即刷新界面：回费/手牌变化即时可见，不再等到后续询问窗关闭（修复献祭后回费延迟感）
+    updateBattleUI();
 
     function kaedeSP(thenFn) {
       // 枫SP③：每次献祭后都可支付1音韵造1混沌伤害（不再限定首次）
