@@ -5807,11 +5807,13 @@ function startTurn() {
   battleState[player]._sacrificeUsedThisTurn = 0; // 重置每回合一次的技能使用记录
   battleState[player]._koharuTimesThisTurn = 0; // 小春SP先机每回合递增加成重置
   battleState[player]._rioMizugiFirstRoll = false; battleState[player]._rioMizugiFirstMove = false; // 里绪(水着)首次投掷/移动每回合重置
-  // 自然回复音韵：基础5；枫(水着)全队+50%（5×1.5=7.5→7，用户口径）；葵每名成员+50%(向下)；予每名无序成员+1；霜烬+1；里尔亚斯被动+2(随等级)
+  // 自然回复音韵：基础5；枫(水着)/葵SP各+50%（5×1.5=7.5→7，与成员数无关，用户口径）；予每名无序成员+1；霜烬+1；里尔亚斯被动+2(随等级)
   (function(){
     var __p = battleState[player], __team = (deckConfig[player].chars||[]).filter(Boolean), __reg = 5;
-    if (__p._kaedeMizugiRegen) __reg = Math.floor(5 * 1.5); // 枫(水着)SP：全队自然回复+50%（固定7，与成员数无关）
-    if (__p._aoiRegenPct) __reg = Math.floor(__reg * (1 + 0.5 * __team.length)); // 葵SP：每名成员自然回复+50%(向下)
+    if (__p._kaedeMizugiRegen || __p._aoiRegenPct) {
+      var __regenPct = (__p._kaedeMizugiRegen ? 0.5 : 0) + (__p._aoiRegenPct ? 0.5 : 0);
+      __reg = Math.floor(5 * (1 + __regenPct));
+    }
     if (__p._yuSP) __reg += __team.filter(function(c){return c.attribute==='无序';}).length;
     if (__p._frostRegen) __reg += 1;
     // 里尔亚斯被动：自然回复+2/4/5/6（Lv1/Lv4/Lv7/Lv10）；音韵上限同步+2/4/5/6
