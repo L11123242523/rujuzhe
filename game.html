@@ -10199,7 +10199,9 @@ function blueprintCopy(user, selfCard, done) {
     if (!picks || !picks.length) { done(); return; }
     var tgt = picks[0].card;
     // 蓝图复制=复制那一张卡：蓝图变为被复制的卡并加入手卡（带蓝图复制标记）；
-    // 玩家之后需要再次主动使用这张被复制的卡来适用其效果（支付等同于被复制卡的费用）
+    // 玩家之后需要再次主动使用这张被复制的卡来适用其效果（支付等同于被复制卡的费用）；
+    // 保存蓝图原本卡面，使用结算完毕送入墓地前变回蓝图原貌
+    selfCard._blueprintOriginal = JSON.parse(JSON.stringify(selfCard));
     var copy = JSON.parse(JSON.stringify(tgt));
     for (var k in copy) { if (Object.prototype.hasOwnProperty.call(copy, k)) selfCard[k] = copy[k]; }
     selfCard._blueprintCopy = true;     // 特殊标记：证明该卡是蓝图所复制的卡
@@ -12946,6 +12948,8 @@ function kaedePassiveTrigger(player, usedCard) {
 function moveCardToGrave(player, card, reason) {
   var __pg = battleState && battleState[player];
   if (!__pg || !card) return false;
+  // 蓝图复制的卡离场送入墓地：变回蓝图原本卡面与效果
+  if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
   (__pg.grave = __pg.grave || []).push(card);
   if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, card, reason || 'effect');
   return true;
@@ -14258,6 +14262,15 @@ function recordSkillUse(card, user) {
 }
 
 // 使用后卡牌去向：永续进效果处理区（满则送墓），其余送墓（玩家/AI 共用）
+// 蓝图复制的卡结算完毕：变回蓝图的原本卡面与效果（在送入墓地/任何离场前调用）
+function __revertBlueprintCopy(card) {
+  if (!card || !card._blueprintCopy || !card._blueprintOriginal) return;
+  var __bo = card._blueprintOriginal;
+  for (var __bk in card) { if (Object.prototype.hasOwnProperty.call(card, __bk)) delete card[__bk]; }
+  for (var __bk2 in __bo) { if (Object.prototype.hasOwnProperty.call(__bo, __bk2)) card[__bk2] = __bo[__bk2]; }
+  addBattleLog('system', '【魔法蓝图】结算完毕，变回蓝图原貌');
+}
+
 function placeAfterUse(user, card, isPerm) {
   var p = battleState[user];
   // 技能卡用后必离场（进墓/回牌组）：清除实例级“本回合已用”标记，使其被回收回手后可再次发动（未回收则卡在墓地，自然无法一回合连发）
@@ -14277,6 +14290,8 @@ function placeAfterUse(user, card, isPerm) {
     card._skipGraveOnce = false;
     addBattleLog(user, '【魔法蓝图】已变为被复制的卡并回到手牌（等待再次使用）');
   } else {
+    // 蓝图复制的卡使用结算完毕：送入墓地前变回蓝图原本卡面与效果
+    if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
     p.grave.push(card);
     addBattleLog(user, card.name + '送入墓地');
     if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, card, 'use');
