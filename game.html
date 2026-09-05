@@ -7659,7 +7659,8 @@ function doSacrifice() {
     if (idx >= p.hand.length) { showToast('手牌已变化，请重新选择献祭的手卡', 'warn'); updateBattleUI(); return; } // 弹窗期间手牌变化：防止越界/误删
     var sacCard = p.hand.splice(idx, 1)[0];
     p.grave.push(sacCard);
-    checkGraveTrigger('p1', sacCard);
+    // 光太郎被动：献祭的卡视为因卡的效果送入墓地（触发"因卡效果送墓"类SP，如来自地狱的盒子）
+    checkGraveTrigger('p1', sacCard, p._kotaroPassive ? 'effect' : 'sacrifice');
     p._sacrificeUsedThisTurn = usedSac + 1;
 
     var recover = 2, isFirst = usedSac === 0;
@@ -10601,7 +10602,8 @@ function sacrificeCards(user, picks, thenDraw, next) {
     var z = pk.zone || 'hand', arr = p[z], idx = arr ? arr.indexOf(pk.card) : -1;
     if (idx >= 0) arr.splice(idx, 1);
     p.grave.push(pk.card);
-    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, pk.card);
+    // 光太郎被动：献祭的卡视为因卡的效果送入墓地
+    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, pk.card, p._kotaroPassive ? 'effect' : 'sacrifice');
     used++; p._sacrificeUsedThisTurn = used;
     var recover = 2;
     if (p._meiSPBeta) { recover += 1; p._meiSPBeta = false; addBattleLog(user, '【松山惠SP·乐曲β】本次献祭回复音韵+1'); }
@@ -12938,6 +12940,32 @@ function checkGraveTrigger(player, card, reason) {
     }
   }
 
+  // 来自地狱的盒子SP：因卡效果送墓时可选 ①4面骰判定，按点数回复同数值音韵 ②对一名玩家造一次4面骰判定伤害
+  if (cardName.indexOf('来自地狱的盒子') >= 0 && reason === 'effect' && sp && /送墓时可选|送墓时/.test(sp)) {
+    function __hellBoxRecover(roll, __cancelled) {
+      if (__cancelled || roll == null) { addBattleLog(player, '【来自地狱的盒子SP】判定被连锁无效'); return; }
+      recoverCost(player, roll, '来自地狱的盒子SP');
+      addBattleLog(player, '【来自地狱的盒子SP】4面骰' + roll + '点，回复' + roll + '音韵（当前' + p.cost + '）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    }
+    function __hellBoxDamage(roll, __cancelled) {
+      if (__cancelled || roll == null) { addBattleLog(player, '【来自地狱的盒子SP】判定被连锁无效，不造伤害'); return; }
+      var __hbFoe = player === 'p1' ? 'p2' : 'p1';
+      dealDamageWithResponse(__hbFoe, roll, '来自地狱的盒子SP', null, null, player, { judge: true });
+      addBattleLog(player, '【来自地狱的盒子SP】4面骰' + roll + '点，对' + (player === 'p1' ? '对手' : '你') + '造成' + roll + '点判定伤害');
+    }
+    if (player === 'p1' && typeof showChoiceModal === 'function') {
+      showChoiceModal('来自地狱的盒子·SP', '因卡的效果送入墓地', '选择一项：①4面骰判定，按点数回复音韵 ②对一名玩家造一次4面骰判定伤害', ['① 4面骰判定回音韵', '② 4面骰判定造伤害'], function (ci) {
+        if (ci === 0) judgePerform('p1', { kind: 'dice', sides: 4, label: '来自地狱的盒子·回音韵判定' }, __hellBoxRecover);
+        else if (ci === 1) judgePerform('p1', { kind: 'dice', sides: 4, label: '来自地狱的盒子·判定伤害' }, __hellBoxDamage);
+      });
+    } else {
+      // AI：回音韵（收益稳定）
+      judgePerform(player, { kind: 'dice', sides: 4, label: '来自地狱的盒子·SP判定' }, __hellBoxRecover);
+    }
+    return;
+  }
+
   // 破损电子设备：进入墓地后可花2音韵回收
   var __recyTxt = sp + effect; // 兼容回收文本落在 sp 或 effect
   if (cardName.indexOf('破损电子设备') >= 0 || (__recyTxt && /进(入)?墓地后/.test(__recyTxt) && __recyTxt.indexOf('回收') >= 0)) {
@@ -13749,7 +13777,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
     showCardPickerMulti(hand, '巧匠之手：选一张手卡献祭（回复2音韵），完成后抽1张', function (hi) {
       if (hi === null || hi === undefined || hi < 0) { cb && cb(); return; }
       var real = p.hand.indexOf(hand[hi]); if (real < 0) { cb && cb(); return; }
-      var sac = p.hand.splice(real, 1)[0]; p.grave.push(sac); checkGraveTrigger('p1', sac);
+      var sac = p.hand.splice(real, 1)[0]; p.grave.push(sac); checkGraveTrigger('p1', sac, p._kotaroPassive ? 'effect' : 'sacrifice');
       p.cost = Math.min(p.cost + 2, p.maxCost);
       addBattleLog('p1', '【巧匠之手】献祭【' + sac.name + '】，回复2音韵（当前' + p.cost + '）');
       // 巧匠的献祭同样是献祭动作：枫SP③每次献祭后支付1音韵造1混沌
