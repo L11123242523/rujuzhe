@@ -3866,6 +3866,15 @@ function __settleOverclockLoan(who) {
   }
   if (typeof updateBattleUI === 'function') updateBattleUI();
 }
+// 里尔亚斯被动：自然回复/音韵上限加成（Lv1→2, Lv4→4, Lv7→5, Lv10→6）
+function __lilithBonus(p) {
+  if (!p || !p._lilithPassive) return 0;
+  var lvl = p.level || 1;
+  if (lvl >= 10) return 6;
+  if (lvl >= 7) return 5;
+  if (lvl >= 4) return 4;
+  return 2;
+}
 function isDiceModifyCard(card){
   var name=card.name||'',eff=card.effect||card.text||'';
   return name==='遥控骰子'||name==='颠倒骰子'||name==='特制手套'||eff.indexOf('修改一次掷骰结果')>=0||eff.indexOf('修改骰子点数')>=0||eff.indexOf('改变一名玩家下一次移动的方向')>=0;
@@ -5785,12 +5794,18 @@ function startTurn() {
   battleState[player]._sacrificeUsedThisTurn = 0; // 重置每回合一次的技能使用记录
   battleState[player]._koharuTimesThisTurn = 0; // 小春SP先机每回合递增加成重置
   battleState[player]._rioMizugiFirstRoll = false; battleState[player]._rioMizugiFirstMove = false; // 里绪(水着)首次投掷/移动每回合重置
-  // 自然回复音韵：基础5；葵/枫(水着)每名成员+50%(向下)；予每名无序成员+1；霜烬+1
+  // 自然回复音韵：基础5；葵/枫(水着)每名成员+50%(向下)；予每名无序成员+1；霜烬+1；里尔亚斯被动+2(随等级)
   (function(){
     var __p = battleState[player], __team = (deckConfig[player].chars||[]).filter(Boolean), __reg = 5;
     if (__p._aoiRegenPct || __p._kaedeMizugiRegen) __reg = Math.floor(5 * (1 + 0.5 * __team.length));
     if (__p._yuSP) __reg += __team.filter(function(c){return c.attribute==='无序';}).length;
     if (__p._frostRegen) __reg += 1;
+    // 里尔亚斯被动：自然回复+2/4/5/6（Lv1/Lv4/Lv7/Lv10）；音韵上限同步+2/4/5/6
+    if (__p._lilithPassive) {
+      var __lilB = (typeof __lilithBonus === 'function') ? __lilithBonus(__p) : 2;
+      __reg += __lilB;
+      __p.maxCost = 12 + __lilB;
+    } else if (__p.maxCost < 12) { __p.maxCost = 12; }
     // 霜烬被动·黎明灰烬：同步<14 每回合自然回复+4且攻击力+4（回合刷新不叠加）；同步>26 全队免疫其他玩家施加的负面效果
     if (__p._frostPassive) {
       if (__p._frostAtkBonus) { __p.attackBuff = (__p.attackBuff || 0) - __p._frostAtkBonus; __p._frostAtkBonus = 0; }
@@ -8386,6 +8401,8 @@ function getActiveBuffs(user) {
     P('stat','⚡','超频','可透支' + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(user) : 5) + '音韵' + (__ocAct ? '·剩' + __ocAct + '行动' : ''),'超频：持续期间可透支音韵值（Lv7透支7点并扣3同步），暴击伤害+50%','jud');
   }
   if (p._guideCore>0) P('stat','🧭','引导核心','×'+p._guideCore,'持有'+p._guideCore+'个引导核心：在“角色技能”中使用，可立即填满当前激励累计条并升级','fire');
+  if (p._sakuraPassive && (p._sakuraFreeUse||0) > 0) P('stat','🎫','免费使用','×'+p._sakuraFreeUse,'宫樱子被动：免费用卡剩余次数（队伍同步降至20/15/10/5时各+1次）','sp');
+  if (p._lilithPassive) P('stat','🪶','福金与穆宁','回费/上限+'+((typeof __lilithBonus==='function')?__lilithBonus(p):2),'获取激励点数额外+1；每回合自然回复与音韵上限+2（随等级提升至+6）','sp');
   // —— 待命：下一次触发的一次性效果 ——
   if (p._nextAttackJudge) { var dn = p._nextAttackJudge.dice==='coin'?'硬币':(p._nextAttackJudge.dice==='d4'?'四面骰':'六面骰'); P('pending','🎯','下次造伤附带',dn,'下一次造成伤害时进行'+dn+'判定，正面/达标追加'+(p._nextAttackJudge.front||2)+'点判定伤害','pend'); }
   if (p._preventNextDamage) P('pending','🛡️','抵消下次伤害','','下一次即将受到的伤害将被抵消','pend');
@@ -8427,6 +8444,21 @@ function renderBuffBar(user) {
 }
 function updateBattleUI() {
   if (!battleState) return;
+  
+  // 宫樱子被动：队伍同步降至阈值(20/15/10/5)时各+1次免费用卡（各阈值仅触发一次）
+  try {
+    var __skp = battleState.p1;
+    if (__skp && __skp._sakuraPassive && __skp._sakuraThr) {
+      var __skSync = __skp.sync || 0;
+      [20, 15, 10, 5].forEach(function (t) {
+        if (__skSync <= t && !__skp._sakuraThr[t]) {
+          __skp._sakuraThr[t] = true;
+          __skp._sakuraFreeUse = (__skp._sakuraFreeUse || 0) + 1;
+          addBattleLog('p1', '【宫樱子被动】同步降至' + t + '以下，免费用卡次数+1（当前' + __skp._sakuraFreeUse + '次）');
+        }
+      });
+    }
+  } catch (e) {}
   
   try {
     // 状态显示
@@ -12698,6 +12730,20 @@ function processCharacterPassives(player) {
         addBattleLog(player, '【予(水着)被动·归纳演绎法】无序以外[战术]/[移动]道具卡视为理智[移动]道具卡，每用1张理智卡回1音韵，队伍伤害变理智属性');
       }
       
+      // 里尔亚斯被动【Huginn&Muninn】：获取激励点数时额外+1；每回合自然回复的音韵值与音韵上限+2（Lv4/7/10→4/5/6）
+      if (charName.indexOf('里尔亚斯') >= 0 || charName.indexOf('斯塔芙莉娅斯特') >= 0) {
+        p._lilithPassive = true;
+        addBattleLog(player, '【里尔亚斯被动·Huginn&Muninn】获取激励+1，自然回复与音韵上限+2（随等级提升）');
+      }
+      
+      // 宫樱子被动【真是没办法了呢】：免费用卡次数（初始1次；队伍同步降至20/15/10/5时各+1次）
+      if (charName.indexOf('樱子') >= 0) {
+        p._sakuraPassive = true;
+        p._sakuraFreeUse = (p._sakuraFreeUse || 0) + 1;
+        p._sakuraThr = p._sakuraThr || { 20: false, 15: false, 10: false, 5: false };
+        addBattleLog(player, '【宫樱子被动】免费用卡次数+1（当前' + p._sakuraFreeUse + '次；队伍同步降至20/15/10/5时各再+1）');
+      }
+      
       // 宁雨清被动（其他角色的被动可以继续添加）
     }
     
@@ -14090,38 +14136,55 @@ function useCardComplete(handIndex) {
 function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, target, fromFaceDown) {
   // 费用减免（葵被动/下张减费）与技能一次记录走统一管线，玩家与AI一致
   var actualCost = computeActualCost(card, 'p1');
-  // 支付费用（盖伏翻开时也在此统一扣一次；activateFaceDown 不再自行扣费，避免双扣）
-  battleState.p1.cost -= actualCost;
-  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
-  // 仅“从手牌发动”才移除手牌；盖伏卡已在 activateFaceDown 从盖伏区移出，handIndex 为 -1 时绝不能误删手牌末张
-  if (!fromFaceDown) battleState.p1.hand.splice(handIndex, 1);
-  recordSkillUse(card, 'p1');
-  addBattleLog('p1', actionType + '【' + card.name + '】（消耗' + actualCost + '费用）');
-  
-  // 永续卡：发动声明=连锁1，双方连锁窗口结束（逆顺处理到连锁1）时才适用“发动时作为效果处理”
-  if (isPermanent) {
-    var __permEff = { player: 'p1', description: '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation' };
-    beforeEffectExecution(__permEff, function (res) {
-      if (!res) {
-        moveCardToGrave('p1', card, 'use');
-        addBattleLog('p1', '【' + card.name + '】的发动被连锁无效，不适用发动时效果，送入墓地');
-        if (typeof updateBattleUI === 'function') updateBattleUI();
-        return;
-      }
-      var sa = handlePermanentActivation(card, effectText, function () {
-        continueCardUse(card, effectText, isPermanent, actionType, target, true);
+  var __freeOk = (battleState.p1._sakuraPassive && (battleState.p1._sakuraFreeUse || 0) > 0 && actualCost > 0);
+  function __go(freeUse) {
+    // 支付费用（盖伏翻开时也在此统一扣一次；activateFaceDown 不再自行扣费，避免双扣）
+    if (freeUse) {
+      battleState.p1._sakuraFreeUse--;
+      addBattleLog('p1', '【宫樱子被动】消耗1次免费用卡（剩余' + battleState.p1._sakuraFreeUse + '次）');
+    } else {
+      battleState.p1.cost -= actualCost;
+      if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
+    }
+    // 仅“从手牌发动”才移除手牌；盖伏卡已在 activateFaceDown 从盖伏区移出，handIndex 为 -1 时绝不能误删手牌末张
+    if (!fromFaceDown) battleState.p1.hand.splice(handIndex, 1);
+    recordSkillUse(card, 'p1');
+    addBattleLog('p1', actionType + '【' + card.name + '】（' + (freeUse ? '免费用卡' : '消耗' + actualCost + '费用') + '）');
+    
+    // 永续卡：发动声明=连锁1，双方连锁窗口结束（逆顺处理到连锁1）时才适用“发动时作为效果处理”
+    if (isPermanent) {
+      var __permEff = { player: 'p1', description: '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation' };
+      beforeEffectExecution(__permEff, function (res) {
+        if (!res) {
+          moveCardToGrave('p1', card, 'use');
+          addBattleLog('p1', '【' + card.name + '】的发动被连锁无效，不适用发动时效果，送入墓地');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+          return;
+        }
+        var sa = handlePermanentActivation(card, effectText, function () {
+          continueCardUse(card, effectText, isPermanent, actionType, target, true);
+        });
+        if (!sa) continueCardUse(card, effectText, isPermanent, actionType, target, false);
       });
-      if (!sa) continueCardUse(card, effectText, isPermanent, actionType, target, false);
+      return;
+    }
+    // 非永续卡：正常解析整段效果
+    var specialActivation = handlePermanentActivation(card, effectText, function() {
+      continueCardUse(card, effectText, isPermanent, actionType, target, true);
+    });
+    if (!specialActivation) {
+      continueCardUse(card, effectText, isPermanent, actionType, target, false);
+    }
+  }
+  // 宫樱子被动：免费用卡次数充足时询问是否消耗
+  if (__freeOk) {
+    showChoiceModal('宫樱子被动·真是没办法了呢', '本次使用【' + card.name + '】需要' + actualCost + '音韵', '是否消耗1次免费用卡次数（剩余' + battleState.p1._sakuraFreeUse + '次）？', ['消耗1次免费使用', '正常支付'], function (o) {
+      if (o == null || o < 0) { return; }
+      __go(o === 0);
     });
     return;
   }
-  // 非永续卡：正常解析整段效果
-  var specialActivation = handlePermanentActivation(card, effectText, function() {
-    continueCardUse(card, effectText, isPermanent, actionType, target, true);
-  });
-  if (!specialActivation) {
-    continueCardUse(card, effectText, isPermanent, actionType, target, false);
-  }
+  __go(false);
 }
 
 // 提取永续卡“发动时（作为效果处理）”的第一句效果；没有则返回 null（主动/被动效果不在发动时执行）
@@ -14424,7 +14487,8 @@ function postUsePassiveHooks(user, card, done) {
         else { __ymSettle(GameRNG.coin() ? '正面' : '反面', tgt); }
       }
       if (user === 'p1') {
-        showChoiceModal('予(水着)SP', '使用理智属性[移动]道具卡后', '对一名玩家造成硬币判定伤害（正面2点）', ['对对手', '对自己'], function (o) { __ymGo(o === 0 ? 'p2' : 'p1'); });
+        // 卡面：对一名“其他玩家”——1v1 中即对手，不再提供对自己选项
+        showChoiceModal('予(水着)SP', '使用理智属性[移动]道具卡后', '对一名其他玩家造成硬币判定伤害（正面2点，背面0）', ['对对手'], function (o) { __ymGo('p2'); });
       } else __ymGo('p1');
     });
   }
@@ -14551,8 +14615,15 @@ function settleCardExecution(card, user, target, opts, done) {
   var p = battleState[user];
   var isPerm = card._category === 'item_permanent';
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
-  p.cost -= actual;
-  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+  // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数
+  var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3;
+  if (__sfAi) {
+    p._sakuraFreeUse--;
+    addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
+  } else {
+    p.cost -= actual;
+    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+  }
   // “每用一次+1”费用递增：结算支付后计次
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     card._escalateCount = (card._escalateCount || 0) + 1;
