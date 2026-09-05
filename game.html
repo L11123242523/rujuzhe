@@ -3848,6 +3848,24 @@ var CARD_PLAY_CONDITIONS={
   '来自地狱的盒子':function(card,me,bs){ if((me.grave||[]).length<2) return {ok:false,reason:'来自地狱的盒子需要墓地中有至少2张卡才能发动'}; return true; },
   '底牌':function(card,me,bs){ var others=(me.hand||[]).filter(function(c){return c!==card;}); var only=others.length===0; var mono=others.length>0&&others.every(function(c){return c.attribute===card.attribute;}); if(!only&&!mono) return {ok:false,reason:'底牌需手卡只有这张、或全部为同一属性才能发动'}; me._dipaiOnly=only; return true; }
 };
+// ===== [超频]状态：可透支音韵值（基础最多5点，Lv7起最多7点；透支发生时扣除持有者3点同步）=====
+function __overclockLoanCap(who) {
+  var p = battleState && battleState[who];
+  if (!p || typeof StatusSys === 'undefined' || !StatusSys.has(who, 'overclock')) return 0;
+  return ((p.level || 1) >= 7) ? 7 : 5;
+}
+// 扣费后音韵值为负时：登记透支日志 + Lv7 扣除3点同步
+function __settleOverclockLoan(who) {
+  var p = battleState && battleState[who];
+  if (!p || !(p.cost < 0)) return;
+  var loaned = -p.cost;
+  addBattleLog(who, '【超频·贷款】透支' + loaned + '点音韵值（音韵值' + p.cost + '）');
+  if ((p.level || 1) >= 7) {
+    p.sync = Math.max(0, p.sync - 3);
+    addBattleLog(who, '【超频Lv7】贷款扣除3点同步值（当前' + p.sync + '）');
+  }
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+}
 function isDiceModifyCard(card){
   var name=card.name||'',eff=card.effect||card.text||'';
   return name==='遥控骰子'||name==='颠倒骰子'||name==='特制手套'||eff.indexOf('修改一次掷骰结果')>=0||eff.indexOf('修改骰子点数')>=0||eff.indexOf('改变一名玩家下一次移动的方向')>=0;
@@ -3939,9 +3957,10 @@ function evaluatePlayable(card,player,opts){
     if(!teamHasCardCharacter(player,card)) return {ok:false,reason:'队伍未编入【'+(card.character_full||card.character||'对应角色')+'】，不能使用其技能卡【'+name+'】（同名不同形态不通用，需编入对应形态）'};
     if(card._skillUsedThisTurn) return {ok:false,reason:'技能卡【'+name+'】本回合已经使用过了（每回合一次）'};
   }
-  // 4) 费用（"1+"/"2+"等字符串费用卡取基数比较，修复 NaN 比较导致0费/负费可出卡）
+  // 4) 费用（"1+"/"2+"等字符串费用卡取基数比较，修复 NaN 比较导致0费/负费可出卡）；[超频]状态可透支音韵
   var cost=parseInt(card.cost,10)||0;
-  if(me.cost<cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost};
+  var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
+  if(me.cost + __loanCap < cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
   // 5) 攻击卡：范围内必须存在可攻击目标
   if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
@@ -5887,7 +5906,8 @@ function collectChainable(player, effect){
     } else {
       if(!isChainOnlyCard(c) || !hasChainTarget(c) || !__matchStage(c)) return;
     }
-    if((parseInt(c.cost,10)||0)>(me.cost||0)) return;
+    var __clCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
+    if((parseInt(c.cost,10)||0)>(me.cost||0)+__clCap) return;
     if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
     out.push({card:c,from:from,index:index});
   }
@@ -5918,6 +5938,7 @@ function applyChainCard(player,pick,effect,done){
   function payAndRemove(){
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
     me.cost-=(parseInt(c.cost,10)||0);
+    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     (me.grave=me.grave||[]).push(c);
   }
@@ -6760,9 +6781,11 @@ function drawByCost() {
   // 核心规则：自己回合的主要阶段(main1/main2)，支付3音韵抽1；走 drawCard 以触发牌库倒置重置与抽牌被动
   if (battleState.currentPlayer !== 'p1') { addBattleLog('只能在自己回合使用音韵抽卡', 'system'); return; }
   if (battleState.phase !== 'main1' && battleState.phase !== 'main2') { addBattleLog('只能在主要阶段使用音韵抽卡', 'system'); return; }
-  if (battleState.p1.cost < 3) { addBattleLog('音韵值不足，需要3点音韵值', 'system'); return; }
+  var __dcLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p1') : 0;
+  if (battleState.p1.cost + __dcLoan < 3) { addBattleLog('音韵值不足，需要3点音韵值' + (__dcLoan > 0 ? '（[超频]可透支' + __dcLoan + '点）' : ''), 'system'); return; }
   if (battleState.p1.deck.length === 0 && (!battleState.p1.grave || battleState.p1.grave.length === 0)) { addBattleLog('牌库与墓地均已空，无卡可抽', 'system'); return; }
   battleState.p1.cost -= 3;
+  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
   var card = drawCard('p1');
   if (!card) return;
   addBattleLog('支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'), 'p1');
@@ -8348,6 +8371,11 @@ function getActiveBuffs(user) {
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
   if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加层数 '+p._shenleStack,'san');
   if (p._overload) P('stat','🎼','过载',(p._overload.until===-1?'永久':('剩'+p._overload.until+'行动')),'过载：持续期间内每因使用而让卡进入墓地的场合抽1张','fire');
+  if (typeof StatusSys !== 'undefined' && StatusSys.has(user, 'overclock')) {
+    var __ocs = StatusSys.all(user).filter(function (s) { return s.type === 'overclock'; });
+    var __ocAct = 0; __ocs.forEach(function (s) { if (s.actions != null && s.actions > 0) __ocAct += s.actions; });
+    P('stat','⚡','超频','可透支' + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(user) : 5) + '音韵' + (__ocAct ? '·剩' + __ocAct + '行动' : ''),'超频：持续期间可透支音韵值（Lv7透支7点并扣3同步），暴击伤害+50%','jud');
+  }
   if (p._guideCore>0) P('stat','🧭','引导核心','×'+p._guideCore,'持有'+p._guideCore+'个引导核心：在“角色技能”中使用，可立即填满当前激励累计条并升级','fire');
   // —— 待命：下一次触发的一次性效果 ——
   if (p._nextAttackJudge) { var dn = p._nextAttackJudge.dice==='coin'?'硬币':(p._nextAttackJudge.dice==='d4'?'四面骰':'六面骰'); P('pending','🎯','下次造伤附带',dn,'下一次造成伤害时进行'+dn+'判定，正面/达标追加'+(p._nextAttackJudge.front||2)+'点判定伤害','pend'); }
@@ -10416,6 +10444,21 @@ function computeDamageValue(user, target, opt) {
   var def = (tp.defense === undefined || tp.defense === null) ? 0 : tp.defense; if (isNaN(def)) def = 0;
   var core = base + atk - def; if (core < 0) core = 0;
   var final = core;
+  // 暴击：初始暴击率0%，默认爆伤150%；crit_rate/crit_damage 状态与超频加成参与（判定伤害不适用暴击）
+  if (!opt.judge && typeof StatusSys !== 'undefined') {
+    var __crate = StatusSys.value(user, 'crit_rate');
+    if (__crate > 0) {
+      var __croll = GameRNG.dice(100);
+      if (__croll <= __crate) {
+        var __cdmg = StatusSys.value(user, 'crit_damage');
+        var __mult = 1.5 + (__cdmg || 0) / 100;
+        core = Math.round(core * __mult);
+        final = core;
+        logs.push('暴击！(' + __croll + '≤' + __crate + '%) 倍率×' + __mult.toFixed(2) + '，括号内伤害=' + core);
+        if (ap._critDamageBonus) { final += ap._critDamageBonus; logs.push('暴击伤害+' + ap._critDamageBonus); }
+      }
+    }
+  }
   // 进攻属性：显式 > 卡牌属性 > 队伍属性
   var sc = opt.srcCard;
   var __rawAttr = opt.attr || (sc && sc.attribute) || ((typeof getTeamAttribute === 'function') ? getTeamAttribute(user) : (ap.captain && ap.captain.attribute)) || null;
@@ -13454,8 +13497,9 @@ function activateFaceDown(index, player) {
     showToast('此卡必须在对应时点窗口（骰子/移动/伤害响应等）中发动', 'warn');
     return false;
   }
-  // 盖伏时未付费，翻开发动时才支付；先校验费用再移出盖伏区，避免费用不足时丢卡
-  if (p.cost < cost) { showToast('费用不足！翻开需要' + cost + '音韵，当前只有' + p.cost, 'warn'); return false; }
+  // 盖伏时未付费，翻开发动时才支付；先校验费用再移出盖伏区，避免费用不足时丢卡（[超频]可透支）
+  var __fdLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p1') : 0;
+  if (p.cost + __fdLoan < cost) { showToast('费用不足！翻开需要' + cost + '音韵，当前只有' + p.cost + (__fdLoan > 0 ? '（[超频]可透支' + __fdLoan + '点）' : ''), 'warn'); return false; }
 
   p.faceDownCards.splice(index, 1);
   card._faceDown = false;
@@ -13949,6 +13993,7 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
   var actualCost = computeActualCost(card, 'p1');
   // 支付费用（盖伏翻开时也在此统一扣一次；activateFaceDown 不再自行扣费，避免双扣）
   battleState.p1.cost -= actualCost;
+  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
   // 仅“从手牌发动”才移除手牌；盖伏卡已在 activateFaceDown 从盖伏区移出，handIndex 为 -1 时绝不能误删手牌末张
   if (!fromFaceDown) battleState.p1.hand.splice(handIndex, 1);
   recordSkillUse(card, 'p1');
@@ -14358,6 +14403,7 @@ function settleCardExecution(card, user, target, opts, done) {
   var isPerm = card._category === 'item_permanent';
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
   p.cost -= actual;
+  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
   // “每用一次+1”费用递增：结算支付后计次
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     card._escalateCount = (card._escalateCount || 0) + 1;
@@ -14530,6 +14576,7 @@ function settleSpecialCard(card, handIndex, user, outerDone) {
   if (!h) { if (outerDone) outerDone(); return; }
   var actual = computeActualCost(card, user);
   p.cost -= actual;
+  if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
   if (typeof handIndex === 'number' && handIndex >= 0) p.hand.splice(handIndex, 1);
   recordSkillUse(card, user);
   addBattleLog(user, '使用【' + card.name + '】（消耗' + actual + '费用）');
