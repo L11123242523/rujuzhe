@@ -6816,6 +6816,9 @@ function endTurn() {
   if (battleState.currentPlayer !== 'p1') return;
   if (battleState._over) return;
   
+  // 临时攻击力（直到本回合结束类，如最佳化）回合结束清零
+  if (battleState.p1._tempAttack) { battleState.p1._tempAttack = 0; addBattleLog('p1', '临时攻击力（本回合）已结束'); }
+  
   // 结束阶段：手牌上限5张
   while (battleState.p1.hand.length > 5) {
     var discarded = battleState.p1.hand.pop();
@@ -7319,6 +7322,10 @@ function aiExecuteMove(dice, callback) {
 // AI结束回合
 function aiEndTurn() {
   if (battleState._over) return;
+  
+  // 临时攻击力（直到本回合结束类）回合结束清零
+  if (battleState.p2._tempAttack) { battleState.p2._tempAttack = 0; addBattleLog('p2', '临时攻击力（本回合）已结束'); }
+  
   while (battleState.p2.hand.length > 5) {
     var discarded2 = battleState.p2.hand.pop();
     moveCardToGrave('p2', discarded2, 'discard');
@@ -9932,7 +9939,11 @@ function __compileBody(t) {
     if (av == null) av = __matchNum(new RegExp('\\+\\s*' + __NUM + '\\s*攻击'), t);
     if (av == null) av = __matchNum(new RegExp('(?:上升|提升)\\s*(?:自身|其)?\\s*' + __NUM + '\\s*点?攻击力'), t);
     if (av == null) av = __matchNum(new RegExp('队伍攻击力\\+\\s*' + __NUM), t);
-    if (av != null) ops.push({ op: 'attack_buff', amount: av });
+    if (av != null) {
+      // “直到本回合结束”类攻击力为临时增益，回合结束时清零（最佳化等）；其余为常驻
+      if (/直到本回合结束|本回合结束/.test(t)) ops.push({ op: 'attack_buff_temp', amount: av });
+      else ops.push({ op: 'attack_buff', amount: av });
+    }
   }
   // 增益持续行动数：持续N次行动 / N次行动内 / 一次行动内；缺省按1次行动
   var __durM = t.match(/持续\s*(\d+)\s*次行动|(\d+)\s*次行动内|一次行动内/);
@@ -10454,7 +10465,7 @@ function computeDamageValue(user, target, opt) {
   var base = opt.base || 0;
   // 括号内：基础 + 攻击力 - 防御
   var __dom = (typeof getDomainBuff === 'function') ? getDomainBuff(user) : { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 }; // 领域增益
-  var __rawAtk = (ap.attackBuff || 0);
+  var __rawAtk = (ap.attackBuff || 0) + (ap._tempAttack || 0);
   if (__dom.atkPct) __rawAtk = Math.floor(__rawAtk * (1 + __dom.atkPct)); // 领域攻击力+%先作用于攻击力资源
   var atk = Math.floor(__rawAtk / 2); // 攻击力规则：÷2向下取整，每满2点+1伤害，不足2点不增加
   var def = (tp.defense === undefined || tp.defense === null) ? 0 : tp.defense; if (isNaN(def)) def = 0;
@@ -10902,6 +10913,7 @@ function runOneOp(op, ctx, next) {
     case 'next_cost_down': p._nextCostReduction = op.amount; if (op.alsoTarget && target !== user) q._nextCostReduction = op.amount; break;
     case 'gain_gold': p.gold = (p.gold || 0) + op.amount; break;
     case 'attack_buff': p.attackBuff = (p.attackBuff || 0) + op.amount; break;
+    case 'attack_buff_temp': p._tempAttack = (p._tempAttack || 0) + op.amount; addBattleLog(user, '攻击力临时+' + op.amount + '（直到本回合结束）'); break;
     case 'apply_status': StatusSys.add(target, { type: op.status, value: op.value, actions: op.actions, addedBy: user }); break;
     case 'cleanse': StatusSys.cleanse(op.who === 'target' ? target : user); break;
     case 'prevent_next_damage': p._preventNextDamage = true; addBattleLog(user, '登记：抵消下一次即将受到的伤害'); break;
@@ -14430,6 +14442,34 @@ function postUsePassiveHooks(user, card, done) {
 }
 
 // 统一结算：付费→记录技能→执行效果→去向+被动钩子。opts.askChain 供玩家插入连锁确认，AI 不传。
+// 攻击卡SP通用钩子：“这次攻击命中后可以再支付N点音韵值来造成X点…属性伤害”类选发效果（最佳化等）——
+// 主效果结算完毕后检查本次攻击是否命中（护盾后实际伤害>0），命中则询问是否发动（玩家弹窗/AI 自动）
+function __afterAttackHitSP(user, card, target, done) {
+  if (!card || card._category !== 'attack_cards') { if (done) done(); return; }
+  var sp = card.sp || '';
+  var m = sp.match(/命中后可以(?:再)?支付\s*(\d+)\s*点音韵值?来?造成\s*(\d+)\s*点([一-龥]{2,4})属性伤害/);
+  if (!m) { if (done) done(); return; }
+  var pay = parseInt(m[1], 10), dmg = parseInt(m[2], 10), attr = m[3];
+  var tgt = target || (user === 'p1' ? 'p2' : 'p1');
+  var tp = battleState[tgt];
+  if (!tp || (tp._lastHitTaken || 0) <= 0) { addBattleLog(user, '【' + (card.name || '') + '·SP】本次攻击未命中，不适用'); if (done) done(); return; }
+  var __spP = battleState[user];
+  if (__spP.cost < pay) { addBattleLog(user, '【' + (card.name || '') + '·SP】音韵不足' + pay + '点，无法发动'); if (done) done(); return; }
+  function __fire() {
+    __spP.cost -= pay;
+    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+    dealDamageWithResponse(tgt, dmg, (card.name || '') + '·SP', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, attr, user, { srcCard: card });
+    addBattleLog(user, '【' + (card.name || '') + '·SP】支付' + pay + '点音韵值，对' + (tgt === user ? '自己' : '对手') + '造成' + dmg + '点' + attr + '属性伤害');
+  }
+  if (user === 'p1' && typeof showChoiceModal === 'function') {
+    showChoiceModal((card.name || '') + ' · SP', '这次攻击命中后', '是否支付' + pay + '点音韵值来造成' + dmg + '点' + attr + '属性伤害？', ['支付并造成伤害', '不发动'], function (o) {
+      if (o === 0) { __fire(); if (done) done(); }
+      else { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); }
+    });
+  } else {
+    __fire(); if (done) done(); // AI 自动执行
+  }
+}
 // 非永续单次卡唯一执行入口：发动声明(ON_ACTIVATE) → 效果将执行前双方连锁窗口 → 适用(ON_APPLY) → 分段执行 → 完成(ON_EFFECT_DONE)
 // 玩家手动(continueCardUse)、AI(settleCardExecution)、盖伏翻开(activateFaceDown→proceedCardUse) 三条路径共用，
 // 避免玩家手动路径绕过连锁窗口（此前玩家用卡走 continueCardUse 直接执行，连锁形同虚设）
@@ -14440,7 +14480,12 @@ function runSingleCardSteps(user, card, target, finalize) {
   beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', description: (user === 'p2' ? '对手' : '你') + '发动【' + card.name + '】（效果将执行前，可连锁）', card: card }, function (res) {
     if (!res) { addBattleLog(user, '【' + card.name + '】发动被反制/无效，不处理其效果'); runTiming(TIMING.ON_EFFECT_DONE, { player: user, card: card, cancelled: true }); finalize(); return; }
     runTiming(TIMING.ON_APPLY, { player: user, card: card });
-    executeEffectSteps(steps, ctx, function () { runTiming(TIMING.ON_EFFECT_DONE, { player: user, card: card }); finalize(); }, user === 'p1');
+    executeEffectSteps(steps, ctx, function () {
+      runTiming(TIMING.ON_EFFECT_DONE, { player: user, card: card });
+      // 攻击卡SP钩子：命中后可选支付音韵追加伤害（最佳化等）
+      if (typeof __afterAttackHitSP === 'function') __afterAttackHitSP(user, card, ctx.target, finalize);
+      else finalize();
+    }, user === 'p1');
   });
 }
 
