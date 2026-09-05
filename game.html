@@ -8486,8 +8486,10 @@ function getActiveBuffs(user) {
   // —— 已生效的角色SP（队长/符合条件的队员）——
   for (var i = 0; i < BUFF_SP_FLAGS.length; i++) { var f = BUFF_SP_FLAGS[i]; if (p[f[0]]) P('passive', 'SP', f[1], '', f[2], 'sp'); }
   // —— 数值增益 / 减益 ——
-  if (p.attackBuff > 0) P('stat','⚔️','攻击力','+'+p.attackBuff,'攻击力上升 '+p.attackBuff,'atk');
-  if (p.attackBuff < 0) P('debuff','⚔️','攻击力',''+p.attackBuff,'攻击力下降','debuff');
+  var __domShown = (typeof getDomainBuff === 'function') ? getDomainBuff(user) : { atkPct: 0 };
+  var __shownAtk = Math.floor(((p.attackBuff || 0) + (p._tempAttack || 0)) * (1 + (((__domShown && __domShown.atkPct) || 0))));
+  if (__shownAtk > 0) P('stat','⚔️','攻击力','+'+__shownAtk,'攻击力上升 '+__shownAtk + (((__domShown && __domShown.atkPct) || 0) ? '（含领域攻击力+50%）' : ''),'atk');
+  if (__shownAtk < 0) P('debuff','⚔️','攻击力',''+__shownAtk,'攻击力下降','debuff');
   if ((p.defense||0) > 0) P('stat','🛡️','防御','+'+p.defense,'防御值上升，受到的伤害减少','def');
   if ((p.defense||0) < 0) P('debuff','🛡️','防御',''+p.defense,'防御值下降（为负），受到的伤害增加','debuff');
   if (p._intellectBonus) P('stat','🔷','理智伤害','+'+p._intellectBonus,'理智属性伤害增加 '+p._intellectBonus,'san');
@@ -10599,7 +10601,7 @@ onTiming(TIMING.ON_TO_GRAVE, function (ctx, next) {
 });
 // ============================================================
 // 领域增益（比翼恋理等）：从卡面解析“攻击力+% / 某属性克制伤害+% / 判定伤害+N”
-// 口径（用户锁定）：攻击力+% → 攻击伤害加成(攻击力÷2)×(1+%)向上取整（攻击力1→+1、2→+2）；克制伤害+100%=把克制那+1变成+2，只强化克制部分。
+// 口径（用户锁定）：攻击力+% 正常加到攻击力资源上（×1.5向下取整，攻击力2→3），伤害公式继续按攻击力÷2向下取整；克制伤害+100%=把克制那+1变成+2，只强化克制部分。
 // ============================================================
 function parseDomainBuff(text) {
   text = text || '';
@@ -10644,13 +10646,8 @@ function computeDamageValue(user, target, opt) {
   // 括号内：基础 + 攻击力 - 防御
   var __dom = (typeof getDomainBuff === 'function') ? getDomainBuff(user) : { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 }; // 领域增益
   var __rawAtk = (ap.attackBuff || 0) + (ap._tempAttack || 0);
-  var atk;
-  if (__dom.atkPct) {
-    // 领域攻击力+%（比翼恋理等，用户口径）：攻击伤害加成（攻击力÷2）×(1+%) 向上取整——攻击力1→+1、2→+2，任何攻击力都看得出增加
-    atk = Math.ceil((__rawAtk / 2) * (1 + __dom.atkPct));
-  } else {
-    atk = Math.floor(__rawAtk / 2); // 攻击力规则：÷2向下取整，每满2点+1伤害，不足2点不增加
-  }
+  if (__dom.atkPct) __rawAtk = Math.floor(__rawAtk * (1 + __dom.atkPct)); // 领域攻击力+%：正常加到攻击力资源上（攻击力2→3），伤害公式继续按攻击力÷2向下取整
+  var atk = Math.floor(__rawAtk / 2); // 攻击力规则：÷2向下取整，每满2点+1伤害，不足2点不增加
   var def = (tp.defense === undefined || tp.defense === null) ? 0 : tp.defense; if (isNaN(def)) def = 0;
   var core = base + atk - def; if (core < 0) core = 0;
   var final = core;
