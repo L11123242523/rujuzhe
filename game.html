@@ -3562,7 +3562,9 @@ function isSameRow(pos1, pos2) {
   if (!MAP_TILES || !MAP_TILES[pos1] || !MAP_TILES[pos2]) return false;
   var y1 = MAP_TILES[pos1].y;
   var y2 = MAP_TILES[pos2].y;
-  return Math.abs(y1 - y2) <= 5;
+  if (Math.abs(y1 - y2) <= 5) return true; // 同一行（上/下横边）
+  var x1 = MAP_TILES[pos1].x, x2 = MAP_TILES[pos2].x;
+  return Math.abs(x1 - x2) <= 5; // 同一列也算"同一行"（左/右竖边，用户口径）
 }
 
 // ===== 统一攻击范围引擎（严格按卡牌 attack_range 文本解析，环形跑道 N=42，前进=id增大）=====
