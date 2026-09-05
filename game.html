@@ -12554,8 +12554,11 @@ var GRAVE_SP_DEFS = [
       (p.permanent || []).forEach(function (c) { cands.push({ card: c, zone: 'permanent' }); });
       if (!cands.length) return;
       showCardPickerMulti(cands.map(function (x) { return x.card; }), '一刀两断：选一张卡送入墓地（墓地的此卡加入手卡）', function (ix) {
-        if (!ix || !ix.length) return;
-        var pick = cands[ix[0]], arr = p[pick.zone], pi = arr.indexOf(pick.card); if (pi < 0) return;
+        // need=1 时回调为单个索引（数字），多选才是数组——统一归一化
+        var __ixs = (ix == null) ? [] : (Array.isArray(ix) ? ix : [ix]);
+        if (!__ixs.length) return;
+        var pick = cands[__ixs[0]]; if (!pick) return;
+        var arr = p[pick.zone], pi = arr.indexOf(pick.card); if (pi < 0) return;
         arr.splice(pi, 1); p.grave.push(pick.card);
         if (typeof checkGraveTrigger === 'function') checkGraveTrigger('p1', pick.card, 'effect');
         var si = p.grave.indexOf(card); if (si < 0) return;
