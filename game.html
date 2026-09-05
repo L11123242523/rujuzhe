@@ -8560,6 +8560,7 @@ function updateBattleUI() {
             var cardStyle = canClick ? '' : 'opacity:0.4;cursor:not-allowed;filter:grayscale(0.55);';
             var phaseHint = canClick ? '' : '（不可用：' + pv.reason + '）';
             var typeBadge = (card._category === 'characters') ? '角色' : (card._category === 'attack_cards' ? '攻击' : (card._category === 'skill_cards' ? '技能' : (card._category === 'gift_cards' ? '馈赠' : (card._category === 'item_permanent' ? '永续道具' : (card._category === 'item_single' ? '道具' : '')))));
+            if (card._blueprintCopy) typeBadge = '📐 蓝图复制';
             return '<div class="hand-card' + (canClick ? ' playable' : '') + '" onclick="' + clickHandler + '" oncontextmenu="handCardContextMenu(' + i + ');return false;" style="' + cardStyle + '" title="左键使用，右键查看效果：' + card.name + phaseHint + '">' +
               (card.cost !== undefined ? '<div class="hand-card-cost">' + card.cost + '</div>' : '') +
               (card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" class="hand-card-img" alt="' + card.name + '" >' : '') +
@@ -10187,26 +10188,21 @@ function blueprintCopy(user, selfCard, done) {
   (p.hand || []).forEach(function (c, i) { if (c._category === 'item_single' && c !== selfCard) pool.push({ card: c, zone: 'hand', index: i }); });
   (p.grave || []).forEach(function (c, i) { if (c._category === 'item_single') pool.push({ card: c, zone: 'grave', index: i }); });
   if (!pool.length) { addBattleLog(user, '手牌与墓地没有可复制的单次卡，蓝图不适用'); done(); return; }
-  pickFromList(user, pool, '魔法蓝图：选择一张单次卡（蓝图变为该卡并适用其效果，支付等同于该卡的费用）', 1, function (picks) {
+  pickFromList(user, pool, '魔法蓝图：选择一张单次种类的卡（此卡变为该卡并加入手卡，之后再次使用它来适用效果）', 1, function (picks) {
     if (!picks || !picks.length) { done(); return; }
     var tgt = picks[0].card;
-    // 蓝图复制=复制那一张卡：蓝图直到结算完送入墓地之前变为被复制的卡；费用按被复制的卡收取
-    p.cost += (parseInt(selfCard.cost, 10) || 0); // 退还蓝图自身费用（使用蓝图时已扣）
-    var copyCost = (typeof computeActualCost === 'function') ? computeActualCost(tgt, user) : (parseInt(tgt.cost, 10) || 0);
-    var __bpLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(user) : 0;
-    if (p.cost + __bpLoan < copyCost) {
-      addBattleLog(user, '【魔法蓝图】音韵不足以支付被复制卡【' + tgt.name + '】的费用' + copyCost + '点（当前' + p.cost + '），复制不成立');
-      if (typeof updateBattleUI === 'function') updateBattleUI();
-      done();
-      return;
-    }
-    p.cost -= copyCost;
-    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
-    addBattleLog(user, '【魔法蓝图】变为【' + tgt.name + '】并适用其效果（支付' + copyCost + '费用，当前' + p.cost + '）');
-    var txt = (typeof getMainEffectText === 'function') ? getMainEffectText(tgt.effect || tgt.text || '') : (tgt.effect || tgt.text || '');
-    var foe = user === 'p1' ? 'p2' : 'p1';
-    if (typeof executeEffectSteps === 'function') { var steps = parseEffect(txt); executeEffectSteps(steps, { user: user, target: foe, card: tgt }, done, user === 'p1'); }
-    else done();
+    // 蓝图复制=复制那一张卡：蓝图变为被复制的卡并加入手卡（带蓝图复制标记）；
+    // 玩家之后需要再次主动使用这张被复制的卡来适用其效果（支付等同于被复制卡的费用）
+    var copy = JSON.parse(JSON.stringify(tgt));
+    for (var k in copy) { if (Object.prototype.hasOwnProperty.call(copy, k)) selfCard[k] = copy[k]; }
+    selfCard._blueprintCopy = true;     // 特殊标记：证明该卡是蓝图所复制的卡
+    selfCard._skipGraveOnce = true;     // 本次结算不送墓：卡已回到手牌
+    selfCard._blueprintSource = tgt.name;
+    p.hand.push(selfCard);
+    if (typeof __emitAddHand === 'function') __emitAddHand(user, selfCard, 'blueprint');
+    addBattleLog(user, '【魔法蓝图】变为【' + selfCard.name + '】并加入手卡（📐蓝图复制标记；再次使用它时支付其费用）');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    done();
   });
 }
 // 属性克制（权威表，来源查询网站 attribute_table，攻击方行/受击方列）：
@@ -14246,6 +14242,10 @@ function placeAfterUse(user, card, isPerm) {
     card._recycled = false;
     p.deck.push(card);
     addBattleLog(user, card.name + '为回收卡，本次使用后放回牌组最下方');
+  } else if (card._skipGraveOnce) {
+    // 蓝图转化：该卡已作为被复制的卡回到手牌，本次结算不送入墓地
+    card._skipGraveOnce = false;
+    addBattleLog(user, '【魔法蓝图】已变为被复制的卡并回到手牌（等待再次使用）');
   } else {
     p.grave.push(card);
     addBattleLog(user, card.name + '送入墓地');
