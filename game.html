@@ -9938,7 +9938,8 @@ function __compileBody(t) {
   if (!__threatHit && /送入墓地|送墓/.test(t) && /选|一张|\d\s*张|手卡|区域|手牌/.test(t)) {
     var zones = []; if (/手卡|手牌/.test(t)) zones.push('hand'); if (/区域|场上|永续/.test(t)) zones.push('permanent'); if (!zones.length) zones.push('hand');
     var dneed = __matchNum(new RegExp('至多?\\s*' + __NUM + '\\s*张'), t) || 1;
-    ops.push({ op: 'discard', zones: zones, need: dneed, thenDraw: false, sacrifice: has('献祭') }); // 抽卡交由独立 draw 指令+位置排序保证先后，避免双抽
+    // “至多N张”：可少选甚至不选（先哲之"馈赠"类）
+    ops.push({ op: 'discard', zones: zones, need: dneed, allowLess: /至多/.test(t), thenDraw: false, sacrifice: has('献祭') }); // 抽卡交由独立 draw 指令+位置排序保证先后，避免双抽
   }
   if (/进行一次献祭动作|立即献祭/.test(t)) ops.push({ op: 'sacrifice_now', thenDraw: false });
   // 从墓地选卡发动/适用其“卡牌效果”（狼牙鹰爪等）：取 effect 而非 sp，支付该卡费用+额外
@@ -10053,14 +10054,14 @@ function collectZoneCards(who, zones, tags, cats, exclude) {
   }); });
   return out;
 }
-function pickFromList(user, list, title, need, cb) {
+function pickFromList(user, list, title, need, cb, allowLess) {
   need = Math.min(need || 1, list.length);
   if (!list.length) { cb([]); return; }
   if (user === 'p1' && typeof showCardPickerMulti === 'function') {
     showCardPickerMulti(list.map(function (x) { return x.card; }), title, function (idxs) {
       var arr = Array.isArray(idxs) ? idxs : [idxs];
       cb(arr.filter(function (i) { return i != null && i >= 0; }).map(function (i) { return list[i]; }));
-    }, need);
+    }, need, allowLess === true);
   } else cb(list.slice(0, need));
 }
 
@@ -10877,13 +10878,13 @@ function runOneOp(op, ctx, next) {
       var __dOw = (!op.sacrifice && (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj))) ? target : user;
       var __dP = battleState[__dOw];
       var dl = collectZoneCards(__dOw, op.zones, null, null);
-      pickFromList(user, dl, '选择要送入墓地的卡', op.need, function (picks) {
+      pickFromList(user, dl, op.allowLess ? ('选择要送入墓地的卡（至多' + op.need + '张，可少选）') : '选择要送入墓地的卡', op.need, function (picks) {
         if (op.sacrifice) { sacrificeCards(user, picks, op.thenDraw, next); return; }
         picks.forEach(function (pk) { var arr = __dP[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); (__dP.grave = __dP.grave || []).push(pk.card); __dP._lastDiscardCard = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(__dOw, pk.card, 'effect'); });
         if (op.thenDraw) drawCard(__dOw);
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
-      }); return;
+      }, op.allowLess === true); return;
     }
     case 'sacrifice_now': { var sl = collectZoneCards(user, ['hand'], null, null); pickFromList(user, sl, '选择献祭的手卡', 1, function (picks) { sacrificeCards(user, picks, op.thenDraw, next); }); return; }
     case 'destroy_pick': {
