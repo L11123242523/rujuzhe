@@ -3960,6 +3960,7 @@ function evaluatePlayable(card,player,opts){
   }
   // 4) 费用（"1+"/"2+"等字符串费用卡取基数比较，修复 NaN 比较导致0费/负费可出卡）；[超频]状态可透支音韵
   var cost=parseInt(card.cost,10)||0;
+  if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
   var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
   if(me.cost + __loanCap < cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
   // 5) 攻击卡：范围内必须存在可攻击目标
@@ -9843,7 +9844,11 @@ function __compileBody(t) {
     var pay = t.match(/付\s*(\d+)\s*[-–~至到]\s*(\d+)\s*音韵/);
     if (cm != null) ops.push({ op: 'gain_cost', amount: cm });
     if (lc != null) ops.push({ op: 'lose_cost', amount: lc });
-    if (pay) ops.push({ op: 'pay_n_deal_n', min: +pay[1], max: +pay[2] });
+    if (pay) {
+      // 红宝之杖·运等“付N-M音韵造等额伤害”：伤害属性随文本，增伤/克制统一走伤害公式
+      var __pkind = has('无序') ? '无序' : (has('理智') ? 'sanity' : (has('热忱') ? 'fervor' : (has('混沌') ? '混沌' : null)));
+      ops.push({ op: 'pay_n_deal_n', min: +pay[1], max: +pay[2], kind: __pkind });
+    }
     if (cm == null && lc == null && !pay && /(?:回复|回|失去)[^。；;\n]{0,12}音韵/.test(t)) uncovered.push('cost');
   }
 
@@ -11025,7 +11030,26 @@ function runOneOp(op, ctx, next) {
     case 'gain_core': p._guideCore = (p._guideCore || 0) + op.n; addBattleLog(user, '获得' + op.n + '点引导核心'); break;
     case 'gain_motivation': p.motivation = (p.motivation || 0) + op.n; if (typeof checkLevelUp === 'function') checkLevelUp(user); break;
     case 'overload': { p._overload = { until: op.duration }; p.cost = Math.min(p.maxCost || 12, p.cost + 2); addBattleLog(user, '进入过载状态，回复2点音韵值' + (op.duration === -1 ? '（直到游戏结束）' : op.duration ? '（持续' + op.duration + '次行动）' : '')); break; }
-    case 'pay_n_deal_n': { var k = Math.min(op.max, Math.max(op.min, p.cost)); p.cost -= k; applyDamageOps(user, target, { judge: false, base: k }, next); return; }
+    case 'pay_n_deal_n': {
+      // 付N-M音韵造等额伤害（红宝之杖·运）：伤害走统一公式（攻击力/防御/克制/增伤）
+      var __pmax = Math.min(op.max, Math.max(op.min, p.cost));
+      function __payDeal(k) {
+        p.cost -= k;
+        if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+        applyDamageOps(user, target, { judge: false, base: k, kind: op.kind }, next);
+      }
+      if (user === 'p1' && typeof showChoiceModal === 'function' && __pmax > op.min) {
+        var __popts = [];
+        for (var __pv = op.min; __pv <= __pmax; __pv++) __popts.push('支付' + __pv + '音韵，造成' + __pv + '点伤害');
+        showChoiceModal('选择支付音韵', (ctx.card ? ctx.card.name : '支付造伤'), '支付越多伤害越高', __popts, function (oi) {
+          if (oi == null || oi < 0) { next(); return; }
+          __payDeal(op.min + oi);
+        });
+        return;
+      }
+      __payDeal(__pmax);
+      return;
+    }
     case 'judge_branch': {
       var __sides = op.sides || 20, __jb = op, __u = user;
       var __settleJB = function (r, __cancelled) {
@@ -14197,6 +14221,8 @@ function computeActualCost(card, user) {
   var p = battleState[user];
   // 费用统一数值化：部分卡 cost 为 "1+"/"2+" 这类字符串（至少X费、可多付），parseInt 取基数；此前 typeof!=='number' 直接当0导致这些卡免费
   var cost = parseInt(card.cost, 10) || 0;
+  // 区间费用卡（"1-10"等，如红宝之杖·运）：支付在效果内完成（pay_n_deal_n），使用时不另扣
+  if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0;
   var actual = cost;
   // “费用随使用次数增加，每用一次+1”（幸运护符/怪怪幽灵吊坠等）：基数+已使用次数
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
