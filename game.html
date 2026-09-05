@@ -12914,6 +12914,16 @@ function processCharacterPassives(player) {
         addBattleLog(player, '【宫樱子被动】免费用卡次数+1（当前' + p._sakuraFreeUse + '次；队伍同步降至20/15/10/5时各再+1）');
       }
       
+      // 霜烬被动【黎明灰烬】（仅队长）：同步>26全队免疫其他玩家负面；同步<14每回合自然回复+4、攻击力+4
+      if (charName.indexOf('霜烬') >= 0) {
+        p._frostPassive = true;
+      }
+      
+      // 琉璃(水着)被动【为君绽放的微笑】（仅队长）：热忱卡造1热忱伤+回1同步；攻击/技能卡抽1+下次热忱+1（一回合一次）
+      if (charName.indexOf('琉璃') >= 0 && charName.indexOf('水着') >= 0) {
+        p._ruriMizugiPassive = true;
+      }
+      
       // 宁雨清被动（其他角色的被动可以继续添加）
     }
     
@@ -12976,9 +12986,9 @@ function processCharacterPassives(player) {
       if (charName.indexOf('莉莉') >= 0) { p._lilySP = true; addBattleLog(player, '【莉莉SP】免疫经过类效果，每回合可回收墓地最下方单次卡'); }
       // 10 琉璃（普通）：判定最大伤害后抽1回1音韵（钩子）
       if (charName.indexOf('琉璃') >= 0 && charName.indexOf('水着') < 0) { p._ruriSP = true; addBattleLog(player, '【小沙香琉璃SP】判定适用最大伤害后抽1卡回2音韵'); }
-      // 11 琉璃(水着)：初始攻击固定+1，三名全热忱额外+1；造成热忱伤害后回1音韵（一回合一次）
+      // 11 琉璃(水着)：初始攻击固定+1，三名全热忱额外+1；造成热忱伤害后回1音韵（一回合一次）——被动仅队长，在队长被动块登记
       if (charName.indexOf('琉璃') >= 0 && charName.indexOf('水着') >= 0) {
-        p._ruriMizugiSP = true; p._ruriMizugiPassive = true;
+        p._ruriMizugiSP = true;
         var __fervor = __team.filter(function (c) { return c.attribute === '热忱'; }).length;
         var __atk = 1 + (__fervor >= 3 ? 1 : 0);
         if (__atk > 0) p.attackBuff = (p.attackBuff || 0) + __atk;
@@ -12986,9 +12996,9 @@ function processCharacterPassives(player) {
       }
       // 12 露璐缇雅：作为2名破坏者计数；3名以上每回合可破坏1张后其回4音韵（主动）
       if (charName.indexOf('爱德华') >= 0 || charName.indexOf('露璐缇雅') >= 0) { p._edwardSP = true; addBattleLog(player, '【露璐缇雅SP】作为2名破坏者计数'); }
-      // 13 霜烬：自然回复+1，初始手牌+1（不提供攻击/技能卡为构筑期规则）
+      // 13 霜烬：自然回复+1，初始手牌+1（不提供攻击/技能卡为构筑期规则）——被动仅队长，在队长被动块登记
       if (charName.indexOf('霜烬') >= 0) {
-        p._frostSP = true; p._frostRegen = true; p._frostPassive = true;
+        p._frostSP = true; p._frostRegen = true;
         { var __fc = takeTopCard(player); if (__fc) { p.hand.push(__fc); addBattleLog(player, '【霜烬SP】初始手牌+1：抽到【' + __fc.name + '】'); } }
       }
       // 14 小仓霞：到达公共站/地铁直达下车点免判定免支付（钩子）
