@@ -8496,7 +8496,7 @@ function getActiveBuffs(user) {
   if (p._critDamageBonus) P('stat','💥','暴击伤害','+'+p._critDamageBonus,'暴击伤害增加 '+p._critDamageBonus,'jud');
   if (p._sacrificeBonus || p._megumiSacBonusThisTurn) P('stat','🔥','献祭次数','+' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)),'每回合可额外献祭 ' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)) + ' 次','fire');
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
-  if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加层数 '+p._shenleStack,'san');
+  if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加'+p._shenleStack+'层（上限9，使用不消耗，每次使用最终伤害+'+p._shenleStack+'）','san');
   if (p._overload) P('stat','🎼','过载',(p._overload.until===-1?'永久':('剩'+p._overload.until+'行动')),'过载：持续期间内每因使用而让卡进入墓地的场合抽1张','fire');
   if (typeof StatusSys !== 'undefined' && StatusSys.has(user, 'overclock')) {
     var __ocs = StatusSys.all(user).filter(function (s) { return s.type === 'overclock'; });
@@ -10599,7 +10599,7 @@ onTiming(TIMING.ON_TO_GRAVE, function (ctx, next) {
 });
 // ============================================================
 // 领域增益（比翼恋理等）：从卡面解析“攻击力+% / 某属性克制伤害+% / 判定伤害+N”
-// 口径（用户锁定）：攻击力+%作用于攻击力资源后再÷2向下取整；克制伤害+100%=把克制那+1变成+2，只强化克制部分。
+// 口径（用户锁定）：攻击力+% → 攻击伤害加成(攻击力÷2)×(1+%)向上取整（攻击力1→+1、2→+2）；克制伤害+100%=把克制那+1变成+2，只强化克制部分。
 // ============================================================
 function parseDomainBuff(text) {
   text = text || '';
@@ -10644,8 +10644,13 @@ function computeDamageValue(user, target, opt) {
   // 括号内：基础 + 攻击力 - 防御
   var __dom = (typeof getDomainBuff === 'function') ? getDomainBuff(user) : { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 }; // 领域增益
   var __rawAtk = (ap.attackBuff || 0) + (ap._tempAttack || 0);
-  if (__dom.atkPct) __rawAtk = Math.floor(__rawAtk * (1 + __dom.atkPct)); // 领域攻击力+%先作用于攻击力资源
-  var atk = Math.floor(__rawAtk / 2); // 攻击力规则：÷2向下取整，每满2点+1伤害，不足2点不增加
+  var atk;
+  if (__dom.atkPct) {
+    // 领域攻击力+%（比翼恋理等，用户口径）：攻击伤害加成（攻击力÷2）×(1+%) 向上取整——攻击力1→+1、2→+2，任何攻击力都看得出增加
+    atk = Math.ceil((__rawAtk / 2) * (1 + __dom.atkPct));
+  } else {
+    atk = Math.floor(__rawAtk / 2); // 攻击力规则：÷2向下取整，每满2点+1伤害，不足2点不增加
+  }
   var def = (tp.defense === undefined || tp.defense === null) ? 0 : tp.defense; if (isNaN(def)) def = 0;
   var core = base + atk - def; if (core < 0) core = 0;
   var final = core;
@@ -10695,7 +10700,7 @@ function computeDamageValue(user, target, opt) {
   // 括号外④：各类“最终伤害+N”
   if (kind === 'sanity' && hasPerm('风纪委员')) { final += 1; logs.push('风纪委员臂章·理智最终+1'); }
   if (opt.judge && hasPerm('钢笔')) { final += 1; logs.push('钢笔·判定最终+1'); }
-  if (sc && sc.name && sc.name.indexOf('神乐铃') >= 0 && (ap._shenleStack || 0) > 0) { var sl = ap._shenleStack; final += sl; ap._shenleStack = 0; logs.push('神乐铃消耗' + sl + '层，最终+' + sl); }
+  if (sc && sc.name && sc.name.indexOf('神乐铃') >= 0 && (ap._shenleStack || 0) > 0) { final += ap._shenleStack; logs.push('神乐铃叠加' + ap._shenleStack + '层，最终+' + ap._shenleStack); }
   if (isAtk && hasPerm('善意面具')) { final += 1; logs.push('善意面具·攻击卡最终+1'); }
   if ((kind === 'fervor' || /热忱/.test(__bAttr || '')) && (ap._nextFervorFinalUp || 0) > 0) { var __ffu = ap._nextFervorFinalUp; final += __ffu; ap._nextFervorFinalUp = 0; logs.push('琉璃(水着)被动·下次热忱最终伤害+' + __ffu + '（已消耗）'); }
   var pierce = false;
@@ -13174,10 +13179,10 @@ function checkGraveTrigger(player, card, reason) {
     else __hit(tp === 'p1' ? 'p2' : 'p1');
   })();
 
-  // 神乐铃 SP：每进入墓地一次，下次使用最终伤害+1（可叠加，上限9层）
+  // 神乐铃 SP：每进入墓地一次，永久+1层（上限9层，使用不消耗；之后每次使用最终伤害+当前层数）
   if (cardName.indexOf('神乐铃') >= 0) {
     p._shenleStack = Math.min(9, (p._shenleStack || 0) + 1);
-    addBattleLog(player, '【神乐铃·SP】进入墓地，下次使用最终伤害+1（当前叠加' + p._shenleStack + '层，上限9）');
+    addBattleLog(player, '【神乐铃·SP】进入墓地，叠加至' + p._shenleStack + '层（上限9，使用不消耗，之后每次使用最终伤害+' + p._shenleStack + '）');
   }
   // 通用必发：卡面 sp 写“被献祭 / 因卡的效果送入墓地时回复自身X点音韵”（如鸣奏之"圣音"）
   // “因卡的效果送墓”包括：献祭 / 效果送墓 / 破坏（自身使用 use 与手牌超限弃置 discard 不算）
