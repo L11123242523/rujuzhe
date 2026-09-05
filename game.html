@@ -7608,7 +7608,8 @@ function doSacrifice() {
 
   // 可视化选择一张献祭
   showCardPickerMulti(p.hand.slice(), '选择要献祭的手卡（送入墓地并回复音韵值）', function(idx) {
-    if (idx === null || idx === undefined || idx < 0 || idx >= p.hand.length) { updateBattleUI(); return; }
+    if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
+    if (idx >= p.hand.length) { showToast('手牌已变化，请重新选择献祭的手卡', 'warn'); updateBattleUI(); return; } // 弹窗期间手牌变化：防止越界/误删
     var sacCard = p.hand.splice(idx, 1)[0];
     p.grave.push(sacCard);
     checkGraveTrigger('p1', sacCard);
@@ -7627,7 +7628,7 @@ function doSacrifice() {
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
 
     function kaedeSP(thenFn) {
-      if (isFirst === false) { thenFn&&thenFn(); return; }
+      if (isFirst === false) { updateBattleUI(); thenFn&&thenFn(); return; }
       if (p._kaedeSacrificeDamage && p.cost >= 1 && battleState.p2 && battleState.p2.sync > 0) {
         showChoiceModal('入间枫 SP', '献祭后是否支付1点音韵值，对对手造成1点混沌属性伤害？', '', ['支付1音韵，造成1点伤害', '不发动'], function(o) {
           if (o === 0) {
