@@ -3892,7 +3892,8 @@ function checkCardResource(card,me,bs){
     } else if(!vsOther && L(me.deck)===0){ return {ok:false,reason:'你的牌组已空，无法从中选择卡牌'}; }
   }
   // 选自己墓地 N 张回收/加入手卡
-  if(eff.indexOf('墓地')>=0 && eff.indexOf('牌组')<0 && /加入手卡|加入手牌|回收|返回手卡|拿回/.test(eff) && !/其他玩家|对手|其墓地|一名玩家/.test(eff)){
+  // （排除“不去墓地/不进墓地”与“从移出游戏回收”类描述：巧匠之手等卡的去向说明不是从墓地取卡）
+  if(eff.indexOf('墓地')>=0 && eff.indexOf('牌组')<0 && /加入手卡|加入手牌|回收|返回手卡|拿回/.test(eff) && !/其他玩家|对手|其墓地|一名玩家/.test(eff) && !/不去墓地|不进墓地|被移出游戏的卡加入手卡|移出游戏的卡加入手卡/.test(eff)){
     var m=eff.match(/墓地\D{0,4}(\d+)\s*张/); var need=m?parseInt(m[1],10):(/一张|1张/.test(eff)?1:0);
     if(need>0 && L(me.grave)<need) return {ok:false,reason:'需要自己墓地中有至少'+need+'张卡（当前'+L(me.grave)+'张）'};
   }
