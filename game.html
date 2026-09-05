@@ -14571,10 +14571,9 @@ function __isMoveItemCard(card) {
   return /item/.test(card._category || '') && (card.tags || []).indexOf('移动') >= 0;
 }
 // 予(水着)SP 触发判定：理智属性[移动]道具卡（含“使用时视为[移动]标签道具卡”类卡；被动下无序以外[战术]/[移动]道具卡视为理智[移动]道具卡）
-// 口径（用户锁定）：永续道具卡（设计师的直尺等）的放置/发动不算“使用[移动]道具卡”，不触发硬币判定
+// 口径（用户锁定）：永续道具首次放进永续区=使用（触发一次）；已放进永续区的卡之后每次发动效果≠使用（不触发，主动发动路径不经过用卡钩子）
 function __yuMizugiTriggerCard(p, card) {
   if (!card) return false;
-  if (card._category === 'item_permanent') return false; // 直尺等永续卡：放置与每回合发动均不触发
   var eff = (card.effect || '') + (card.sp || '') + (card.text || '');
   if (/视为\s*\[移动\]\s*标签?道具卡/.test(eff) && (card.attribute || '') === '理智') return true;
   if (!/item/.test(card._category || '')) return false;
