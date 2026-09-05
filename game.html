@@ -7622,6 +7622,29 @@ function triggerTileEffect(player) {
 
 
 // 献祭：每回合1次，送1张手卡入墓，回2音韵
+// 枫SP③：每次献祭后可以支付1点音韵值，对一名其他玩家造成1点混沌属性伤害（玩家询问/AI 自动）
+function __kaedeSacrificeSP(user, thenFn) {
+  var p = battleState[user];
+  if (!p || !p._kaedeSacrificeDamage) { if (thenFn) thenFn(); return; }
+  var foe = user === 'p1' ? 'p2' : 'p1';
+  if (!battleState[foe] || battleState[foe].sync <= 0) { if (thenFn) thenFn(); return; }
+  if (p.cost < 1) { if (thenFn) thenFn(); return; }
+  function __fire() {
+    p.cost -= 1;
+    dealDamageWithResponse(foe, 1, '入间枫SP', function () {}, '混沌', user, { kind: 'chaos', srcCard: null });
+    addBattleLog(user, '【入间枫SP】支付1音韵，对' + (foe === user ? '自己' : '对手') + '造成1点混沌伤害');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    if (thenFn) thenFn();
+  }
+  if (user === 'p1') {
+    showChoiceModal('入间枫SP', '每次献祭后', '是否支付1点音韵值，对一名其他玩家造成1点混沌属性伤害？', ['支付1音韵，造成1点伤害', '不发动'], function (o) {
+      if (o === 0) __fire(); else { if (typeof updateBattleUI === 'function') updateBattleUI(); if (thenFn) thenFn(); }
+    });
+  } else {
+    __fire(); // AI 自动执行
+  }
+}
+
 function doSacrifice() {
   if (battleState.currentPlayer !== 'p1') return;
   var p = battleState.p1;
@@ -7652,18 +7675,9 @@ function doSacrifice() {
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
 
     function kaedeSP(thenFn) {
-      if (isFirst === false) { updateBattleUI(); thenFn&&thenFn(); return; }
-      if (p._kaedeSacrificeDamage && p.cost >= 1 && battleState.p2 && battleState.p2.sync > 0) {
-        showChoiceModal('入间枫 SP', '献祭后是否支付1点音韵值，对对手造成1点混沌属性伤害？', '', ['支付1音韵，造成1点伤害', '不发动'], function(o) {
-          if (o === 0) {
-            p.cost -= 1;
-            // 统一伤害管线：护盾/克制/增伤/伤害响应窗/胜负判定全走 dealDamageWithResponse（修复原直扣同步绕过规则）
-            dealDamageWithResponse('p2', 1, '入间枫SP', function () {}, '混沌', 'p1', { kind: 'chaos', srcCard: null });
-            addBattleLog('p1', '【入间枫SP】支付1音韵，对对手造成1点混沌伤害');
-          }
-          updateBattleUI(); thenFn&&thenFn();
-        });
-      } else { updateBattleUI(); thenFn&&thenFn(); }
+      // 枫SP③：每次献祭后都可支付1音韵造1混沌伤害（不再限定首次）
+      if (typeof __kaedeSacrificeSP === 'function') { __kaedeSacrificeSP('p1', thenFn); return; }
+      updateBattleUI(); thenFn&&thenFn();
     }
 
     // 光太郎SP：首次献祭三选一（可视化）
@@ -10596,6 +10610,8 @@ function sacrificeCards(user, picks, thenDraw, next) {
     p.cost = Math.min(p.cost + recover, p.maxCost);
     if (p._lilithSacHeal) { p.sync = Math.min(p.sync + 1, p.maxSync || 999); addBattleLog(user, '【里尔亚斯SP】献祭后回复自身1点同步'); }
     addBattleLog(user, '献祭【' + pk.card.name + '】回' + recover + '音韵');
+    // 枫SP③：每次献祭后可以支付1音韵对一名其他玩家造1混沌伤害
+    if (typeof __kaedeSacrificeSP === 'function') __kaedeSacrificeSP(user);
   });
   if (thenDraw) drawCard(user);
   next();
@@ -13736,6 +13752,8 @@ var PERMANENT_ONPLAY_HANDLERS = {
       var sac = p.hand.splice(real, 1)[0]; p.grave.push(sac); checkGraveTrigger('p1', sac);
       p.cost = Math.min(p.cost + 2, p.maxCost);
       addBattleLog('p1', '【巧匠之手】献祭【' + sac.name + '】，回复2音韵（当前' + p.cost + '）');
+      // 巧匠的献祭同样是献祭动作：枫SP③每次献祭后支付1音韵造1混沌
+      if (typeof __kaedeSacrificeSP === 'function') __kaedeSacrificeSP('p1');
       draw();
     });
   }
