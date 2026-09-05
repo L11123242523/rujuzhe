@@ -9957,7 +9957,9 @@ function __compileBody(t) {
   var named = t.match(/(?:获得|施加|赋予|得到)\s*(?:其|目标|一名玩家)?\s*(?:持续\s*\d+\s*(?:次行动|轮|回合)的?)?\s*\[([^\]]+)\]/);
   if (named) {
     var dur = __matchNum(/持续\s*(\d+)\s*(?:次行动|轮|回合)/, t);
-    ops.push({ op: 'apply_status', status: named[1], actions: (dur == null ? 1 : dur) });
+    // 状态名归一：卡面【超频】与贷款/暴击结算使用的 overclock 统一
+    var __stName = (named[1] === '超频') ? 'overclock' : named[1];
+    ops.push({ op: 'apply_status', status: __stName, actions: (dur == null ? 1 : dur) });
   }
 
   // 驱散 / 抵消伤害
@@ -10185,10 +10187,23 @@ function blueprintCopy(user, selfCard, done) {
   (p.hand || []).forEach(function (c, i) { if (c._category === 'item_single' && c !== selfCard) pool.push({ card: c, zone: 'hand', index: i }); });
   (p.grave || []).forEach(function (c, i) { if (c._category === 'item_single') pool.push({ card: c, zone: 'grave', index: i }); });
   if (!pool.length) { addBattleLog(user, '手牌与墓地没有可复制的单次卡，蓝图不适用'); done(); return; }
-  pickFromList(user, pool, '魔法蓝图：选择一张单次卡复制其效果', 1, function (picks) {
+  pickFromList(user, pool, '魔法蓝图：选择一张单次卡（蓝图变为该卡并适用其效果，支付等同于该卡的费用）', 1, function (picks) {
     if (!picks || !picks.length) { done(); return; }
-    var tgt = picks[0].card, txt = (typeof getMainEffectText === 'function') ? getMainEffectText(tgt.effect || tgt.text || '') : (tgt.effect || tgt.text || '');
-    addBattleLog(user, '【魔法蓝图】复制【' + tgt.name + '】的效果结算');
+    var tgt = picks[0].card;
+    // 蓝图复制=复制那一张卡：蓝图直到结算完送入墓地之前变为被复制的卡；费用按被复制的卡收取
+    p.cost += (parseInt(selfCard.cost, 10) || 0); // 退还蓝图自身费用（使用蓝图时已扣）
+    var copyCost = (typeof computeActualCost === 'function') ? computeActualCost(tgt, user) : (parseInt(tgt.cost, 10) || 0);
+    var __bpLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(user) : 0;
+    if (p.cost + __bpLoan < copyCost) {
+      addBattleLog(user, '【魔法蓝图】音韵不足以支付被复制卡【' + tgt.name + '】的费用' + copyCost + '点（当前' + p.cost + '），复制不成立');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      done();
+      return;
+    }
+    p.cost -= copyCost;
+    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+    addBattleLog(user, '【魔法蓝图】变为【' + tgt.name + '】并适用其效果（支付' + copyCost + '费用，当前' + p.cost + '）');
+    var txt = (typeof getMainEffectText === 'function') ? getMainEffectText(tgt.effect || tgt.text || '') : (tgt.effect || tgt.text || '');
     var foe = user === 'p1' ? 'p2' : 'p1';
     if (typeof executeEffectSteps === 'function') { var steps = parseEffect(txt); executeEffectSteps(steps, { user: user, target: foe, card: tgt }, done, user === 'p1'); }
     else done();
