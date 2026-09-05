@@ -4549,11 +4549,20 @@ function archOf(card, arch) {
 }
 function cScore(c) { return (typeof c.score === 'number' && !isNaN(c.score)) ? c.score : 5; }
 function nameHit(a, b) { return a && b && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0); }
-// 【唯一权威】卡牌是否属于所选队伍：同名不同形态不通用，只认 character_full 与角色名完全相等；缺 full 时仅短名全等，不做包含匹配
+// 【唯一权威】卡牌是否属于所选队伍：同名不同形态不通用。
+// character_full 精确匹配；缺 full 时按短名包含匹配（如"里绪"→"现实间里绪"、"枫"→"入间枫"、"予"→"入间予"），
+// 但队伍角色是"X(水着)"形态时，卡面归属也必须写明"(水着)"才归属（普通形态卡不得借用水着角色编入使用）
 function cardBelongsToTeam(card, teamNames) {
   if (!card) return false;
   if (card.character_full) return teamNames.indexOf(card.character_full) >= 0;
-  if (card.character) return teamNames.some(function (n) { return n === card.character; });
+  if (card.character) {
+    var __ch = card.character;
+    return teamNames.some(function (n) {
+      if (n === __ch) return true;
+      if (n.indexOf('水着') >= 0 && __ch.indexOf('水着') < 0) return false; // 水着形态与普通形态互斥
+      return n.indexOf(__ch) >= 0;
+    });
+  }
   return false;
 }
 // 【道具属性硬需求】默认2无序 + 每名非混沌角色对应属性2；混沌角色不占硬需求(留灵活位)。返回需求表/硬需求总数/灵活位数
