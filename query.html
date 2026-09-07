@@ -1579,7 +1579,7 @@ img,video,canvas,svg{max-width:100%}
       "title": "卡组构成",
       "content": [
         "完整卡组 = 8张道具卡 + 4张角色携带卡（攻击卡+技能卡）",
-        "角色编组：3张角色卡，选1张为队长（被动+SP生效），2名队员中仅1名SP生效",
+        "角色编组：3张角色卡，选1张为队长（被动+SP生效）；队员仅提供SP，写有“作为队员编组也生效”的SP才在队员位生效，编组类队员SP互相冲突、通常只第一个生效",
         "道具属性：默认2张无序 + 每名非混沌角色对应属性2张，混沌角色可带任意属性",
         "永续道具上限：2张",
         "初始手牌4张，每回合抽1张，手牌上限5张",
@@ -1601,14 +1601,13 @@ img,video,canvas,svg{max-width:100%}
     "resource": {
       "title": "资源系统",
       "content": [
-        "同步值（血量）= 3张角色卡同步值之和 × 2",
-        "音韵值（费用）：最大12，每回合自然回复",
-        "自然回复 = 150%队长基础回复 + 50%队员1 + 50%队员2（默认5费）",
+        "同步值（血量）= 3张角色卡同步值之和 × 2.5（0.5进一，向上取整）",
+        "音韵值（费用）：上限12点，每回合准备阶段自然回复",
+        "自然回复基础为5点；葵/枫(水着)的SP使每名成员自然回复+50%（向下取整），予、霜烬、里尔亚斯等另有回复加成",
         "献祭：每回合1次，送1张手卡入墓回复2音韵值",
         "控骰能力：每20%可让投掷点数±1（判定伤害最多可适用20%控骰能力，即骰子点数±1）",
-        "暴击：初始0%，默认爆伤150%，超频加爆伤不加暴击率",
-        "音韵抽卡：自己回合内可支付3点音韵值抽1张卡（每回合不限次数）",
-        "打2抽1：自己回合内每打出2张单次卡（进入墓地）可抽1张卡，每回合最多触发3次"
+        "暴击：初始0%，默认爆伤150%，超频加爆伤不加暴击率（判定伤害不适用暴击）",
+        "音韵抽卡：自己回合内可支付3点音韵值抽1张卡（每回合不限次数）"
       ]
     },
     "damage": {
@@ -1616,6 +1615,7 @@ img,video,canvas,svg{max-width:100%}
       "content": [
         "实际伤害 = [(基础伤害+攻击力÷2向下取整-防御)×暴击倍率 + 属性克制增伤(每段+1) + 最终增伤]（攻击力每满2点+1伤害，不足2点不增加）",
         "属性克制时伤害+1点（每段），被克制时伤害不减少",
+        "判定伤害不适用属性克制增伤与暴击，但吃判定伤害增伤，且最多适用20%控骰能力（骰子点数±1）",
         "多段判定每段单独计算，每段吃增伤",
         "护盾：点数制永久存在，破碎后防止多余伤害",
         "混沌属性：克制混沌（+1伤害），被所有属性克制但伤害不减少"
@@ -2275,6 +2275,17 @@ function updateDamageCurveDisplay(){
     const atkMatch = captain.passive.match(/攻击[力]?[+＋](\d+)/);
     if(atkMatch) atkBonus += parseInt(atkMatch[1]);
   }
+  // 角色SP中的攻击力加成：队长SP生效；队员仅sp_member生效，编组类只取第一个
+  let __atkMemberUsed=false;
+  allChars.forEach((ch,idx)=>{
+    if(!ch) return;
+    const isC=idx===0, spm=/作为队员.*生效|队员.*也.*生效|队员.*可用/.test(ch.sp||'');
+    if(isC || (spm&&!__atkMemberUsed)){
+      if(!isC&&spm)__atkMemberUsed=true;
+      const m=(ch.sp||'').match(/攻击[力]?[+＋](\d+)/);
+      if(m) atkBonus += parseInt(m[1]);
+    }
+  });
   const atkDmgBonus = Math.floor(atkBonus / 2);
   
   // 暴击（弱点分析+冬马）
@@ -2308,6 +2319,12 @@ function updateDamageCurveDisplay(){
         movePassiveDmg += liXuBaseDmg;
         moveDmgDetail.push(`里绪被动(队长): 每累计移动8格付1音韵四面骰判定(均2.5,可付2音韵改六面骰均3.5),预估+${liXuBaseDmg.toFixed(1)}`);
       }
+      if(name === '现实间冬马' || /累计移动5格.*无序/.test(passive)){
+        // 冬马被动(基础,不含等级成长)：每累计移动5格造1点无序；按一回合移动12格估2.4次
+        const dongMaDmg = 1 * (12/5);
+        movePassiveDmg += dongMaDmg;
+        moveDmgDetail.push(`冬马被动(队长): 每累计移动5格造1点无序(基础,Lv4/7降为4/3格、伤2/3),预估+${dongMaDmg.toFixed(1)}`);
+      }
     }
     if(isCaptain || (spWorksAsMember && !moveMemberSpUsed)){
       if(!isCaptain && spWorksAsMember) moveMemberSpUsed = true;
@@ -2318,13 +2335,13 @@ function updateDamageCurveDisplay(){
     }
   });
   selectedItems.forEach(item=>{
-    if(item.name === '设计师的直尺' || /每移动.*格.*理智伤害/.test(item.effect||'')){
+    if(item.name === '设计师的直尺' || /移动8格.*理智|每移动8格/.test(item.effect||'')){
       const 位移手Count = allChars.filter(c=>c && (c.roles||[]).includes('位移手')).length;
-      const zhiChiThreshold = Math.max(1, 8 - 位移手Count);
-      const zhiChiTriggers = 12 / zhiChiThreshold;
-      const zhiChiDmg = zhiChiTriggers * 2;
+      const zhiChiBase = 位移手Count >= 2 ? 3 : 2; // 最新卡面：固定每8格触发，≥2名[位移手]基础伤2→3（不再减阈值）
+      const zhiChiTriggers = 12 / 8;
+      const zhiChiDmg = zhiChiTriggers * zhiChiBase;
       movePassiveDmg += zhiChiDmg;
-      moveDmgDetail.push(`直尺SP: 每移动${zhiChiThreshold}格造2点理智伤害(${位移手Count}名位移手)`);
+      moveDmgDetail.push(`直尺SP: 固定每移动8格造${zhiChiBase}点理智伤害(${位移手Count}名位移手,≥2名为3伤)`);
     }
   });
   
@@ -2982,36 +2999,36 @@ function calcDeckScore(){
 const PRESET_DECKS = [
   {
     name: "判定伤害队（实战推荐）",
-    desc: "队长琉璃被动判定回音韵+全队增伤，予的判定+1，枫开局回费，稳定判定输出",
+    desc: "琉璃队长：造成判定伤害回1音韵，累计3/6/11/14次后全队判定+1；里绪队员SP提供全队判定伤害+1；枫队员SP开局选2项回费/抽牌。判定输出稳定。",
     captain: "小沙香琉璃",
-    members: ["入间予", "入间枫"],
+    members: ["现实间里绪", "入间枫"],
     activeMember: 0,
     items: ["黑色卡片", "善意面具", "怪怪幽灵吊坠", "幸运护符", "侦探放大镜", "经文", "神乐铃", "绿宝之杖·择"],
     carries: ["人格修正拳！", "秘技！摸头杀", "得分！", "好孩子的奖励"]
   },
   {
     name: "混沌混伤队",
-    desc: "枫队长混沌属性可带任意道具，予判定+1，琉璃队员SP判定后抽卡回费",
+    desc: "枫队长：用[战术]/[增益]卡后抽馈赠、再抽1张辨色回费；琉璃、里绪均为队员SP可用，分别补判定最大伤抽卡回费与全队判定+1。",
     captain: "入间枫",
-    members: ["入间予", "小沙香琉璃"],
-    activeMember: 1,
+    members: ["小沙香琉璃", "现实间里绪"],
+    activeMember: 0,
     items: ["黑色卡片", "善意面具", "怪怪幽灵吊坠", "幸运护符", "妖刀五月雨", "侦探放大镜", "经文", "神乐铃"],
     carries: ["得分！", "鼓舞", "秘技！摸头杀", "人格修正拳！"]
   },
   {
     name: "热忱快攻队",
-    desc: "结衣队长多段横扫，里绪移动累计造判定，霜烬同步>15时全队免疫+增伤",
+    desc: "结衣队长：攻击/侵略指定目标后将其一张卡暂时移出；霜烬、琉璃(水着)队员SP补自然回费/初始手牌与热忱初始攻击。注意霜烬的免负面/加攻被动仅其担任队长时才有。",
     captain: "小野结衣",
-    members: ["现实里绪", "霜烬"],
+    members: ["霜烬", "琉璃(水着)"],
     activeMember: 0,
-    items: ["共鸣者", "血之佑戒·红泪拉克莎", "怪怪幽灵吊坠", "幸运护符", "球棒", "刃", "饮料", "神乐铃"],
+    items: ["共鸣者", "血之佑戒·红泪拉克莎", "怪怪幽灵吊坠", "幸运护符", "能量饮料", "四叶草发卡", "柔软枕头", "神乐铃"],
     carries: ["横扫之刃", "钢筋铁肘", "祓禊", "认真起来了！"]
   },
   {
     name: "理智控制队",
-    desc: "予队长20%控骰，惠滤馈赠+控骰，露璐帽子戏法回费，偏控制和资源",
+    desc: "予队长：初始20%控骰（编组光太郎/葵/莉莉/霞或琉璃/里绪/枫可提升）并提供全队判定+1；雨清、枫(水着)队员SP补检索入手减费、理智增伤与自然回费。",
     captain: "入间予",
-    members: ["松山惠", "露璐缇雅·爱德华"],
+    members: ["宁雨清", "枫(水着)"],
     activeMember: 0,
     items: ["风纪委员臂章", "钢笔", "侦探放大镜", "经文", "共鸣者", "底牌", "颠倒骰子", "绿宝之杖·择"],
     carries: ["秘技！摸头杀", "放轻松些", "谢幕", "剖析"]
@@ -3287,7 +3304,7 @@ function randomByArchetype(){
   // 角色协同道具卡（基于角色被动/SP）
   const charItemSynergy = {
     '小沙香琉璃': ['钢笔','蓝宝之杖·命','破损电子设备','某女士爱用球棒','Twice','能量饮料'], // 判定伤害
-    '入间予': ['结晶碎弧','钢笔','蓝宝之杖·命','破损电子设备','某女士爱用球棒','绿宝之杖·择'], // 判定伤害+控骰(但判定伤害队不带控骰)
+    '入间予': ['结晶碎弧','钢笔','蓝宝之杖·命','破损电子设备','某女士爱用球棒','绿宝之杖·择'], // 判定伤害+判定增伤(判定最多吃20%控骰)
     '入间枫': ['Twice','经文','神乐铃','能量饮料','黑色卡片'], // 同色卡联动+回费
     '木原光太郎': ['黑色卡片','智能手机','来自地狱的盒子','搜查令','绿宝之杖·择'], // 献祭+金币
     '松山惠': ['钢笔','底牌','侦探放大镜','特制手套','遥控骰子'], // 检索+控制
@@ -3497,7 +3514,7 @@ function randomByArchetype(){
   // ===== 位移队专属组卡逻辑（里绪+予水着双核心，移动流派）=====
   if(archetype === '位移队'){
     // 位移队核心角色：
-    // 里绪(热忱/红)：移动8格触发4面骰判定伤害(首次+1热忱),可用2枚六面骰替换原本骰子(不可用于判定伤害)，SP全队判定伤害+1(队员也生效)
+    // 里绪(热忱/红)：每累计移动8格付1音韵打四面骰判定(可付2改六面),可用2枚六面骰替换原本骰子(不可用于判定伤害)，SP全队判定伤害+1(队员也生效)
     // 予水着(理智/蓝)：战术/移动卡视为理智移动卡，SP移动卡后造硬币伤害
     // 里绪水着：移动+馈赠
     // 星奈水着：多段伤害+移动
@@ -3815,7 +3832,7 @@ function randomByArchetype(){
     return Math.random()-0.5;
   });
   
-  // 判定伤害队专属：完全排除控骰类道具（判定伤害的判定不能被改效果），优先判定增伤卡
+  // 判定伤害队专属：判定伤害最多吃20%控骰(点数±1)，故排除降伤的20面骰/碰碰冰茶、以及大幅改点对判定无增益的遥控骰子，优先判定增伤卡
   if(archetype === '判定伤害队'){
     // 判定伤害队排除：减判定伤害的卡和改投掷效果的卡
     // 20面骰-8伤害，碰碰冰茶-4伤害，遥控骰子改投掷判定不能用
@@ -4017,7 +4034,7 @@ function randomByArchetype(){
     usedBaseNames.add(pickedFlex.name.replace(/[（(]水着[)）]/g,''));
     
     // 资源运转流道具加权：抽卡/滤牌/检索/回费类卡牌加分
-    const resCoreItems = ['钢笔','底牌','特制手套','共鸣者','黑色卡片','永奏进行曲','鸣奏之"圣音"','经文','魔法清点名单','来自地狱的盒子','智能手机','侦探放大镜','蓝图复制'];
+    const resCoreItems = ['钢笔','底牌','特制手套','共鸣者','黑色卡片','永奏进行曲','鸣奏之"圣音"','经文','魔法清点名单','来自地狱的盒子','智能手机','侦探放大镜','魔法蓝图'];
     const resFiltered = scoredItems.map(c=>{
       const item = {...c};
       if(resCoreItems.includes(item.name)) item._score = (item._score||0) + 8;
@@ -4398,7 +4415,7 @@ function randomByArchetype(){
       skill: ['超频','拿手好戏','比翼恋理']
     },
     '无序队': {
-      attack: ['秘技！摸头杀！','安静些','对弈'],
+      attack: ['秘技！摸头杀','安静些','对弈'],
       skill: ['集中','狡黠之跃']
     },
     '破局队': {
@@ -4748,7 +4765,7 @@ function randomByArchetype(){
     const carryNames = selectedCarries.map(c=>c.name);
     
     const archDesc = {
-      '判定伤害队': '以判定伤害为核心输出手段，通过钢笔、蓝杖等永续卡叠加判定伤害加成，配合控骰卡稳定命中，追求高暴击高爆发。',
+      '判定伤害队': '以判定伤害为核心输出手段，通过钢笔、蓝杖等永续卡叠加判定伤害加成（判定伤害不吃暴击与属性克制，但吃判定增伤与最多20%控骰），追求多段稳定判定爆发。',
       '控骰队': '通过控制骰子点数来干扰对手节奏，同时利用判定效果获取优势。适合喜欢博弈和操控随机性的玩家。',
       '进攻队': '纯输出向构筑，依靠高伤害攻击卡和增伤道具快速击杀对手。前期压制力强，适合快攻打法。',
       '热忱队': '以热忱属性角色为核心，利用热忱属性伤害和同步回复能力持续作战。攻防均衡，适应性强。',
@@ -4764,7 +4781,7 @@ function randomByArchetype(){
       '金币队': '以金币经济为核心，通过商店和金币效果获取优势。需要合理规划金币使用时机。',
       
       '破局队': '以校准降低入迷值为核心获胜手段，通过控骰提高校准成功率，配合快速移动到达馈赠区和神社，依靠馈赠卡和御神签持续降入迷。控骰角色为核心，结晶碎弧为卡组内唯一直接降入迷道具。',
-  '破甲队': '以降低对方防御和穿透伤害为核心，通过破甲/降防效果削弱目标防御后配合高伤害输出快速击杀。里尔亚斯和霜烬为核心角色，夏日泳圈攻击等降防卡为关键组件。',
+  '破甲队': '以降低对方防御和穿透伤害为核心，通过夏日泳圈攻击、某女士爱用球棒等降防/破甲卡先削弱目标防御，再配合高攻击加成的输出卡快速击杀。',
 };
     
     let html = '';
@@ -4989,17 +5006,25 @@ function randomByArchetype(){
     normalFlatDmg = 0; critRateBonus = 0; critDmgBonus = 0; hasCrit = false; hasDongMa = false;
     let atkBonus = 0;
     
-    allChars.forEach(ch=>{
+    let __atkMemberUsed=false;
+    allChars.forEach((ch,idx)=>{
       if(!ch) return;
       const name = ch.name||'';
       // 冬马本人不提供暴击加成，暴击来自弱点分析技能卡
       if(name === '现实间冬马' || /冬马/.test(name)) {
         hasDongMa = true;
       }
+      const isC = idx===0, spm=/作为队员.*生效|队员.*也.*生效|队员.*可用/.test(ch.sp||'');
       // 队长被动中的攻击加成
-      if(ch === captain){
+      if(isC){
         const atkMatch = (ch.passive||'').match(/攻击[力]?[+＋](\d+)/);
         if(atkMatch) atkBonus += parseInt(atkMatch[1]);
+      }
+      // 角色SP攻击力加成：队长SP / 首个可用队员SP
+      if(isC || (spm&&!__atkMemberUsed)){
+        if(!isC&&spm)__atkMemberUsed=true;
+        const m=(ch.sp||'').match(/攻击[力]?[+＋](\d+)/);
+        if(m) atkBonus += parseInt(m[1]);
       }
     });
     
@@ -5046,13 +5071,17 @@ function randomByArchetype(){
       if(isCaptain) {
         if(name === '现实间里绪' || /累计移动.*格.*判定伤害/.test(passive)) {
           hasLiXu = true;
-          // 里绪被动：移动8格触发4面骰判定伤害(平均2.5)，首次触发附加1点热忱伤害
-          // 可用2枚六面骰替换原本骰子(不可用于判定伤害)；判定增伤也加成
+          // 里绪被动(最新)：每累计移动8格付1音韵打四面骰判定(均2.5)，可付2音韵改六面骰(均3.5)；已无首次附加热忱
           const liXuBaseDmg = 2.5 + judgeDmgBonus;
-          const liXuFirstBonus = 1;
-          const liXuDmg = liXuBaseDmg + liXuFirstBonus;
+          const liXuDmg = liXuBaseDmg;
           movePassiveDmg += liXuDmg;
-          moveDmgDetail.push(`里绪被动(队长): 移动8格触发4面骰判定伤害(平均${liXuBaseDmg.toFixed(1)},首次+1热忱),预估+${liXuDmg.toFixed(1)}`);
+          moveDmgDetail.push(`里绪被动(队长): 每累计8格付1音韵四面骰判定(均${liXuBaseDmg.toFixed(1)},可付2改六面均3.5),预估+${liXuDmg.toFixed(1)}`);
+        }
+        if(name === '现实间冬马' || /累计移动5格.*无序/.test(passive)) {
+          // 冬马被动(基础,不含等级)：每累计移动5格造1无序，按12格估2.4次
+          const dongMaDmg = 1*(12/5);
+          movePassiveDmg += dongMaDmg;
+          moveDmgDetail.push(`冬马被动(队长): 每累计移动5格造1无序(基础,Lv4/7增强),预估+${dongMaDmg.toFixed(1)}`);
         }
       }
       // SP：只有队长生效，或写了作为队员也生效（队员SP冲突，只取第一个）
@@ -5073,14 +5102,14 @@ function randomByArchetype(){
       const eff = (item.effect||'')+(item.passive||'');
       if(name === '设计师的直尺' || /每移动.*格.*理智伤害/.test(eff)) {
         hasZhiChi = true;
-        // 直尺SP：单回合内每移动8格造2点理智伤害，队伍中每有1名位移手触发格数-1
+        // 直尺SP(最新)：固定每移动8格造2理智，队伍≥2名[位移手]基础伤提升至3（不再按人数减阈值）
         const 位移手Count = allChars.filter(c=>c && (c.roles||[]).includes('位移手')).length;
-        const zhiChiThreshold = Math.max(1, 8 - 位移手Count);
-        // 预估一回合移动12格，触发次数
-        const zhiChiTriggers = 12 / zhiChiThreshold;
-        const zhiChiDmg = zhiChiTriggers * 2;
+        const zhiChiBase = 位移手Count >= 2 ? 3 : 2;
+        // 预估一回合移动12格，触发1.5次
+        const zhiChiTriggers = 12 / 8;
+        const zhiChiDmg = zhiChiTriggers * zhiChiBase;
         movePassiveDmg += zhiChiDmg;
-        moveDmgDetail.push(`直尺SP: 每移动${zhiChiThreshold}格造2点理智伤害(${位移手Count}名位移手), 预估+${zhiChiDmg.toFixed(1)}`);
+        moveDmgDetail.push(`直尺SP: 固定每移动8格造${zhiChiBase}理智(${位移手Count}名位移手,≥2名为3伤), 预估+${zhiChiDmg.toFixed(1)}`);
       }
       // 统计移动卡数量
       if(/移动|前进|后退|位移/.test(eff) || /[移动]/.test(item.tags||'')) {
