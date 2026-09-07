@@ -3446,10 +3446,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     var isNegate = eff.indexOf('抵消') >= 0 && eff.indexOf('伤害') >= 0;
     // 反制整效：当其他玩家发动特定效果时可连锁、令那个效果无效（崩塌之乌托邦类）
     var isNegateEffect = name.indexOf('崩塌之乌托邦') >= 0 || (/效果无效/.test(eff) && /发动了?[^。；]{0,24}时/.test(eff));
+    // 大风等事件卡：终止所有移动动作（移动将执行前可连锁打断，全时点）
+    var isStopMove = name.indexOf('大风') >= 0 || /终止所有[^。；]*移动|终止所有进行中的移动/.test(eff);
     // Twice：让一名玩家重新进行一次判定（在判定结果出现、确定适用前连锁，重掷判定）
     var isRerollJudge = name === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
     if (isReverse) return 'reverse';
     if (isDiceSet) return 'dice_set';
+    if (isStopMove) return 'stop_move';
     if (isRerollJudge) return 'reroll_judge';
     if (isMoveAdjust) return 'move_adjust';
     if (isNegate) return 'negate_damage';
@@ -3461,8 +3464,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   function chainableAt(windowStage, cardKind) {
     switch (windowStage) {
       case 'dice_result': return cardKind === 'dice_set' || cardKind === 'reverse' || cardKind === 'reroll_judge';
-      case 'move':        // 移动将执行：纯改点已无原始骰子对象；改方向/增减/打断仍可
-        return cardKind === 'reverse' || cardKind === 'move_adjust';
+      case 'move':        // 移动将执行：纯改点已无原始骰子对象；改方向/增减/打断/终止移动仍可
+        return cardKind === 'reverse' || cardKind === 'move_adjust' || cardKind === 'stop_move';
       case 'damage':      return cardKind === 'negate_damage';
       case 'rand':        // 随机/判定结果将适用：改点、重判可介入
       case 'rand_result': return cardKind === 'dice_set' || cardKind === 'reroll_judge';
@@ -5922,7 +5925,7 @@ function collectChainable(player, effect){
       // 移动将要执行时：纯改点卡(遥控/手套)已无原始骰子对象可排除；但改变方向卡(颠倒骰子)仍可反转本次移动
       var __rev = nm.indexOf('颠倒骰子')>=0 || /改变[^。；]*方向/.test(eff);
       if(isDiceModifyCard(c) && !__rev) return false;
-      return __rev || /位移量|增减|打断/.test(eff)||nm.indexOf('侦探放大镜')>=0||nm.indexOf('猎手爪链')>=0;
+      return __rev || /位移量|增减|打断/.test(eff)||nm.indexOf('侦探放大镜')>=0||nm.indexOf('猎手爪链')>=0||nm.indexOf('大风')>=0||/终止.*移动/.test(eff);
     }
     if(stage==='damage') return /抵消/.test(eff)&&/伤害/.test(eff);
     return true;
@@ -5963,6 +5966,8 @@ function collectChainable(player, effect){
     consider(c,'hand',i);
   });
   (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
+  // 事件卡（全时点）：也可作为连锁响应发动（如大风在移动将执行前终止所有移动）
+  (me.eventCards||[]).forEach(function(c,i){consider(c,'event',i);});
   return out;
 }
 // 发动一张连锁卡并修改待结算效果；需要二次选择（点数/增减）时走可视化弹窗，结束回调 done
@@ -5973,11 +5978,17 @@ function applyChainCard(player,pick,effect,done){
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
     me.cost-=(parseInt(c.cost,10)||0);
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
-    if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
-    (me.grave=me.grave||[]).push(c);
-    // 投掷/移动窗口的连锁用卡同样计入“使用”：技能一次记录 + 进墓统一时点（神乐铃叠层/星奈回收等）
-    if (typeof recordSkillUse === 'function') recordSkillUse(player, c);
-    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, c, 'use');
+    if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else if(pick.from==='event') me.eventCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
+    if (pick.from === 'event') {
+      // 事件卡使用后进入公共墓地（不洗牌），与常规使用一致
+      if (typeof publicGraveyard !== 'undefined' && publicGraveyard) publicGraveyard.event_cards.push(c);
+      addBattleLog(player, '【' + name + '】已放入公共墓地');
+    } else {
+      (me.grave=me.grave||[]).push(c);
+      // 投掷/移动窗口的连锁用卡同样计入“使用”：技能一次记录 + 进墓统一时点（神乐铃叠层/星奈回收等）
+      if (typeof recordSkillUse === 'function') recordSkillUse(player, c);
+      if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, c, 'use');
+    }
   }
   function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI();
     // 用卡后角色被动钩子（惠/爱德华/小春/予水着SP等）统一走标准管线，投掷阶段用卡不再漏计
@@ -6012,6 +6023,9 @@ function applyChainCard(player,pick,effect,done){
     else setV(__setSides);
   } else if(name.indexOf('颠倒骰子')>=0 || (eff.indexOf('改变')>=0&&eff.indexOf('方向')>=0)){
     payAndRemove(); effect._chain.push({kind:'reverse',by:player,name:name}); afterUse();
+  } else if(name.indexOf('大风')>=0 || /终止.*移动/.test(eff)){
+    // 大风（事件卡）：终止所有移动动作；触发后所有玩家下次执行的位移效果-2
+    payAndRemove(); effect._chain.push({kind:'stop_move',by:player,name:name}); afterUse();
   } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
     payAndRemove();
     function applyAdd(add){ effect._chain.push({kind:'add',by:player,name:name,from:__orig(),delta:add}); afterUse(); }
@@ -6203,6 +6217,14 @@ function resolveChainStack(effect, onDone) {
     } else if (e.kind === 'cancel' || e.kind === 'cancelDamage') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】对象动作/伤害已不存在，不重复处理'); }
       else { actionAlive = false; effect.cancelled = true; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】' + (e.kind === 'cancelDamage' ? '抵消本次伤害' : '打断本次动作')); if (typeof e.extra === 'function') { try { e.extra(); } catch (err) {} } }
+    } else if (e.kind === 'stop_move') {
+      if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，不重复处理'); }
+      else {
+        actionAlive = false; effect.cancelled = true; __doneSet[i] = true;
+        battleState._stopAllMove = true;
+        ['p1', 'p2'].forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
+        addBattleLog(e.by, '【' + e.name + '】终止所有移动动作，本次移动被阻止；双方下次执行的位移效果-2');
+      }
     } else if (e.kind === 'selfdouble') {
       // 位移增益（能量饮料）：发动时已即时把位移 x2（最多+6）写入待结算值，这里只做链上确认
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，位移增益随之无效'); }
@@ -6343,7 +6365,7 @@ function accumulateMovePassives(player, amount, oldPos) {
     p._kaedeMizugiMove = (p._kaedeMizugiMove || 0) + amt;
     if ((p._kaedeMizugiMove || 0) >= 8 && !p._kaedeMizugiRecycledTurn) {
       p._kaedeMizugiRecycledTurn = true;
-      var __kml = (p.grave || []).filter(function (c) { return c && /item/.test(c._category || '') && ((c.tags || []).indexOf('移动') >= 0 || (c.tags || []).indexOf('战术') >= 0); });
+      var __kml = (p.grave || []).filter(function (c) { return c && /item/.test(c._category || '') && (__cardTags(c).indexOf('移动') >= 0 || __cardTags(c).indexOf('战术') >= 0); });
       if (!__kml.length) { addBattleLog(player, '【枫(水着)被动】单回合累计移动8格，但墓地无[移动]/[战术]道具卡'); }
       else if (player === 'p1' && typeof pickFromList === 'function') {
         pickFromList('p1', __kml.map(function (c) { return { card: c, zone: 'grave', index: p.grave.indexOf(c) }; }), '枫(水着)被动：回收墓地一张[移动]/[战术]道具卡', 1, function (picks) {
@@ -10701,14 +10723,15 @@ function computeDamageValue(user, target, opt) {
   // 进攻属性：显式 > 卡牌属性 > 队伍属性
   var sc = opt.srcCard;
   var __rawAttr = opt.attr || (sc && sc.attribute) || ((typeof getTeamAttribute === 'function') ? getTeamAttribute(user) : (ap.captain && ap.captain.attribute)) || null;
-  // 予(水着)被动·归纳演绎法：队伍造成的伤害均变为理智属性（判定伤害无属性，不参与）
-  if (ap._yuMizugiPassive && !opt.judge) { __rawAttr = '理智'; }
+  // 予(水着)被动·归纳演绎法：队伍造成的伤害均变为理智属性（用户口径：含硬币判定伤害——判定伤害同样转为理智属性伤害，
+  // 吃到理智伤害+1；判定伤害本身仍不吃属性克制与判定以外增伤）
+  if (ap._yuMizugiPassive) { __rawAttr = '理智'; }
   // 规则口径（用户确认）：判定伤害不吃任何属性增伤——克制+1/克制伤害+N/理智伤害+/属性类最终增伤一律不适用，
   // 只吃判定增伤；故 judge 时增伤判定属性按"无属性"处理（显式传入的属性仅保留作上下文标记，不参与增伤）
-  var attr = opt.judge ? (opt.attr || null) : __rawAttr;
-  var __bAttr = opt.judge ? null : __rawAttr;
+  var attr = (ap._yuMizugiPassive) ? '理智' : (opt.judge ? (opt.attr || null) : __rawAttr);
+  var __bAttr = (ap._yuMizugiPassive) ? '理智' : (opt.judge ? null : __rawAttr);
   var defAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (tp.captain && tp.captain.attribute) || null;
-  var kind = opt.judge ? null : (ap._yuMizugiPassive ? 'sanity' : (opt.kind || __kindOf(__bAttr || ''))); // 予(水着)被动：kind 同步变为理智，使理智伤害+1等按 kind 判定的增益正常生效
+  var kind = (ap._yuMizugiPassive) ? 'sanity' : (opt.judge ? null : (opt.kind || __kindOf(__bAttr || ''))); // 予(水着)被动：kind 同步变为理智，使理智伤害+1等按 kind 判定的增益正常生效
   // 括号外①：属性克制，每段+1（被克制不减少）；混沌规则在 __attrBeats 内
   // 规则：判定伤害不吃属性克制增伤（含克制伤害+N、领域克制强化），故 opt.judge 时整段跳过
   if (!opt.judge && __bAttr && defAttr && typeof __attrBeats === 'function' && __attrBeats(__bAttr, defAttr)) {
@@ -10724,7 +10747,7 @@ function computeDamageValue(user, target, opt) {
   if (kind === 'sanity' && ap._intellectBonus) { final += ap._intellectBonus; logs.push('理智伤害+' + ap._intellectBonus); }
   var perm = ap.permanent || [];
   function hasPerm(k) { return perm.some(function (c) { return c.name && c.name.indexOf(k) >= 0; }); }
-  var tags = (sc && sc.tags) || [], cat = sc && sc._category;
+  var tags = (typeof __cardTags === 'function' && sc) ? __cardTags(sc) : ((sc && sc.tags) || []), cat = sc && sc._category;
   var isAtk = cat === 'attack_cards', isSkill = cat === 'skill_cards', isItem = cat && /item/.test(cat);
   // 括号外④：各类“最终伤害+N”
   if (kind === 'sanity' && hasPerm('风纪委员')) { final += 1; logs.push('风纪委员臂章·理智最终+1'); }
@@ -13595,7 +13618,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       var __ap = battleState[attacker];
       if (__ap) {
         var __hit = p.sync < __hadSync; // 本次实际扣减了同步
-        var __sc = opts.srcCard, __tags = __sc ? (__sc.tags || []) : [], __cat = __sc ? __sc._category : '';
+        var __sc = opts.srcCard, __tags = __sc ? ((typeof __cardTags === 'function') ? __cardTags(__sc) : (__sc.tags || [])) : [], __cat = __sc ? __sc._category : '';
         // 造伤后同时满足的多个被动/SP：不再写死顺序立即执行，统一收集为连锁候选，由玩家决定选发顺序后逆结算
         var __cands = [];
         if (opts.judge && __ap._ruriPassive) __cands.push({ key: 'ruri', label: '琉璃被动·判定后回1音韵/累计阶梯', owner: attacker, mandatory: true, fire: function (d) {
@@ -14590,11 +14613,16 @@ function placeAfterUse(user, card, isPerm) {
 }
 
 // 卡是否按“使用时视为[移动]标签道具卡”结算（能量饮料等[移动]道具 + 夏日畅饮时间！类SP文本）
+function __cardTags(card) {
+  var out = (card && card.tags) ? card.tags.slice() : [];
+  if (card && card.type && out.indexOf(card.type) < 0) out.push(card.type);
+  return out;
+}
 function __isMoveItemCard(card) {
   if (!card) return false;
   var eff = (card.effect || '') + (card.sp || '') + (card.text || '');
   if (/视为\s*\[移动\]\s*标签?道具卡/.test(eff)) return true;
-  return /item/.test(card._category || '') && (card.tags || []).indexOf('移动') >= 0;
+  return /item/.test(card._category || '') && __cardTags(card).indexOf('移动') >= 0;
 }
 // 予(水着)SP 触发判定：理智属性[移动]道具卡（含“使用时视为[移动]标签道具卡”类卡；被动下无序以外[战术]/[移动]道具卡视为理智[移动]道具卡）
 // 口径（用户锁定）：永续道具首次放进永续区=使用（触发一次）；已放进永续区的卡之后每次发动效果≠使用（不触发，主动发动路径不经过用卡钩子）
@@ -14603,7 +14631,7 @@ function __yuMizugiTriggerCard(p, card) {
   var eff = (card.effect || '') + (card.sp || '') + (card.text || '');
   if (/视为\s*\[移动\]\s*标签?道具卡/.test(eff) && (card.attribute || '') === '理智') return true;
   if (!/item/.test(card._category || '')) return false;
-  var tags = card.tags || [];
+  var tags = __cardTags(card);
   var mv = tags.indexOf('移动') >= 0;
   if (card.attribute === '理智' && mv) return true;
   if (p._yuMizugiPassive && card.attribute && card.attribute !== '无序' && (mv || tags.indexOf('战术') >= 0)) return true;
@@ -14613,8 +14641,10 @@ function __yuMizugiTriggerCard(p, card) {
 function __yuMizugiSanityCard(p, card) {
   if (!card) return false;
   if ((card.attribute || '') === '理智') return true;
-  if (p._yuMizugiPassive && /item/.test(card._category || '') && card.attribute && card.attribute !== '无序' &&
-      ((card.tags || []).indexOf('战术') >= 0 || (card.tags || []).indexOf('移动') >= 0)) return true;
+  if (p._yuMizugiPassive && /item/.test(card._category || '') && card.attribute && card.attribute !== '无序') {
+    var __st = __cardTags(card);
+    if (__st.indexOf('战术') >= 0 || __st.indexOf('移动') >= 0) return true;
+  }
   return false;
 }
 
@@ -14745,7 +14775,7 @@ function postUsePassiveHooks(user, card, done) {
   }
 
   // 结衣被动·小野一刀流：使用攻击卡或[侵略]道具卡（指定了目标）后可将其一张卡移出游戏直到回合结束（选发）
-  if (p._yuiPassive && card && (card._category === 'attack_cards' || (/item/.test(card._category || '') && (card.tags || []).indexOf('侵略') >= 0))) {
+  if (p._yuiPassive && card && (card._category === 'attack_cards' || (/item/.test(card._category || '') && __cardTags(card).indexOf('侵略') >= 0))) {
     __add(user, false, '结衣被动·小野一刀流', function (next) {
       var __yFoe = user === 'p1' ? 'p2' : 'p1', __yFp = battleState[__yFoe];
       var __yList = [];
