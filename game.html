@@ -2914,6 +2914,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <div id="hitFlash"></div>
   <div class="battle-main-area">
     <div class="opponent-area">
+      <div class="opp-zone-counts" id="p2ZoneCounts" style="font-size:12px;color:#cde;padding:2px 4px;">对手 手牌×0 · 区域×0</div>
       <div class="permanent-slots" id="p2PermanentSlots"></div>
       <div class="buff-bar" id="p2BuffBar"></div>
     </div>
@@ -5974,8 +5975,15 @@ function applyChainCard(player,pick,effect,done){
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     (me.grave=me.grave||[]).push(c);
+    // 投掷/移动窗口的连锁用卡同样计入“使用”：技能一次记录 + 进墓统一时点（神乐铃叠层/星奈回收等）
+    if (typeof recordSkillUse === 'function') recordSkillUse(player, c);
+    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, c, 'use');
   }
-  function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI(); setTimeout(done,250); }
+  function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI();
+    // 用卡后角色被动钩子（惠/爱德华/小春/予水着SP等）统一走标准管线，投掷阶段用卡不再漏计
+    if (typeof postUsePassiveHooks === 'function') { postUsePassiveHooks(player, c, function(){ setTimeout(done,250); }); }
+    else setTimeout(done,250);
+  }
   function __orig(){ return (effect.moveAmount!==undefined&&effect.moveAmount!==null)?effect.moveAmount:null; } // 锁定时的原始值（结算前不被改动）
   // 位移增益主动卡（能量饮料）：自己在移动将要执行前发动，本次位移x2（最多+6格）
   if (pick.selfBuff) {
@@ -7178,6 +7186,7 @@ function aiTurn() {
     setTimeout(function() {
       battleState.phase = 'roll';
       battleState._diceRolledThisPhase = false;
+      addBattleLog('phase', '进入投骰阶段（AI）');
       updateBattleUI();
       
       setTimeout(function() {
@@ -7196,6 +7205,7 @@ function aiTurn() {
           // 主要阶段2：AI继续使用卡牌
           setTimeout(function() {
             battleState.phase = 'main2';
+            addBattleLog('phase', '进入主要阶段2（AI）：可继续使用手牌');
             updateBattleUI();
             
             aiMaybeUseEvent(function() {
@@ -8589,6 +8599,14 @@ function updateBattleUI() {
     if (p1CostEl) p1CostEl.textContent = battleState.p1.cost;
     if (p2SyncEl) p2SyncEl.textContent = battleState.p2.sync;
     if (p2CostEl) p2CostEl.textContent = battleState.p2.cost;
+    // 对手区域可见计数：手牌张数 / 效果处理区（含盖伏）张数
+    var __p2zc = document.getElementById('p2ZoneCounts');
+    if (__p2zc) {
+      var __p2h = battleState.p2.hand.length;
+      var __p2perm = (battleState.p2.permanent || []).length;
+      var __p2fd = (battleState.p2.faceDownCards || []).length;
+      __p2zc.textContent = '对手 手牌×' + __p2h + ' · 区域×' + (__p2perm + __p2fd) + (__p2fd ? '（含盖伏×' + __p2fd + '）' : '');
+    }
     flashStat('p1Sync', battleState.p1.sync);
     flashStat('p2Sync', battleState.p2.sync);
     
@@ -10690,7 +10708,7 @@ function computeDamageValue(user, target, opt) {
   var attr = opt.judge ? (opt.attr || null) : __rawAttr;
   var __bAttr = opt.judge ? null : __rawAttr;
   var defAttr = (typeof getTeamAttribute === 'function') ? getTeamAttribute(target) : (tp.captain && tp.captain.attribute) || null;
-  var kind = opt.judge ? null : (opt.kind || __kindOf(__bAttr || ''));
+  var kind = opt.judge ? null : (ap._yuMizugiPassive ? 'sanity' : (opt.kind || __kindOf(__bAttr || ''))); // 予(水着)被动：kind 同步变为理智，使理智伤害+1等按 kind 判定的增益正常生效
   // 括号外①：属性克制，每段+1（被克制不减少）；混沌规则在 __attrBeats 内
   // 规则：判定伤害不吃属性克制增伤（含克制伤害+N、领域克制强化），故 opt.judge 时整段跳过
   if (!opt.judge && __bAttr && defAttr && typeof __attrBeats === 'function' && __attrBeats(__bAttr, defAttr)) {
@@ -14651,7 +14669,7 @@ function postUsePassiveHooks(user, card, done) {
     }
   }
 
-  // 爱德华：与上一张同费回 1/2/3 音韵（必发）
+  // 爱德华：与上一张同费回 1/2/3 音韵（必发）；单回合内每触发3次，可以破坏一名玩家的一张手卡
   if (p._edwardPassive && card.cost !== undefined) {
     if (p._edwardLastCost === card.cost) {
       p._edwardTriggerCount = (p._edwardTriggerCount || 0) + 1;
@@ -14660,7 +14678,37 @@ function postUsePassiveHooks(user, card, done) {
           var refund = Math.min(cnt, 3);
           p.cost = Math.min(p.cost + refund, p.maxCost);
           addBattleLog(user, '【爱德华被动·帽子戏法】同费回复' + refund + '音韵（第' + cnt + '次）');
-          next();
+          if (cnt % 3 !== 0) { next(); return; }
+          // 每触发3次：可以破坏一名玩家的一张手卡（玩家弹窗选人+选卡，AI 自动破坏对手）
+          function __doDestroy(who) {
+            var __wp = battleState[who];
+            if (!__wp || !(__wp.hand || []).length) { addBattleLog(user, '【爱德华被动】' + (who === 'p1' ? '你' : '对手') + '没有手卡，无法破坏'); next(); return; }
+            if (user === 'p1' && typeof pickFromList === 'function') {
+              pickFromList('p1', __wp.hand.map(function (c, i) { return { card: c, zone: 'hand', index: i }; }), '爱德华被动：破坏' + (who === 'p1' ? '自己' : '对手') + '一张手卡', 1, function (picks) {
+                if (picks && picks.length) {
+                  var __ix = __wp.hand.indexOf(picks[0].card); if (__ix >= 0) __wp.hand.splice(__ix, 1);
+                  (__wp.grave = __wp.grave || []).push(picks[0].card);
+                  if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, picks[0].card, 'effect');
+                  addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + '手卡【' + picks[0].card.name + '】');
+                }
+                if (typeof updateBattleUI === 'function') updateBattleUI();
+                next();
+              }, true);
+            } else {
+              var __c0 = __wp.hand[0]; __wp.hand.splice(0, 1);
+              (__wp.grave = __wp.grave || []).push(__c0);
+              if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, __c0, 'effect');
+              addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + '手卡【' + __c0.name + '】');
+              next();
+            }
+          }
+          if (user === 'p1') {
+            showChoiceModal('爱德华被动·别眨眼！', '本回合第' + cnt + '次同费触发', '可以破坏一名玩家的一张手卡', ['破坏对手一张手卡', '破坏自己一张手卡', '不发动'], function (o) {
+              if (o === 0) __doDestroy('p2');
+              else if (o === 1) __doDestroy('p1');
+              else next();
+            });
+          } else __doDestroy('p1');
         });
       })(p._edwardTriggerCount);
     }
@@ -15026,9 +15074,9 @@ function getSpecialHandler(card) {
   var t = card.effect || card.text || '';
   var h = SPECIAL_CARD_HANDLERS[n] || null;
   if (!h && (t.indexOf('破坏其区域内的一张卡') >= 0 || t.indexOf('破坏其区域内的1张卡') >= 0)) h = SPECIAL_CARD_HANDLERS['破坏'];
-  // 双面连锁卡（幸运护符/颠倒骰子）：主动效果带方向选择/复合语义（抵消+前进、自我方向选择），
-  // 必须走 SPECIAL 特判保证卡面语义完整（结构化层只覆盖其连锁响应面）
-  if (n === '幸运护符' || n === '颠倒骰子') return h;
+  // 双面连锁卡（幸运护符/颠倒骰子/特制手套）：主动效果带方向选择/复合语义（抵消+前进、自我方向选择、三选一检索），
+  // 必须走 SPECIAL 特判保证卡面语义完整且主要阶段可直接使用（结构化层只覆盖其连锁响应面）
+  if (n === '幸运护符' || n === '颠倒骰子' || n === '特制手套') return h;
   // 架构闸：结构化指令层能精确编译的卡，优先走指令层；旧特判仅对指令层无法编译(null)的卡兜底，杜绝旧硬编码覆盖新卡面
   if (h && typeof compileStepOps === 'function') {
     var __main = (typeof getMainEffectText === 'function') ? getMainEffectText(t) : t;
