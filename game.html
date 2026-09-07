@@ -6313,6 +6313,8 @@ function startTurn() {
   battleState[player]._koharuMoveCount = 0; // 小春SP单回合移动累计，每回合清零
   battleState[player]._kaedeMizugiMove = 0; // 枫(水着)被动单回合移动累计
   battleState[player]._kaedeMizugiRecycledTurn = false; // 枫(水着)被动单回合回收一次标记
+  battleState[player]._tomaMoveCount = 0; // 冬马被动单回合移动累计
+  battleState[player]._tomaItemTurn = false; // 冬马被动Lv7每回合首次道具触发标记
   
   // 重置每回合被动标记
   battleState[player]._kasumiUsedThisTurn = false;
@@ -6938,6 +6940,20 @@ function accumulateMovePassives(player, amount, oldPos) {
       if (passed && (p._xianji || 0) < 6) { p._xianji = (p._xianji || 0) + 1; addBattleLog(player, '【小春被动·侦探直觉】经过其他玩家，获得1点先机（当前' + p._xianji + '点）'); }
     }
   }
+  // 现实间冬马被动·分析大师的游刃有余：自己回合内每累计移动N格，对一名其他玩家造成M点无序伤害
+  // （Lv1：5格/1点；Lv4：4格/2点；Lv7：3格/3点——随等级成长）
+  if (p._tomaPassive) {
+    var __tl = p.level || 1;
+    var __tThr = __tl >= 7 ? 3 : (__tl >= 4 ? 4 : 5);
+    var __tDmg = __tl >= 7 ? 3 : (__tl >= 4 ? 2 : 1);
+    p._tomaMoveCount = (p._tomaMoveCount || 0) + amt;
+    while (p._tomaMoveCount >= __tThr) {
+      p._tomaMoveCount -= __tThr;
+      var __tFoe = player === 'p1' ? 'p2' : 'p1';
+      dealDamageWithResponse(__tFoe, __tDmg, '冬马被动·移动累计', null, '无序', player);
+      addBattleLog(player, '【冬马被动·分析大师】累计移动' + __tThr + '格（Lv' + __tl + '），对其他玩家造成' + __tDmg + '点无序伤害');
+    }
+  }
   // 星奈(水着)被动·戏水：单次移动位移量>5格 → 对一名其他玩家造成2段1点理智属性伤害（无回合次数限制）
   if (p._senaPassive && amt > 5) {
     var __sfoe = player === 'p1' ? 'p2' : 'p1';
@@ -7130,6 +7146,8 @@ function rollPlayerDice(player) {
   p._hinaMoveUsedThisAction = false; // 羽奈被动：新行动重置[移动]道具触发标记
   // 里绪(水着)SP：首次投掷后回复与点数相同的音韵值
   if (p._rioMizugiSP && !p._rioMizugiFirstRoll) { p._rioMizugiFirstRoll = true; p.cost = Math.min(p.cost + d, p.maxCost); addBattleLog(player, '【里绪(水着)SP】首次投掷回复' + d + '点音韵值'); }
+  // 予(普通)被动·Lv7追加：每进行一次投掷后回复自身1点音韵值
+  if (p._yuPassive && (p.level || 1) >= 7) { recoverCost(player, 1, '予被动Lv7'); addBattleLog(player, '【入间予被动·Lv7】每次投掷后回复1点音韵值'); }
   return d;
 }
 // 统一进入“额外掷骰阶段”（Twice/小春/Again 等）：始终在本回合内插入，绝不拖到下回合。玩家停在 roll 阶段等点投骰；AI 自动补投。
@@ -7612,6 +7630,7 @@ function endTurn() {
   // 单回合移动累计：回合结束立即归零（里绪/直尺）
   battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
   battleState.p1._kaedeMizugiMove = 0; battleState.p1._kaedeMizugiRecycledTurn = false;
+  battleState.p1._tomaMoveCount = 0; battleState.p1._tomaItemTurn = false;
   // 结衣被动：对方被移出游戏的卡（直到本回合结束）回合结束返回原区域
   __restoreTempExiled('p2');
 
@@ -8119,6 +8138,7 @@ function aiEndTurn() {
   // 单回合移动累计：AI回合结束立即归零（里绪/直尺）
   battleState.p2._rioMoveCount = 0; battleState.p2._zhichiMoveCount = 0; battleState.p2._koharuMoveCount = 0;
   battleState.p2._kaedeMizugiMove = 0; battleState.p2._kaedeMizugiRecycledTurn = false;
+  battleState.p2._tomaMoveCount = 0; battleState.p2._tomaItemTurn = false;
   // 结衣被动：我方被移出游戏的卡（直到本回合结束）回合结束返回原区域
   __restoreTempExiled('p1');
   function __aiEndTail() {
@@ -8149,6 +8169,16 @@ function aiEndTurn() {
   __aiEndTail();
 }
 
+// 游戏结束时：把尚未使用的蓝图复制卡全部还原为【魔法蓝图】卡面，防止对局结束后手牌/卡组残留“被复制的卡”导致bug
+function __revertAllBlueprintCopies() {
+  if (!battleState || typeof __revertBlueprintCopy !== 'function') return;
+  ['p1', 'p2'].forEach(function (w) {
+    var wp = battleState[w]; if (!wp) return;
+    ['hand', 'deck', 'grave', 'permanent', 'faceDownCards', 'removed', 'removedFromGame'].forEach(function (z) {
+      (wp[z] || []).forEach(function (c) { if (c && c._blueprintCopy) __revertBlueprintCopy(c); });
+    });
+  });
+}
 function checkBattleEnd() {
   if (battleState._over) return true; // 已判定过：不再重复弹窗/重复推进
   var isRL = (roguelikeState && roguelikeState._isRoguelike);
@@ -8167,6 +8197,7 @@ function checkBattleEnd() {
   // 同步值归零判定（常规获胜）
   if (battleState.p1.sync <= 0) {
     battleState._over = true;
+    __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(false); return true; }
     showBattleResult(false, __oppNm + ' 获胜', '你的同步值归零，败北了。再挑战一次吧！', __endStats());
     showScreen('mainMenu'); __olEnd();
@@ -8174,6 +8205,7 @@ function checkBattleEnd() {
   }
   if (battleState.p2.sync <= 0) {
     battleState._over = true;
+    __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
     showBattleResult(true, '你获胜了！', __oppNm + ' 的同步值归零。漂亮的胜利！', __endStats());
     showScreen('mainMenu'); __olEnd();
@@ -8182,6 +8214,7 @@ function checkBattleEnd() {
   // 入迷值归零判定（破局获胜）
   if (battleState.p1.fascination <= 0) {
     battleState._over = true;
+    __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(false); return true; }
     showBattleResult(false, __oppNm + ' 破局获胜', '你的入迷值归零。破局失败……', __endStats());
     showScreen('mainMenu'); __olEnd();
@@ -8189,6 +8222,7 @@ function checkBattleEnd() {
   }
   if (battleState.p2.fascination <= 0) {
     battleState._over = true;
+    __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
     showBattleResult(true, '破局获胜！', __oppNm + ' 的入迷值归零。你以破局方式赢下了对局！', __endStats());
     showScreen('mainMenu'); __olEnd();
@@ -14061,6 +14095,22 @@ function processCharacterPassives(player) {
         p._ruriMizugiPassive = true;
       }
       
+      // 冬马被动【分析大师的游刃有余】（仅队长）：自己回合内每累计移动5格（Lv4/7→4/3格）对一名玩家造成1点（Lv4/7→2/3点）无序伤害；Lv7追加：每回合首次使用道具卡也能触发
+      if (charName.indexOf('冬马') >= 0) {
+        p._tomaPassive = true; p._tomaMoveCount = 0; p._tomaItemTurn = false;
+        addBattleLog(player, '【现实间冬马被动·分析大师】累计移动造无序伤害（Lv4/7成长），Lv7每回合首次用道具卡也能触发');
+      }
+      
+      // 予(普通)被动【解构与求索】（仅队长）：初始20%控骰；编组光太郎/葵/莉莉/霞任一+20%（可叠加）；编组琉璃/里绪/枫任一+40%（不可叠加）；Lv7追加：每次投掷后回1音韵
+      if (charName.indexOf('予') >= 0 && charName.indexOf('水着') < 0) {
+        p._yuPassive = true;
+        var __dicePct = 0.2, __teamAll = (deckConfig[player].chars || []).filter(Boolean);
+        ['光太郎', '葵', '莉莉', '霞'].forEach(function (k) { if (__teamAll.some(function (c) { return c && c.name && c.name.indexOf(k) >= 0; })) __dicePct += 0.2; });
+        if (__teamAll.some(function (c) { return c && c.name && /琉璃|里绪|枫/.test(c.name); })) __dicePct += 0.4;
+        p._diceControlBonus = (p._diceControlBonus || 0) + __dicePct;
+        addBattleLog(player, '【入间予被动·解构与求索】控骰+' + Math.round(__dicePct * 100) + '%（初始20%+队友加成），Lv7起每次投掷后回1音韵');
+      }
+      
       // 宁雨清被动（其他角色的被动可以继续添加）
     }
     
@@ -16223,6 +16273,20 @@ function postUsePassiveHooks(user, card, done) {
     __add(user, true, '小春被动·[移动]道具先机', function (next) {
       if ((p._xianji || 0) < 6) { p._xianji = (p._xianji || 0) + 1; addBattleLog(user, '【小春被动·侦探直觉】使用[移动]道具卡，获得1点先机（当前' + p._xianji + '点）'); }
       else addBattleLog(user, '【小春被动】先机已达上限6点');
+      next();
+    });
+  }
+
+  // 冬马被动·Lv7追加：每回合首次使用道具卡也能触发一次“移动累计造伤”（按当前等级阈值/伤害结算）
+  if (p._tomaPassive && (p.level || 1) >= 7 && !p._tomaItemTurn && /item/.test(card._category || '')) {
+    p._tomaItemTurn = true;
+    __add(user, true, '冬马被动·Lv7道具触发', function (next) {
+      var __tl2 = p.level || 7;
+      var __tThr2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 4 : 5);
+      var __tDmg2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 2 : 1);
+      var __tFoe2 = user === 'p1' ? 'p2' : 'p1';
+      dealDamageWithResponse(__tFoe2, __tDmg2, '冬马被动·Lv7道具触发', null, '无序', user);
+      addBattleLog(user, '【冬马被动·Lv7】使用道具卡触发：对其他玩家造成' + __tDmg2 + '点无序伤害（本回合首次）');
       next();
     });
   }
