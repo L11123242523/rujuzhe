@@ -2915,6 +2915,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <div class="battle-main-area">
     <div class="opponent-area">
       <div class="opp-zone-counts" id="p2ZoneCounts" style="font-size:12px;color:#cde;padding:2px 4px;">对手 手牌×0 · 区域×0</div>
+      <div style="display:flex;gap:6px;padding:2px 4px;flex-wrap:wrap;">
+        <button onclick="showOppZone('grave')" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#cde;font-size:11px;padding:2px 8px;cursor:pointer;">⚰️ 墓地 <span id="p2GraveN">0</span></button>
+        <button onclick="showOppZone('removed')" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#cde;font-size:11px;padding:2px 8px;cursor:pointer;">🚫 移出区 <span id="p2RemovedN">0</span></button>
+      </div>
       <div class="permanent-slots" id="p2PermanentSlots"></div>
       <div class="buff-bar" id="p2BuffBar"></div>
     </div>
@@ -8629,6 +8633,10 @@ function updateBattleUI() {
       var __p2fd = (battleState.p2.faceDownCards || []).length;
       __p2zc.textContent = '对手 手牌×' + __p2h + ' · 区域×' + (__p2perm + __p2fd) + (__p2fd ? '（含盖伏×' + __p2fd + '）' : '');
     }
+    var __p2g = document.getElementById('p2GraveN');
+    if (__p2g) __p2g.textContent = battleState.p2.grave.length;
+    var __p2r = document.getElementById('p2RemovedN');
+    if (__p2r) __p2r.textContent = ((battleState.p2.removed || []).length + (battleState.p2.removedFromGame || []).length);
     flashStat('p1Sync', battleState.p1.sync);
     flashStat('p2Sync', battleState.p2.sync);
     
@@ -8698,6 +8706,16 @@ function updateBattleUI() {
     
     var phaseNames = { prepare: '准备阶段', main1: '主要阶段1', roll: '投骰阶段', main2: '主要阶段2', end: '结束阶段' };
     var phaseInfoEl = document.getElementById('phaseInfo');
+    // 阶段保护（用户口径）：投骰完成且效果栈已清空、无连锁结算时，若仍停在投掷阶段则自动进入主要阶段2，
+    // 杜绝任何路径漏跳主要阶段2（投掷阶段 → 主要阶段2 → 结束阶段）
+    try {
+      if (battleState.currentPlayer === 'p1' && battleState.phase === 'roll' && battleState._diceRolledThisPhase &&
+          !(battleState.effectStack || []).length &&
+          !((typeof effectEngine !== 'undefined') && effectEngine && (effectEngine._chainLock || effectEngine._resolveDepth > 0))) {
+        battleState.phase = 'main2';
+        addBattleLog('phase', '进入主要阶段2：可继续使用手牌');
+      }
+    } catch (e) {}
     if (phaseInfoEl) phaseInfoEl.textContent = phaseNames[battleState.phase] || battleState.phase;
     
     // 回合切换横幅（currentPlayer 或回合数变化时）
@@ -12707,6 +12725,14 @@ function showGraveList(zone) {
   modal.classList.add('active');
 }
 
+// 查看对手墓地/移出游戏区的具体卡（只读查看，不可选择）
+function showOppZone(zone) {
+  if (!battleState || !battleState.p2) return;
+  if (zone !== 'grave' && zone !== 'removed') return;
+  var title = '对手' + (zone === 'grave' ? '墓地' : '移出游戏区');
+  if (typeof showTargetCards === 'function') showTargetCards('p2', zone, title, false, null);
+}
+
 // ========== 目标方卡牌查看/选择功能 ==========
 var pendingTargetCardCallback = null;
 
@@ -12720,7 +12746,7 @@ function showTargetCards(player, zone, title, selectable, callback) {
   else if (zone === 'permanent') cards = p.permanent;
   else if (zone === 'grave') cards = p.grave;
   else if (zone === 'deck') cards = p.deck;
-  else if (zone === 'removed') cards = p.removed || [];
+  else if (zone === 'removed') cards = (p.removed || []).concat(p.removedFromGame || []);
   
   // AI 自动结算：可选类直接挑费用最高的回调；纯查看类直接跳过不弹窗
   if (effectEngine.autoResolve) {
