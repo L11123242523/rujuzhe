@@ -9,10 +9,10 @@ compatibility_date = "2025-09-01"
 name = "ROOMS"
 class_name = "RoomObject"
 
-# 首次部署需要声明 DO 迁移（创建该类）
+# 首次部署需要声明 DO 迁移（免费档要求 SQLite 后端：new_sqlite_classes）
 [[migrations]]
 tag = "v1"
-new_classes = ["RoomObject"]
+new_sqlite_classes = ["RoomObject"]
 
 [observability]
 enabled = true

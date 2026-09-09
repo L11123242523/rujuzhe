@@ -2807,8 +2807,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
   <div class="ol-wrap">
     <h2>🌐 联机对战</h2>
-    <div class="ol-sub">本地试玩：先运行 <code>node online_server.js</code>，用 <code>http://127.0.0.1:8080</code> 打开本页，服务器栏留空即可（自动连接 ws://localhost:2567）。线上（https 页面）必须部署中继服务器并在服务器栏填 <code>wss://你的域名</code>。双方同权威种子双机推演：一人创建房间，把房号发给另一人加入，双方准备后开局。</div>
-    <div class="ol-row"><label>服务器</label><input id="olServer" placeholder="留空=与网页同源；本地调试 ws://localhost:2567"></div>
+    <div class="ol-sub">异地联机：服务器栏<strong>留空即默认官方中继</strong>（Cloudflare），一人创建房间得到4位房号，把房号发给好友，好友输入房号加入，双方准备后开局（同权威种子双机推演）。本地调试：运行 <code>node online_server.js</code>，用 <code>http://127.0.0.1:8080</code> 打开本页，服务器栏同样留空（自动连 ws://localhost:2567）。自建中继时在服务器栏填 <code>wss://你的域名</code>。</div>
+    <div class="ol-row"><label>服务器</label><input id="olServer" placeholder="留空=官方中继(Cloudflare)；本地调试自动 ws://localhost:2567"></div>
     <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
     <div class="ol-row">
       <button class="ol-btn" onclick="Online.createRoom()">① 创建房间</button>
@@ -3703,14 +3703,11 @@ var Online = {
   _wsUrl:function(raw){
     var v=(raw||'').trim();
     if(!v){
-      // 留空：本地调试默认本地中继服务器；线上(https 非本地)必须显式填写，返回空并提示
-      if(location.protocol==='https:' && !(location.hostname==='127.0.0.1'||location.hostname==='localhost')){
-        return '';
-      }
+      // 本地调试默认本地中继；线上（GitHub Pages 等）默认官方 Cloudflare 中继，留空即可直接联机
       if(location.hostname==='127.0.0.1'||location.hostname==='localhost'){
         return (location.protocol==='https:') ? 'wss://localhost:2567' : 'ws://localhost:2567';
       }
-      return 'ws://'+location.host;
+      return 'wss://rujuzhe-relay.1457288062.workers.dev';
     }
     v=v.replace(/^https?:\/\//,function(m){ return m==='https://'?'wss://':'ws://'; });
     if(/^wss?:\/\//.test(v)) return v.replace(/\/+$/,'');
@@ -3719,7 +3716,7 @@ var Online = {
     return proto+v.replace(/\/+$/,'');
   },
   status:function(t){ var el=document.getElementById('olStatus'); if(el) el.textContent=t; },
-  refreshLobby:function(){ this.status('填写中继服务器地址（留空=与网页同源；本地调试填 ws://localhost:2567；线上部署填 wss://你的服务器域名），创建房间或输入房号加入。'); },
+  refreshLobby:function(){ this.status('服务器栏留空即默认官方中继（Cloudflare），直接创建房间或输入对方房号加入即可；自建中继才需填写 wss://地址。'); },
   _name:function(){ var el=document.getElementById('olName'); var n=el?el.value.trim():''; return n||('玩家'+Math.floor(Math.random()*900+100)); },
   _send:function(obj){
     if(this.ws && this.ws.readyState===1){ try{ this.ws.send(JSON.stringify(obj)); return true; }catch(e){} }
