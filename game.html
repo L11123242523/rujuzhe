@@ -368,6 +368,47 @@ body {
   cursor: pointer;
 }
 .battle-main-area { display: flex; flex-direction: column; gap: 10px; }
+/* ===== 新对战布局（用户指定）：最下手牌区 → 效果结算区 → 状态栏 → 3D地图 ===== */
+#battleScreen .battle-main-area > .map3d-wrap { order: 1; }
+#battleScreen .battle-main-area > .center-area { order: 2; }
+#battleScreen .battle-main-area > .player-area { order: 3; }
+#battleScreen .battle-main-area > .opponent-area { order: 0; }
+.map3d-wrap {
+  position: relative; width: 100%; flex: 1 1 auto; min-height: 240px; height: 38vh;
+  border-radius: 14px; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #1b2b4a 0%, #0b1220 70%);
+  border: 1px solid rgba(120,160,255,.22);
+}
+.map3d-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.map3d-topbar {
+  position: absolute; left: 10px; right: 10px; top: 8px; z-index: 3;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; pointer-events: none;
+}
+.map3d-topbar > * { pointer-events: auto; }
+.map3d-title { font-size: 12.5px; color: #cfe0ff; font-weight: 700; text-shadow: 0 1px 4px #000; }
+.map3d-btn {
+  background: rgba(20,30,50,.82); border: 1px solid rgba(120,160,255,.35); color: #dbe7ff;
+  border-radius: 9px; padding: 5px 10px; font-size: 12px; cursor: pointer; backdrop-filter: blur(6px);
+}
+.map3d-btn:hover { background: rgba(40,60,100,.9); }
+.map3d-hint {
+  position: absolute; left: 10px; bottom: 8px; z-index: 3;
+  font-size: 11px; color: rgba(200,215,240,.62); text-shadow: 0 1px 3px #000; pointer-events: none;
+}
+.map3d-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px; }
+.map3d-tip {
+  position: absolute; z-index: 4; pointer-events: none; display: none;
+  background: rgba(10,16,28,.94); border: 1px solid rgba(120,160,255,.45); color: #e8f0ff;
+  border-radius: 8px; padding: 6px 9px; font-size: 12px; line-height: 1.35; max-width: 200px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.5);
+}
+/* 3D 地图可用时隐藏 2D 小地图（避免与战斗日志在右上角互相遮挡）；回退 2D 时自动恢复 */
+body.map3d-on .minimap-container { display: none !important; }
+/* 战斗日志改到左下角，避开右上角的地图控件/小地图 */
+.battle-log-panel { right: auto !important; left: 16px; }
+@media (max-width: 900px) {
+  .battle-log-panel { left: 8px; right: 8px; width: auto !important; }
+}
 .opponent-area {
   display: flex; justify-content: center;
   padding: 12px;
@@ -1886,7 +1927,10 @@ body {
     min-width: 70px;
   }
   .hand-card .card-cost { width: 22px; height: 22px; font-size: 12px; }
-  .hand-card .card-name { font-size: 10px; }
+  /* 修正：手牌真实类名是 .hand-card-name / .hand-card-cost（原 .card-name/.card-cost 是不存在的类，导致移动端字号规则失效） */
+  .hand-card .hand-card-name { font-size: 10px; }
+  .hand-card .hand-card-cost { width: 20px; height: 20px; font-size: 11px; line-height: 20px; }
+  .hand-card .hand-card-img { width: 100%; height: auto; aspect-ratio: 5 / 6; object-fit: cover; }
   .hand-card .card-type { font-size: 9px; }
   
   /* 侧边区域（牌组/墓地/永续区） */
@@ -2926,13 +2970,23 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
       <div class="permanent-slots" id="p2PermanentSlots"></div>
       <div class="buff-bar" id="p2BuffBar"></div>
     </div>
-    <!-- 简化横向地图（只显示玩家所在行） -->
-    <div class="battle-map-container compact">
-      <div class="zone-label">🗺️ 当前位置（点击右上角小地图查看完整地图）</div>
-      <div class="compact-map" id="compactMap"></div>
-      <div class="map-position-info">
-        <span class="pos-p1">你: 第<span id="p1PosNum">0</span>格【<span id="p1PosName">起点</span>】</span>
-        <span class="pos-p2">AI: 第<span id="p2PosNum">0</span>格【<span id="p2PosName">起点</span>】</span>
+    <!-- 3D 地图（默认斜俯视角，可切上帝视角） -->
+    <div class="battle-map-container map3d-wrap">
+      <div id="map3dHost" style="position:absolute;inset:0;"></div>
+      <div class="map3d-topbar">
+        <span class="map3d-title">🗺️ 环状地图</span>
+        <button class="map3d-btn" id="map3dViewBtn" onclick="Map3D.toggleView()">🎥 上帝视角</button>
+        <button class="map3d-btn" onclick="Map3D.focusPlayer('p1')">🔍 定位我</button>
+        <button class="map3d-btn" onclick="toggleMinimapExpand()">🧭 小地图</button>
+      </div>
+      <div class="map3d-hint" id="map3dHint">拖动旋转 · 滚轮缩放 · 点击格子查看</div>
+      <div class="map3d-tip" id="map3dTip"></div>
+      <div class="map3d-fallback" id="map3dFallback" style="display:none;">
+        <div class="compact-map" id="compactMap"></div>
+        <div class="map-position-info">
+          <span class="pos-p1">你: 第<span id="p1PosNum">0</span>格【<span id="p1PosName">起点</span>】</span>
+          <span class="pos-p2">AI: 第<span id="p2PosNum">0</span>格【<span id="p2PosName">起点</span>】</span>
+        </div>
       </div>
     </div>
     
@@ -3503,6 +3557,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 }));
 /* ===ENGINE-CORE-END=== */
 </script>
+<script src="vendor/three.min.js"></script>
 <script>
 // 全局数据
 var allCards = [];
@@ -3554,6 +3609,446 @@ var MAP_TILES = [
   {id:40, type:'bus', name:'公交站', x:96, y:80},
   {id:41, type:'gift', name:'馈赠格', x:96, y:90}
 ];
+
+/* ============================================================
+   3D 地图模块（Three.js）：
+   - 42 格环状棋盘（按 MAP_TILES 的 x/y 坐标还原布局）
+   - 玩家用国际象棋棋子表示（p1=白方国王，p2=黑方国王）
+   - 默认斜俯视角（可拖动旋转/滚轮缩放）；一键切上帝视角（正交俯视）
+   - 无 WebGL / 无 three.js 时自动回退到原 2D 横向地图
+   ============================================================ */
+var Map3D = (function () {
+  var T = null;                 // THREE 引用
+  var host = null, renderer = null, scene = null, camPersp = null, camOrtho = null;
+  var mode = 'persp';
+  var tiles = [], pieces = {}, raycaster = null, pointer = null;
+  var hoverTile = null, camTarget = null, camDist = 26, camYaw = Math.PI * 0.25, camPitch = 0.95;
+  var dragging = false, lastX = 0, lastY = 0, moved = 0;
+  var ready = false, failed = false, animT = 0, rafId = 0;
+  var tileGeo = null, tileMat = {}, labelCache = {};
+  var SCALE = 0.115;            // 地图百分比 → 世界单位
+  var TILE_R = 0.62, TILE_H = 0.34;
+
+  var TILE_COLOR = {
+    start: 0x3ddc84, gift: 0xffb84d, item: 0x4dc3ff, again: 0xb388ff,
+    bus: 0xff8a65, card: 0x64b5f6, subway: 0x7986cb, story: 0xba68c8,
+    power: 0xffd54f, inspire: 0x81c784, read: 0x4db6ac, shrine: 0xff7043,
+    game: 0xf06292, airport: 0x90a4ae
+  };
+  var TILE_ICON = {
+    start: '🏁', gift: '🎁', item: '🔄', again: '↩️', bus: '🚌', card: '🃏',
+    subway: '🚇', story: '📖', power: '⚡', inspire: '💡', read: '📚',
+    shrine: '⛩️', game: '🎮', airport: '✈️'
+  };
+
+  function worldPos(tile) {
+    // 地图坐标 x/y 为 0~100 百分比；转成以中心为原点的世界坐标（X-Z 平面）
+    return { x: (tile.x - 50) * SCALE, z: (tile.y - 50) * SCALE };
+  }
+  function isAvailable() {
+    return typeof THREE !== 'undefined' && !!THREE.WebGLRenderer;
+  }
+  function fail(reason) {
+    failed = true;
+    console.warn('3D 地图不可用，回退 2D：', reason);
+    try { document.body.classList.remove('map3d-on'); } catch (e) {}
+    var fb = document.getElementById('map3dFallback');
+    if (fb) fb.style.display = 'flex';
+    var hint = document.getElementById('map3dHint');
+    if (hint) hint.style.display = 'none';
+    try { renderBattleMap(); } catch (e) {}
+  }
+
+  /* ---------- 棋子：用基础几何拼一个"国王"造型 ---------- */
+  function buildKing(isWhite) {
+    var g = new T.Group();
+    var bodyMat = new T.MeshStandardMaterial({
+      color: isWhite ? 0xf2f5fa : 0x232a38,
+      metalness: 0.35, roughness: 0.42,
+      emissive: isWhite ? 0x223044 : 0x000000,
+      emissiveIntensity: isWhite ? 0.25 : 0.1
+    });
+    var goldMat = new T.MeshStandardMaterial({ color: isWhite ? 0xffd76a : 0xd9a63c, metalness: 0.85, roughness: 0.3 });
+
+    function add(geo, mat, y, ry) {
+      var m = new T.Mesh(geo, mat);
+      m.position.y = y; if (ry) m.rotation.y = ry;
+      m.castShadow = true; m.receiveShadow = false;
+      g.add(m); return m;
+    }
+    // 底座
+    add(new T.CylinderGeometry(0.42, 0.5, 0.16, 24), bodyMat, 0.08);
+    add(new T.CylinderGeometry(0.34, 0.42, 0.12, 24), goldMat, 0.2);
+    // 身体
+    add(new T.CylinderGeometry(0.22, 0.32, 0.52, 24), bodyMat, 0.5);
+    // 领口
+    add(new T.TorusGeometry(0.24, 0.05, 10, 24), goldMat, 0.78, Math.PI / 2);
+    // 头
+    add(new T.SphereGeometry(0.21, 24, 18), bodyMat, 0.96);
+    // 王冠
+    var crown = add(new T.CylinderGeometry(0.2, 0.23, 0.16, 20), goldMat, 1.12);
+    // 王冠十字
+    add(new T.BoxGeometry(0.05, 0.2, 0.05), goldMat, 1.28);
+    add(new T.BoxGeometry(0.16, 0.05, 0.05), goldMat, 1.3);
+    return g;
+  }
+  /* 棋子顶上的名牌（用 canvas 贴图，避免额外字体依赖） */
+  function buildTag(text, color) {
+    var cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 96;
+    var ctx = cv.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = 'rgba(8,12,22,0.82)';
+    ctx.strokeStyle = color; ctx.lineWidth = 6;
+    var r = 26;
+    ctx.beginPath();
+    ctx.moveTo(r, 3); ctx.lineTo(256 - r, 3); ctx.quadraticCurveTo(253, 3, 253, 3 + r);
+    ctx.lineTo(253, 93 - r); ctx.quadraticCurveTo(253, 93, 256 - r, 93);
+    ctx.lineTo(r, 93); ctx.quadraticCurveTo(3, 93, 3, 93 - r);
+    ctx.lineTo(3, 3 + r); ctx.quadraticCurveTo(3, 3, r, 3);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = color; ctx.font = 'bold 46px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 50);
+    var tex = new T.CanvasTexture(cv);
+    var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    spr.scale.set(1.5, 0.56, 1);
+    return spr;
+  }
+
+  /* ---------- 场景构建 ---------- */
+  function buildScene() {
+    scene = new T.Scene();
+    scene.background = new T.Color(0x0a1120);
+    scene.fog = new T.Fog(0x0a1120, 22, 46);
+
+    // 灯光
+    scene.add(new T.AmbientLight(0xbcd2ff, 0.72));
+    var hemi = new T.HemisphereLight(0xcfe0ff, 0x0a1020, 0.55); scene.add(hemi);
+    var dir = new T.DirectionalLight(0xffffff, 1.15);
+    dir.position.set(8, 16, 10);
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(1024, 1024);
+    var d = 10;
+    dir.shadow.camera.left = -d; dir.shadow.camera.right = d;
+    dir.shadow.camera.top = d; dir.shadow.camera.bottom = -d;
+    dir.shadow.camera.near = 1; dir.shadow.camera.far = 40;
+    scene.add(dir);
+    var rim = new T.DirectionalLight(0x6ea8ff, 0.5); rim.position.set(-9, 7, -8); scene.add(rim);
+
+    // 棋盘底板
+    var board = new T.Mesh(
+      new T.BoxGeometry(13.6, 0.5, 13.6),
+      new T.MeshStandardMaterial({ color: 0x121a2c, metalness: 0.2, roughness: 0.85 })
+    );
+    board.position.y = -0.28; board.receiveShadow = true; scene.add(board);
+    // 边框高光
+    var frame = new T.Mesh(
+      new T.BoxGeometry(13.9, 0.12, 13.9),
+      new T.MeshStandardMaterial({ color: 0x24406e, emissive: 0x1b3a6b, emissiveIntensity: 0.55, metalness: 0.6, roughness: 0.35 })
+    );
+    frame.position.y = -0.06; scene.add(frame);
+
+    // 42 格
+    tileGeo = new T.CylinderGeometry(TILE_R, TILE_R, TILE_H, 28);
+    tiles = [];
+    for (var i = 0; i < MAP_TILES.length; i++) {
+      var t = MAP_TILES[i];
+      var col = TILE_COLOR[t.type] || 0x9aa7bd;
+      if (!tileMat[col]) {
+        tileMat[col] = new T.MeshStandardMaterial({
+          color: col, metalness: 0.3, roughness: 0.5,
+          emissive: col, emissiveIntensity: 0.16
+        });
+      }
+      var mesh = new T.Mesh(tileGeo, tileMat[col]);
+      var wp = worldPos(t);
+      mesh.position.set(wp.x, TILE_H / 2, wp.z);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.userData.tileId = t.id;
+      scene.add(mesh);
+
+      // 序号浮标
+      var tag = buildTag(String(t.id), '#' + col.toString(16).padStart(6, '0'));
+      if (tag) { tag.position.set(wp.x, TILE_H + 0.52, wp.z); tag.scale.set(0.95, 0.36, 1); scene.add(tag); }
+      tiles.push(mesh);
+    }
+
+    // 棋子
+    pieces.p1 = buildKing(true);
+    pieces.p2 = buildKing(false);
+    pieces.p1.userData.side = 'p1';
+    pieces.p2.userData.side = 'p2';
+    var tag1 = buildTag('你', '#8fd0ff'); if (tag1) { tag1.position.set(0, 1.75, 0); tag1.scale.set(1.25, 0.47, 1); pieces.p1.add(tag1); }
+    var tag2 = buildTag('对手', '#ff9c8f'); if (tag2) { tag2.position.set(0, 1.75, 0); tag2.scale.set(1.4, 0.52, 1); pieces.p2.add(tag2); }
+    scene.add(pieces.p1); scene.add(pieces.p2);
+    pieces.p1.position.set(0, 0, 0);
+    pieces.p2.position.set(0, 0, 0);
+
+    // 相机
+    var aspect = 1;
+    camPersp = new T.PerspectiveCamera(52, aspect, 0.1, 200);
+    var fr = 8.2;
+    camOrtho = new T.OrthographicCamera(-fr, fr, fr, -fr, 0.1, 200);
+    updateCamera(true);
+  }
+
+  function resize() {
+    if (!renderer || !host) return;
+    var w = host.clientWidth || 600, h = host.clientHeight || 320;
+    renderer.setSize(w, h, false);
+    var aspect = w / Math.max(1, h);
+    if (camPersp) { camPersp.aspect = aspect; camPersp.updateProjectionMatrix(); }
+    if (camOrtho) {
+      var fr = 8.2, vf = fr / Math.max(0.35, Math.min(1.6, aspect));
+      camOrtho.left = -fr * Math.max(0.6, aspect); camOrtho.right = fr * Math.max(0.6, aspect);
+      camOrtho.top = vf; camOrtho.bottom = -vf;
+      camOrtho.updateProjectionMatrix();
+    }
+  }
+
+  function updateCamera(instant) {
+    if (!camPersp) return;
+    if (mode === 'ortho') {
+      camOrtho.position.set(0, 22, 0.01);
+      camOrtho.lookAt(0, 0, 0);
+    } else {
+      var r = camDist;
+      var y = r * Math.sin(camPitch);
+      var flat = r * Math.cos(camPitch);
+      camPersp.position.set(Math.sin(camYaw) * flat, y, Math.cos(camYaw) * flat);
+      camPersp.lookAt(camTarget ? camTarget.x : 0, 0.4, camTarget ? camTarget.z : 0);
+    }
+  }
+
+  /* ---------- 棋子平滑移动 ---------- */
+  var tweens = [];
+  function movePieceTo(side, tileId) {
+    var t = MAP_TILES[tileId]; if (!t || !pieces[side]) return;
+    var wp = worldPos(t);
+    var p = pieces[side];
+    tweens.push({ obj: p, from: { x: p.position.x, z: p.position.z }, to: { x: wp.x, z: wp.z }, t: 0, dur: 0.75 });
+  }
+  function updateTweens(dt) {
+    for (var i = tweens.length - 1; i >= 0; i--) {
+      var tw = tweens[i];
+      tw.t += dt / tw.dur;
+      var k = Math.min(1, tw.t);
+      var e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
+      var hop = Math.sin(Math.PI * k) * 0.55;                        // 跳跃弧线
+      tw.obj.position.x = tw.from.x + (tw.to.x - tw.from.x) * e;
+      tw.obj.position.z = tw.from.z + (tw.to.z - tw.from.z) * e;
+      tw.obj.position.y = hop;
+      if (k >= 1) { tw.obj.position.y = 0; tweens.splice(i, 1); }
+    }
+  }
+
+  /* ---------- 每帧渲染 ---------- */
+  var clockLast = 0, lastSync = { p1: -1, p2: -1 };
+  function frame(ts) {
+    rafId = requestAnimationFrame(frame);
+    if (!ready) return;
+    var dt = clockLast ? Math.min(0.05, (ts - clockLast) / 1000) : 0.016;
+    clockLast = ts;
+    animT += dt;
+
+    updateTweens(dt);
+    // 棋子呼吸/待机浮动
+    ['p1', 'p2'].forEach(function (s, idx) {
+      var p = pieces[s]; if (!p) return;
+      p.rotation.y = Math.sin(animT * 0.6 + idx * 1.7) * 0.12;
+      if (p.position.y === 0) p.position.y = Math.sin(animT * 1.8 + idx) * 0.035;
+    });
+    // 当前行动方棋子高亮脉冲
+    if (battleState) {
+      var cur = battleState.currentPlayer;
+      ['p1', 'p2'].forEach(function (s) {
+        var p = pieces[s]; if (!p) return;
+        var isCur = (s === cur);
+        p.traverse(function (o) {
+          if (o.material && o.material.emissiveIntensity !== undefined) {
+            var base = (s === 'p1') ? 0.25 : 0.1;
+            o.material.emissiveIntensity = isCur ? base + 0.22 + Math.sin(animT * 3.2) * 0.14 : base;
+          }
+        });
+      });
+    }
+    // 格子高亮：玩家所在格
+    if (battleState) {
+      for (var i = 0; i < tiles.length; i++) {
+        var id = tiles[i].userData.tileId;
+        var onP1 = battleState.p1 && battleState.p1.position === id;
+        var onP2 = battleState.p2 && battleState.p2.position === id;
+        var m = tiles[i].material;
+        if (m && m.emissiveIntensity !== undefined) {
+          var baseE = 0.16;
+          if (hoverTile === tiles[i]) baseE = 0.85;
+          else if (onP1 || onP2) baseE = 0.5 + Math.sin(animT * 3) * 0.12;
+          m.emissiveIntensity = baseE;
+        }
+      }
+    }
+    renderer.render(scene, mode === 'ortho' ? camOrtho : camPersp);
+  }
+
+  /* ---------- 交互 ---------- */
+  function pickTile(ev) {
+    if (!raycaster || !host) return null;
+    var rect = host.getBoundingClientRect();
+    var nx = ((ev.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    var ny = -((ev.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
+    pointer.set(nx, ny);
+    raycaster.setFromCamera(pointer, mode === 'ortho' ? camOrtho : camPersp);
+    var hits = raycaster.intersectObjects(tiles, false);
+    return hits.length ? hits[0].object : null;
+  }
+  function bindEvents() {
+    if (!host) return;
+    raycaster = new T.Raycaster();
+    pointer = new T.Vector2();
+    var tip = document.getElementById('map3dTip');
+
+    host.addEventListener('pointerdown', function (ev) {
+      dragging = true; moved = 0; lastX = ev.clientX; lastY = ev.clientY;
+      try { host.setPointerCapture(ev.pointerId); } catch (e) {}
+    });
+    host.addEventListener('pointermove', function (ev) {
+      if (dragging) {
+        var dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+        lastX = ev.clientX; lastY = ev.clientY;
+        moved += Math.abs(dx) + Math.abs(dy);
+        camYaw -= dx * 0.006;
+        camPitch = Math.max(0.35, Math.min(1.45, camPitch + dy * 0.005));
+        updateCamera();
+        return;
+      }
+      var hit = pickTile(ev);
+      hoverTile = hit;
+      if (tip) {
+        if (hit) {
+          var t = MAP_TILES[hit.userData.tileId];
+          if (t) {
+            tip.style.display = 'block';
+            tip.style.left = Math.min(host.clientWidth - 170, Math.max(4, ev.clientX - host.getBoundingClientRect().left + 12)) + 'px';
+            tip.style.top = Math.max(4, ev.clientY - host.getBoundingClientRect().top - 10) + 'px';
+            var p1on = battleState && battleState.p1 && battleState.p1.position === t.id;
+            var p2on = battleState && battleState.p2 && battleState.p2.position === t.id;
+            tip.innerHTML = '<b>' + (TILE_ICON[t.type] || '❓') + ' ' + t.name + '</b><br>第 ' + t.id + ' 格' +
+              (p1on ? '<br><span style="color:#8fd0ff">● 你在这里</span>' : '') +
+              (p2on ? '<br><span style="color:#ff9c8f">● 对手在这里</span>' : '');
+          }
+        } else tip.style.display = 'none';
+      }
+    });
+    function endDrag(ev) {
+      if (!dragging) return;
+      dragging = false;
+      try { host.releasePointerCapture(ev.pointerId); } catch (e) {}
+      if (moved < 6) {
+        var hit = pickTile(ev);
+        if (hit) {
+          var t = MAP_TILES[hit.userData.tileId];
+          if (t) { addBattleLog('system', '🗺️ 第' + t.id + '格【' + t.name + '】' + (t.big ? '（大型格）' : '')); }
+        }
+      }
+    }
+    host.addEventListener('pointerup', endDrag);
+    host.addEventListener('pointercancel', function (ev) { dragging = false; });
+    host.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      camDist = Math.max(8, Math.min(42, camDist + (ev.deltaY > 0 ? 1.6 : -1.6)));
+      updateCamera();
+    }, { passive: false });
+    window.addEventListener('resize', resize);
+  }
+
+  /* ---------- 对外 API ---------- */
+  function init() {
+    if (ready || failed) return ready;
+    if (!isAvailable()) { fail('three.js 未加载'); return false; }
+    host = document.getElementById('map3dHost');
+    if (!host) { fail('缺少容器'); return false; }
+    try {
+      T = THREE;
+      renderer = new T.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = T.PCFSoftShadowMap;
+      host.appendChild(renderer.domElement);
+      buildScene();
+      resize();
+      bindEvents();
+      ready = true;
+      // 隐藏 2D 小地图（3D 地图已提供完整视野），并给出提示
+      try { document.body.classList.add('map3d-on'); } catch (e) {}
+      rafId = requestAnimationFrame(frame);
+      return true;
+    } catch (e) {
+      fail(e && e.message || e);
+      return false;
+    }
+  }
+  // 与战斗状态同步（updateBattleUI 会调用）
+  function syncFromGame() {
+    if (!ready || !battleState) return;
+    ['p1', 'p2'].forEach(function (s) {
+      var p = battleState[s];
+      if (!p) return;
+      if (lastSync[s] !== p.position) {
+        lastSync[s] = p.position;
+        movePieceTo(s, p.position);
+      }
+    });
+  }
+  function toggleView() {
+    if (!ready) return;
+    mode = (mode === 'persp') ? 'ortho' : 'persp';
+    var btn = document.getElementById('map3dViewBtn');
+    if (btn) btn.textContent = (mode === 'ortho') ? '🎥 斜俯视角' : '🎥 上帝视角';
+    var hint = document.getElementById('map3dHint');
+    if (hint) hint.textContent = (mode === 'ortho') ? '上帝视角：点击格子查看 · 切回斜俯可拖动旋转' : '拖动旋转 · 滚轮缩放 · 点击格子查看';
+    updateCamera();
+    addBattleLog('system', mode === 'ortho' ? '地图视角：上帝视角' : '地图视角：斜俯视角');
+  }
+  function focusPlayer(side) {
+    if (!ready || !battleState || !battleState[side]) return;
+    var t = MAP_TILES[battleState[side].position];
+    if (!t) return;
+    var wp = worldPos(t);
+    camTarget = { x: wp.x, z: wp.z };
+    // 平滑把镜头中心移到该格
+    var steps = 14, i = 0, fromX = 0, fromZ = 0;
+    if (camPersp) { fromX = camPersp.position.x; fromZ = camPersp.position.z; }
+    var iv = setInterval(function () {
+      i++;
+      var k = i / steps;
+      var e = 1 - Math.pow(1 - k, 3);
+      if (camPersp) {
+        var r = camDist, y = r * Math.sin(camPitch), flat = r * Math.cos(camPitch);
+        camPersp.position.set(Math.sin(camYaw) * flat + camTarget.x * e, y, Math.cos(camYaw) * flat + camTarget.z * e);
+        camPersp.lookAt(camTarget.x * e, 0.4, camTarget.z * e);
+      }
+      if (mode === 'ortho') { camOrtho.position.set(camTarget.x * e, 22, camTarget.z * e + 0.01); camOrtho.lookAt(camTarget.x * e, 0, camTarget.z * e); }
+      if (i >= steps) clearInterval(iv);
+    }, 22);
+    addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格');
+  }
+  function resetCamera() {
+    camTarget = null; camDist = 26; camYaw = Math.PI * 0.25; camPitch = 0.95;
+    if (mode === 'ortho') { mode = 'persp'; var btn = document.getElementById('map3dViewBtn'); if (btn) btn.textContent = '🎥 上帝视角'; }
+    updateCamera();
+  }
+  function dispose() {
+    if (rafId) cancelAnimationFrame(rafId);
+    ready = false;
+    if (renderer) { try { renderer.dispose(); } catch (e) {} }
+  }
+  return {
+    init: init, syncFromGame: syncFromGame, toggleView: toggleView, focusPlayer: focusPlayer,
+    resetCamera: resetCamera, resize: resize, dispose: dispose,
+    isReady: function () { return ready; }, isFailed: function () { return failed; }
+  };
+})();
 
 // 判断两个格子是否在同一行（基于MAP_TILES的y坐标）
 // 卡图加载失败：先自动重试一次，仍失败则弱化占位，避免直接消失/裂图
@@ -4562,6 +5057,16 @@ function showScreen(id) {
   }
   if (id === 'cardViewer') renderCardGrid();
   if (id === 'deckBuilder') renderDeckBuilder();
+  // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
+  if (id === 'battleScreen' && typeof Map3D !== 'undefined') {
+    setTimeout(function () {
+      try {
+        if (!Map3D.isReady() && !Map3D.isFailed()) Map3D.init();
+        else Map3D.resize();
+        if (Map3D.isReady()) Map3D.syncFromGame();
+      } catch (e) { console.error('Map3D init error', e); }
+    }, 30);
+  }
 }
 
 /* ================= UI 4.0 · 反馈系统工具 ================= */
@@ -6529,6 +7034,63 @@ function collectChainable(player, effect){
   (me.eventCards||[]).forEach(function(c,i){consider(c,'event',i);});
   return out;
 }
+/* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
+// 会话级记忆（刷新页面即失效，避免永久改变规则）
+var __chainAutoPassSec = 8;          // 倒计时秒数（0 = 关闭自动 PASS）
+var __chainNeverAsk = false;         // 本会话自动放弃连锁
+function setChainAutoPass(sec) { __chainAutoPassSec = sec; showToast('连锁窗口自动放弃倒计时：' + (sec ? sec + '秒' : '关闭'), 'info'); }
+function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); }
+/* 弹出连锁选择窗（带倒计时自动放弃）。choices 末项为 PASS；超时按 PASS 处理。 */
+function showChainChoice(title, cardName, effectText, choices, onPick) {
+  if (__chainNeverAsk) { onPick(choices.length - 1); return; }
+  var modal = document.getElementById('choiceModal');
+  if (!modal) { onPick(choices.length - 1); return; }
+  // 复用现有弹窗 DOM，但加一行倒计时与快捷按钮
+  document.getElementById('choiceTitle').textContent = title;
+  document.getElementById('choiceCardName').textContent = cardName || '';
+  document.getElementById('choiceCardEffect').textContent = effectText || '';
+  var buttonsDiv = document.getElementById('choiceButtons');
+  buttonsDiv.innerHTML = '';
+  var settled = false, timer = null, left = __chainAutoPassSec;
+  function finish(idx) {
+    if (settled) return; settled = true;
+    if (timer) clearInterval(timer);
+    pendingChoiceCallback = null;
+    try { closeChoiceModal(); } catch (e) {}
+    try { __dequeueChoice(); } catch (e) {}
+    onPick(idx);
+  }
+  pendingChoiceCallback = finish; // 保持与全局单槽回调一致（其他入口不会覆盖）
+  choices.forEach(function (choice, index) {
+    var btn = document.createElement('button');
+    btn.className = 'modal-btn modal-btn-confirm';
+    btn.style.width = '100%';
+    btn.textContent = choice;
+    btn.onclick = function () { finish(index); };
+    buttonsDiv.appendChild(btn);
+  });
+  // 倒计时行
+  var bar = document.createElement('div');
+  bar.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px;color:#9fb0d0;';
+  var cd = document.createElement('span');
+  cd.textContent = __chainAutoPassSec > 0 ? ('自动放弃：' + left + 's') : '（自动放弃已关闭）';
+  bar.appendChild(cd);
+  var never = document.createElement('button');
+  never.className = 'modal-btn';
+  never.style.cssText = 'padding:5px 10px;font-size:12px;';
+  never.textContent = '本会话不再询问';
+  never.onclick = function (ev) { ev.stopPropagation(); __chainNeverAsk = true; finish(choices.length - 1); };
+  bar.appendChild(never);
+  buttonsDiv.appendChild(bar);
+  if (__chainAutoPassSec > 0) {
+    timer = setInterval(function () {
+      left--;
+      if (left <= 0) { finish(choices.length - 1); return; }
+      cd.textContent = '自动放弃：' + left + 's';
+    }, 1000);
+  }
+  modal.classList.add('active');
+}
 // 发动一张连锁卡并修改待结算效果；需要二次选择（点数/增减）时走可视化弹窗，结束回调 done
 function applyChainCard(player,pick,effect,done){
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
@@ -6618,14 +7180,93 @@ function applyChainCard(player,pick,effect,done){
     payAndRemove(); afterUse();
   }
 }
-// AI 连锁决策：仅在高价值时连锁，否则放弃（返回 pick 或 null）
+// AI 连锁决策：按"这一环对自己是否有利"决定是否连锁（返回 pick 或 null）
+// 覆盖全部连锁类别：改点/反转/位移增减/打断/重判/抵消伤害/反制整效/位移增益
 function aiDecideChain(list, effect){
   if(!list.length) return null;
-  var dmg=effect.pendingDamage||effect.damage||0;
-  // 1) 即将受到致命/较重伤害，用抵消卡保命
-  for(var i=0;i<list.length;i++){ var e=list[i].card.effect||'';
-    if(e.indexOf('抵消')>=0&&e.indexOf('伤害')>=0 && (dmg>=battleState.p2.sync || dmg>=4)) return list[i]; }
-  // 2) 其余情况（改点/反转/增减/打断）保守处理，不主动连锁以免拖沓
+  var me = battleState.p2, foe = battleState.p1;
+  if (!me || !foe) return null;
+  var stage = (effect && (effect._stage || effect.type)) || '';
+  var who = (effect && effect.player) || battleState.currentPlayer;
+  var isMine = (who === 'p2');
+  var dmg = (effect && (effect.pendingDamage || effect.damage)) || 0;
+  // 我方收益/受害的关键格：神社(御神签) / 灵感 / 馈赠 / Story / 阅览室 等
+  var GOOD = { shrine: 3, inspire: 3, gift: 2, story: 2, read: 3, card: 1, again: 2, start: 1 };
+  function tileScore(pos) {
+    var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[pos] : null;
+    if (!t) return 0;
+    return GOOD[t.type] || 0;
+  }
+  // 该卡发动后会把我方位置推向哪里（改点：把骰点设为目标值；反转：反向）
+  function landingScore(card, eff) {
+    var pos = me.position, mv = (effect && effect.moveAmount) || 0;
+    if (mv <= 0) return tileScore(pos);
+    var nm = card.name || '';
+    if (nm.indexOf('颠倒骰子') >= 0 || /改变[^。；]*方向/.test(eff)) {
+      return tileScore(((pos - mv) % 42 + 42) % 42);
+    }
+    if (/位移量|增减/.test(eff)) {
+      var delta = /-2|减少/.test(eff) ? -2 : 2;
+      return tileScore(((pos + mv + delta) % 42 + 42) % 42);
+    }
+    return tileScore(((pos + mv) % 42 + 42) % 42);
+  }
+  // 对手将要落到的好格价值（打断/改点收益）
+  function foeLandingScore() {
+    var mv = (effect && effect.moveAmount) || 0;
+    return tileScore(((foe.position + mv) % 42 + 42) % 42);
+  }
+  var best = null, bestScore = 0;
+  function consider(c, s, reason) { if (s > bestScore) { bestScore = s; best = c; best._aiReason = reason; } }
+
+  for (var i = 0; i < list.length; i++) {
+    var it = list[i], c = it.card, eff = (c.effect || '') + (c.sp || '');
+    var nm = c.name || '';
+    // 1) 抵消伤害：致死必用；伤害≥4 或 ≥自身1/3同步时用
+    if (eff.indexOf('抵消') >= 0 && eff.indexOf('伤害') >= 0 && (stage === 'damage' || dmg > 0)) {
+      if (dmg >= me.sync) consider(it, 1000, '致死抵消');
+      else if (dmg >= 4 || dmg * 3 >= me.sync) consider(it, 120 + dmg * 10, '抵消' + dmg + '点伤害');
+      continue;
+    }
+    // 2) 反制整效：只在对手发动检索/抽卡/送墓类效果时用
+    if (eff.indexOf('效果无效') >= 0 || nm.indexOf('崩塌之乌托邦') >= 0) {
+      if (!isMine && /加入手卡|加入手牌|送入墓地|送墓|抽|检索/.test((effect && effect.description) || '')) consider(it, 90, '反制对手检索');
+      continue;
+    }
+    // 3) 移动窗口
+    if (stage === 'move' || stage === 'dice_result') {
+      if (!isMine) {
+        // 对手要移动：若他会落到好格，值得改点/打断
+        var fs = foeLandingScore();
+        if (fs >= 3) {
+          if (/打断/.test(eff) || nm.indexOf('猎手爪链') >= 0) consider(it, 100 + fs * 5, '打断对手好格');
+          else consider(it, 70 + fs * 5, '改对手落点');
+        }
+      } else {
+        // 自己移动：若新落点更好才用（避免白费一张卡）
+        var before = tileScore(((me.position + ((effect && effect.moveAmount) || 0)) % 42 + 42) % 42);
+        var after = landingScore(c, eff);
+        if (after > before) consider(it, 60 + (after - before) * 8, '优化自己落点');
+      }
+      continue;
+    }
+    // 4) 判定/随机窗口：自己判定偏低时重判（Twice）
+    if (stage === 'rand' || stage === 'rand_result') {
+      var roll = (effect && (effect.result !== undefined ? effect.result : effect.value));
+      if (isMine && /重新(进行)?判定|重判/.test(eff) && typeof roll === 'number' && roll <= 2) consider(it, 55, '重判低点数');
+      continue;
+    }
+    // 5) 骰子结果窗口（改点卡）
+    if (stage === 'dice_result' || stage === 'dice') {
+      if (!isMine) consider(it, 45, '修改对手骰点');
+      continue;
+    }
+  }
+  // 阈值：收益过低就不连锁，避免无意义拖慢节奏
+  if (best && bestScore >= 40) {
+    addBattleLog('p2', '【AI连锁决策】选择发动【' + (best.card.name || '') + '】（' + (best._aiReason || '') + '，收益' + bestScore + '）');
+    return best;
+  }
   return null;
 }
 /* AI 连锁决策钩子：resolveSimultaneous 的选发轮通过 globalThis.__aiChainDecide 调用。
@@ -6794,6 +7435,17 @@ function resolveSimultaneous(tp, candidates, allDone) {
       }
       var aiIdx = -1;
       try { var __cg = (typeof globalThis !== 'undefined') ? globalThis : ((typeof window !== 'undefined') ? window : null); if (__cg && typeof __cg.__aiChainDecide === 'function') aiIdx = __cg.__aiChainDecide(who, pool, chain.slice()); } catch (e) { aiIdx = -1; }
+      // 手牌/事件卡候选优先；若没有可用手牌连锁，尝试翻开盖伏卡（AI 盖伏机制）
+      // 注意：resolveSimultaneous 内没有 effect 变量（本轮链在 chain 里），用最后入链的节点判断窗口类型
+      if (aiIdx < 0 && who === 'p2' && typeof aiActivateFaceDown === 'function') {
+        var __lastNode = chain.length ? chain[chain.length - 1] : null;
+        var __fdIdx = aiPickFaceDownForWindow(__lastNode || {});
+        if (__fdIdx >= 0) {
+          addBattleLog('p2', '【连锁】AI 翻开盖伏卡响应');
+          aiActivateFaceDown(__fdIdx, function () { current = other(who); setTimeout(freeChain, 250); });
+          return;
+        }
+      }
       if (aiIdx >= 0 && pool[aiIdx]) { addChain(pool[aiIdx]); passStreak = 0; addBattleLog(who, '【连锁】AI发动【' + pool[aiIdx].label + '】成为 C' + chain.length); }
       else passStreak++;
       current = other(who); setTimeout(freeChain, 0); return;
@@ -6809,8 +7461,8 @@ function resolveSimultaneous(tp, candidates, allDone) {
         });
       return;
     }
-    showChoiceModal('连锁窗口 · 你的优先权（当前 ' + whoName(who) + '）', '当前连锁：' + chainText(),
-      '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算', opts, function (idx) {
+    showChainChoice('连锁窗口 · 你的优先权（当前 ' + whoName(who) + '）', '当前连锁：' + chainText(),
+      '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算（超时自动放弃）', opts, function (idx) {
         if (idx === null || idx === undefined || idx >= pool.length) { passStreak++; addBattleLog('p1', '【连锁】你PASS'); }
         else { addChain(pool[idx]); passStreak = 0; addBattleLog('p1', '【连锁】你发动【' + pool[idx].label + '】成为 C' + chain.length); }
         current = other(who); freeChain();
@@ -6918,6 +7570,8 @@ function beforeEffectExecution(effect, callback) {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
   if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._chainLock) { if (typeof popEffect === 'function') popEffect(effect); __releaseB(); callback(effect); return; }
   effect._chain = [];
+  // 记录当前响应窗口类型，供 AI 盖伏响应（aiPickFaceDownForWindow）判定
+  if (battleState) { battleState._curWindowStage = effect._stage || effect.type || ''; battleState._curWindowDamage = effect.pendingDamage || effect.damage || 0; }
   // 快速路径：双方都没有任何可连锁卡时静默放行，不刷日志/不弹连锁条，避免普通用卡被打扰
   var __q1 = collectChainable('p1', effect), __q2 = collectChainable('p2', effect);
   if (!__q1.length && !__q2.length) { if (typeof popEffect === 'function') popEffect(effect); __releaseB(); callback(effect); return; }
@@ -6948,7 +7602,7 @@ function beforeEffectExecution(effect, callback) {
       });
       return;
     }
-    showChoiceModal('效果执行前 · 连锁', effect.description||'', '选择要连锁发动的卡（最后一项=放弃连锁）', choices, function(i){
+    showChainChoice('效果执行前 · 连锁', effect.description||'', '选择要连锁发动的卡（最后一项=放弃连锁；超时自动放弃）', choices, function(i){
       if(i>=list.length){ pass(); return; }
       applyChainCard('p1',list[i],effect,chained);
     });
@@ -7751,6 +8405,7 @@ function checkHandLimit(player) {
     if (!battleState[p]) return;
     var hand = battleState[p].hand || [];
     if (hand.length > 5 && battleState.phase === 'end') {
+      if (p === 'p1') { promptDiscardToLimit('p1'); return; } // 玩家自选弃牌
       while (hand.length > 5) {
         var d = hand.pop();
         moveCardToGrave(p, d, 'discard');
@@ -7759,6 +8414,52 @@ function checkHandLimit(player) {
     }
   });
   if (typeof updateBattleUI === 'function') updateBattleUI();
+}
+
+/* 手牌超限弃牌：由玩家自选要弃的卡（AI 仍自动弃最尾张）。
+   每次弹窗选 1 张，直到降到 5 张以内，然后执行 done 回调（结束回合流程用）。 */
+function promptDiscardToLimit(player, done) {
+  var p = battleState && battleState[player];
+  if (!p) { if (done) done(); return; }
+  if ((p.hand || []).length <= 5) { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); return; }
+  if (p._discardingHand) return; // 防止重复弹窗
+  p._discardingHand = true;
+  var over = p.hand.length - 5;
+  function step() {
+    var hand = p.hand || [];
+    if (hand.length <= 5) {
+      p._discardingHand = false;
+      addBattleLog(player, '手牌已降至上限内（' + hand.length + '/5）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      if (done) done();
+      return;
+    }
+    var overNow = hand.length - 5;
+    if (typeof showCardPickerMulti !== 'function') {
+      // 兜底：选择器不可用时弃最尾张（保持流程不中断）
+      var d0 = hand.pop(); moveCardToGrave(player, d0, 'discard');
+      addBattleLog(player, '手牌超限，弃置【' + d0.name + '】');
+      step(); return;
+    }
+    showCardPickerMulti(hand.slice(), '手牌超过上限：请选择要弃掉的卡（还需弃' + overNow + '张）', function (sel) {
+      var idx = Array.isArray(sel) ? sel[0] : sel;
+      if (idx === null || idx === undefined || idx < 0 || idx >= p.hand.length) {
+        // 取消选择：仍必须弃牌，兜底弃最后一张，保证回合能正常结束
+        var d1 = p.hand[p.hand.length - 1];
+        p.hand.pop();
+        moveCardToGrave(player, d1, 'discard');
+        addBattleLog(player, '未选择弃牌，自动弃置【' + d1.name + '】');
+      } else {
+        var d2 = p.hand.splice(idx, 1)[0];
+        moveCardToGrave(player, d2, 'discard');
+        addBattleLog(player, '手牌超限，弃置【' + d2.name + '】（剩余手牌' + p.hand.length + '张）');
+      }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      setTimeout(step, 120);
+    }, 1);
+  }
+  addBattleLog(player, '手牌超过上限5张（当前' + p.hand.length + '张），请选择弃掉' + over + '张');
+  step();
 }
 
 // 结衣被动：移出游戏直到回合结束的卡，回合结束返回原区域
@@ -7780,13 +8481,8 @@ function endTurn() {
   // 临时攻击力（直到本回合结束类，如最佳化）回合结束清零
   if (battleState.p1._tempAttack) { battleState.p1._tempAttack = 0; addBattleLog('p1', '临时攻击力（本回合）已结束'); }
   
-  // 结束阶段：手牌上限5张
-  while (battleState.p1.hand.length > 5) {
-    var discarded = battleState.p1.hand.pop();
-    moveCardToGrave('p1', discarded, 'discard');
-    addBattleLog('p1', '手牌超限，弃掉【' + discarded.name + '】');
-  }
-  
+  // 结束阶段：手牌上限5张（玩家自选弃牌；AI 自动弃尾张）
+  function __afterDiscard() {
   // 处理王车易位效果恢复
   if (battleState._swappedTiles && battleState._swappedTiles.length > 0) {
     for (var i = battleState._swappedTiles.length - 1; i >= 0; i--) {
@@ -7837,6 +8533,9 @@ function endTurn() {
     }
   }
   __endTurnTail();
+  } // __afterDiscard 结束
+  // 先让玩家自选弃掉超出手牌上限的卡，弃完再继续回合结束流程
+  promptDiscardToLimit('p1', __afterDiscard);
 }
 
 
@@ -7882,6 +8581,25 @@ function aiUseCardComplete(handIndex, callback) {
 }
 
 // ============ AI 事件卡使用（镜像 useEventCard 各 case 语义；每阶段至多1张，启发式选卡）============
+/* AI 乐谱卡使用：乐谱卡不占手牌上限，放在 eventCards 里；AI 之前从不使用（死代码）。
+   每次调用最多用 1 张，走 useMusicCardFor 的统一流程（含连锁窗口/公共墓地）。 */
+function aiMaybeUseMusic(done) {
+  try {
+    var p = battleState && battleState.p2;
+    if (!p || battleState._over || battleState.currentPlayer !== 'p2') { if (done) done(); return; }
+    if (!(p.eventCards || []).length) { if (done) done(); return; }
+    var idx = -1;
+    for (var i = 0; i < p.eventCards.length; i++) {
+      var c = p.eventCards[i];
+      if (c && (c._isMusic || c._category === 'music_cards')) { idx = i; break; }
+    }
+    if (idx < 0) { if (done) done(); return; }
+    addBattleLog('p2', '【AI】使用乐谱卡【' + p.eventCards[idx].name + '】');
+    if (typeof useMusicCardFor === 'function') useMusicCardFor('p2', idx, p.eventCards[idx].name, function () { if (done) done(); });
+    else { if (done) done(); }
+  } catch (e) { console.error('aiMaybeUseMusic error', e); if (done) done(); }
+}
+
 function aiMaybeUseEvent(done) {
   var p = battleState.p2;
   var foe = battleState.p1;
@@ -8064,7 +8782,27 @@ function aiResourceStep(done) {
         if (typeof updateBattleUI === 'function') updateBattleUI();
       }
     }
-    // 2) 手牌偏少且音韵富余 → 音韵抽卡（每回合最多 2 次，避免烧光）
+    // 2.5) AI 盖伏蓄爆：把"可盖伏"的连锁/响应类卡在对手回合前盖下（效果处理区有空位时才做）
+  (function () {
+    try {
+      var p2 = battleState.p2;
+      if (!p2 || battleState._over) return;
+      var zoneUsed = (p2.permanent || []).length + (p2.faceDownCards || []).length;
+      if (zoneUsed >= 3) return;
+      if (typeof canCardBeFaceDown !== 'function' || typeof aiPlaceFaceDown !== 'function') return;
+      // 只在"对手即将行动"时蓄爆才有意义：自己主要阶段末尾盖下
+      for (var hi = 0; hi < p2.hand.length && zoneUsed < 3; hi++) {
+        var hc = p2.hand[hi];
+        if (!hc || !canCardBeFaceDown(hc)) continue;
+        var heff = (hc.effect || '') + (hc.sp || '');
+        // 优先盖伏"能抵消伤害/改点/打断"的响应卡
+        if (!/抵消.*伤害|修改.*(骰|点)|打断|位移量|重新判定/.test(heff)) continue;
+        if (aiPlaceFaceDown(hi)) { hi--; zoneUsed++; }
+      }
+    } catch (e) { console.error('aiPlaceFaceDown error', e); }
+  })();
+
+  // 3) 手牌偏少且音韵富余 → 音韵抽卡（每回合最多 2 次，避免烧光）
     var drawTimes = 0;
     while (p.cost >= 3 && p.hand.length <= 4 && drawTimes < 2) {
       p.cost -= 3;
@@ -8089,6 +8827,7 @@ function aiTurn() {
   updateBattleUI();
   
   aiMaybeUseEvent(function() {
+  aiMaybeUseMusic(function() {
   aiUseActiveSP('p2', function() {
     aiResourceStep(function() {          // ← 新增资源层：献祭/音韵抽卡
     aiPlayCards(3, function() {
@@ -8125,6 +8864,7 @@ function aiTurn() {
             updateBattleUI();
             
             aiMaybeUseEvent(function() {
+            aiMaybeUseMusic(function() {
             aiUseActiveSP('p2', function() {
               aiResourceStep(function() {          // ← 主要阶段2 再次整理资源
               aiPlayCards(2, function() {
@@ -8139,6 +8879,7 @@ function aiTurn() {
               });
             });
             });
+            });
           }, 600);
         });
         }
@@ -8149,6 +8890,7 @@ function aiTurn() {
     }, 600);
     });
     });
+  });
   });
   });
 }
@@ -9662,6 +10404,8 @@ function renderBuffBar(user) {
 }
 function updateBattleUI() {
   if (!battleState) return;
+  // 回音韵时点兜底（补齐绕过 recoverCost 的直接改费路径）
+  try { if (typeof __syncRecoverTiming === 'function') __syncRecoverTiming(); } catch (e) {}
   
   // 宫樱子被动：队伍同步降至阈值(20/15/10/5)时各+1次免费用卡（各阈值仅触发一次）
   try {
@@ -10003,6 +10747,17 @@ function renderZoneSlots(pl) {
 // 渲染简化横向地图（只显示玩家所在行）
 function renderBattleMap() {
   if (!battleState) return;
+  // 3D 地图就绪时：只同步棋子位置，不再重建 2D 横向地图（2D 仅作为 WebGL 不可用时的回退）
+  if (typeof Map3D !== 'undefined' && Map3D.isReady()) {
+    try { Map3D.syncFromGame(); } catch (e) { console.error('Map3D sync error', e); }
+    var __p1t = MAP_TILES[battleState.p1.position], __p2t = MAP_TILES[battleState.p2.position];
+    var __n1 = document.getElementById('p1PosNum'); if (__n1) __n1.textContent = battleState.p1.position;
+    var __nm1 = document.getElementById('p1PosName'); if (__nm1 && __p1t) __nm1.textContent = __p1t.name;
+    var __n2 = document.getElementById('p2PosNum'); if (__n2) __n2.textContent = battleState.p2.position;
+    var __nm2 = document.getElementById('p2PosName'); if (__nm2 && __p2t) __nm2.textContent = __p2t.name;
+    renderMinimap();
+    return;
+  }
   
   var p1Tile = MAP_TILES[battleState.p1.position];
   var p2Tile = MAP_TILES[battleState.p2.position];
@@ -11828,6 +12583,19 @@ function recoverCost(player, amount, source) {
   if (__gain > 0) __emitRecover(player, __gain, source || '');
   return __gain;
 }
+/* 回音韵时点兜底：卡牌效果里仍有约 30 处直接写 p.cost = min(cost+N)，绕过了 recoverCost，
+   导致"玩家回复音韵值时"（规则书第十三章时点11）漏发。这里在每次 UI 刷新前对比快照，
+   把绕过出口的回费补发一次时点（只补发时点，不改变数值，避免双重加费）。 */
+function __syncRecoverTiming() {
+  if (!battleState) return;
+  ['p1', 'p2'].forEach(function (w) {
+    var p = battleState[w]; if (!p) return;
+    var last = (typeof p._lastCostSnapshot === 'number') ? p._lastCostSnapshot : (p.cost || 0);
+    var now = p.cost || 0;
+    if (now > last) { try { __emitRecover(w, now - last, '回音韵（补发时点）'); } catch (e) {} }
+    p._lastCostSnapshot = now;
+  });
+}
 // 宁雨清被动：每次抽卡后回1音韵（挂时点总线，替代散落硬编码）
 onTiming(TIMING.ON_DRAW, function (ctx, next) {
   if (!battleState || !ctx) { next(); return; }
@@ -12120,23 +12888,26 @@ function __animOverlay() {
 }
 function playDrawAnim(user, cards, cb) {
   try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
-  var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || user !== 'p1' || (typeof document === 'undefined');
-  if (auto) { cb && cb(); return; } // AI/自动结算/无界面：同步继续，不等动画
+  // AI 回合也播放抽卡动画（联机远端位仍跳过，避免双机时序分叉；无界面环境同步继续）
+  var __ol = (typeof Online !== 'undefined' && Online.active);
+  var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || __ol || (typeof document === 'undefined');
+  if (auto) { cb && cb(); return; } // 自动结算/联机/无界面：同步继续，不等动画
   var ov = __animOverlay();
   var inner = cards.map(function (c) {
     return '<div style="background:linear-gradient(135deg,#2c3e50,#34495e);border:2px solid #feca57;border-radius:8px;padding:8px;margin:0 6px;width:118px;text-align:center;animation:pop .3s ease;">' +
       (c.image_url ? '<img src="' + c.image_url + '" style="width:100px;height:120px;object-fit:cover;border-radius:6px;display:block;margin:0 auto;">' : '') +
       '<div style="color:#fff;font-size:12px;font-weight:bold;margin-top:4px;word-break:break-all;">' + (c.name || '') + '</div></div>';
   }).join('');
-  ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">✨ 抽到 ' + cards.length + ' 张卡</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
+  ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">' + (user === 'p2' ? '🤖 对手抽到 ' : '✨ 抽到 ') + cards.length + ' 张卡</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
   ov.style.display = 'flex';
   setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 640);
 }
 function playSearchAnim(user, cb) {
-  var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || user !== 'p1' || (typeof document === 'undefined');
+  var __ol2 = (typeof Online !== 'undefined' && Online.active);
+  var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || __ol2 || (typeof document === 'undefined');
   if (auto) { cb && cb(); return; }
   var ov = __animOverlay();
-  ov.innerHTML = '<div style="background:rgba(20,20,40,0.92);border:2px solid #74b9ff;border-radius:12px;padding:26px 40px;color:#74b9ff;font-size:20px;font-weight:bold;">🔍 正在检索卡区…</div>';
+  ov.innerHTML = '<div style="background:rgba(20,20,40,0.92);border:2px solid #74b9ff;border-radius:12px;padding:26px 40px;color:#74b9ff;font-size:20px;font-weight:bold;">🔍 ' + (user === 'p2' ? '对手正在检索卡区…' : '正在检索卡区…') + '</div>';
   ov.style.display = 'flex';
   setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 480);
 }
@@ -13918,12 +14689,19 @@ function useMusicCardFor(player, index, name, done) {
           __finishMusic();
         }
         if (__muOL && player === 'p2') onlineDecideModal('p2', '乐谱卡（对手）', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
+        else if (player === 'p2') __musicDir(0); // AI 自动选前进（离线不再误弹玩家弹窗）
         else showChoiceModal('乐谱卡', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
       } else {
         opt.action(); __finishMusic();
       }
     }
     if (__muOL && player === 'p2') onlineDecideModal('p2', '乐谱卡三选一（对手）', card.name, '请选择一项效果', __optLabels, __musicPick);
+    else if (player === 'p2') {
+      // AI 选择逻辑：优先拿引导核心（升级收益最大），其次回费/移动
+      var __aiOi = 0;
+      for (var __mi = 0; __mi < options.length; __mi++) { if (/引导核心/.test(options[__mi].label)) { __aiOi = __mi; break; } }
+      __musicPick(__aiOi);
+    }
     else showChoiceModal('乐谱卡三选一', card.name, '请选择一项效果', __optLabels, __musicPick);
   }
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制
@@ -15525,6 +16303,70 @@ function placeFaceDown(card, player) {
   card._faceDownPlayer = player;
   p.faceDownCards.push(card);
   addBattleLog(player, '盖伏【' + card.name + '】（本回合无法发动，之后可在任何时机发动）');
+  return true;
+}
+
+/* ---------- AI 盖伏机制：AI 也能盖伏蓄爆/反制（费用在翻开时支付） ---------- */
+function aiPlaceFaceDown(handIndex) {
+  if (!battleState) return false;
+  var p = battleState.p2, card = p.hand[handIndex];
+  if (!card || typeof canCardBeFaceDown !== 'function' || !canCardBeFaceDown(card)) return false;
+  if ((p.permanent || []).length + (p.faceDownCards || []).length >= 3) return false;
+  p.hand.splice(handIndex, 1);
+  if (!placeFaceDown(card, 'p2')) { p.hand.splice(handIndex, 0, card); return false; }
+  addBattleLog('p2', '【AI】盖伏【' + card.name + '】（下回合起可翻开响应）');
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+  return true;
+}
+// AI 在响应窗口中翻开自己的盖伏卡（费用/去向/被动钩子走统一结算管线）
+/* 在指定响应窗口里，挑一张 AI 盖伏卡准备翻开；返回下标，无可翻返回 -1。
+   窗口类型由 effect._stage/type 判定，与手牌连锁的 __matchStage 口径一致。 */
+function aiPickFaceDownForWindow(effect) {
+  if (!battleState || !battleState.p2) return -1;
+  var p = battleState.p2;
+  if (!p.faceDownCards || !p.faceDownCards.length) return -1;
+  // 窗口类型：优先取传入效果，其次取当前全局窗口（resolveSimultaneous 内没有 effect 变量）
+  var stage = effect ? (effect._stage || effect.type || '') : '';
+  if (!stage && typeof battleState !== 'undefined' && battleState._curWindowStage) stage = battleState._curWindowStage;
+  var dmg = (effect && (effect.pendingDamage || effect.damage)) || (battleState._curWindowDamage || 0);
+  for (var i = 0; i < p.faceDownCards.length; i++) {
+    var c = p.faceDownCards[i];
+    if (!c) continue;
+    // 盖伏当回合不可发动
+    if (c._faceDownTurn === battleState.turn && c._faceDownPlayer === 'p2') continue;
+    // 费用要够（含超频透支）
+    var cost = parseInt(c.cost, 10) || 0;
+    var loan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p2') : 0;
+    if (p.cost + loan < cost) continue;
+    var eff = (c.effect || '') + (c.sp || '');
+    var nm = c.name || '';
+    var usable = false;
+    if (stage === 'damage' || dmg > 0) usable = /抵消/.test(eff) && /伤害/.test(eff);
+    else if (stage === 'move' || stage === 'dice_result' || stage === 'dice') usable = /位移量|打断|改变[^。；]*方向|修改.*(骰|点)/.test(eff) || nm.indexOf('侦探放大镜') >= 0 || nm.indexOf('猎手爪链') >= 0 || nm.indexOf('遥控骰子') >= 0 || nm.indexOf('颠倒骰子') >= 0;
+    else if (stage === 'rand' || stage === 'rand_result') usable = nm === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
+    else if (stage === 'effect_activate') usable = /效果无效/.test(eff) || nm.indexOf('崩塌之乌托邦') >= 0;
+    if (usable) return i;
+  }
+  return -1;
+}
+
+function aiActivateFaceDown(index, done) {
+  if (!battleState) { if (done) done(); return false; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && (effectEngine._resolveDepth > 0 || effectEngine._chainLock)) { if (done) done(); return false; }
+  var p = battleState.p2, card = p.faceDownCards && p.faceDownCards[index];
+  if (!card) { if (done) done(); return false; }
+  // 盖伏当回合不可发动（自己回合内）
+  if (card._faceDownTurn === battleState.turn && card._faceDownPlayer === 'p2' && battleState.currentPlayer === 'p2') { if (done) done(); return false; }
+  // 连锁响应类必须有对应时点窗口，避免空放
+  if (typeof isChainOnlyCard === 'function' && isChainOnlyCard(card) && !(typeof rwHas === 'function' && rwHas())) { if (done) done(); return false; }
+  var cost = parseInt(card.cost, 10) || 0;
+  var __loan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p2') : 0;
+  if (p.cost + __loan < cost) { if (done) done(); return false; }
+  p.faceDownCards.splice(index, 1);
+  card._faceDown = false;
+  card._activatedFromFaceDown = true;
+  addBattleLog('p2', '【AI】翻开盖伏的【' + card.name + '】，进入发动');
+  settleCardExecution(card, 'p2', 'p1', {}, function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); });
   return true;
 }
 
