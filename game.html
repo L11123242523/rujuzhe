@@ -6543,10 +6543,12 @@ function applyChainCard(player,pick,effect,done){
       if (typeof publicGraveyard !== 'undefined' && publicGraveyard) { publicGraveyard.event_cards.push(c); c._alreadyInPublicGrave = true; }
       addBattleLog(player, '【' + name + '】已放入公共墓地');
     } else {
-      (me.grave=me.grave||[]).push(c);
-      // 投掷/移动窗口的连锁用卡同样计入“使用”：技能一次记录 + 进墓统一时点（神乐铃叠层/星奈回收等）
+      // 规则书第十章二：单次卡必须等整条连锁（含所有"那之后"子效果）结算完毕才统一进墓。
+      // 因此这里只把卡从原区域移出并登记为"待入墓"，真正进墓 + 送墓时点在各链环逆结算完成时执行。
+      effect._pendingGrave = effect._pendingGrave || [];
+      effect._pendingGrave.push({ player: player, card: c, name: name });
+      // 技能卡每回合一次记录在"发动"时即生效（卡已离手/离场）
       if (typeof recordSkillUse === 'function') recordSkillUse(player, c);
-      if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, c, 'use');
     }
   }
   function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI();
@@ -6819,7 +6821,20 @@ function resolveSimultaneous(tp, candidates, allDone) {
 function resolveChainStack(effect, onDone) {
   var stack = effect._chain || [];
   if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = true;
-  function __endChain() { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); }
+  // 规则书第十章二：连锁用卡在本链环逆结算完成时才统一进墓（发动时已从原区域移出）
+  var __pgIdx = 0;
+  function __flushGrave() {
+    var list = effect._pendingGrave || [];
+    while (__pgIdx < list.length) {
+      var pg = list[__pgIdx++];
+      if (!pg || !pg.card) continue;
+      var __pp = battleState[pg.player]; if (!__pp) continue;
+      (__pp.grave = __pp.grave || []).push(pg.card);
+      addBattleLog(pg.player, '【' + (pg.name || pg.card.name || '') + '】结算完毕，送入墓地');
+      if (typeof checkGraveTrigger === 'function') checkGraveTrigger(pg.player, pg.card, 'use');
+    }
+  }
+  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -6886,6 +6901,7 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，位移增益随之无效'); }
       else { __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】位移x2生效（当前位移 ' + (hasNum ? cur : '?') + ' 格）'); }
     }
+    __flushGrave(); // 本链环已逆结算完成：其用卡此刻进墓并触发送墓时点
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('C' + (i + 1) + (__lostSet[i] ? ' 失去对象' : ' 结算完成'), __lostSet[i] ? 'flash-lost' : 'flash-ok');
     setTimeout(__step, 340);
   }
@@ -7312,7 +7328,9 @@ function enterExtraRollPhase(player, cb) {
       var d = (typeof rollPlayerDice === 'function') ? rollPlayerDice('p2') : GameRNG.dice(6);
       battleState._diceRolledThisPhase = true;
       addBattleLog('p2', '追加投掷投出' + d + '点');
-      if (typeof aiExecuteMove === 'function') aiExecuteMove(d, cb); else if (cb) cb();
+      var __goExtra = function () { if (typeof aiExecuteMove === 'function') aiExecuteMove(d, cb); else if (cb) cb(); };
+      if (typeof playDiceRollAnim === 'function') playDiceRollAnim('p2', d, battleState.p2._nextDiceSides || 6, (battleState.p2._lastRolls && battleState.p2._lastRolls.length) || 1, __goExtra);
+      else __goExtra();
     }, 400);
   }
 }
@@ -8340,7 +8358,9 @@ function aiExecuteMove(dice, callback) {
         var extraDice = rollPlayerDice('p2');
         battleState._diceRolledThisPhase = true;
         addBattleLog(player, '追加投掷投出' + extraDice + '点');
-        aiExecuteMove(extraDice, callback);
+        var __goExtra2 = function () { aiExecuteMove(extraDice, callback); };
+        if (typeof playDiceRollAnim === 'function') playDiceRollAnim('p2', extraDice, battleState.p2._nextDiceSides || 6, (battleState.p2._lastRolls && battleState.p2._lastRolls.length) || 1, __goExtra2);
+        else __goExtra2();
       }, 500);
       return;
     }
@@ -8942,7 +8962,9 @@ function aiUseActiveSP(player, done) {
           var __kd = rollPlayerDice('p2');
           battleState._diceRolledThisPhase = true;
           addBattleLog('p2', '追加投掷投出' + __kd + '点');
-          aiExecuteMove(__kd, function () { battleState.phase = 'main2'; battleState._diceRolledThisPhase = false; updateBattleUI(); next(); });
+          var __goExtra3 = function () { aiExecuteMove(__kd, function () { battleState.phase = 'main2'; battleState._diceRolledThisPhase = false; updateBattleUI(); next(); }); };
+          if (typeof playDiceRollAnim === 'function') playDiceRollAnim('p2', __kd, battleState.p2._nextDiceSides || 6, (battleState.p2._lastRolls && battleState.p2._lastRolls.length) || 1, __goExtra3);
+          else __goExtra3();
         }, 500);
         return;
       }
@@ -14650,7 +14672,8 @@ function kaedePassiveTrigger(player, usedCard) {
         p.grave.push(showCard);
         p.cost = Math.min(p.cost + 2, p.maxCost);
         addBattleLog(player, '【入间枫被动】异色卡【' + showCard.name + '】送入墓地（视为献祭），回复2点音韵');
-        checkGraveTrigger(player, showCard);
+        // 卡面明写"也可视为一次献祭"，因此显式按献祭口径触发送墓时点（不能依赖默认值）
+        checkGraveTrigger(player, showCard, 'sacrifice');
       }
       updateBattleUI();
     }
@@ -14672,7 +14695,9 @@ function moveCardToGrave(player, card, reason) {
 function checkGraveTrigger(player, card, reason) {
   runTiming(TIMING.ON_TO_GRAVE, { player: player, card: card, reason: reason || "" });
   if (!battleState || !card) return;
-  reason = reason || 'sacrifice';
+  // 未显式传 reason 的送墓一律按"因效果送墓"处理（规则书第十一章二-1：献祭≠效果送墓；
+  // 旧默认值 'sacrifice' 会让效果送墓误触发"被献祭/因效果送墓"类 SP）
+  reason = reason || 'effect';
   var p = battleState[player];
   var cardName = card.name || '';
   var sp = card.sp || '';
