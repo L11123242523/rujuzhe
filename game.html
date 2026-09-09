@@ -2886,6 +2886,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
           <span class="duel-sub">🎭<span id="p1Fascination">6</span></span>
           <span class="duel-sub">💎<span id="p1Cost">0</span></span>
           <span class="duel-sub">🪙<span id="p1GoldTop">0</span></span>
+          <span class="duel-sub" id="p1ShieldWrap" style="display:none;">🛡️<span id="p1ShieldTop">0</span></span>
+          <span class="duel-sub">⭐<span id="p1MotivationTop">0</span></span>
         </div>
       </div>
     </div>
@@ -2905,6 +2907,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
           <span class="duel-sub">🪙<span id="p2GoldTop">0</span></span>
           <span class="duel-sub">💎<span id="p2Cost">0</span></span>
           <span class="duel-sub">🎭<span id="p2Fascination">6</span></span>
+          <span class="duel-sub" id="p2ShieldWrap" style="display:none;">🛡️<span id="p2ShieldTop">0</span></span>
+          <span class="duel-sub">⭐<span id="p2MotivationTop">0</span></span>
         </div>
       </div>
       <div class="duel-portrait" id="p2Portrait"><img id="p2PortraitImg" alt="AI队长" onerror="this.style.display='none'"><span class="duel-lv" id="p2LvBadge">Lv1</span></div>
@@ -7213,6 +7217,46 @@ function executeMoveEffect(effect) {
 }
 
 // 统一投掷：读取下次面数/枚数标记、神醉减半，玩家与AI共用
+/* 通用骰子滚动动画（纯本地视觉：刻意用 Math.random，不消耗 GameRNG，保证联机双机随机流一致）。
+   玩家主投掷与 AI 投掷共用，避免 AI 回合"看不到骰子"（规则书第八章三-5 要求判定/投掷有过程反馈）。
+   who：'p1' | 'p2'，仅用于文案前缀；结果值由调用方传入，动画不参与数值。 */
+function playDiceRollAnim(who, finalVal, sides, count, cb) {
+  var area = document.getElementById('diceAnimationArea');
+  var diceEl = document.getElementById('diceRolling');
+  var resEl = document.getElementById('diceResult');
+  var msgEl = document.getElementById('diceMessage');
+  if (!area || !diceEl || typeof setInterval !== 'function') { if (cb) cb(); return; }
+  sides = sides || 6; count = count || 1;
+  var faces6 = ['⚀','⚁','⚂','⚃','⚄','⚅'];
+  area.style.display = 'flex';
+  diceEl.style.display = 'block';
+  if (resEl) resEl.style.display = 'none';
+  if (msgEl) msgEl.textContent = (who === 'p2' ? '【对手】' : '') + '投掷中…';
+  var rollCount = 0, maxRolls = 12, __fired = false;
+  // 保险：动画被中断（切屏/容器隐藏）时也必须放行，否则 AI 回合会永久卡住
+  function __finishAnim() {
+    if (__fired) return;
+    __fired = true;
+    try { area.style.display = 'none'; } catch (e) {}
+    if (cb) cb();
+  }
+  setTimeout(__finishAnim, 3000);
+  var iv = setInterval(function () {
+    if (__fired) { clearInterval(iv); return; }
+    var rv = Math.floor(Math.random() * sides) + 1;
+    diceEl.textContent = (sides === 6) ? faces6[rv - 1] : String(rv);
+    diceEl.style.transform = 'rotate(' + (Math.random() * 360) + 'deg) scale(' + (0.8 + Math.random() * 0.4) + ')';
+    rollCount++;
+    if (rollCount >= maxRolls) {
+      clearInterval(iv);
+      diceEl.textContent = (sides === 6 && count === 1) ? faces6[Math.min(5, Math.max(0, finalVal - 1))] : String(finalVal);
+      diceEl.style.transform = 'rotate(0deg) scale(1.2)';
+      if (resEl) { resEl.textContent = finalVal + ' 点'; resEl.style.display = 'block'; }
+      if (msgEl) msgEl.textContent = (who === 'p2' ? '【对手】' : '') + '投出 ' + finalVal + ' 点！';
+      setTimeout(__finishAnim, 700);
+    }
+  }, 70);
+}
 // 普通现实间里绪担任队长（才有“2枚六面骰替换”被动；水着里绪无此效果）
 function isRioCaptain(player) {
   var p = (typeof battleState!=='undefined') ? battleState[player] : null;
@@ -8048,6 +8092,9 @@ function aiTurn() {
         var __aiRollTxt = (__aip._lastRolls && __aip._lastRolls.length>1) ? (__aip._lastRolls.join('+')+'='+dice) : (''+dice);
         addBattleLog('p2', '投出' + __aiRollTxt + '点');
         
+        // AI 骰子动画：先播动画，再执行移动（此前 AI 回合完全没有骰子视觉过程）
+        (function () {
+        function __aiMoveNow() {
         // 执行AI移动
         aiExecuteMove(dice, function() {
           if (checkBattleEnd()) return;
@@ -8076,6 +8123,10 @@ function aiTurn() {
             });
           }, 600);
         });
+        }
+        if (typeof playDiceRollAnim === 'function') playDiceRollAnim('p2', dice, __aip._nextDiceSides || 6, (__aip._lastRolls && __aip._lastRolls.length) || 1, __aiMoveNow);
+        else __aiMoveNow();
+        })();
       }, 500);
     }, 600);
     });
@@ -9108,6 +9159,10 @@ function checkLevelUp(player) {
     p.motivation = maxMot;
   }
   if (leveled) {
+    // 对手升级时给玩家一个明确提示（否则玩家只会看到对方血条莫名其妙回升）
+    if (player !== 'p1' && !(typeof Online !== 'undefined' && Online.active) && typeof showToast === 'function') {
+      showToast('⚠️ 对手升到 Lv' + p.level + '！', 'warn');
+    }
     var __hasSup = (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('供给者') >= 0; });
     // AI：升级奖励默认攻击力+1，避免等待玩家点选（联机远端位不走 AI 自动，与玩家同弹窗序列）
     if (__hasSup && player !== 'p1' && !(typeof Online !== 'undefined' && Online.active)) { for (var __ai = 0; __ai < __upCount; __ai++) p.attackBuff = (p.attackBuff || 0) + 1; if (__upCount) addBattleLog(player, '【核心的供给者】升级奖励×' + __upCount + '：攻击力+' + __upCount); updateBattleUI(); return; }
@@ -9611,13 +9666,17 @@ function updateBattleUI() {
     if (p1CostEl) p1CostEl.textContent = battleState.p1.cost;
     if (p2SyncEl) p2SyncEl.textContent = battleState.p2.sync;
     if (p2CostEl) p2CostEl.textContent = battleState.p2.cost;
-    // 对手区域可见计数：手牌张数 / 效果处理区（含盖伏）张数
+    // 对手区域可见计数：手牌张数 / 效果处理区（含盖伏）张数 / 牌组余量 / 激励进度
     var __p2zc = document.getElementById('p2ZoneCounts');
     if (__p2zc) {
       var __p2h = battleState.p2.hand.length;
       var __p2perm = (battleState.p2.permanent || []).length;
       var __p2fd = (battleState.p2.faceDownCards || []).length;
-      __p2zc.textContent = '对手 手牌×' + __p2h + ' · 区域×' + (__p2perm + __p2fd) + (__p2fd ? '（含盖伏×' + __p2fd + '）' : '');
+      var __p2deck = (battleState.p2.deck || []).length;
+      var __p2lv = battleState.p2.level || 1;
+      var __p2need = (__p2lv >= 6) ? 7 : Math.max(1, __p2lv - 1);
+      __p2zc.textContent = '对手 手牌×' + __p2h + ' · 区域×' + (__p2perm + __p2fd) + (__p2fd ? '（含盖伏×' + __p2fd + '）' : '') +
+        ' · 牌组×' + __p2deck + ' · 激励' + (battleState.p2.motivation || 0) + '/' + __p2need;
     }
     var __p2g = document.getElementById('p2GraveN');
     if (__p2g) __p2g.textContent = battleState.p2.grave.length;
@@ -9658,6 +9717,19 @@ function updateBattleUI() {
         if (g) g.textContent = P.gold || 0;
         var lv = document.getElementById(pl + 'LvBadge');
         if (lv) lv.textContent = 'Lv' + (P.level || 1);
+        // 护盾：>0 才显示徽标（对手护盾此前完全不可见，玩家无法判断斩杀线）
+        var __sh = P.shield || 0;
+        var __shWrap = document.getElementById(pl + 'ShieldWrap');
+        var __shVal = document.getElementById(pl + 'ShieldTop');
+        if (__shWrap) __shWrap.style.display = __sh > 0 ? '' : 'none';
+        if (__shVal) __shVal.textContent = __sh;
+        // 激励点数：显示"当前/升级需求"（Lv1-5 需求=当前等级-1，Lv6 起每级 7）
+        var __mv = document.getElementById(pl + 'MotivationTop');
+        if (__mv) {
+          var __lvN = P.level || 1;
+          var __need = (__lvN >= 6) ? 7 : Math.max(1, __lvN - 1);
+          __mv.textContent = (P.motivation || 0) + '/' + __need;
+        }
       }
       __fillDuel('p1'); __fillDuel('p2');
     } catch (e3) { /* 对决头渲染失败不影响流程 */ }
@@ -14880,11 +14952,13 @@ function judgeAnimate(user, spec, cb) {
   var area = document.getElementById('diceAnimationArea');
   var diceEl = document.getElementById('diceRolling'), resEl = document.getElementById('diceResult'), msgEl = document.getElementById('diceMessage');
   var isP1 = user === 'p1';
-  // AI 结算或无动画容器：直接给结果（日志由调用方/此处补一条，保证可追溯）
-  if (!isP1 || !area || !diceEl) { addBattleLog(user, '【判定】' + (spec.label || '效果判定') + ' → ' + finalVal); cb(finalVal); return; }
+  // 无动画容器：直接给结果（日志由调用方/此处补一条，保证可追溯）
+  // 规则书第八章三-5：所有执行判定的卡/格都必须播放判定动画，以区分"效果未执行"与"判定失败故无效果"，
+  // 因此 AI(p2) 的判定同样播放动画，只在文案上标注"对手"。
+  if (!area || !diceEl) { addBattleLog(user, '【判定】' + (spec.label || '效果判定') + ' → ' + finalVal); cb(finalVal); return; }
   var faces6 = ['⚀','⚁','⚂','⚃','⚄','⚅'];
   area.style.display = 'flex'; if (resEl) resEl.style.display = 'none'; diceEl.style.display = 'block';
-  if (msgEl) msgEl.textContent = (spec.label || '判定') + ' 判定中…';
+  if (msgEl) msgEl.textContent = (isP1 ? '' : '【对手】') + (spec.label || '判定') + ' 判定中…';
   var tick = 0;
   // 下方滚动跳动/旋转是纯本地视觉，刻意用 Math.random、不走 GameRNG，避免消耗权威随机序列
   // （联机两端帧率不同会令后续判定分叉）；最终结果只由 __roll(GameRNG) 决定。
