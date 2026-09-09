@@ -9,7 +9,9 @@
  * 双机推演，保证洗牌/骰子/判定一致。
  *
  * 运行：node online_server.js        （默认端口 2567，前端本地默认连此端口）
- * 部署：Render/Railway 等会注入 process.env.PORT；本地可用 wss 由反代负责。
+ * 部署：Render/Koyeb/Railway 等会注入 process.env.PORT（进程必须监听该端口）；
+ *       云端统一显式绑定 0.0.0.0，本地 wss/TLS 由平台边缘负责。
+ *       Koyeb 免费层(nano,无需信用卡)：服务对外端口与 PORT 都设 8000，健康检查 /health。
  * ===================================================================== */
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -148,6 +150,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[rujuzhe] 中继服务器已启动：ws 端口 ${PORT}（健康检查 /health，当前房间 0）`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[rujuzhe] 中继服务器已启动：ws 端口 ${PORT}（绑定 0.0.0.0，健康检查 /health，当前房间 0）`);
 });
