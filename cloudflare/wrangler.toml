@@ -1,0 +1,18 @@
+# Wrangler 配置 —— 入局者联机中继（Cloudflare Workers + Durable Objects，免费）
+# 部署：npm i -g wrangler && wrangler login（或用 CLOUDFLARE_API_TOKEN）&& wrangler deploy
+name = "rujuzhe-relay"
+main = "worker.mjs"
+compatibility_date = "2025-09-01"
+
+# 一个房号 = 一个 RoomObject 实例
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomObject"
+
+# 首次部署需要声明 DO 迁移（创建该类）
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomObject"]
+
+[observability]
+enabled = true

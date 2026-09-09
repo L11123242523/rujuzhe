@@ -2,12 +2,14 @@
   "name": "rujuzhe-online",
   "version": "0.2.0",
   "private": true,
-  "description": "入局者 TCG 联机：前端确定性双机推演(lockstep) + 极简 WebSocket 中继服 online_server.js（同仓托管静态页，Render 部署中继服，GitHub Pages 托管前端）。server/ 为早期 Colyseus 权威服原型，封存保留。",
+  "description": "入局者 TCG 联机：前端确定性双机推演(lockstep) + 极简 WebSocket 中继。online_server.js=Node 中继（Render 等，绑定 PORT）；cloudflare/=Cloudflare Workers+Durable Objects 中继（永久免费、无需信用卡，主用）。server/ 为早期 Colyseus 权威服原型，封存保留。",
   "main": "online_server.js",
   "scripts": {
     "start": "node online_server.js",
     "test:relay": "node server/test/relay_link_test.js",
-    "test:online": "node server/test/two_client_test.js"
+    "test:online": "node server/test/two_client_test.js",
+    "cf:dev": "wrangler -C cloudflare/wrangler.toml dev",
+    "cf:deploy": "wrangler -C cloudflare/wrangler.toml deploy"
   },
   "engines": {
     "node": ">=18"
@@ -24,7 +26,7 @@
   "devDependencies": {
     "colyseus.js": "^0.16.22",
     "playwright-core": "^1.62.1",
-    "wrangler": "^4.127.1"
+    "wrangler": "^4.130.0"
   },
   "overrides": {
     "@colyseus/greeting-banner": "^2.0.6"

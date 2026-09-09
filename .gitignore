@@ -1,5 +1,8 @@
 # 依赖
 node_modules/
+# wrangler 本地模拟产物/缓存（Cloudflare，勿入库）
+.wrangler/
+cloudflare/.wrangler/
 # 日志
 *.log
 npm-debug.log*

@@ -3726,29 +3726,47 @@ var Online = {
     return false;
   },
   _relay:function(m){ this._send({t:'relay', m:m}); },
+  // ws(s) -> http(s)，用于访问 /newroom
+  _httpBase:function(wsUrl){ return (wsUrl||'').replace(/^wss:\/\//,'https://').replace(/^ws:\/\//,'http://'); },
+  // 由 ws 根地址 + 房号拼出直连 URL（一个房号对应服务端一个房间对象）
+  _roomUrl:function(wsBase, code){
+    var sep = wsBase.indexOf('?')>=0 ? '&' : (wsBase.charAt(wsBase.length-1)==='/' ? '?' : '/?');
+    return wsBase + sep + 'r=' + code;
+  },
   createRoom:function(){
     var self=this;
-    this.endpoint=this._wsUrl(document.getElementById('olServer')?document.getElementById('olServer').value:'');
-    if(!this.endpoint){
-      this.status('线上页面（https）必须先部署并填写中继服务器地址（wss://…）。\n本地调试：请用 http://127.0.0.1:8080 打开页面并先运行 node online_server.js，服务器栏可留空。');
-      showToast('无法创建房间：请先填写中继服务器地址（wss://…）\n本地调试请用 http://127.0.0.1:8080 打开并运行 node online_server.js', 'warn');
+    var wsBase=this._wsUrl(document.getElementById('olServer')?document.getElementById('olServer').value:'');
+    if(!wsBase){
+      this.status('线上页面（https）必须先部署并填写中继服务器地址（wss://…）。\n本地调试：请用 http://127.0.0.1:8080 打开页面并先运行中继服，服务器栏可留空。');
+      showToast('无法创建房间：请先填写中继服务器地址（wss://…）', 'warn');
       return;
     }
-    this.status('正在连接 '+this.endpoint+' …');
-    this._connect(function(){ self._send({t:'create', name:self._name()}); });
+    this.status('正在向 '+wsBase+' 申请房号 …');
+    fetch(this._httpBase(wsBase)+'/newroom').then(function(r){return r.json();}).then(function(j){
+      var code=(j&&j.code||'').toUpperCase();
+      if(!code) throw new Error('bad code');
+      self.roomId=code; self.endpoint=self._roomUrl(wsBase, code);
+      self.status('正在连接房间 '+code+' …');
+      self._connect(function(){ self._send({t:'hello', role:'host', name:self._name()}); });
+    }).catch(function(e){
+      self.status('申请房号失败（'+(e&&e.message?e.message:e)+'）。请确认中继服务器地址正确且已部署 /newroom 接口。');
+      showToast('创建房间失败：无法连接中继服务器', 'warn');
+    });
   },
   joinRoom:function(){
     var id=(document.getElementById('olRoomId').value||'').trim().toUpperCase();
     if(!id){ showToast('请输入对方房号', 'warn'); return; }
+    if(!/^[A-Z0-9]{4}$/.test(id)){ showToast('房号应为 4 位字母/数字', 'warn'); return; }
     var self=this;
-    this.endpoint=this._wsUrl(document.getElementById('olServer')?document.getElementById('olServer').value:'');
-    if(!this.endpoint){
-      this.status('线上页面（https）必须先部署并填写中继服务器地址（wss://…）。\n本地调试：请用 http://127.0.0.1:8080 打开页面并先运行 node online_server.js，服务器栏可留空。');
-      showToast('无法加入房间：请先填写中继服务器地址（wss://…）\n本地调试请用 http://127.0.0.1:8080 打开并运行 node online_server.js', 'warn');
+    var wsBase=this._wsUrl(document.getElementById('olServer')?document.getElementById('olServer').value:'');
+    if(!wsBase){
+      this.status('线上页面（https）必须先部署并填写中继服务器地址（wss://…）。\n本地调试：请用 http://127.0.0.1:8080 打开页面并先运行中继服，服务器栏可留空。');
+      showToast('无法加入房间：请先填写中继服务器地址（wss://…）', 'warn');
       return;
     }
-    this.status('正在连接 '+this.endpoint+' …');
-    this._connect(function(){ self._send({t:'join', id:id, name:self._name()}); });
+    this.roomId=id; this.endpoint=this._roomUrl(wsBase, id);
+    this.status('正在加入房间 '+id+' …');
+    this._connect(function(){ self._send({t:'hello', role:'guest', name:self._name()}); });
   },
   _connect:function(onOpen){
     var self=this;
