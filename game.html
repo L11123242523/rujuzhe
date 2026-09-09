@@ -4077,19 +4077,14 @@ function onlineUseCardP2(handIndex, cardName, done) {
     var actualCost = computeActualCost(card, 'p2');
     var __freeOk = (p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actualCost > 0);
     function __pay(freeUse) {
-      if (freeUse) {
-        p._sakuraFreeUse--;
-        addBattleLog('p2', '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
-      } else {
-        p.cost -= actualCost;
-        if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2');
-      }
+      // 【联机修复】音韵费用与宫樱子免费次数统一交给 settleCardExecution 处理（只扣一次）；
+      // 此处不再自行 p.cost-=actualCost，否则会与结算入口形成“联机双扣”。
       if (battleState.p2.hand[handIndex] === card) battleState.p2.hand.splice(handIndex, 1);
       else { var __ci = battleState.p2.hand.indexOf(card); if (__ci >= 0) battleState.p2.hand.splice(__ci, 1); }
       if (typeof recordSkillUse === 'function') recordSkillUse(card, 'p2');
       addBattleLog('p2', actionType + '【' + card.name + '】（' + (freeUse ? '免费用卡' : '消耗' + actualCost + '费用') + '）');
-      if (typeof settleCardExecution === 'function') settleCardExecution(card, 'p2', target, { actualCost: actualCost }, function () { if (done) done(); });
-      else { if (done) done(); }
+      if (typeof settleCardExecution === 'function') settleCardExecution(card, 'p2', target, { actualCost: actualCost, forceFree: !!freeUse }, function () { if (done) done(); });
+      else { if (!freeUse) { p.cost -= actualCost; if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2'); } if (done) done(); }
     }
     if (__freeOk) {
       // 宫樱子免费用卡询问：与 p1 弹窗同流位同选项
@@ -4126,7 +4121,7 @@ function __replayPendingPhaseIntent() {
   if (!battleState || !battleState._phaseIntentPending) return;
   if (!(typeof Online !== 'undefined' && Online.active) || battleState.currentPlayer !== 'p2') { battleState._phaseIntentPending = null; return; }
   var pa = battleState._phaseIntentPending; battleState._phaseIntentPending = null;
-  try { onlineNextPhaseP2(pa, null); } catch (e) { console.error('重放阶段意图失败', e); }
+  try { onlineNextPhaseP2(); } catch (e) { console.error('重放阶段意图失败', e); }
 }
 // 远端位阶段推进：镜像 p1 的 nextPhase（含机场自由移动决策）
 function onlineNextPhaseP2(done) {
@@ -4157,7 +4152,7 @@ function onlineNextPhaseP2(done) {
   } else if (battleState.phase === 'roll') {
     // 对方已投骰且移动收尾：镜像其“进入主要阶段2”的主动结算；移动未收尾则挂起待收尾后重放
     if (battleState._diceRolledThisPhase && !battleState._moveResolved) {
-      battleState._phaseIntentPending = a;
+      battleState._phaseIntentPending = true;
       if (typeof addBattleLog === 'function') addBattleLog('system', '【联机】对方阶段意图在移动收尾前到达，已挂起待重放');
       if (done) done();
       return;
@@ -6149,9 +6144,12 @@ function initBattle() {
     p2Deck.push(deckConfig.p2.carries[i]);
   }
   
-  // 洗牌
-  shuffleArray(p1Deck);
-  shuffleArray(p2Deck);
+  // 洗牌【联机对称化】：两端必须都按“主机队伍→后手队伍”的全局顺序消耗 RNG，
+  // 否则同一玩家牌组在两台机器上会洗出不同顺序（镜像模型下后手端 p1=自己、p2=主机）
+  var __deckA = (typeof Online !== 'undefined' && Online.active && !Online.isHost) ? p2Deck : p1Deck;
+  var __deckB = (__deckA === p1Deck) ? p2Deck : p1Deck;
+  shuffleArray(__deckA);
+  shuffleArray(__deckB);
   
   var __cap1 = (deckConfig && deckConfig.p1 && (deckConfig.p1.captain || (deckConfig.p1.chars||[]).filter(Boolean)[0])) || null;
   var __cap2 = (deckConfig && deckConfig.p2 && (deckConfig.p2.captain || (deckConfig.p2.chars||[]).filter(Boolean)[0])) || null;
@@ -6187,12 +6185,13 @@ function initBattle() {
   
   // 初始抽牌：双方统一起手4张；先手多出的1张由其第一回合“准备阶段抽1”自然获得（先手=5）。
   // 有宁雨清的不在这里抽，由被动处理7选5
-  if (!p1HasNing) {
-    for (var i = 0; i < 4; i++) drawCard('p1'); // 起手4张
-  }
-  if (!p2HasNing) {
-    for (var i = 0; i < 4; i++) drawCard('p2');
-  }
+  // 【联机对称化】按“主机队伍→后手队伍”全局顺序抽，保证两端同一玩家牌序一致
+  var __initA = (typeof Online !== 'undefined' && Online.active && !Online.isHost) ? 'p2' : 'p1';
+  var __initB = (__initA === 'p1') ? 'p2' : 'p1';
+  var __hasNing = { p1: p1HasNing, p2: p2HasNing };
+  [__initA, __initB].forEach(function (w) {
+    if (!__hasNing[w]) { for (var i = 0; i < 4; i++) drawCard(w); } // 起手4张
+  });
   
   // ========== 角色被动和SP初始化处理 ==========
   // 联机：按【主机队伍优先】顺序结算（双机同序 => 决策序列号一致：主机队的选择在两台机器上都先登记）
@@ -6229,8 +6228,9 @@ function initBattle() {
     var __gd = drawCard(w);
     addBattleLog(w, '游戏开始：回复' + __greg + '点音韵并抽1张卡' + (__gd ? '【' + __gd.name + '】' : '（牌组为空）'));
   }
-  __gameStartRegenDraw('p1');
-  __gameStartRegenDraw('p2');
+  // 【联机对称化】开局回费+抽1 同样按主机优先全局顺序（drawCard 取牌顺序两端一致）
+  __gameStartRegenDraw(__initA);
+  __gameStartRegenDraw(__initB);
 
   // 联机：后手方的本机 p1 即真实的第二位玩家——先手(主机)先行动，这里直接进入远端位回合等待
   if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
@@ -12002,7 +12002,9 @@ function runOneOp(op, ctx, next) {
       if (op.ifLevel && ((p.level || 1) < op.ifLevel)) { addBattleLog(user, '等级未到 Lv' + op.ifLevel + '，该追加抽牌不适用'); break; }
       function __doDraw(__dw) { var __drawn = []; for (var __di = 0; __di < op.n; __di++) { var __dc = drawCard(__dw); if (__dc) __drawn.push(__dc); } playDrawAnim(__dw, __drawn, next); }
       if (op.who === 'pick_player') { // 绿宝之杖①：统一弹一个选玩家框，列出所有在场玩家，点谁谁抽（不区分友敌/1v1/2v2）
-        var __pp = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'].filter(function (k) { return battleState[k]; });
+        var __ppAll = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'].filter(function (k) { return battleState[k]; });
+        // 【联机修复】选项按“使用者自己打头”做中性相对排序：双端广播同一索引都指向同一相对角色（自己/其他），避免全局[p1,p2]在镜像端错位
+        var __pp = [user].concat(__ppAll.filter(function (x) { return x !== user; }));
         if (user === 'p1' && typeof showChoiceModal === 'function') {
           showChoiceModal('选择抽牌的玩家', '绿宝之杖·择', '选择一名玩家抽' + op.n + '张', __pp.map(playerDisplayName), function (oi) { if (oi == null || oi < 0 || !__pp[oi]) { next(); return; } __doDraw(__pp[oi]); });
           return;
@@ -15721,7 +15723,8 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var OL2 = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2');
     function __lvPick(ci) {
       if (ci === 0) {
-        var __pp1 = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'];
+        var __ppAll1 = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'];
+        var __pp1 = [user].concat(__ppAll1.filter(function (x) { return x !== user; })); // 联机中性序：使用者自己打头，双端同一索引指向同一相对角色
         function __lvDraw(wi) {
           if (wi == null || wi < 0) { updateBattleUI(); return; }
           var wd = __pp1[wi] || 'p1'; drawCard(wd);
@@ -16590,8 +16593,8 @@ function settleCardExecution(card, user, target, opts, done) {
   var p = battleState[user];
   var isPerm = card._category === 'item_permanent';
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
-  // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数
-  var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3;
+  // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数；联机重放时认 opts.forceFree（发起方已决定是否免费）
+  var __sfAi = opts.forceFree || (p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3);
   if (__sfAi) {
     p._sakuraFreeUse--;
     addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
@@ -16847,9 +16850,9 @@ function continueCardUse(card, effectText, isPermanent, actionType, target, alre
   runSingleCardSteps('p1', card, target, __finalize);
 }
 
-// 覆盖原有的useCard函数
-var originalUseCard = useCard;
-useCard = useCardComplete;
+// 【联机修复】必须保留前面定义的 useCard（先 Online.sendIntent 广播 card 意图，再调用
+// useCardComplete 完整结算）。绝不能再用 useCardComplete 覆盖 useCard，否则联机出牌不会同步给对手。
+// 单机时 Online.active=false，useCard 不广播，行为与直接 useCardComplete 等价。
 
 
 // 移动端长按手牌=右键查看详情

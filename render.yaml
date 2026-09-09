@@ -1,5 +1,6 @@
-# Render Blueprint —— 入局者权威联机服务器（免费档）
+# Render Blueprint —— 入局者联机中继服（lockstep 极简 WebSocket 转发，免费档）
 # 首次：Render 控制台 New → Blueprint，连接 GitHub 仓库 L11123242523/rujuzhe 即可按本文件自动创建服务
+# 部署后拿到 wss://<服务名>.onrender.com，填进对战页联机大厅“服务器”栏即可异地联机；同服务也托管静态页（GET /）
 services:
   - type: web
     name: rujuzhe-server

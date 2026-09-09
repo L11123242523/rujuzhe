@@ -1,11 +1,12 @@
 {
   "name": "rujuzhe-online",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "入局者 TCG：Colyseus 权威联机服务器（前端静态页同仓，Render 部署本服务，GitHub Pages 托管前端）",
-  "main": "server/index.js",
+  "description": "入局者 TCG 联机：前端确定性双机推演(lockstep) + 极简 WebSocket 中继服 online_server.js（同仓托管静态页，Render 部署中继服，GitHub Pages 托管前端）。server/ 为早期 Colyseus 权威服原型，封存保留。",
+  "main": "online_server.js",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node online_server.js",
+    "test:relay": "node server/test/relay_link_test.js",
     "test:online": "node server/test/two_client_test.js"
   },
   "engines": {
@@ -17,8 +18,8 @@
     "@colyseus/ws-transport": "^0.16.0",
     "colyseus": "^0.16.5",
     "cors": "^2.8.6",
-    "cos-nodejs-sdk-v5": "^3.0.0",
-    "express": "^4.22.2"
+    "express": "^4.22.2",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "colyseus.js": "^0.16.22",
