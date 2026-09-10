@@ -3628,7 +3628,7 @@ var Map3D = (function () {
   var host = null, renderer = null, scene = null, camPersp = null, camOrtho = null;
   var mode = 'persp';
   var tiles = [], pieces = {}, raycaster = null, pointer = null;
-  var hoverTile = null, camTarget = null, camDist = 10.5, camYaw = Math.PI * 0.23, camPitch = 0.86;
+  var hoverTile = null, camTarget = null, camDist = 10.5, camYaw = 0.28, camPitch = 0.86;
   var dragging = false, lastX = 0, lastY = 0, moved = 0;
   var ready = false, failed = false, loading = false, animT = 0, rafId = 0;
   var tileMat = {}, artTex = null;
@@ -3642,7 +3642,9 @@ var Map3D = (function () {
   var HALF_W = BOARD_W / 2, HALF_D = BOARD_D / 2;
   var SX = BOARD_W / 100, SZ = BOARD_D / 100;   // MAP_TILES 百分比 → 世界单位
   var SMALL_H = 0.16, BIG_H = 0.46;       // 普通格 / 四角大格 的抬升高度
-  var TOP_H = 2.0;                        // 棋盘最高占用（含抬升的四角与棋子名牌），用于取景
+  var TOP_H = 1.8;                        // 棋盘最高占用（四角格抬升 + 棋子 + 头顶名牌），用于取景留白
+                                          // 2.0 留白太保守会让棋盘明显偏小；1.8 时名牌仍完整在画面内
+                                          // （实测带牌最高 ≈1.91，但取景点在四角时仍 <1.0 NDC）
   var PIECE_SCALE = 0.72;                 // 棋子整体缩放
 
   // 由原图量测的栅格（单位：像素）
@@ -4044,10 +4046,14 @@ var Map3D = (function () {
     updateCamera(true);
   }
 
-  /* 斜俯视角下让整块棋盘（含抬升格块与棋子）刚好入画的相机距离。
-     先用解析式给一个下界，再用真实透视投影对棋盘外接点做少数几次数值放大：
-     近角/近边在透视下会被解析式低估，不收紧就会出画。 */
+  /* 斜俯视角取景：让整块棋盘（含抬升格块与棋子）刚好入画，并且在画面里真正居中。
+     1) 解析式给距离下界；
+     2) 用真实透视投影对棋盘外接点二分收紧距离（近角在透视下会被解析式低估，不收紧就会出画）；
+     3) 棋盘在画面里是斜的，透视下近角比远角压得更低，整体会贴住下边缘（实测上边空 111px、
+        下边只剩 10px）。用镜头位移 setViewOffset 把投影包围盒在画面里垂直居中 —— 只平移画面，
+        不改变视角和透视。距离与位移互相影响，交替求解几轮即收敛。 */
   var _framePts = null, _tmpV = null;
+  var viewOffY = 0, viewW = 0, viewH = 0;
   function framePoints() {
     if (_framePts) return _framePts;
     _framePts = [];
@@ -4057,47 +4063,87 @@ var Map3D = (function () {
     }
     return _framePts;
   }
-  function frameFits(dist) {
-    if (!camPersp || !T.Vector3 || !camPersp.position || !camPersp.lookAt || !camPersp.updateMatrixWorld) return true;
-    if (!_tmpV) _tmpV = new T.Vector3();
+  function placeCam(dist) {
     var tx = camTarget ? camTarget.x : 0, tz = camTarget ? camTarget.z : 0;
     var flat = dist * Math.cos(camPitch);
     camPersp.position.set(tx + Math.sin(camYaw) * flat, 0.9 + dist * Math.sin(camPitch), tz + Math.cos(camYaw) * flat);
     camPersp.lookAt(tx, 0.9, tz);
     camPersp.updateMatrixWorld();
+  }
+  /* 参考点的 NDC 包围盒；桩环境无法投影时返回 null */
+  function boardBox(dist) {
+    if (!camPersp || !T.Vector3 || !camPersp.position || !camPersp.lookAt || !camPersp.updateMatrixWorld) return null;
+    if (!_tmpV) _tmpV = new T.Vector3();
+    if (!_tmpV.copy || !_tmpV.project) return null;
+    placeCam(dist);
     var pts = framePoints();
+    var box = { minX: 1e9, maxX: -1e9, minY: 1e9, maxY: -1e9 };
     for (var i = 0; i < pts.length; i++) {
-      if (!_tmpV.copy || !_tmpV.project) return true;   // 桩环境无法投影：跳过收紧
       _tmpV.copy(pts[i]).project(camPersp);
-      if (Math.abs(_tmpV.x) > 1.0 || Math.abs(_tmpV.y) > 1.0) return false;
+      if (_tmpV.x < box.minX) box.minX = _tmpV.x;
+      if (_tmpV.x > box.maxX) box.maxX = _tmpV.x;
+      if (_tmpV.y < box.minY) box.minY = _tmpV.y;
+      if (_tmpV.y > box.maxY) box.maxY = _tmpV.y;
     }
-    return true;
+    return box;
+  }
+  function boxFits(box) {
+    return box && Math.max(Math.abs(box.minX), Math.abs(box.maxX), Math.abs(box.minY), Math.abs(box.maxY)) <= 1.0;
+  }
+  function applyViewOffset(w, h, offY) {
+    viewW = w; viewH = h; viewOffY = offY;
+    if (!camPersp || !camPersp.setViewOffset) return;
+    if (Math.abs(offY) < 0.5) { if (camPersp.clearViewOffset) camPersp.clearViewOffset(); return; }
+    camPersp.setViewOffset(w, h, 0, offY, w, h);
+  }
+  function perspSize() {
+    var sz = null;
+    try { sz = renderer ? renderer.getSize(new T.Vector2()) : null; } catch (e) {}
+    return {
+      w: (sz && sz.x) || (host ? host.clientWidth : 900) || 900,
+      h: (sz && sz.y) || (host ? host.clientHeight : 380) || 380
+    };
+  }
+  function bisectFits(base) {
+    var lo = base, hi = base * 6;
+    for (var b = 0; b < 12; b++) {
+      var mid = (lo + hi) * 0.5;
+      var box = boardBox(mid);
+      if (!box) return null;
+      if (boxFits(box)) hi = mid; else lo = mid;
+    }
+    return hi;
   }
   function viewDistance() {
     if (!camPersp) return 20;
-    var sz = null;
-    try { sz = renderer ? renderer.getSize(new T.Vector2()) : null; } catch (e) {}
-    var w = (sz && sz.x) || (host ? host.clientWidth : 900) || 900;
-    var h = (sz && sz.y) || (host ? host.clientHeight : 380) || 380;
+    var s = perspSize(), w = s.w, h = s.h;
     var aspect = Math.max(0.4, w / Math.max(1, h));
     var vFov = camPersp.fov * Math.PI / 180;
     var hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-    var cy = Math.abs(Math.cos(camYaw)), sy = Math.abs(Math.sin(camYaw));
+    var cyw = Math.abs(Math.cos(camYaw)), syw = Math.abs(Math.sin(camYaw));
     var sp = Math.sin(camPitch), cp = Math.cos(camPitch);
-    var projW = HALF_W * cy + HALF_D * sy;                       // 棋盘在画面横向的投影半宽
-    var projH = (HALF_W * sy + HALF_D * cy) * sp + TOP_H * cp;    // 棋盘在画面纵向的投影半高（含抬升高度）
-    var fitH = projH / Math.tan(vFov / 2);
-    var fitW = projW / Math.tan(hFov / 2);
-    var base = Math.max(fitH, fitW);
+    var projW = HALF_W * cyw + HALF_D * syw;                      // 画面横向投影半宽
+    var projH = (HALF_W * syw + HALF_D * cyw) * sp + TOP_H * cp;   // 画面纵向投影半高（含抬升高度）
+    var base = Math.max(projH / Math.tan(vFov / 2), projW / Math.tan(hFov / 2));
     var dist = base;
-    // 在 [base, base*6] 上二分：frameFits 是距离的单调函数，12 次二分即可收紧到 0.15%
     try {
-      var lo = base, hi = base * 6;
-      for (var b = 0; b < 12; b++) {
-        var mid = (lo + hi) * 0.5;
-        if (frameFits(mid)) hi = mid; else lo = mid;
+      var offY = viewOffY;
+      for (var pass = 0; pass < 4; pass++) {
+        applyViewOffset(w, h, offY);
+        var d = bisectFits(base);
+        if (d === null) { dist = base; return dist * 1.03 * (camDist / 10.5); }   // 桩环境
+        dist = d;
+        var bb = boardBox(dist);
+        if (!bb) break;
+        // 镜头位移本身会改变包围盒位置（Δndc_y = 2*offY/H，已用真实 three.js 标定），
+        // 所以按"还差多少像素"累加；直接赋值会在两个值之间来回震荡。
+        var step = -((bb.minY + bb.maxY) / 2) * h / 2;
+        offY += step;
+        if (Math.abs(step) < 0.5) break;
       }
-      dist = hi;
+      applyViewOffset(w, h, offY);
+      var d2 = bisectFits(base);
+      if (d2 !== null) dist = d2;
     } catch (e) { dist = base * 1.6; }
     return dist * 1.03 * (camDist / 10.5);
   }
@@ -4406,7 +4452,7 @@ var Map3D = (function () {
     addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格');
   }
   function resetCamera() {
-    camTarget = null; camDist = 10.5; camYaw = Math.PI * 0.23; camPitch = 0.86;
+    camTarget = null; camDist = 10.5; camYaw = 0.28; camPitch = 0.86;
     if (mode === 'ortho') { mode = 'persp'; var btn = document.getElementById('map3dViewBtn'); if (btn) btn.textContent = '🎥 上帝视角'; }
     updateCamera();
   }
