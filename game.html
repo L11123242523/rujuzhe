@@ -4654,7 +4654,9 @@ var Online = {
   _decOwnerStack:[],    // 嵌套流程的归属栈（p2 远程流程内部所有弹窗都归 p2）
   _answers:{},          // seq -> {got, v, waiters}
   _waitingCount:0,
-  _intentQueue:[], _intentBusy:false, _intentCb:null,
+  // 决策序列失步自检：两端定期交换 _decSeq，静默期仍不一致即判定失步
+  _peerSeq:-1, _peerWait:-1, _seqBadStreak:0, _seqWarned:false, _seqTimer:null,
+  _intentQueue:[], _intentBusy:false, _intentCb:null, _intentStalled:false,
   _oppDeck:null, _oppDeckWaiters:[],
   _gotStart:false, _battleStarted:false, _deckSent:false,
   _reconnectTimer:null, _hbTimer:null,
@@ -4812,6 +4814,7 @@ var Online = {
     try{ if(this.ws){ this._send({t:'leave'}); this.ws.close(); } }catch(e){}
     this.ws=null; this.connected=false; this.active=false; this._gotStart=false; this._battleStarted=false;
     this._decSeq=0; this._answers={}; this._intentQueue=[]; this._intentBusy=false; this._oppDeck=null; this._oppDeckWaiters=[];
+    this._stopSeqWatch();
     this._hideWaiting();
     var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=true;
   },
@@ -4819,6 +4822,9 @@ var Online = {
   _onGameStart:function(m){
     var self=this;
     this.seed=m.seed; this.active=true;
+    // 开局把决策序列号归零（双机在同一点执行 => 仍然对齐），并启动失步自检
+    this._decSeq=0; this._answers={}; this._waitingCount=0; this._seqBadStreak=0; this._seqWarned=false;
+    this._startSeqWatch();
     setGameSeed(m.seed);                 // 双方同一权威种子 -> 本地推演确定一致
     this.mySide=(m.first===this.mySession)?'p1':'p2';
     this.isHost=(this.mySide==='p1');
@@ -4874,6 +4880,10 @@ var Online = {
       case 'emote':
         try{ if(typeof sendEmote==='function' && m && typeof m.idx==='number') sendEmote(m.idx, true); }catch(e){}
         break;
+      case 'seq':
+        if(typeof m.n==='number') this._peerSeq=m.n;
+        if(typeof m.w==='number') this._peerWait=m.w;
+        break;
     }
   },
   _onOpponentLeft:function(){
@@ -4895,7 +4905,21 @@ var Online = {
     this._intentBusy=true;
     var a=this._intentQueue.shift();
     if(this._dbg) console.log('[联机] 应用意图', a);
-    var done=function(){ self._intentBusy=false; self._drainIntents(); };
+    // 卡住可见化：远端位套用一条操作期间，后续操作只能排队。
+    // 若长时间不结束（例如某个决策点等不到答案），玩家只会看到"点了没反应"——这里明确提示。
+    var __t0=Date.now();
+    var __wd=setInterval(function(){
+      if(!self._intentBusy){ clearInterval(__wd); return; }
+      if(self._intentStalled) return;
+      var s=Math.round((Date.now()-__t0)/1000);
+      if(s>=20){
+        self._intentStalled=true;
+        var msg='上一条操作（'+((a&&a.type)||'?')+'）已处理 '+s+' 秒仍未结束，后续操作正在排队等待。';
+        try{ addBattleLog('system','【联机】'+msg); }catch(e){}
+        self.status('⚠ '+msg);
+      }
+    },5000);
+    var done=function(){ clearInterval(__wd); self._intentBusy=false; self._intentStalled=false; self._drainIntents(); };
     try{
       if(typeof onlineApplyIntent==='function') onlineApplyIntent(a, done);
       else { addBattleLog('system','【联机】意图处理器缺失：'+JSON.stringify(a)); done(); }
@@ -4961,6 +4985,34 @@ var Online = {
     el.style.display=on?'block':'none';
   },
   _hideWaiting:function(){ this._waitingCount=0; this._showWaiting(false); },
+  /* ---------------- 决策序列失步自检 ----------------
+     双机必须逐点分配同一序列号。任何一处只在一端分配（例如"区域为空时一端跳过"），
+     此后所有答案都会配错决策点：表现就是"出牌/造伤对手收不到、延迟很久（每次 45s 超时）、投骰卡死"。
+     这里定期交换 _decSeq：只有在【两端都不在等待答案】且连续两次心跳都不一致时才告警，
+     避免把"某一端正在思考"这种正常瞬时差误报。 */
+  _startSeqWatch:function(){
+    var self=this;
+    if(this._seqTimer) return;
+    this._peerSeq=-1; this._peerWait=-1; this._seqBadStreak=0; this._seqWarned=false;
+    this._seqTimer=setInterval(function(){
+      if(!self.active) return;
+      if(self.ws && self.ws.readyState===1) self._relay({k:'seq', n:self._decSeq, w:self._waitingCount});
+      var quiet = (self._waitingCount<=0) && (self._peerWait===0);
+      if(quiet && self._peerSeq>=0 && self._peerSeq!==self._decSeq){
+        self._seqBadStreak++;
+        if(self._seqBadStreak>=3 && !self._seqWarned){
+          self._seqWarned=true;
+          var msg='【联机·决策序列失步】本机'+self._decSeq+' / 对方'+self._peerSeq+
+            '。两端对"哪里该由谁做选择"判断不一致，本局后续的选择会互相错位（出牌或造伤可能对方收不到）。'+
+            '建议：双方退出房间重开一局。';
+          try{ addBattleLog('system', msg); }catch(e){}
+          try{ showToast(msg,'warn'); }catch(e){}
+          self.status('⚠ 决策序列失步：本机 '+self._decSeq+' / 对方 '+self._peerSeq+'（建议重开房间）');
+        }
+      } else if(self._peerSeq===self._decSeq){ self._seqBadStreak=0; }
+    }, 2500);
+  },
+  _stopSeqWatch:function(){ if(this._seqTimer){ clearInterval(this._seqTimer); this._seqTimer=null; } },
   /* ---------------- 表情 ---------------- */
   sendEmote:function(idx){ this._relay({k:'emote', idx:idx}); },
   oppDisplayName:function(){ return this.oppName||'对手'; }
@@ -4970,12 +5022,21 @@ var Online = {
  * 远端位所有决策点显式走 onlineDecideModal('p2',…) / Online.awaitAnswer，
  * 与对方 p1 弹窗在同一流位置登记同序列号（双机确定性推演）。
  * ============================================================ */
+/* 联机·不同步告警
+   远端位拒绝/跳过一条意图时，本机与对方的状态就已经分叉了（对方屏幕上什么都没发生）。
+   这类情况以前只写一行战斗日志，玩家根本看不到，只会觉得"我出牌对手没反应"。
+   这里统一升级为可见告警，让问题当场暴露而不是默默各打各的。 */
+function __onlineDiverge(msg) {
+  try { addBattleLog('system', '【联机·不同步】' + msg); } catch (e) {}
+  try { showToast('联机不同步：' + msg + '\n该操作在对方机器上没有生效，本局状态可能已分叉，建议双方退出重开房间。', 'warn'); } catch (e) {}
+  try { if (typeof Online !== 'undefined' && Online.status) Online.status('⚠ 不同步：' + msg); } catch (e) {}
+}
 function onlineApplyIntent(a, done) {
   if (!battleState || battleState._over) { if (done) done(); return; }
   if (!a || !a.type) { if (done) done(); return; }
   // 'card'/'event'/'music'/'fdPlace'/'fd' 意图任意回合都套用（对手回合可发动技能卡/事件卡/盖伏，与 p1 入口同规则）；
   // 其余意图仅作用于远端位回合
-  if (a.type !== 'card' && a.type !== 'event' && a.type !== 'music' && a.type !== 'fdPlace' && a.type !== 'fd' && battleState.currentPlayer !== 'p2') { if (done) done(); return; }
+  if (a.type !== 'card' && a.type !== 'event' && a.type !== 'music' && a.type !== 'fdPlace' && a.type !== 'fd' && battleState.currentPlayer !== 'p2') { __onlineDiverge('对方执行了「' + a.type + '」，但本机认为不是对方回合，已忽略'); if (done) done(); return; }
   function __fin() { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); }
   switch (a.type) {
     case 'card':
@@ -5001,7 +5062,7 @@ function onlineApplyIntent(a, done) {
       if (battleState.phase === 'roll' && !battleState._diceRolledThisPhase) {
         addBattleLog('p2', '【联机】对方投骰移动');
         rollDiceForPlayer('p2');
-      } else if (typeof addBattleLog === 'function') addBattleLog('system', '【联机】忽略投骰意图（阶段不匹配）');
+      } else if (typeof addBattleLog === 'function') { addBattleLog('system', '【联机】忽略投骰意图（阶段不匹配）'); __onlineDiverge('对方投骰，但本机阶段/状态不匹配（phase=' + battleState.phase + '）'); }
       __fin();
       return;
     case 'end':
@@ -5023,6 +5084,7 @@ function onlineApplyIntent(a, done) {
       return;
     default:
       addBattleLog('system', '【联机】未支持的意图：' + (a.type || '?') + '（双方版本不一致？）');
+      __onlineDiverge('收到本机不认识的意图「' + (a.type || '?') + '」，双方游戏版本可能不一致');
       __fin();
       return;
   }
@@ -5039,12 +5101,12 @@ function onlineUseCardP2(handIndex, cardName, done) {
     }
     if (fi >= 0) { card = p.hand[fi]; handIndex = fi; }
   }
-  if (!card) { addBattleLog('system', '【联机】意图指定的手卡不存在，已跳过'); if (done) done(); return; }
+  if (!card) { addBattleLog('system', '【联机】意图指定的手卡不存在，已跳过'); __onlineDiverge('对方打出的手卡在本机手牌里找不到（索引 ' + handIndex + ' / 名称 ' + (cardName || '?') + '）'); if (done) done(); return; }
   if (typeof __resolveLocked === 'function' && __resolveLocked()) { if (done) done(); return; }
   // 对手回合镜像：仅角色技能卡可从手牌发动（与 p1 的 useCardComplete 同规则）
   if (battleState.currentPlayer !== 'p2' && card._category !== 'skill_cards') { if (done) done(); return; }
   var __play = (typeof evaluatePlayable === 'function') ? evaluatePlayable(card, 'p2') : { ok: true };
-  if (!__play.ok) { addBattleLog('system', '【联机】对方出牌被本机合法性拦截：' + (__play.reason || '')); if (done) done(); return; }
+  if (!__play.ok) { addBattleLog('system', '【联机】对方出牌被本机合法性拦截：' + (__play.reason || '')); __onlineDiverge('对方打出【' + (card.name || '') + '】，但本机合法性校验不通过：' + (__play.reason || '')); if (done) done(); return; }
   var effectText = card.effect || card.text || '';
   var isPermanent = card._category === 'item_permanent';
   var actionType = isPermanent ? '发动' : '使用';
@@ -5070,7 +5132,7 @@ function onlineUseCardP2(handIndex, cardName, done) {
       else { var __ci = battleState.p2.hand.indexOf(card); if (__ci >= 0) battleState.p2.hand.splice(__ci, 1); }
       if (typeof recordSkillUse === 'function') recordSkillUse(card, 'p2');
       addBattleLog('p2', actionType + '【' + card.name + '】（' + (freeUse ? '免费用卡' : '消耗' + actualCost + '费用') + '）');
-      if (typeof settleCardExecution === 'function') settleCardExecution(card, 'p2', target, { actualCost: actualCost }, function () { if (done) done(); });
+      if (typeof settleCardExecution === 'function') settleCardExecution(card, 'p2', target, { actualCost: actualCost, alreadyPaid: true }, function () { if (done) done(); });
       else { if (done) done(); }
     }
     if (__freeOk) {
@@ -8724,11 +8786,12 @@ var pendingCardIndex = -1;
 var pendingCardData = null;
 
 function useCard(handIndex) {
-  // 联机：广播出牌意图（对方远端位以同一流程重放；目标/免费用卡等决策经答案流同步）
-  if (typeof Online !== 'undefined' && Online.active && battleState && battleState.p1 && battleState.p1.hand[handIndex]) {
-    Online.sendIntent({ type: 'card', idx: handIndex, name: battleState.p1.hand[handIndex].name });
-  }
-  // 直接调用完整的卡牌使用流程
+  // 【联机广播已统一移入 useCardComplete】
+  // 本函数在文件末尾被 `useCard = useCardComplete;` 覆盖，而手牌点击处理器生成的是
+  // onclick="useCard(i)"，运行时解析到的是覆盖后的版本——所以旧版放在这里的
+  // Online.sendIntent({type:'card'}) 实际永远不会执行，出牌意图从未发给对手
+  // （表现：自己出牌/造伤生效，对手完全收不到，两端状态永久分叉）。
+  // 广播现在放在 useCardComplete 内，覆盖所有出牌入口。此处保留仅为兼容 originalUseCard 引用。
   useCardComplete(handIndex);
 }
 // HTML 属性转义（灰色卡原因写入 data-block-reason 用）
@@ -11868,15 +11931,27 @@ function parseTargetType(effectText) {
 // 单槽 + 队列（与 choice 弹窗同款）：两个目标选择询问重叠时排队串行，防止 pendingTargetCallback 被覆盖导致流程卡死
 var _targetSelectOpen = false;
 var _targetSelectQueue = [];
+// 联机·目标选择的序列号【必须在调用点预分配】。
+// 原因：本机这次目标选择可能因为已有弹窗而进入排队（showTargetSelect 的 _targetSelectQueue），
+// 而远端 chooseTargetPlayer 的 p2 分支是【立刻】awaitAnswer 的。
+// 若本机等真正弹窗时才分配，排队期间两端序列号就错位一位 —— 之后所有答案配错决策点，
+// 表现就是"出牌/造伤对手收不到、延迟很久"。所以这里先分配好，排队时把它一起存进去。
+function __onlineTargetPrealloc(effectText) {
+  if (typeof Online === 'undefined' || !Online.active || !battleState || battleState._over) return null;
+  var neutral = __onlineTargetNeutralOptions(parseTargetType(effectText));
+  if (neutral === null) return null;                       // 纯自身：两端都不产生决策点
+  return { seq: Online.registerLocalAnswer(), neutral: neutral };
+}
 function showTargetSelect(card, effectText, callback) {
+  var pre = __onlineTargetPrealloc(effectText);
   if (_targetSelectOpen || effectEngine.pendingTargetCallback) {
-    _targetSelectQueue.push({ card: card, effectText: effectText, callback: callback });
+    _targetSelectQueue.push({ card: card, effectText: effectText, callback: callback, pre: pre });
     addBattleLog('system', '【目标选择排队】“' + ((card && card.name) || '效果') + '”等待当前目标选择结束后弹出');
     return;
   }
-  __showTargetSelectNow(card, effectText, callback);
+  __showTargetSelectNow(card, effectText, callback, pre);
 }
-function __showTargetSelectNow(card, effectText, callback) {
+function __showTargetSelectNow(card, effectText, callback, pre) {
   _targetSelectOpen = true;
   var modal = document.getElementById('targetSelectModal');
   document.getElementById('targetSelectTitle').textContent = '选择使用目标';
@@ -11887,15 +11962,16 @@ function __showTargetSelectNow(card, effectText, callback) {
   var optionsDiv = document.getElementById('targetSelectOptions');
   optionsDiv.innerHTML = '';
   
-  // 联机：目标选择是本机玩家(p1)决策——登记序列号，选定/取消时广播中性目标（self/foe）；纯自身无决策点
+  // 联机：目标选择是本机玩家(p1)决策——选定/取消时广播中性目标（self/foe）；纯自身无决策点。
+  // 序列号优先用调用点预分配的那个（排队过的也带着自己的号）。
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
-    var __tNeutral = __onlineTargetNeutralOptions(targetType);
+    var __tNeutral = (pre && pre.neutral) ? pre.neutral : __onlineTargetNeutralOptions(targetType);
     if (__tNeutral === null) {
       effectEngine.pendingTargetCallback = callback;
       selectTarget('p1');
       return;
     }
-    var __tsSeq = Online.registerLocalAnswer();
+    var __tsSeq = (pre && pre.seq !== null && pre.seq !== undefined) ? pre.seq : Online.registerLocalAnswer();
     effectEngine.pendingTargetCallback = function (side) {
       var neutral = null;
       if (side !== null && side !== undefined) neutral = (__tNeutral.length === 1) ? 0 : (side === 'p1' ? 0 : 1);
@@ -11959,7 +12035,7 @@ function __dequeueTargetSelect() {
   var q = _targetSelectQueue.shift();
   if (!q) return;
   if (q.attackCards) showAttackCardSelect(q.attackCards, q.callback);
-  else showTargetSelect(q.card, q.effectText, q.callback);
+  else __showTargetSelectNow(q.card, q.effectText, q.callback, q.pre); // 排队时已预分配序列号，直接展示，不再重复分配
 }
 
 // selectTarget函数已在前面定义
@@ -15449,8 +15525,10 @@ var pendingTargetCardCallback = null;
 function showTargetCards(player, zone, title, selectable, callback) {
   if (!battleState) return;
   // 联机：现有调用点均为本机玩家(p1)决策——正常弹窗并在回答时广播所选索引（远端位经 awaitAnswer 映射同序卡）
+  var __stcDecision = false;
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && selectable && callback && !effectEngine.autoResolve) {
     var __stcSeq = Online.registerLocalAnswer();
+    __stcDecision = true;
     var __stcOrig = callback;
     callback = function (c, i) {
       try { Online.broadcastAnswer(__stcSeq, (i === null || i === undefined || i < 0) ? null : i); } catch (e) {}
@@ -15485,6 +15563,17 @@ function showTargetCards(player, zone, title, selectable, callback) {
   
   if (cards.length === 0) {
     content.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:20px;">没有卡牌</div>';
+    if (__stcDecision || (selectable && callback)) {
+      // 空区域也【必须】产生答案：否则 callback 永不触发，本机出牌流程就地卡死，
+      // 对面还在 awaitAnswer 里等 45 秒。给一个"继续"按钮把决策点收尾。
+      // （单机同样适用：以前这里是个没有任何按钮的死路窗口，流程会永远停住）
+      var __stcEmptyBtn = document.createElement('button');
+      __stcEmptyBtn.className = 'modal-btn modal-btn-confirm';
+      __stcEmptyBtn.style.cssText = 'width:100%;margin-top:10px;';
+      __stcEmptyBtn.textContent = '没有可选的卡 · 继续';
+      __stcEmptyBtn.onclick = function () { closeCardList(); if (callback) callback(null, -1); };
+      content.appendChild(__stcEmptyBtn);
+    }
   } else {
     for (var i = 0; i < cards.length; i++) {
       (function(card, idx) {
@@ -15949,14 +16038,44 @@ function kaedeSPSelect(player) {
   selectNext();
 }
 
-// 控骰能力：骰子点数调整（20%控骰=点数±1，取更有利结果）
+// 控骰能力：骰子点数调整（20%控骰=点数±1）
 // 判定伤害最多适用20%控骰能力，即最多调整±1点
+// 控骰百分比：入间予被动登记在 _diceControlBonus，状态系统登记在 control_dice，
+// 风纪委员臂章（永续区）额外 +20%。
+function __diceControlPct(player) {
+  if (!battleState || !battleState[player]) return 0;
+  var p = battleState[player];
+  var pct = (p._diceControlBonus || 0) + ((typeof StatusSys !== 'undefined') ? StatusSys.value(player, 'control_dice') / 100 : 0);
+  if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) pct += 0.2;
+  return pct;
+}
+/* 控骰【手动按钮】：点数已确定后询问玩家是否使用 ±1 能力，而不是替他自动选"更有利"。
+   选项顺序固定三项（不使用 / +1 / -1），双机同序 => 答案索引可直接映射。
+   联机：本机玩家走 showChoiceModal（其联机包装自动登记序列号并广播答案）；
+         远端位走 onlineDecideModal('p2')，两边在同一流位弹同一组选项，确定性一致。 */
+function __diceControlAsk(user, rawVal, diceMax, label, done) {
+  if (!battleState || !battleState[user]) { done(rawVal); return; }
+  var pct = __diceControlPct(user);
+  if (pct <= 0) { done(rawVal); return; }
+  var up = Math.min(rawVal + 1, diceMax), dn = Math.max(rawVal - 1, 1);
+  if (up === rawVal && dn === rawVal) { done(rawVal); return; }
+  var opts = [
+    '不使用控骰（保留 ' + rawVal + ' 点）',
+    (up !== rawVal) ? ('控骰 +1 → ' + up + ' 点') : ('控骰 +1（已是最大 ' + diceMax + ' 点）'),
+    (dn !== rawVal) ? ('控骰 -1 → ' + dn + ' 点') : ('控骰 -1（已是最小 1 点）')
+  ];
+  var title = '控骰 · ' + (label || '判定');
+  var desc = '本次投出 ' + rawVal + ' 点（' + diceMax + '面骰）。你有 ' + Math.round(Math.min(pct, 0.2) * 100) + '% 控骰能力，可将点数调整 ±1。';
+  var apply = function (o) { if (o === 1) done(up); else if (o === 2) done(dn); else done(rawVal); };
+  var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+  if (__OL && user === 'p2') { onlineDecideModal('p2', title + '（对手）', desc, '', opts, apply); return; }
+  // 单机时 p2 是 AI：不能给玩家弹 AI 的控骰窗，沿用原来的"自动取更有利"（+1 且不超过骰面）
+  if (!__OL && user !== 'p1') { done(up); return; }
+  showChoiceModal(title, desc, '', opts, apply);
+}
 function applyDiceControl(player, diceResult, diceMax) {
   if (!battleState) return diceResult;
-  var p = battleState[player];
-  var diceControl = (p._diceControlBonus || 0) + ((typeof StatusSys!=='undefined') ? StatusSys.value(player,'control_dice')/100 : 0);
-  // 风纪委员臂章：0-13格范围内20%控骰（作用于自身骰子时自身恒为0格，满足范围）
-  if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) diceControl += 0.2;
+  var diceControl = __diceControlPct(player);
   if (diceControl <= 0) return diceResult;
   // 判定伤害最多适用20%控骰能力，即最多±1点
   var maxAdjust = Math.min(Math.floor(diceControl / 0.2), 1);
@@ -16299,12 +16418,23 @@ function judgePerform(user, spec, applyFn) {
 function judgeAnimate(user, spec, cb) {
   spec = spec || {};
   var isCoin = spec.kind === 'coin';
+  var __isFixed = (spec.fixed !== undefined && spec.fixed !== null);
   function __roll() {
     if (isCoin) return GameRNG.coin() ? '正面' : '反面';
-    var raw = GameRNG.dice(spec.sides || 6);
-    return (typeof applyDiceControl === 'function') ? applyDiceControl(user, raw, spec.sides || 6) : raw;
+    return GameRNG.dice(spec.sides || 6); // 只取原始点数：控骰已改为由玩家手动决定
   }
-  var finalVal = (spec.fixed !== undefined && spec.fixed !== null) ? spec.fixed : __roll();
+  var finalVal = __isFixed ? spec.fixed : __roll();
+  // 控骰【手动按钮】：点数已知后询问玩家是否 ±1（不再替玩家自动选"更有利"的结果）
+  if (!isCoin && !__isFixed && typeof __diceControlAsk === 'function') {
+    __diceControlAsk(user, finalVal, spec.sides || 6, spec.label, function (v) {
+      if (v !== finalVal) addBattleLog(user, '【控骰】判定骰子点数' + finalVal + '→' + v + '（手动选择）');
+      __judgeAnimPlay(user, spec, false, v, cb);
+    });
+    return;
+  }
+  __judgeAnimPlay(user, spec, isCoin, finalVal, cb);
+}
+function __judgeAnimPlay(user, spec, isCoin, finalVal, cb) {
   var area = document.getElementById('diceAnimationArea');
   var diceEl = document.getElementById('diceRolling'), resEl = document.getElementById('diceResult'), msgEl = document.getElementById('diceMessage');
   var isP1 = user === 'p1';
@@ -17538,6 +17668,10 @@ function useCardComplete(handIndex) {
     if (!canCardBeFaceDown(card)) { showToast('这张卡不能盖伏', 'warn'); return; }
     var __fdp = battleState.p1;
     if ((__fdp.permanent||[]).length + (__fdp.faceDownCards||[]).length >= 3) { showToast('效果处理区已满（3格），无法盖伏', 'warn'); return; }
+    // 联机：盖伏放置也要广播（这条入口走不到下面的出牌广播，否则对手看不到这次盖伏）
+    if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
+      Online.sendIntent({ type: 'fdPlace', idx: handIndex, name: card.name });
+    }
     __fdp.hand.splice(handIndex, 1);
     placeFaceDown(card, 'p1');
     updateBattleUI();
@@ -17550,6 +17684,12 @@ function useCardComplete(handIndex) {
   // 统一发动合法性校验（连锁对象/阶段/技能一次/费用/攻击范围/特例条件）
   var __play = evaluatePlayable(card, 'p1');
   if(!__play.ok){ showToast(__play.reason, 'warn'); return; }
+
+  // 联机：广播出牌意图（对方远端位以同一流程重放；目标选择/宫樱子免费用卡等决策经答案流同步）。
+  // 位置放在所有"本机不会真的打出这张牌"的提前返回之后，保证对手只重放本机确实执行了的出牌。
+  if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
+    Online.sendIntent({ type: 'card', idx: handIndex, name: card.name });
+  }
 
   var isPermanent = card._category === 'item_permanent';
   var actionType = isPermanent ? '发动' : '使用';
@@ -18258,14 +18398,18 @@ function settleCardExecution(card, user, target, opts, done) {
   var p = battleState[user];
   var isPerm = card._category === 'item_permanent';
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
-  // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数
-  var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3;
-  if (__sfAi) {
-    p._sakuraFreeUse--;
-    addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
-  } else {
-    p.cost -= actual;
-    if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+  // 【避免双扣】调用方若已完成付费（含宫樱子免费用卡的玩家选择），必须传 alreadyPaid:true。
+  // 否则这里会再扣一次 opts.actualCost，导致费用 4 的牌扣掉 8（联机远端位曾因此与对面分叉）。
+  if (!opts.alreadyPaid) {
+    // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数
+    var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3;
+    if (__sfAi) {
+      p._sakuraFreeUse--;
+      addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
+    } else {
+      p.cost -= actual;
+      if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
+    }
   }
   // “每用一次+1”费用递增：结算支付后计次
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
@@ -18326,9 +18470,13 @@ function chooseTargetPlayer(user, card, cb) {
 // 从某玩家某区域选一张卡：玩家可视化选，AI 自动取第一张；无卡返回 (null,-1)
 function chooseZoneCard(user, who, zone, title, cb) {
   var arr = (battleState[who] && battleState[who][zone]) || [];
+  // 【联机·空区域闸门·判定只写一次】两端必须对"空区域是否算一个决策点"给出同一答案。
+  // who 在双机指同一名玩家（A机 p2 = B机 p1），故此判定双机同真同假。
+  // 若一端跳过、另一端分配序列号，此后所有答案都会与决策点错位一位
+  // → 表现为"出牌/造伤对手收不到、延迟很久（每次等 45s 超时）、投骰卡死"。
+  if (!arr.length) { cb(null, -1); return; }
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
     if (user === 'p2') {
-      if (!arr.length) { cb(null, -1); return; }
       Online.awaitAnswer({ label: title + '（对手）' }, function (v) {
         var ix = Array.isArray(v) ? v[0] : v;
         if (ix === null || ix === undefined || ix < 0 || ix >= arr.length) { cb(null, -1); return; }
