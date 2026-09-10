@@ -4,6 +4,15 @@ name = "rujuzhe-relay"
 main = "worker.mjs"
 compatibility_date = "2025-09-01"
 
+# 自定义域名：relay.rujuzhe-b-a-gs.top -> 本 Worker。
+# custom_domain = true 由 Cloudflare 自动建 DNS 记录并签发证书（不用手动加 CNAME）。
+# 前提：rujuzhe-b-a-gs.top 的 DNS 已托管在同一个 Cloudflare 账号下
+#       （即域名的 NS 已改成 Cloudflare 给出的那两个）；否则 wrangler deploy 会直接报错。
+# 游戏页面里填的中继地址就是：wss://relay.rujuzhe-b-a-gs.top
+routes = [
+  { pattern = "relay.rujuzhe-b-a-gs.top", custom_domain = true }
+]
+
 # 一个房号 = 一个 RoomObject 实例
 [[durable_objects.bindings]]
 name = "ROOMS"

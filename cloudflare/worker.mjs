@@ -89,13 +89,23 @@ export class RoomObject {
             me.isHost = true; this.hostSid = sid;
             this._send(server, { t: 'joined', id: this.code, sid, isHost: true });
           } else {
+            // 与 Node 版 online_server.js 行为保持一致：没有房主的房间视为「不存在」。
+            // DO 是按房号按需创建的，不这样挡的话，房号打错一位就会静默建出一个没有房主的
+            // 房间，双方都算客人、start.first 为空，开局直接卡死。
+            if (!this.hostSid) {
+              this._send(server, { t: 'error', msg: '房间不存在，请先创建或核对房号' });
+              try { server.close(); } catch (e) {}
+              return;
+            }
             if (this.started) { this._send(server, { t: 'error', msg: '对局已经开始，无法加入' }); try { server.close(); } catch (e) {} return; }
-            if (this.players.filter((p) => p.greeted).length > MAX) {
+            // 只数「别人」：me.greeted 在上面已经置 true，直接数全部会把正常加入的第 2 人误挡。
+            if (this.players.filter((p) => p.greeted && p !== me).length >= MAX) {
               this._send(server, { t: 'error', msg: '房间已满（2 人）' }); try { server.close(); } catch (e) {} return;
             }
             this._send(server, { t: 'joined', id: this.code, sid, isHost: false });
           }
-          this._broadcast(this._snapshot());
+          // 先把快照推给房里其他人，再单独发给刚进来的这位（避免他收到两遍）
+          this._broadcast(this._snapshot(), server);
           this._send(server, this._snapshot());
           break;
         }
