@@ -374,7 +374,8 @@ body {
 #battleScreen .battle-main-area > .player-area { order: 3; }
 #battleScreen .battle-main-area > .opponent-area { order: 0; }
 .map3d-wrap {
-  position: relative; width: 100%; flex: 1 1 auto; min-height: 240px; height: 38vh;
+  position: relative; width: 100%; flex: 0 0 auto; min-height: 300px;
+  height: auto; aspect-ratio: 2 / 1; max-height: 60vh;
   border-radius: 14px; overflow: hidden;
   background: radial-gradient(120% 90% at 50% 0%, #1b2b4a 0%, #0b1220 70%);
   border: 1px solid rgba(120,160,255,.22);
@@ -3622,7 +3623,7 @@ var Map3D = (function () {
   var host = null, renderer = null, scene = null, camPersp = null, camOrtho = null;
   var mode = 'persp';
   var tiles = [], pieces = {}, raycaster = null, pointer = null;
-  var hoverTile = null, camTarget = null, camDist = 26, camYaw = Math.PI * 0.25, camPitch = 0.95;
+  var hoverTile = null, camTarget = null, camDist = 10.5, camYaw = Math.PI * 0.23, camPitch = 0.86;
   var dragging = false, lastX = 0, lastY = 0, moved = 0;
   var ready = false, failed = false, animT = 0, rafId = 0;
   var tileGeo = null, tileMat = {}, labelCache = {};
@@ -3659,41 +3660,93 @@ var Map3D = (function () {
     try { renderBattleMap(); } catch (e) {}
   }
 
-  /* ---------- 棋子：用基础几何拼一个"国王"造型 ---------- */
+  /* ---------- 棋子：LatheGeometry 车削出国际象棋"国王"造型 ---------- */
+  // 圆角矩形路径（格子底板用）
+  function roundedRectShape(w, h, r) {
+    var s = new T.Shape();
+    var hw = w / 2, hh = h / 2;
+    s.moveTo(-hw + r, -hh);
+    s.lineTo(hw - r, -hh); s.quadraticCurveTo(hw, -hh, hw, -hh + r);
+    s.lineTo(hw, hh - r); s.quadraticCurveTo(hw, hh, hw - r, hh);
+    s.lineTo(-hw + r, hh); s.quadraticCurveTo(-hw, hh, -hw, hh - r);
+    s.lineTo(-hw, -hh + r); s.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
+    return s;
+  }
   function buildKing(isWhite) {
     var g = new T.Group();
-    var bodyMat = new T.MeshStandardMaterial({
-      color: isWhite ? 0xf2f5fa : 0x232a38,
-      metalness: 0.35, roughness: 0.42,
-      emissive: isWhite ? 0x223044 : 0x000000,
-      emissiveIntensity: isWhite ? 0.25 : 0.1
+    var bodyMat = new T.MeshPhysicalMaterial ? new T.MeshPhysicalMaterial({
+      color: isWhite ? 0xf6f8fc : 0x1d2431,
+      metalness: 0.28, roughness: isWhite ? 0.32 : 0.38,
+      clearcoat: 0.85, clearcoatRoughness: 0.22,
+      sheen: 0.4, sheenColor: isWhite ? 0xbfd4ff : 0x3a4a66
+    }) : new T.MeshStandardMaterial({
+      color: isWhite ? 0xf6f8fc : 0x1d2431, metalness: 0.35, roughness: 0.34,
+      emissive: isWhite ? 0x1a2740 : 0x05080f, emissiveIntensity: isWhite ? 0.22 : 0.12
     });
-    var goldMat = new T.MeshStandardMaterial({ color: isWhite ? 0xffd76a : 0xd9a63c, metalness: 0.85, roughness: 0.3 });
+    var goldMat = new T.MeshStandardMaterial({ color: isWhite ? 0xffd98a : 0xe0b061, metalness: 0.92, roughness: 0.22 });
+    var darkMat = new T.MeshStandardMaterial({ color: isWhite ? 0x2b3a55 : 0x0b1119, metalness: 0.55, roughness: 0.5 });
 
-    function add(geo, mat, y, ry) {
-      var m = new T.Mesh(geo, mat);
-      m.position.y = y; if (ry) m.rotation.y = ry;
-      m.castShadow = true; m.receiveShadow = false;
+    // 车削轮廓（y 向上，x 为半径）——经典国王剪影：底座→收腰→球腹→领口→头冠
+    var profile = [
+      [0.00, 0.000], [0.34, 0.000], [0.36, 0.020], [0.33, 0.055], [0.24, 0.085],
+      [0.19, 0.130], [0.175, 0.200], [0.20, 0.280], [0.245, 0.350], [0.265, 0.420],
+      [0.245, 0.490], [0.205, 0.545], [0.185, 0.580], [0.230, 0.610], [0.245, 0.640],
+      [0.215, 0.675], [0.165, 0.705], [0.150, 0.740], [0.175, 0.790], [0.195, 0.850],
+      [0.185, 0.910], [0.150, 0.955], [0.105, 0.985], [0.060, 1.005], [0.030, 1.020],
+      [0.000, 1.025]
+    ];
+    var pts = profile.map(function (p) { return new T.Vector2(p[0], p[1]); });
+    var body = new T.Mesh(new T.LatheGeometry(pts, 40), bodyMat);
+    body.castShadow = true; body.receiveShadow = true;
+    g.add(body);
+
+    // 金属环饰：底座环 / 领口环
+    function ring(radius, tube, y) {
+      var m = new T.Mesh(new T.TorusGeometry(radius, tube, 12, 36), goldMat);
+      m.position.y = y; m.rotation.x = Math.PI / 2; m.castShadow = true;
       g.add(m); return m;
     }
-    // 底座
-    add(new T.CylinderGeometry(0.42, 0.5, 0.16, 24), bodyMat, 0.08);
-    add(new T.CylinderGeometry(0.34, 0.42, 0.12, 24), goldMat, 0.2);
-    // 身体
-    add(new T.CylinderGeometry(0.22, 0.32, 0.52, 24), bodyMat, 0.5);
-    // 领口
-    add(new T.TorusGeometry(0.24, 0.05, 10, 24), goldMat, 0.78, Math.PI / 2);
-    // 头
-    add(new T.SphereGeometry(0.21, 24, 18), bodyMat, 0.96);
-    // 王冠
-    var crown = add(new T.CylinderGeometry(0.2, 0.23, 0.16, 20), goldMat, 1.12);
-    // 王冠十字
-    add(new T.BoxGeometry(0.05, 0.2, 0.05), goldMat, 1.28);
-    add(new T.BoxGeometry(0.16, 0.05, 0.05), goldMat, 1.3);
+    ring(0.335, 0.026, 0.030);
+    ring(0.238, 0.024, 0.615);
+
+    // 头顶十字（国王标志）
+    var crossV = new T.Mesh(new T.BoxGeometry(0.045, 0.145, 0.045), goldMat);
+    crossV.position.y = 1.095; crossV.castShadow = true; g.add(crossV);
+    var crossH = new T.Mesh(new T.BoxGeometry(0.115, 0.045, 0.045), goldMat);
+    crossH.position.y = 1.105; crossH.castShadow = true; g.add(crossH);
+
+    // 脚下接触阴影（软圆斑，增强"落地"感）
+    var shCv = document.createElement('canvas'); shCv.width = 128; shCv.height = 128;
+    var shCtx = shCv.getContext('2d');
+    if (shCtx) {
+      var grad = shCtx.createRadialGradient(64, 64, 4, 64, 64, 62);
+      grad.addColorStop(0, 'rgba(0,0,0,0.55)');
+      grad.addColorStop(0.55, 'rgba(0,0,0,0.22)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      shCtx.fillStyle = grad; shCtx.fillRect(0, 0, 128, 128);
+      var shTex = new T.CanvasTexture(shCv);
+      var shMat = new T.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false });
+      var shPlane = new T.Mesh(new T.PlaneGeometry(1.5, 1.5), shMat);
+      shPlane.rotation.x = -Math.PI / 2; shPlane.position.y = 0.012;
+      g.add(shPlane);
+      g.userData.shadow = shPlane;
+    }
+
+    // 选中/当前行动方光环（默认隐藏，frame 里控制）
+    var ringGeo = new T.RingGeometry(0.52, 0.68, 48);
+    var ringMat = new T.MeshBasicMaterial({ color: isWhite ? 0x7fc4ff : 0xff8f7a, transparent: true, opacity: 0, side: T.DoubleSide, depthWrite: false });
+    var selRing = new T.Mesh(ringGeo, ringMat);
+    selRing.rotation.x = -Math.PI / 2; selRing.position.y = 0.02;
+    selRing.userData.isSelectRing = true;
+    g.add(selRing);
+
+    // 记录材质，供 frame 里做高亮脉冲
+    g.userData.mats = [bodyMat, goldMat, darkMat];
+    g.userData.selRing = selRing;
     return g;
   }
-  /* 棋子顶上的名牌（用 canvas 贴图，避免额外字体依赖） */
-  function buildTag(text, color) {
+  /* 文字贴图（名牌 / 格子序号） */
+  function buildTag(text, color, fontPx, w, h) {
     var cv = document.createElement('canvas');
     cv.width = 256; cv.height = 96;
     var ctx = cv.getContext('2d');
@@ -3707,71 +3760,122 @@ var Map3D = (function () {
     ctx.lineTo(r, 93); ctx.quadraticCurveTo(3, 93, 3, 93 - r);
     ctx.lineTo(3, 3 + r); ctx.quadraticCurveTo(3, 3, r, 3);
     ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = color; ctx.font = 'bold 46px "Microsoft YaHei",sans-serif';
+    ctx.fillStyle = color; ctx.font = 'bold ' + (fontPx || 46) + 'px "Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(text, 128, 50);
     var tex = new T.CanvasTexture(cv);
     var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-    spr.scale.set(1.5, 0.56, 1);
+    spr.scale.set(w || 1.5, h || 0.56, 1);
+    return spr;
+  }
+  /* 格子图标贴图（emoji 圆形徽章） */
+  function buildEmblem(icon, color) {
+    var cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 128;
+    var ctx = cv.getContext('2d');
+    if (!ctx) return null;
+    ctx.beginPath(); ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(10,16,28,0.86)'; ctx.fill();
+    ctx.lineWidth = 7; ctx.strokeStyle = color; ctx.stroke();
+    ctx.font = '62px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 64, 68);
+    var tex = new T.CanvasTexture(cv);
+    var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    spr.scale.set(0.72, 0.72, 1);
     return spr;
   }
 
   /* ---------- 场景构建 ---------- */
   function buildScene() {
     scene = new T.Scene();
-    scene.background = new T.Color(0x0a1120);
-    scene.fog = new T.Fog(0x0a1120, 22, 46);
+    scene.background = new T.Color(0x070b14);
+    scene.fog = new T.Fog(0x070b14, 26, 60);
 
-    // 灯光
-    scene.add(new T.AmbientLight(0xbcd2ff, 0.72));
-    var hemi = new T.HemisphereLight(0xcfe0ff, 0x0a1020, 0.55); scene.add(hemi);
-    var dir = new T.DirectionalLight(0xffffff, 1.15);
-    dir.position.set(8, 16, 10);
-    dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
+    // 灯光：暖色主光 + 冷色补光 + 半球环境（让棋子有金属层次而不是死白/死黑）
+    scene.add(new T.AmbientLight(0x9fb8e8, 0.55));
+    scene.add(new T.HemisphereLight(0xd8e6ff, 0x141a2a, 0.75));
+    var key = new T.DirectionalLight(0xfff3dd, 2.1);
+    key.position.set(7, 15, 9);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
     var d = 10;
-    dir.shadow.camera.left = -d; dir.shadow.camera.right = d;
-    dir.shadow.camera.top = d; dir.shadow.camera.bottom = -d;
-    dir.shadow.camera.near = 1; dir.shadow.camera.far = 40;
-    scene.add(dir);
-    var rim = new T.DirectionalLight(0x6ea8ff, 0.5); rim.position.set(-9, 7, -8); scene.add(rim);
+    key.shadow.camera.left = -d; key.shadow.camera.right = d;
+    key.shadow.camera.top = d; key.shadow.camera.bottom = -d;
+    key.shadow.camera.near = 1; key.shadow.camera.far = 46;
+    key.shadow.bias = -0.0006;
+    if (key.shadow.normalBias !== undefined) key.shadow.normalBias = 0.02;
+    scene.add(key);
+    var fill = new T.DirectionalLight(0x6fa8ff, 0.85); fill.position.set(-9, 8, -7); scene.add(fill);
+    var rim = new T.DirectionalLight(0xffb27a, 0.55); rim.position.set(-4, 5, 12); scene.add(rim);
 
-    // 棋盘底板
+    // 棋盘：底座 + 内嵌地板 + 金色描边
     var board = new T.Mesh(
-      new T.BoxGeometry(13.6, 0.5, 13.6),
-      new T.MeshStandardMaterial({ color: 0x121a2c, metalness: 0.2, roughness: 0.85 })
+      new T.BoxGeometry(13.7, 0.62, 13.7),
+      new T.MeshStandardMaterial({ color: 0x0d1424, metalness: 0.35, roughness: 0.78 })
     );
-    board.position.y = -0.28; board.receiveShadow = true; scene.add(board);
-    // 边框高光
-    var frame = new T.Mesh(
-      new T.BoxGeometry(13.9, 0.12, 13.9),
-      new T.MeshStandardMaterial({ color: 0x24406e, emissive: 0x1b3a6b, emissiveIntensity: 0.55, metalness: 0.6, roughness: 0.35 })
+    board.position.y = -0.34; board.receiveShadow = true; scene.add(board);
+    var floorIn = new T.Mesh(
+      new T.BoxGeometry(12.9, 0.06, 12.9),
+      new T.MeshStandardMaterial({ color: 0x111c31, metalness: 0.15, roughness: 0.9 })
     );
-    frame.position.y = -0.06; scene.add(frame);
+    floorIn.position.y = -0.015; floorIn.receiveShadow = true; scene.add(floorIn);
+    // 金色描边（四条）
+    var trimMat = new T.MeshStandardMaterial({ color: 0xc9a44a, metalness: 0.95, roughness: 0.28, emissive: 0x3a2a08, emissiveIntensity: 0.6 });
+    [[0, 6.85], [0, -6.85], [6.85, 0], [-6.85, 0]].forEach(function (p) {
+      var w = p[1] === 0 ? 0.09 : 13.7, dp = p[1] === 0 ? 13.7 : 0.09;
+      var bar = new T.Mesh(new T.BoxGeometry(w, 0.1, dp), trimMat);
+      bar.position.set(p[0], -0.03, p[1]); scene.add(bar);
+    });
 
-    // 42 格
-    tileGeo = new T.CylinderGeometry(TILE_R, TILE_R, TILE_H, 28);
+    // 42 格：圆角方板 + 彩色内嵌顶面 + 图标徽章 + 序号
     tiles = [];
+    var bevelShape = roundedRectShape(1.06, 1.06, 0.24);
+    var bevelGeo = new T.ExtrudeGeometry(bevelShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 3, curveSegments: 6 });
+    bevelGeo.rotateX(-Math.PI / 2);
+    var insetGeo = new T.BoxGeometry(0.8, 0.045, 0.8);
+    var baseMat = new T.MeshStandardMaterial({ color: 0x1b2537, metalness: 0.5, roughness: 0.45 });
+
     for (var i = 0; i < MAP_TILES.length; i++) {
       var t = MAP_TILES[i];
       var col = TILE_COLOR[t.type] || 0x9aa7bd;
       if (!tileMat[col]) {
         tileMat[col] = new T.MeshStandardMaterial({
-          color: col, metalness: 0.3, roughness: 0.5,
-          emissive: col, emissiveIntensity: 0.16
+          color: col, metalness: 0.45, roughness: 0.35,
+          emissive: col, emissiveIntensity: 0.35
         });
       }
-      var mesh = new T.Mesh(tileGeo, tileMat[col]);
       var wp = worldPos(t);
-      mesh.position.set(wp.x, TILE_H / 2, wp.z);
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      mesh.userData.tileId = t.id;
-      scene.add(mesh);
+      var g = new T.Group();
+      g.position.set(wp.x, 0, wp.z);
 
-      // 序号浮标
-      var tag = buildTag(String(t.id), '#' + col.toString(16).padStart(6, '0'));
-      if (tag) { tag.position.set(wp.x, TILE_H + 0.52, wp.z); tag.scale.set(0.95, 0.36, 1); scene.add(tag); }
-      tiles.push(mesh);
+      var slab = new T.Mesh(bevelGeo, baseMat);
+      slab.castShadow = true; slab.receiveShadow = true;
+      g.add(slab);
+      var top = new T.Mesh(insetGeo, tileMat[col]);
+      top.position.y = 0.21; top.castShadow = false; top.receiveShadow = true;
+      g.add(top);
+
+      // 图标徽章（浮在格子上方）
+      var emb = buildEmblem(TILE_ICON[t.type] || '❓', '#' + col.toString(16).padStart(6, '0'));
+      if (emb) { emb.position.set(0, 0.82, 0); g.add(emb); }
+      // 序号小标签
+      var tag = buildTag(String(t.id), '#' + col.toString(16).padStart(6, '0'), 40, 0.52, 0.2);
+      if (tag) { tag.position.set(0, 0.42, 0.42); g.add(tag); }
+
+      // 当前玩家所在格的光柱
+      var glowMat = new T.MeshBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false });
+      var glow = new T.Mesh(new T.CylinderGeometry(0.5, 0.62, 2.6, 24, 1, true), glowMat);
+      glow.position.y = 1.3; glow.userData.isGlow = true;
+      g.add(glow);
+
+      scene.add(g);
+      // 用 slab 作为拾取与高亮载体，保持 tileId 索引一致
+      slab.userData.tileId = t.id;
+      slab.userData.group = g;
+      slab.userData.top = top;
+      slab.userData.glow = glow;
+      tiles.push(slab);
     }
 
     // 棋子
@@ -3779,55 +3883,110 @@ var Map3D = (function () {
     pieces.p2 = buildKing(false);
     pieces.p1.userData.side = 'p1';
     pieces.p2.userData.side = 'p2';
-    var tag1 = buildTag('你', '#8fd0ff'); if (tag1) { tag1.position.set(0, 1.75, 0); tag1.scale.set(1.25, 0.47, 1); pieces.p1.add(tag1); }
-    var tag2 = buildTag('对手', '#ff9c8f'); if (tag2) { tag2.position.set(0, 1.75, 0); tag2.scale.set(1.4, 0.52, 1); pieces.p2.add(tag2); }
+    var tag1 = buildTag('你', '#8fd0ff', 44, 1.15, 0.43); if (tag1) { tag1.position.set(0, 1.72, 0); pieces.p1.add(tag1); }
+    var tag2 = buildTag('对手', '#ff9c8f', 42, 1.28, 0.48); if (tag2) { tag2.position.set(0, 1.72, 0); pieces.p2.add(tag2); }
     scene.add(pieces.p1); scene.add(pieces.p2);
     pieces.p1.position.set(0, 0, 0);
     pieces.p2.position.set(0, 0, 0);
 
     // 相机
-    var aspect = 1;
-    camPersp = new T.PerspectiveCamera(52, aspect, 0.1, 200);
-    var fr = 8.2;
-    camOrtho = new T.OrthographicCamera(-fr, fr, fr, -fr, 0.1, 200);
+    camPersp = new T.PerspectiveCamera(46, 1, 0.1, 300);
+    var fr = 8.0;
+    camOrtho = new T.OrthographicCamera(-fr, fr, fr, -fr, 0.1, 300);
     updateCamera(true);
+  }
+
+  /* 根据渲染器当前真实尺寸刷新正交相机视锥（每帧调用，避免布局时序导致的宽高比失真） */
+  function refreshOrthoFrustum() {
+    if (!camOrtho || !renderer) return;
+    var sz = null;
+    try { sz = renderer.getSize(new T.Vector2()); } catch (e) {}
+    var w = (sz && sz.x) || 900, h = (sz && sz.y) || 380;
+    var aspect = Math.max(0.3, w / Math.max(1, h));
+    var needW = 8.4, needH = 7.2;               // 棋盘半宽/半高（含描边与浮标留白）
+    var halfW, halfH;
+    if (aspect >= needW / needH) { halfH = needH; halfW = halfH * aspect; }
+    else { halfW = needW; halfH = halfW / aspect; }
+    camOrtho.left = -halfW; camOrtho.right = halfW;
+    camOrtho.top = halfH; camOrtho.bottom = -halfH;
+    camOrtho.updateProjectionMatrix();
+    return { w: w, h: h, aspect: aspect, halfW: halfW, halfH: halfH };
   }
 
   function resize() {
     if (!renderer || !host) return;
-    var w = host.clientWidth || 600, h = host.clientHeight || 320;
-    renderer.setSize(w, h, false);
-    var aspect = w / Math.max(1, h);
+    // 用真实布局尺寸（getBoundingClientRect）而不是 clientHeight：
+    // 之前读到的是 flex 布局前的 0/异常值，导致画布被 CSS 拉伸放大、棋盘显得很小。
+    var r = null;
+    try { r = host.getBoundingClientRect(); } catch (e) {}
+    var w = Math.max(320, Math.round((r && r.width) || host.clientWidth || 900));
+    var h = Math.max(220, Math.round((r && r.height) || host.clientHeight || 380));
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(w, h, true);
+    var aspect = w / h;
     if (camPersp) { camPersp.aspect = aspect; camPersp.updateProjectionMatrix(); }
-    if (camOrtho) {
-      var fr = 8.2, vf = fr / Math.max(0.35, Math.min(1.6, aspect));
-      camOrtho.left = -fr * Math.max(0.6, aspect); camOrtho.right = fr * Math.max(0.6, aspect);
-      camOrtho.top = vf; camOrtho.bottom = -vf;
-      camOrtho.updateProjectionMatrix();
-    }
+      if (camOrtho) refreshOrthoFrustum();
+    updateCamera(true);
   }
 
   function updateCamera(instant) {
     if (!camPersp) return;
+    var tx = camTarget ? camTarget.x : 0;
+    var tz = camTarget ? camTarget.z : 0;
+    var ty = 0.85; // 视线中心略高于棋盘，让棋盘在画面里居中
     if (mode === 'ortho') {
-      camOrtho.position.set(0, 22, 0.01);
-      camOrtho.lookAt(0, 0, 0);
+      camOrtho.position.set(tx, 24, tz + 0.01);
+      // 俯视时把"上"方向固定为世界 -Z，避免与视线共线导致画面被随机旋转
+      if (camOrtho.up && camOrtho.up.set) camOrtho.up.set(0, 0, -1);
+      camOrtho.lookAt(tx, 0, tz);
     } else {
-      var r = camDist;
-      var y = r * Math.sin(camPitch);
-      var flat = r * Math.cos(camPitch);
-      camPersp.position.set(Math.sin(camYaw) * flat, y, Math.cos(camYaw) * flat);
-      camPersp.lookAt(camTarget ? camTarget.x : 0, 0.4, camTarget ? camTarget.z : 0);
+      // 按棋盘尺寸 + 视口宽高比自动求距离，保证整块棋盘刚好占满画面（不再是一个小方块）
+      var w = host ? (host.clientWidth || 900) : 900;
+      var h = host ? (host.clientHeight || 380) : 380;
+      var aspect = Math.max(0.4, w / Math.max(1, h));
+      var vFov = camPersp.fov * Math.PI / 180;
+      var hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+      // 按"棋盘完整外接圆"求距离：用完整半宽而不是半宽的一半，避免近端被裁掉
+      var extent = 8.6;                          // 棋盘含描边的外接半径（世界单位）
+      var fitH = extent / Math.tan(vFov / 2);
+      var fitW = extent / Math.tan(hFov / 2);
+      // 1.34 系数补偿斜俯视角下棋盘对角在屏幕上的额外占位（近角最容易出画）
+      var dist = Math.max(fitH, fitW) * 1.34 * (camDist / 10.5);
+      if (window.__M3D_DEBUG) {
+        var __dbg = 'w=' + w + ' h=' + h + ' aspect=' + aspect.toFixed(2) + ' dist=' + dist.toFixed(2);
+        console.log('[Map3D] ' + __dbg);
+        try { var __h = document.getElementById('map3dHint'); if (__h) __h.textContent = 'DBG ' + __dbg; } catch (e) {}
+      }
+      camPersp.position.set(
+        tx + Math.sin(camYaw) * dist * Math.cos(camPitch),
+        ty + dist * Math.sin(camPitch),
+        tz + Math.cos(camYaw) * dist * Math.cos(camPitch)
+      );
+      camPersp.lookAt(tx, ty, tz);
     }
   }
 
   /* ---------- 棋子平滑移动 ---------- */
   var tweens = [];
+  // 同一格上两枚棋子错开摆放（同格时朝相反方向偏移，避免互相遮挡）
+  function slotOffset(side, tileId) {
+    var other = (side === 'p1') ? battleState && battleState.p2 : battleState && battleState.p1;
+    if (!other || other.position !== tileId) return { x: 0, z: 0 };
+    var t = MAP_TILES[tileId];
+    if (!t) return { x: 0, z: 0 };
+    // 沿"环的切线方向"错开
+    var prev = MAP_TILES[(tileId - 1 + MAP_TILES.length) % MAP_TILES.length];
+    var nx = t.x - prev.x, ny = t.y - prev.y;
+    var len = Math.sqrt(nx * nx + ny * ny) || 1;
+    nx /= len; ny /= len;
+    var s = (side === 'p1') ? 0.5 : -0.5;
+    return { x: nx * s, z: ny * s };
+  }
   function movePieceTo(side, tileId) {
     var t = MAP_TILES[tileId]; if (!t || !pieces[side]) return;
-    var wp = worldPos(t);
+    var wp = worldPos(t), off = slotOffset(side, tileId);
     var p = pieces[side];
-    tweens.push({ obj: p, from: { x: p.position.x, z: p.position.z }, to: { x: wp.x, z: wp.z }, t: 0, dur: 0.75 });
+    tweens.push({ obj: p, from: { x: p.position.x, z: p.position.z }, to: { x: wp.x + off.x, z: wp.z + off.z }, t: 0, dur: 0.75 });
   }
   function updateTweens(dt) {
     for (var i = tweens.length - 1; i >= 0; i--) {
@@ -3835,11 +3994,17 @@ var Map3D = (function () {
       tw.t += dt / tw.dur;
       var k = Math.min(1, tw.t);
       var e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
-      var hop = Math.sin(Math.PI * k) * 0.55;                        // 跳跃弧线
+      var hop = Math.sin(Math.PI * k) * 0.5;                         // 跳跃弧线
       tw.obj.position.x = tw.from.x + (tw.to.x - tw.from.x) * e;
       tw.obj.position.z = tw.from.z + (tw.to.z - tw.from.z) * e;
       tw.obj.position.y = hop;
-      if (k >= 1) { tw.obj.position.y = 0; tweens.splice(i, 1); }
+      // 落点影子随跳跃淡出（增强腾空感）
+      if (tw.obj.userData.shadow) tw.obj.userData.shadow.material.opacity = 1 - hop * 1.4;
+      if (k >= 1) {
+        tw.obj.position.y = 0;
+        if (tw.obj.userData.shadow) tw.obj.userData.shadow.material.opacity = 1;
+        tweens.splice(i, 1);
+      }
     }
   }
 
@@ -3853,40 +4018,46 @@ var Map3D = (function () {
     animT += dt;
 
     updateTweens(dt);
-    // 棋子呼吸/待机浮动
-    ['p1', 'p2'].forEach(function (s, idx) {
-      var p = pieces[s]; if (!p) return;
-      p.rotation.y = Math.sin(animT * 0.6 + idx * 1.7) * 0.12;
-      if (p.position.y === 0) p.position.y = Math.sin(animT * 1.8 + idx) * 0.035;
-    });
-    // 当前行动方棋子高亮脉冲
+    // 棋子待机浮动 + 当前行动方光环
     if (battleState) {
       var cur = battleState.currentPlayer;
-      ['p1', 'p2'].forEach(function (s) {
+      ['p1', 'p2'].forEach(function (s, idx) {
         var p = pieces[s]; if (!p) return;
         var isCur = (s === cur);
-        p.traverse(function (o) {
-          if (o.material && o.material.emissiveIntensity !== undefined) {
-            var base = (s === 'p1') ? 0.25 : 0.1;
-            o.material.emissiveIntensity = isCur ? base + 0.22 + Math.sin(animT * 3.2) * 0.14 : base;
-          }
-        });
+        p.rotation.y = Math.sin(animT * 0.55 + idx * 1.7) * 0.1;
+        if (p.position.y <= 0.001) p.position.y = Math.sin(animT * 1.7 + idx) * 0.03;
+        var ring = p.userData.selRing;
+        if (ring && ring.material) {
+          ring.material.opacity = isCur ? (0.5 + Math.sin(animT * 3.4) * 0.32) : 0;
+          var sc = isCur ? (1 + Math.sin(animT * 3.4) * 0.05) : 1;
+          ring.scale.set(sc, sc, 1);
+        }
       });
     }
-    // 格子高亮：玩家所在格
+    // 格子高亮：玩家所在格 / 悬停格 / 光柱
     if (battleState) {
       for (var i = 0; i < tiles.length; i++) {
-        var id = tiles[i].userData.tileId;
+        var ud = tiles[i].userData;
+        var id = ud.tileId;
         var onP1 = battleState.p1 && battleState.p1.position === id;
         var onP2 = battleState.p2 && battleState.p2.position === id;
-        var m = tiles[i].material;
-        if (m && m.emissiveIntensity !== undefined) {
-          var baseE = 0.16;
-          if (hoverTile === tiles[i]) baseE = 0.85;
-          else if (onP1 || onP2) baseE = 0.5 + Math.sin(animT * 3) * 0.12;
-          m.emissiveIntensity = baseE;
+        var occupied = onP1 || onP2;
+        var top = ud.top;
+        if (top && top.material && top.material.emissiveIntensity !== undefined) {
+          var baseE = 0.35;
+          if (hoverTile === tiles[i]) baseE = 1.15;
+          else if (occupied) baseE = 0.75 + Math.sin(animT * 3) * 0.2;
+          top.material.emissiveIntensity = baseE;
+        }
+        var glow = ud.glow;
+        if (glow && glow.material) {
+          glow.material.opacity = occupied ? (0.09 + Math.sin(animT * 2.2) * 0.05) : 0;
         }
       }
+    }
+    if (mode === 'ortho') {
+      var __of = refreshOrthoFrustum();
+      if (__of && window.__M3D_DEBUG) { try { var __h2 = document.getElementById('map3dHint'); if (__h2) __h2.textContent = 'ORTHO ' + __of.w + 'x' + __of.h + ' a=' + __of.aspect.toFixed(2) + ' hw=' + __of.halfW.toFixed(2) + ' hh=' + __of.halfH.toFixed(2); } catch (e) {} }
     }
     renderer.render(scene, mode === 'ortho' ? camOrtho : camPersp);
   }
@@ -3956,7 +4127,7 @@ var Map3D = (function () {
     host.addEventListener('pointercancel', function (ev) { dragging = false; });
     host.addEventListener('wheel', function (ev) {
       ev.preventDefault();
-      camDist = Math.max(8, Math.min(42, camDist + (ev.deltaY > 0 ? 1.6 : -1.6)));
+      camDist = Math.max(6, Math.min(34, camDist + (ev.deltaY > 0 ? 1.2 : -1.2)));
       updateCamera();
     }, { passive: false });
     window.addEventListener('resize', resize);
@@ -3981,6 +4152,9 @@ var Map3D = (function () {
       ready = true;
       // 隐藏 2D 小地图（3D 地图已提供完整视野），并给出提示
       try { document.body.classList.add('map3d-on'); } catch (e) {}
+      // 布局稳定后再校准一次尺寸（首次 init 时 flex 高度可能还没算好）
+      setTimeout(function () { try { resize(); } catch (e) {} }, 260);
+      setTimeout(function () { try { resize(); } catch (e) {} }, 900);
       rafId = requestAnimationFrame(frame);
       return true;
     } catch (e) {
@@ -4034,7 +4208,7 @@ var Map3D = (function () {
     addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格');
   }
   function resetCamera() {
-    camTarget = null; camDist = 26; camYaw = Math.PI * 0.25; camPitch = 0.95;
+    camTarget = null; camDist = 10.5; camYaw = Math.PI * 0.23; camPitch = 0.86;
     if (mode === 'ortho') { mode = 'persp'; var btn = document.getElementById('map3dViewBtn'); if (btn) btn.textContent = '🎥 上帝视角'; }
     updateCamera();
   }
@@ -11221,6 +11395,24 @@ window.addEventListener('load', function() {
   tryLoadDeckConfig();
   initRules();
   console.log('游戏加载完成，共 ' + allCards.length + ' 张卡牌');
+  // 调试/自动化钩子：?debug3d=1 直接进入对战（便于无头浏览器截图检查 3D 地图）
+  try {
+    if (/[?&]debug3d=1/.test(location.search)) {
+      window.__M3D_DEBUG = /[?&]m3ddbg=1/.test(location.search);
+      setTimeout(function () {
+        try {
+          // 直接构筑双方卡组（不弹窗），再开战
+          if (typeof buildSmartDeck === 'function' && typeof applySmartDeck === 'function' && typeof ARCH_LIST !== 'undefined') {
+            applySmartDeck('p1', buildSmartDeck(ARCH_LIST[0]), false);
+            applySmartDeck('p2', buildSmartDeck(ARCH_LIST[1 % ARCH_LIST.length]), false);
+          } else if (typeof randomDeck === 'function') { randomDeck('p1'); randomDeck('p2'); }
+          startBattle();
+          if (/[?&]god=1/.test(location.search)) setTimeout(function () { try { Map3D.toggleView(); } catch (e) {} }, 1400);
+          if (/[?&]focus=1/.test(location.search)) setTimeout(function () { try { Map3D.focusPlayer('p1'); } catch (e) {} }, 1600);
+        } catch (e) { console.error('debug3d 启动失败', e); }
+      }, 120);
+    }
+  } catch (e) {}
 });
 
 // ============================================================
@@ -13834,15 +14026,16 @@ function processSingleEffect(effectText, context, callback) {
     if (effectText.indexOf('后退') >= 0) moveAmount = -moveAmount;
     // 单次位移最多20格
     var actualMoveAmount = Math.max(-20, Math.min(20, moveAmount));
+    // 修复：此前先把 position 改了，紧接着又调用 applyMove（内部再位移一次）→ 实际移动了两倍。
+    // 现在只走统一移动底层 applyMove（路障/经过起点/位移被动累计/落点格子效果/0格保护全部一致）。
     var oldPos = battleState[user].position;
-    battleState[user].position = ((battleState[user].position + actualMoveAmount) % 42 + 42) % 42;
+    var __destPreview = ((oldPos + actualMoveAmount) % 42 + 42) % 42;
     effectEngine.effectLog.push({
       label: '【效果结果】',
-      text: (actualMoveAmount >= 0 ? '前进' : '后退') + Math.abs(actualMoveAmount) + '格，从第' + oldPos + '格移动到第' + battleState[user].position + '格',
+      text: (actualMoveAmount >= 0 ? '前进' : '后退') + Math.abs(actualMoveAmount) + '格，从第' + oldPos + '格移动到第' + __destPreview + '格',
       class: 'effect-step step-result'
     });
-    addBattleLog(user, '移动到第' + battleState[user].position + '格');
-    // 统一移动底层：路障/经过起点/位移被动累计/落点格子效果/0格保护全部一致
+    addBattleLog(user, '移动到第' + __destPreview + '格');
     applyMove(user, actualMoveAmount);
   }
   
@@ -14386,6 +14579,9 @@ function useEventCardFor(player, index, name, done) {
         if (__p2drop) {
           battleState[__ecFoe].position = __gameIdx;
           addBattleLog(__ecFoe, '圆桌会议：移动至第' + __gameIdx + '格【Game】');
+          // 规则书第七章五-3：因任何效果移动/后退而落到某格，都要立即结算该格效果
+          // （此前只给移动者结算、对手移动后不结算，导致对手白吃 GAME 格效果）
+          if (typeof triggerTileEffect === 'function') triggerTileEffect(__ecFoe);
         }
       }
       break;
