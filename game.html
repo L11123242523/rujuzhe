@@ -2975,12 +2975,12 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="battle-map-container map3d-wrap">
       <div id="map3dHost" style="position:absolute;inset:0;"></div>
       <div class="map3d-topbar">
-        <span class="map3d-title">🗺️ 环状地图</span>
+        <span class="map3d-title">🗺️ 环状地图 3D</span>
         <button class="map3d-btn" id="map3dViewBtn" onclick="Map3D.toggleView()">🎥 上帝视角</button>
         <button class="map3d-btn" onclick="Map3D.focusPlayer('p1')">🔍 定位我</button>
         <button class="map3d-btn" onclick="toggleMinimapExpand()">🧭 小地图</button>
       </div>
-      <div class="map3d-hint" id="map3dHint">拖动旋转 · 滚轮缩放 · 点击格子查看</div>
+      <div class="map3d-hint" id="map3dHint">拖动旋转 · 滚轮缩放（放大可看清原图格子）· 点击格子查看</div>
       <div class="map3d-tip" id="map3dTip"></div>
       <div class="map3d-fallback" id="map3dFallback" style="display:none;">
         <div class="compact-map" id="compactMap"></div>
@@ -3566,57 +3566,62 @@ var currentFilter = 'all';
 
 // 真实地图数据（42格环形地图）
 var MAP_IMAGE_URL = 'assets/images/img_Cf28qFzUPV.webp';
+// 真实地图数据（42格环形地图）
+// x/y 为「地图原图（地图/Map（fin）.png，10401×6963）」上的格子中心百分比，
+// 由原图逐格量测得到（横向小格栅格 x=1311+648k，纵向小格栅格 y=1275+630k）。
 var MAP_TILES = [
-  {id:0, type:'start', name:'起点', x:93, y:90, big:true},
-  {id:1, type:'gift', name:'馈赠格', x:85, y:90},
-  {id:2, type:'item', name:'易物', x:78, y:90},
-  {id:3, type:'again', name:'Again', x:71, y:90},
-  {id:4, type:'gift', name:'馈赠格', x:64, y:90},
-  {id:5, type:'bus', name:'公交站', x:57, y:90},
-  {id:6, type:'card', name:'卡牌格', x:50, y:90},
-  {id:7, type:'subway', name:'地铁', x:43, y:90},
-  {id:8, type:'story', name:'Story', x:36, y:90},
-  {id:9, type:'power', name:'配电室', x:29, y:90},
-  {id:10, type:'inspire', name:'灵感', x:22, y:90},
-  {id:11, type:'gift', name:'馈赠格', x:15, y:90},
-  {id:12, type:'card', name:'卡牌格', x:8, y:90},
-  {id:13, type:'read', name:'阅览室', x:3, y:90, big:true},
-  {id:14, type:'gift', name:'馈赠格', x:3, y:78},
-  {id:15, type:'card', name:'卡牌格', x:3, y:68},
-  {id:16, type:'bus', name:'公交站', x:3, y:58},
-  {id:17, type:'story', name:'Story', x:3, y:48},
-  {id:18, type:'subway', name:'地铁', x:3, y:38},
-  {id:19, type:'card', name:'卡牌格', x:3, y:28},
-  {id:20, type:'gift', name:'馈赠格', x:3, y:18},
-  {id:21, type:'shrine', name:'神社', x:3, y:8, big:true},
-  {id:22, type:'inspire', name:'灵感', x:12, y:8},
-  {id:23, type:'gift', name:'馈赠格', x:19, y:8},
-  {id:24, type:'card', name:'卡牌格', x:26, y:8},
-  {id:25, type:'game', name:'GAME', x:33, y:8},
-  {id:26, type:'again', name:'Again', x:40, y:8},
-  {id:27, type:'subway', name:'地铁', x:47, y:8},
-  {id:28, type:'gift', name:'馈赠格', x:54, y:8},
-  {id:29, type:'story', name:'Story', x:61, y:8},
-  {id:30, type:'bus', name:'公交站', x:68, y:8},
-  {id:31, type:'power', name:'配电室', x:75, y:8},
-  {id:32, type:'gift', name:'馈赠格', x:82, y:8},
-  {id:33, type:'card', name:'卡牌格', x:89, y:8},
-  {id:34, type:'airport', name:'机场', x:95, y:8, big:true},
-  {id:35, type:'gift', name:'馈赠格', x:96, y:20},
-  {id:36, type:'card', name:'卡牌格', x:96, y:32},
-  {id:37, type:'subway', name:'地铁', x:96, y:44},
-  {id:38, type:'story', name:'Story', x:96, y:56},
-  {id:39, type:'card', name:'卡牌格', x:96, y:68},
-  {id:40, type:'bus', name:'公交站', x:96, y:80},
-  {id:41, type:'gift', name:'馈赠格', x:96, y:90}
+  {id:0, type:'start', name:'起点', x:93.60, y:90.70, big:true},
+  {id:1, type:'gift', name:'馈赠格', x:84.25, y:92.65},
+  {id:2, type:'item', name:'易物', x:78.02, y:92.65},
+  {id:3, type:'again', name:'Again', x:71.79, y:92.65},
+  {id:4, type:'gift', name:'馈赠格', x:65.56, y:92.65},
+  {id:5, type:'bus', name:'公交站', x:59.33, y:92.65},
+  {id:6, type:'card', name:'卡牌格', x:53.10, y:92.65},
+  {id:7, type:'subway', name:'地铁', x:46.87, y:92.65},
+  {id:8, type:'story', name:'Story', x:40.64, y:92.65},
+  {id:9, type:'power', name:'配电室', x:34.41, y:92.65},
+  {id:10, type:'inspire', name:'灵感', x:28.18, y:92.65},
+  {id:11, type:'gift', name:'馈赠格', x:21.95, y:92.65},
+  {id:12, type:'card', name:'卡牌格', x:15.72, y:92.65},
+  {id:13, type:'read', name:'阅览室', x:6.37, y:90.70, big:true},
+  {id:14, type:'gift', name:'馈赠格', x:4.82, y:77.13},
+  {id:15, type:'card', name:'卡牌格', x:4.82, y:68.08},
+  {id:16, type:'bus', name:'公交站', x:4.82, y:59.03},
+  {id:17, type:'story', name:'Story', x:4.82, y:49.98},
+  {id:18, type:'subway', name:'地铁', x:4.82, y:40.93},
+  {id:19, type:'card', name:'卡牌格', x:4.82, y:31.88},
+  {id:20, type:'gift', name:'馈赠格', x:4.82, y:22.84},
+  {id:21, type:'shrine', name:'神社', x:6.37, y:9.26, big:true},
+  {id:22, type:'inspire', name:'灵感', x:15.72, y:6.69},
+  {id:23, type:'gift', name:'馈赠格', x:21.95, y:6.69},
+  {id:24, type:'card', name:'卡牌格', x:28.18, y:6.69},
+  {id:25, type:'game', name:'GAME', x:34.41, y:6.69},
+  {id:26, type:'again', name:'Again', x:40.64, y:6.69},
+  {id:27, type:'subway', name:'地铁', x:46.87, y:6.69},
+  {id:28, type:'gift', name:'馈赠格', x:53.10, y:6.69},
+  {id:29, type:'story', name:'Story', x:59.33, y:6.69},
+  {id:30, type:'bus', name:'公交站', x:65.56, y:6.69},
+  {id:31, type:'power', name:'配电室', x:71.79, y:6.69},
+  {id:32, type:'gift', name:'馈赠格', x:78.02, y:6.69},
+  {id:33, type:'card', name:'卡牌格', x:84.25, y:6.69},
+  {id:34, type:'airport', name:'机场', x:93.60, y:9.26, big:true},
+  {id:35, type:'gift', name:'馈赠格', x:95.16, y:22.84},
+  {id:36, type:'card', name:'卡牌格', x:95.16, y:31.88},
+  {id:37, type:'subway', name:'地铁', x:95.16, y:40.93},
+  {id:38, type:'story', name:'Story', x:95.16, y:49.98},
+  {id:39, type:'card', name:'卡牌格', x:95.16, y:59.03},
+  {id:40, type:'bus', name:'公交站', x:95.16, y:68.08},
+  {id:41, type:'gift', name:'馈赠格', x:95.16, y:77.13}
 ];
 
 /* ============================================================
    3D 地图模块（Three.js）：
-   - 42 格环状棋盘（按 MAP_TILES 的 x/y 坐标还原布局）
+   - 棋盘 = 地图文件夹里的原作地图（Map（fin）.png）做成实体 3D 棋盘：
+     整图作为棋盘台面贴图，42 个格子按原图逐格量测的像素矩形抬升为立体格块，
+     格块顶面正是原图对应格子的画（图标 / 编号 / 名称），四角大开格抬得更高。
    - 玩家用国际象棋棋子表示（p1=白方国王，p2=黑方国王）
    - 默认斜俯视角（可拖动旋转/滚轮缩放）；一键切上帝视角（正交俯视）
-   - 无 WebGL / 无 three.js 时自动回退到原 2D 横向地图
+   - 贴图缺失 / 无 WebGL / 无 three.js 时逐级回退（程序化配色格块 → 2D 地图）
    ============================================================ */
 var Map3D = (function () {
   var T = null;                 // THREE 引用
@@ -3625,10 +3630,61 @@ var Map3D = (function () {
   var tiles = [], pieces = {}, raycaster = null, pointer = null;
   var hoverTile = null, camTarget = null, camDist = 10.5, camYaw = Math.PI * 0.23, camPitch = 0.86;
   var dragging = false, lastX = 0, lastY = 0, moved = 0;
-  var ready = false, failed = false, animT = 0, rafId = 0;
-  var tileGeo = null, tileMat = {}, labelCache = {};
-  var SCALE = 0.115;            // 地图百分比 → 世界单位
-  var TILE_R = 0.62, TILE_H = 0.34;
+  var ready = false, failed = false, loading = false, animT = 0, rafId = 0;
+  var tileMat = {}, artTex = null;
+
+  /* ---------- 地图原图几何（像素量测值） ---------- */
+  var ART_W = 10401, ART_H = 6963;        // 地图原图像素尺寸
+  var ART_URL = 'assets/images/map3d_board.png';
+  var BOARD_W = 15;                       // 棋盘世界宽度
+  var UNIT = BOARD_W / ART_W;             // 原图像素 → 世界单位
+  var BOARD_D = ART_H * UNIT;             // 棋盘世界深度（≈10.04）
+  var HALF_W = BOARD_W / 2, HALF_D = BOARD_D / 2;
+  var SX = BOARD_W / 100, SZ = BOARD_D / 100;   // MAP_TILES 百分比 → 世界单位
+  var SMALL_H = 0.16, BIG_H = 0.46;       // 普通格 / 四角大格 的抬升高度
+  var TOP_H = 2.0;                        // 棋盘最高占用（含抬升的四角与棋子名牌），用于取景
+  var PIECE_SCALE = 0.72;                 // 棋子整体缩放
+
+  // 由原图量测的栅格（单位：像素）
+  var GX0 = 1311, GP = 648;               // 上/下排小格横向栅格（13 条边 → 12 格）
+  var LY0 = 1275, LP = 630;               // 左/右列小格纵向栅格（8 条边 → 7 格）
+  var TOP_Y0 = 15, TOP_Y1 = 916;          // 上排格块的上下边界
+  var BOT_Y0 = 5956, BOT_Y1 = 6946;       // 下排格块的上下边界
+  var LEFT_X0 = 15, LEFT_X1 = 988;        // 左列格块
+  var RIGHT_X0 = 9411, RIGHT_X1 = 10383;  // 右列格块
+  var CORNER_RECT = [
+    [15, 15, 1311, 1275],        // 神社（21，左上）
+    [9087, 15, 10383, 1275],     // 机场（34，右上）
+    [15, 5685, 1311, 6946],      // 阅览室（13，左下）
+    [9087, 5685, 10383, 6946]    // 起点（0，右下）
+  ];
+  // 每格在原图上的像素矩形 [x0, y0, x1, y1]
+  var TILE_RECT = (function () {
+    var r = new Array(42), i, k;
+    r[0] = CORNER_RECT[3]; r[13] = CORNER_RECT[2];
+    r[21] = CORNER_RECT[0]; r[34] = CORNER_RECT[1];
+    for (i = 1; i <= 12; i++) { k = 12 - i; r[i] = [GX0 + GP * k, BOT_Y0, GX0 + GP * (k + 1), BOT_Y1]; }
+    for (i = 14; i <= 20; i++) { k = 20 - i; r[i] = [LEFT_X0, LY0 + LP * k, LEFT_X1, LY0 + LP * (k + 1)]; }
+    for (i = 22; i <= 33; i++) { k = i - 22; r[i] = [GX0 + GP * k, TOP_Y0, GX0 + GP * (k + 1), TOP_Y1]; }
+    for (i = 35; i <= 41; i++) { k = i - 35; r[i] = [RIGHT_X0, LY0 + LP * k, RIGHT_X1, LY0 + LP * (k + 1)]; }
+    return r;
+  })();
+
+  function rectWorld(rect) {
+    return {
+      cx: ((rect[0] + rect[2]) / 2 - ART_W / 2) * UNIT,
+      cz: ((rect[1] + rect[3]) / 2 - ART_H / 2) * UNIT,
+      sx: (rect[2] - rect[0]) * UNIT,
+      sz: (rect[3] - rect[1]) * UNIT
+    };
+  }
+  function rectUV(rect, inset) {
+    var i = inset || 0;
+    return {
+      u0: (rect[0] + i) / ART_W, u1: (rect[2] - i) / ART_W,
+      v0: 1 - (rect[3] - i) / ART_H, v1: 1 - (rect[1] + i) / ART_H
+    };
+  }
 
   var TILE_COLOR = {
     start: 0x3ddc84, gift: 0xffb84d, item: 0x4dc3ff, again: 0xb388ff,
@@ -3643,8 +3699,12 @@ var Map3D = (function () {
   };
 
   function worldPos(tile) {
-    // 地图坐标 x/y 为 0~100 百分比；转成以中心为原点的世界坐标（X-Z 平面）
-    return { x: (tile.x - 50) * SCALE, z: (tile.y - 50) * SCALE };
+    // 地图坐标 x/y 为 0~100 百分比；转成以棋盘中心为原点的世界坐标（X-Z 平面）
+    return { x: (tile.x - 50) * SX, z: (tile.y - 50) * SZ };
+  }
+  function tileTopY(tileId) {
+    var t = MAP_TILES[tileId];
+    return (t && t.big) ? BIG_H : SMALL_H;
   }
   function isAvailable() {
     return typeof THREE !== 'undefined' && !!THREE.WebGLRenderer;
@@ -3660,18 +3720,40 @@ var Map3D = (function () {
     try { renderBattleMap(); } catch (e) {}
   }
 
-  /* ---------- 棋子：LatheGeometry 车削出国际象棋"国王"造型 ---------- */
-  // 圆角矩形路径（格子底板用）
-  function roundedRectShape(w, h, r) {
-    var s = new T.Shape();
-    var hw = w / 2, hh = h / 2;
-    s.moveTo(-hw + r, -hh);
-    s.lineTo(hw - r, -hh); s.quadraticCurveTo(hw, -hh, hw, -hh + r);
-    s.lineTo(hw, hh - r); s.quadraticCurveTo(hw, hh, hw - r, hh);
-    s.lineTo(-hw + r, hh); s.quadraticCurveTo(-hw, hh, -hw, hh - r);
-    s.lineTo(-hw, -hh + r); s.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
-    return s;
+  /* ---------- 地图贴图预加载 ---------- */
+  var artImg = null, artSettled = false, artUsable = false;
+  (function preloadArt() {
+    try {
+      if (typeof Image !== 'function') { artSettled = true; artUsable = false; return; }
+      artImg = new Image();
+      artImg.onload = function () { artSettled = true; artUsable = !!(artImg.naturalWidth || artImg.width); };
+      artImg.onerror = function () { artSettled = true; artUsable = false; };
+      artImg.src = ART_URL;
+    } catch (e) { artSettled = true; artUsable = false; }
+  })();
+
+  function ensureArtTexture() {
+    if (!artUsable || !artImg || !T) return null;
+    if (artTex) return artTex;
+    try {
+      artTex = new T.Texture(artImg);
+      if (T.SRGBColorSpace !== undefined && 'colorSpace' in artTex) artTex.colorSpace = T.SRGBColorSpace;
+      artTex.wrapS = T.ClampToEdgeWrapping;
+      artTex.wrapT = T.ClampToEdgeWrapping;
+      artTex.generateMipmaps = true;
+      artTex.minFilter = T.LinearMipmapLinearFilter;
+      artTex.magFilter = T.LinearFilter;
+      try {
+        if (renderer && renderer.capabilities && renderer.capabilities.getMaxAnisotropy) {
+          artTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        }
+      } catch (e) {}
+      artTex.needsUpdate = true;
+      return artTex;
+    } catch (e) { artTex = null; return null; }
   }
+
+  /* ---------- 棋子：LatheGeometry 车削出国际象棋"国王"造型 ---------- */
   function buildKing(isWhite) {
     var g = new T.Group();
     var bodyMat = new T.MeshPhysicalMaterial ? new T.MeshPhysicalMaterial({
@@ -3732,7 +3814,7 @@ var Map3D = (function () {
       g.userData.shadow = shPlane;
     }
 
-    // 选中/当前行动方光环（默认隐藏，frame 里控制）
+    // 当前行动方光环（默认隐藏，frame 里控制）
     var ringGeo = new T.RingGeometry(0.52, 0.68, 48);
     var ringMat = new T.MeshBasicMaterial({ color: isWhite ? 0x7fc4ff : 0xff8f7a, transparent: true, opacity: 0, side: T.DoubleSide, depthWrite: false });
     var selRing = new T.Mesh(ringGeo, ringMat);
@@ -3740,12 +3822,12 @@ var Map3D = (function () {
     selRing.userData.isSelectRing = true;
     g.add(selRing);
 
-    // 记录材质，供 frame 里做高亮脉冲
     g.userData.mats = [bodyMat, goldMat, darkMat];
     g.userData.selRing = selRing;
+    g.userData.baseY = 0;
     return g;
   }
-  /* 文字贴图（名牌 / 格子序号） */
+  /* 文字贴图（名牌） */
   function buildTag(text, color, fontPx, w, h) {
     var cv = document.createElement('canvas');
     cv.width = 256; cv.height = 96;
@@ -3768,7 +3850,7 @@ var Map3D = (function () {
     spr.scale.set(w || 1.5, h || 0.56, 1);
     return spr;
   }
-  /* 格子图标贴图（emoji 圆形徽章） */
+  /* 格子图标贴图（emoji 圆形徽章）——仅在缺失地图贴图的回退模式下使用 */
   function buildEmblem(icon, color) {
     var cv = document.createElement('canvas');
     cv.width = 128; cv.height = 128;
@@ -3782,117 +3864,150 @@ var Map3D = (function () {
     ctx.fillText(icon, 64, 68);
     var tex = new T.CanvasTexture(cv);
     var spr = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
-    spr.scale.set(0.72, 0.72, 1);
+    spr.scale.set(0.62, 0.62, 1);
     return spr;
   }
 
+  /* 把 box 顶面（uv 序号 8..11）的 UV 映射到原图上的某个格子矩形 */
+  function remapTopUV(geo, uv) {
+    if (!geo || !geo.attributes || !geo.attributes.uv) return;
+    var a = geo.attributes.uv;
+    if (a.count < 12) return;
+    for (var i = 8; i <= 11; i++) {
+      var u = a.getX(i), v = a.getY(i);
+      a.setXY(i, uv.u0 + u * (uv.u1 - uv.u0), uv.v0 + v * (uv.v1 - uv.v0));
+    }
+    a.needsUpdate = true;
+  }
+
   /* ---------- 场景构建 ---------- */
-  function buildScene() {
-    scene = new T.Scene();
-    scene.background = new T.Color(0x070b14);
-    scene.fog = new T.Fog(0x070b14, 26, 60);
+  function buildBoard() {
+    var slabT = 0.55;
+    var slabMat = new T.MeshStandardMaterial({ color: 0x101a2c, metalness: 0.6, roughness: 0.4 });
+    var topMat = artTex
+      ? new T.MeshStandardMaterial({ map: artTex, roughness: 0.9, metalness: 0.02 })
+      : new T.MeshStandardMaterial({ color: 0x121b2d, metalness: 0.2, roughness: 0.85 });
+    var board = new T.Mesh(new T.BoxGeometry(BOARD_W, slabT, BOARD_D),
+      [slabMat, slabMat, topMat, slabMat, slabMat, slabMat]);
+    board.position.y = -slabT / 2;
+    board.receiveShadow = true;
+    scene.add(board);
 
-    // 灯光：暖色主光 + 冷色补光 + 半球环境（让棋子有金属层次而不是死白/死黑）
-    scene.add(new T.AmbientLight(0x9fb8e8, 0.55));
-    scene.add(new T.HemisphereLight(0xd8e6ff, 0x141a2a, 0.75));
-    var key = new T.DirectionalLight(0xfff3dd, 2.1);
-    key.position.set(7, 15, 9);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    var d = 10;
-    key.shadow.camera.left = -d; key.shadow.camera.right = d;
-    key.shadow.camera.top = d; key.shadow.camera.bottom = -d;
-    key.shadow.camera.near = 1; key.shadow.camera.far = 46;
-    key.shadow.bias = -0.0006;
-    if (key.shadow.normalBias !== undefined) key.shadow.normalBias = 0.02;
-    scene.add(key);
-    var fill = new T.DirectionalLight(0x6fa8ff, 0.85); fill.position.set(-9, 8, -7); scene.add(fill);
-    var rim = new T.DirectionalLight(0xffb27a, 0.55); rim.position.set(-4, 5, 12); scene.add(rim);
-
-    // 棋盘：底座 + 内嵌地板 + 金色描边
-    var board = new T.Mesh(
-      new T.BoxGeometry(13.7, 0.62, 13.7),
-      new T.MeshStandardMaterial({ color: 0x0d1424, metalness: 0.35, roughness: 0.78 })
-    );
-    board.position.y = -0.34; board.receiveShadow = true; scene.add(board);
-    var floorIn = new T.Mesh(
-      new T.BoxGeometry(12.9, 0.06, 12.9),
-      new T.MeshStandardMaterial({ color: 0x111c31, metalness: 0.15, roughness: 0.9 })
-    );
-    floorIn.position.y = -0.015; floorIn.receiveShadow = true; scene.add(floorIn);
     // 金色描边（四条）
     var trimMat = new T.MeshStandardMaterial({ color: 0xc9a44a, metalness: 0.95, roughness: 0.28, emissive: 0x3a2a08, emissiveIntensity: 0.6 });
-    [[0, 6.85], [0, -6.85], [6.85, 0], [-6.85, 0]].forEach(function (p) {
-      var w = p[1] === 0 ? 0.09 : 13.7, dp = p[1] === 0 ? 13.7 : 0.09;
-      var bar = new T.Mesh(new T.BoxGeometry(w, 0.1, dp), trimMat);
-      bar.position.set(p[0], -0.03, p[1]); scene.add(bar);
+    var barZ = new T.BoxGeometry(BOARD_W + 0.18, 0.1, 0.09);
+    var barX = new T.BoxGeometry(0.09, 0.1, BOARD_D + 0.18);
+    [[0, -HALF_D - 0.05], [0, HALF_D + 0.05]].forEach(function (p) {
+      var b = new T.Mesh(barZ, trimMat); b.position.set(p[0], -0.03, p[1]); scene.add(b);
     });
+    [[-HALF_W - 0.05, 0], [HALF_W + 0.05, 0]].forEach(function (p) {
+      var b = new T.Mesh(barX, trimMat); b.position.set(p[0], -0.03, p[1]); scene.add(b);
+    });
+  }
 
-    // 42 格：圆角方板 + 彩色内嵌顶面 + 图标徽章 + 序号
+  function buildTiles() {
     tiles = [];
-    var bevelShape = roundedRectShape(1.06, 1.06, 0.24);
-    var bevelGeo = new T.ExtrudeGeometry(bevelShape, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 3, curveSegments: 6 });
-    bevelGeo.rotateX(-Math.PI / 2);
-    var insetGeo = new T.BoxGeometry(0.8, 0.045, 0.8);
-    var baseMat = new T.MeshStandardMaterial({ color: 0x1b2537, metalness: 0.5, roughness: 0.45 });
+    var sideMat = new T.MeshStandardMaterial({ color: 0x1b2537, metalness: 0.55, roughness: 0.42 });
+    var topArt = artTex ? new T.MeshStandardMaterial({ map: artTex, roughness: 0.92, metalness: 0.02 }) : null;
 
     for (var i = 0; i < MAP_TILES.length; i++) {
       var t = MAP_TILES[i];
+      var rect = TILE_RECT[t.id];
+      if (!rect) continue;
+      var w = rectWorld(rect);
+      var h = t.big ? BIG_H : SMALL_H;
+      var geo = new T.BoxGeometry(w.sx, h, w.sz);
       var col = TILE_COLOR[t.type] || 0x9aa7bd;
-      if (!tileMat[col]) {
-        tileMat[col] = new T.MeshStandardMaterial({
-          color: col, metalness: 0.45, roughness: 0.35,
-          emissive: col, emissiveIntensity: 0.35
-        });
+      var mats;
+      if (topArt) {
+        remapTopUV(geo, rectUV(rect, 3));
+        mats = [sideMat, sideMat, topArt, sideMat, sideMat, sideMat];
+      } else {
+        if (!tileMat[col]) {
+          tileMat[col] = new T.MeshStandardMaterial({
+            color: col, metalness: 0.45, roughness: 0.35,
+            emissive: col, emissiveIntensity: 0.35
+          });
+        }
+        mats = [sideMat, sideMat, tileMat[col], sideMat, sideMat, sideMat];
       }
-      var wp = worldPos(t);
-      var g = new T.Group();
-      g.position.set(wp.x, 0, wp.z);
+      var mesh = new T.Mesh(geo, mats);
+      mesh.position.set(w.cx, h / 2, w.cz);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      mesh.userData.tileId = t.id;
+      scene.add(mesh);
+      tiles.push(mesh);
 
-      var slab = new T.Mesh(bevelGeo, baseMat);
-      slab.castShadow = true; slab.receiveShadow = true;
-      g.add(slab);
-      var top = new T.Mesh(insetGeo, tileMat[col]);
-      top.position.y = 0.21; top.castShadow = false; top.receiveShadow = true;
-      g.add(top);
+      // 悬停 / 占用高亮板（贴在地块顶面之上一点点）
+      var hiMat = new T.MeshBasicMaterial({
+        color: 0x9fd8ff, transparent: true, opacity: 0, depthWrite: false,
+        blending: (T.AdditiveBlending !== undefined) ? T.AdditiveBlending : 1
+      });
+      var hi = new T.Mesh(new T.PlaneGeometry(w.sx * 0.98, w.sz * 0.98), hiMat);
+      hi.rotation.x = -Math.PI / 2;
+      hi.position.set(w.cx, h + 0.007, w.cz);
+      scene.add(hi);
+      mesh.userData.highlight = hi;
 
-      // 图标徽章（浮在格子上方）
-      var emb = buildEmblem(TILE_ICON[t.type] || '❓', '#' + col.toString(16).padStart(6, '0'));
-      if (emb) { emb.position.set(0, 0.82, 0); g.add(emb); }
-      // 序号小标签
-      var tag = buildTag(String(t.id), '#' + col.toString(16).padStart(6, '0'), 40, 0.52, 0.2);
-      if (tag) { tag.position.set(0, 0.42, 0.42); g.add(tag); }
+      // 缺失贴图的回退模式：补一个图标徽章与序号，保证可读
+      if (!topArt) {
+        var emb = buildEmblem(TILE_ICON[t.type] || '❓', '#' + col.toString(16).padStart(6, '0'));
+        if (emb) { emb.position.set(w.cx, h + 0.45, w.cz); scene.add(emb); }
+      }
 
-      // 当前玩家所在格的光柱
-      var glowMat = new T.MeshBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false });
-      var glow = new T.Mesh(new T.CylinderGeometry(0.5, 0.62, 2.6, 24, 1, true), glowMat);
-      glow.position.y = 1.3; glow.userData.isGlow = true;
-      g.add(glow);
-
-      scene.add(g);
-      // 用 slab 作为拾取与高亮载体，保持 tileId 索引一致
-      slab.userData.tileId = t.id;
-      slab.userData.group = g;
-      slab.userData.top = top;
-      slab.userData.glow = glow;
-      tiles.push(slab);
+      // 玩家所在格的光柱
+      var glowMat = new T.MeshBasicMaterial({
+        color: topArt ? 0x8fd0ff : col, transparent: true, opacity: 0, depthWrite: false, side: T.DoubleSide
+      });
+      var glow = new T.Mesh(new T.CylinderGeometry(0.34, 0.42, 2.2, 24, 1, true), glowMat);
+      glow.position.set(w.cx, h + 1.1, w.cz);
+      scene.add(glow);
+      mesh.userData.glow = glow;
     }
+  }
 
-    // 棋子
+  function buildPieces() {
     pieces.p1 = buildKing(true);
     pieces.p2 = buildKing(false);
     pieces.p1.userData.side = 'p1';
     pieces.p2.userData.side = 'p2';
-    var tag1 = buildTag('你', '#8fd0ff', 44, 1.15, 0.43); if (tag1) { tag1.position.set(0, 1.72, 0); pieces.p1.add(tag1); }
-    var tag2 = buildTag('对手', '#ff9c8f', 42, 1.28, 0.48); if (tag2) { tag2.position.set(0, 1.72, 0); pieces.p2.add(tag2); }
+    pieces.p1.scale.setScalar(PIECE_SCALE);
+    pieces.p2.scale.setScalar(PIECE_SCALE);
+    var tag1 = buildTag('你', '#8fd0ff', 44, 1.15, 0.43); if (tag1) { tag1.position.set(0, 1.78, 0); pieces.p1.add(tag1); }
+    var tag2 = buildTag('对手', '#ff9c8f', 42, 1.28, 0.48); if (tag2) { tag2.position.set(0, 1.78, 0); pieces.p2.add(tag2); }
     scene.add(pieces.p1); scene.add(pieces.p2);
-    pieces.p1.position.set(0, 0, 0);
-    pieces.p2.position.set(0, 0, 0);
+  }
+
+  function buildScene() {
+    scene = new T.Scene();
+    scene.background = new T.Color(0x070b14);
+    scene.fog = new T.Fog(0x070b14, 46, 120);   // 只在拉远时轻微收边，默认视角不会影响棋盘贴图的可读性
+
+    // 灯光：暖色主光 + 冷色补光 + 半球环境（棋盘贴图要够亮才看得清，同时保留投影层次）
+    scene.add(new T.AmbientLight(0x9fb8e8, 0.62));
+    scene.add(new T.HemisphereLight(0xd8e6ff, 0x141a2a, 0.8));
+    var key = new T.DirectionalLight(0xfff3dd, 2.1);
+    key.position.set(7, 16, 9);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    var d = 11;
+    key.shadow.camera.left = -d; key.shadow.camera.right = d;
+    key.shadow.camera.top = d; key.shadow.camera.bottom = -d;
+    key.shadow.camera.near = 1; key.shadow.camera.far = 64;
+    key.shadow.bias = -0.0006;
+    if (key.shadow.normalBias !== undefined) key.shadow.normalBias = 0.02;
+    scene.add(key);
+    var fill = new T.DirectionalLight(0x6fa8ff, 0.85); fill.position.set(-10, 9, -8); scene.add(fill);
+    var rim = new T.DirectionalLight(0xffb27a, 0.55); rim.position.set(-5, 6, 13); scene.add(rim);
+
+    buildBoard();
+    buildTiles();
+    buildPieces();
 
     // 相机
-    camPersp = new T.PerspectiveCamera(46, 1, 0.1, 300);
-    var fr = 8.0;
-    camOrtho = new T.OrthographicCamera(-fr, fr, fr, -fr, 0.1, 300);
+    camPersp = new T.PerspectiveCamera(46, 1, 0.1, 400);
+    var fr = HALF_W * 1.12;
+    camOrtho = new T.OrthographicCamera(-fr, fr, fr, -fr, 0.1, 400);
     updateCamera(true);
   }
 
@@ -3903,7 +4018,7 @@ var Map3D = (function () {
     try { sz = renderer.getSize(new T.Vector2()); } catch (e) {}
     var w = (sz && sz.x) || 900, h = (sz && sz.y) || 380;
     var aspect = Math.max(0.3, w / Math.max(1, h));
-    var needW = 7.6, needH = 6.5;               // 棋盘半宽/半高（含描边与浮标留白；数值越小棋盘越大）
+    var needW = HALF_W * 1.06, needH = HALF_D * 1.06;   // 棋盘半宽/半高（含边缘留白）
     var halfW, halfH;
     if (aspect >= needW / needH) { halfH = needH; halfW = halfH * aspect; }
     else { halfW = needW; halfH = halfW / aspect; }
@@ -3925,68 +4040,125 @@ var Map3D = (function () {
     renderer.setSize(w, h, true);
     var aspect = w / h;
     if (camPersp) { camPersp.aspect = aspect; camPersp.updateProjectionMatrix(); }
-      if (camOrtho) refreshOrthoFrustum();
+    if (camOrtho) refreshOrthoFrustum();
     updateCamera(true);
+  }
+
+  /* 斜俯视角下让整块棋盘（含抬升格块与棋子）刚好入画的相机距离。
+     先用解析式给一个下界，再用真实透视投影对棋盘外接点做少数几次数值放大：
+     近角/近边在透视下会被解析式低估，不收紧就会出画。 */
+  var _framePts = null, _tmpV = null;
+  function framePoints() {
+    if (_framePts) return _framePts;
+    _framePts = [];
+    var xs = [-HALF_W, HALF_W], zs = [-HALF_D, HALF_D], ys = [0, TOP_H];
+    for (var a = 0; a < 2; a++) for (var b = 0; b < 2; b++) for (var c = 0; c < 2; c++) {
+      _framePts.push(new T.Vector3(xs[a], ys[c], zs[b]));
+    }
+    return _framePts;
+  }
+  function frameFits(dist) {
+    if (!camPersp || !T.Vector3 || !camPersp.position || !camPersp.lookAt || !camPersp.updateMatrixWorld) return true;
+    if (!_tmpV) _tmpV = new T.Vector3();
+    var tx = camTarget ? camTarget.x : 0, tz = camTarget ? camTarget.z : 0;
+    var flat = dist * Math.cos(camPitch);
+    camPersp.position.set(tx + Math.sin(camYaw) * flat, 0.9 + dist * Math.sin(camPitch), tz + Math.cos(camYaw) * flat);
+    camPersp.lookAt(tx, 0.9, tz);
+    camPersp.updateMatrixWorld();
+    var pts = framePoints();
+    for (var i = 0; i < pts.length; i++) {
+      if (!_tmpV.copy || !_tmpV.project) return true;   // 桩环境无法投影：跳过收紧
+      _tmpV.copy(pts[i]).project(camPersp);
+      if (Math.abs(_tmpV.x) > 1.0 || Math.abs(_tmpV.y) > 1.0) return false;
+    }
+    return true;
+  }
+  function viewDistance() {
+    if (!camPersp) return 20;
+    var sz = null;
+    try { sz = renderer ? renderer.getSize(new T.Vector2()) : null; } catch (e) {}
+    var w = (sz && sz.x) || (host ? host.clientWidth : 900) || 900;
+    var h = (sz && sz.y) || (host ? host.clientHeight : 380) || 380;
+    var aspect = Math.max(0.4, w / Math.max(1, h));
+    var vFov = camPersp.fov * Math.PI / 180;
+    var hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    var cy = Math.abs(Math.cos(camYaw)), sy = Math.abs(Math.sin(camYaw));
+    var sp = Math.sin(camPitch), cp = Math.cos(camPitch);
+    var projW = HALF_W * cy + HALF_D * sy;                       // 棋盘在画面横向的投影半宽
+    var projH = (HALF_W * sy + HALF_D * cy) * sp + TOP_H * cp;    // 棋盘在画面纵向的投影半高（含抬升高度）
+    var fitH = projH / Math.tan(vFov / 2);
+    var fitW = projW / Math.tan(hFov / 2);
+    var base = Math.max(fitH, fitW);
+    var dist = base;
+    // 在 [base, base*6] 上二分：frameFits 是距离的单调函数，12 次二分即可收紧到 0.15%
+    try {
+      var lo = base, hi = base * 6;
+      for (var b = 0; b < 12; b++) {
+        var mid = (lo + hi) * 0.5;
+        if (frameFits(mid)) hi = mid; else lo = mid;
+      }
+      dist = hi;
+    } catch (e) { dist = base * 1.6; }
+    return dist * 1.03 * (camDist / 10.5);
   }
 
   function updateCamera(instant) {
     if (!camPersp) return;
     var tx = camTarget ? camTarget.x : 0;
     var tz = camTarget ? camTarget.z : 0;
-    var ty = 0.85; // 视线中心略高于棋盘，让棋盘在画面里居中
+    var ty = 0.9; // 视线中心略高于棋盘，让棋盘在画面里居中
     if (mode === 'ortho') {
-      camOrtho.position.set(tx, 24, tz + 0.01);
+      camOrtho.position.set(tx, 26, tz + 0.01);
       // 俯视时把"上"方向固定为世界 -Z，避免与视线共线导致画面被随机旋转
       if (camOrtho.up && camOrtho.up.set) camOrtho.up.set(0, 0, -1);
       camOrtho.lookAt(tx, 0, tz);
     } else {
-      // 按棋盘尺寸 + 视口宽高比自动求距离，保证整块棋盘刚好占满画面（不再是一个小方块）
-      var w = host ? (host.clientWidth || 900) : 900;
-      var h = host ? (host.clientHeight || 380) : 380;
-      var aspect = Math.max(0.4, w / Math.max(1, h));
-      var vFov = camPersp.fov * Math.PI / 180;
-      var hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-      // 按"棋盘完整外接圆"求距离：用完整半宽而不是半宽的一半，避免近端被裁掉
-      var extent = 7.4;                          // 取景半径：让棋盘尽量铺满画面
-      var fitH = extent / Math.tan(vFov / 2);
-      var fitW = extent / Math.tan(hFov / 2);
-      // 1.12 系数补偿斜俯视角下棋盘近端的额外占位（防止近角出画）
-      var dist = Math.max(fitH, fitW) * 1.12 * (camDist / 10.5);
-      if (window.__M3D_DEBUG) {
-        var __dbg = 'w=' + w + ' h=' + h + ' aspect=' + aspect.toFixed(2) + ' dist=' + dist.toFixed(2);
-        console.log('[Map3D] ' + __dbg);
-        try { var __h = document.getElementById('map3dHint'); if (__h) __h.textContent = 'DBG ' + __dbg; } catch (e) {}
-      }
+      var dist = viewDistance();
       camPersp.position.set(
         tx + Math.sin(camYaw) * dist * Math.cos(camPitch),
         ty + dist * Math.sin(camPitch),
         tz + Math.cos(camYaw) * dist * Math.cos(camPitch)
       );
       camPersp.lookAt(tx, ty, tz);
+      if (window.__M3D_DEBUG) {
+        var __dbg = 'dist=' + dist.toFixed(2) + ' yaw=' + camYaw.toFixed(2) + ' pitch=' + camPitch.toFixed(2) + ' art=' + (!!artTex);
+        console.log('[Map3D] ' + __dbg);
+        try { var __h = document.getElementById('map3dHint'); if (__h) __h.textContent = 'DBG ' + __dbg; } catch (e) {}
+      }
     }
   }
 
   /* ---------- 棋子平滑移动 ---------- */
   var tweens = [];
-  // 同一格上两枚棋子错开摆放（同格时朝相反方向偏移，避免互相遮挡）
+  // 同一格上两枚棋子错开摆放（同格时沿环的切线方向朝相反方向偏移，避免互相遮挡）
   function slotOffset(side, tileId) {
     var other = (side === 'p1') ? battleState && battleState.p2 : battleState && battleState.p1;
     if (!other || other.position !== tileId) return { x: 0, z: 0 };
     var t = MAP_TILES[tileId];
     if (!t) return { x: 0, z: 0 };
-    // 沿"环的切线方向"错开
     var prev = MAP_TILES[(tileId - 1 + MAP_TILES.length) % MAP_TILES.length];
-    var nx = t.x - prev.x, ny = t.y - prev.y;
-    var len = Math.sqrt(nx * nx + ny * ny) || 1;
-    nx /= len; ny /= len;
-    var s = (side === 'p1') ? 0.5 : -0.5;
-    return { x: nx * s, z: ny * s };
+    if (!prev) return { x: 0, z: 0 };
+    var nx = (t.x - prev.x) * SX, nz = (t.y - prev.y) * SZ;
+    var len = Math.sqrt(nx * nx + nz * nz) || 1;
+    var s = (side === 'p1') ? 0.26 : -0.26;
+    return { x: nx / len * s, z: nz / len * s };
   }
-  function movePieceTo(side, tileId) {
+  function movePieceTo(side, tileId, instant) {
     var t = MAP_TILES[tileId]; if (!t || !pieces[side]) return;
     var wp = worldPos(t), off = slotOffset(side, tileId);
     var p = pieces[side];
-    tweens.push({ obj: p, from: { x: p.position.x, z: p.position.z }, to: { x: wp.x + off.x, z: wp.z + off.z }, t: 0, dur: 0.75 });
+    var baseY = tileTopY(tileId);
+    p.userData.baseY = baseY;
+    if (instant) {
+      // 首次同步直接落位，避免棋子从棋盘中心"飞"过来
+      p.position.set(wp.x + off.x, baseY, wp.z + off.z);
+      return;
+    }
+    tweens.push({
+      obj: p,
+      fromX: p.position.x, fromY: p.position.y, fromZ: p.position.z,
+      toX: wp.x + off.x, toZ: wp.z + off.z, baseY: baseY, t: 0, dur: 0.75
+    });
   }
   function updateTweens(dt) {
     for (var i = tweens.length - 1; i >= 0; i--) {
@@ -3994,14 +4166,14 @@ var Map3D = (function () {
       tw.t += dt / tw.dur;
       var k = Math.min(1, tw.t);
       var e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOutQuad
-      var hop = Math.sin(Math.PI * k) * 0.5;                         // 跳跃弧线
-      tw.obj.position.x = tw.from.x + (tw.to.x - tw.from.x) * e;
-      tw.obj.position.z = tw.from.z + (tw.to.z - tw.from.z) * e;
-      tw.obj.position.y = hop;
+      var hop = Math.sin(Math.PI * k) * 0.55;                         // 跳跃弧线
+      tw.obj.position.x = tw.fromX + (tw.toX - tw.fromX) * e;
+      tw.obj.position.z = tw.fromZ + (tw.toZ - tw.fromZ) * e;
+      tw.obj.position.y = tw.fromY + (tw.baseY - tw.fromY) * e + hop;
       // 落点影子随跳跃淡出（增强腾空感）
-      if (tw.obj.userData.shadow) tw.obj.userData.shadow.material.opacity = 1 - hop * 1.4;
+      if (tw.obj.userData.shadow) tw.obj.userData.shadow.material.opacity = 1 - Math.min(1, hop * 1.5);
       if (k >= 1) {
-        tw.obj.position.y = 0;
+        tw.obj.position.y = tw.baseY;
         if (tw.obj.userData.shadow) tw.obj.userData.shadow.material.opacity = 1;
         tweens.splice(i, 1);
       }
@@ -4024,8 +4196,9 @@ var Map3D = (function () {
       ['p1', 'p2'].forEach(function (s, idx) {
         var p = pieces[s]; if (!p) return;
         var isCur = (s === cur);
+        var baseY = p.userData.baseY || 0;
         p.rotation.y = Math.sin(animT * 0.55 + idx * 1.7) * 0.1;
-        if (p.position.y <= 0.001) p.position.y = Math.sin(animT * 1.7 + idx) * 0.03;
+        if (p.position.y <= baseY + 0.001) p.position.y = baseY + Math.sin(animT * 1.7 + idx) * 0.03;
         var ring = p.userData.selRing;
         if (ring && ring.material) {
           ring.material.opacity = isCur ? (0.5 + Math.sin(animT * 3.4) * 0.32) : 0;
@@ -4034,7 +4207,7 @@ var Map3D = (function () {
         }
       });
     }
-    // 格子高亮：玩家所在格 / 悬停格 / 光柱
+    // 格子高亮：悬停格 / 玩家所在格 / 光柱
     if (battleState) {
       for (var i = 0; i < tiles.length; i++) {
         var ud = tiles[i].userData;
@@ -4042,12 +4215,12 @@ var Map3D = (function () {
         var onP1 = battleState.p1 && battleState.p1.position === id;
         var onP2 = battleState.p2 && battleState.p2.position === id;
         var occupied = onP1 || onP2;
-        var top = ud.top;
-        if (top && top.material && top.material.emissiveIntensity !== undefined) {
-          var baseE = 0.35;
-          if (hoverTile === tiles[i]) baseE = 1.15;
-          else if (occupied) baseE = 0.75 + Math.sin(animT * 3) * 0.2;
-          top.material.emissiveIntensity = baseE;
+        var hi = ud.highlight;
+        if (hi && hi.material) {
+          var target = 0;
+          if (hoverTile === tiles[i]) target = 0.26;
+          else if (occupied) target = 0.13 + Math.sin(animT * 3) * 0.05;
+          hi.material.opacity = target;
         }
         var glow = ud.glow;
         if (glow && glow.material) {
@@ -4057,7 +4230,7 @@ var Map3D = (function () {
     }
     if (mode === 'ortho') {
       var __of = refreshOrthoFrustum();
-      if (__of && window.__M3D_DEBUG) { try { var __h2 = document.getElementById('map3dHint'); if (__h2) __h2.textContent = 'ORTHO ' + __of.w + 'x' + __of.h + ' a=' + __of.aspect.toFixed(2) + ' hw=' + __of.halfW.toFixed(2) + ' hh=' + __of.halfH.toFixed(2); } catch (e) {} }
+      if (__of && window.__M3D_DEBUG) { try { var __h2 = document.getElementById('map3dHint'); if (__h2) __h2.textContent = 'ORTHO ' + __of.w + 'x' + __of.h + ' a=' + __of.aspect.toFixed(2); } catch (e) {} }
     }
     renderer.render(scene, mode === 'ortho' ? camOrtho : camPersp);
   }
@@ -4105,6 +4278,7 @@ var Map3D = (function () {
             var p1on = battleState && battleState.p1 && battleState.p1.position === t.id;
             var p2on = battleState && battleState.p2 && battleState.p2.position === t.id;
             tip.innerHTML = '<b>' + (TILE_ICON[t.type] || '❓') + ' ' + t.name + '</b><br>第 ' + t.id + ' 格' +
+              (t.big ? '（大型格）' : '') +
               (p1on ? '<br><span style="color:#8fd0ff">● 你在这里</span>' : '') +
               (p2on ? '<br><span style="color:#ff9c8f">● 对手在这里</span>' : '');
           }
@@ -4127,31 +4301,30 @@ var Map3D = (function () {
     host.addEventListener('pointercancel', function (ev) { dragging = false; });
     host.addEventListener('wheel', function (ev) {
       ev.preventDefault();
-      camDist = Math.max(6, Math.min(34, camDist + (ev.deltaY > 0 ? 1.2 : -1.2)));
+      // 滚轮缩放：拉近上限放到 3.4，便于看清地图原图上的小图标与文字
+      camDist = Math.max(3.4, Math.min(34, camDist + (ev.deltaY > 0 ? 1.2 : -1.2)));
       updateCamera();
     }, { passive: false });
     window.addEventListener('resize', resize);
   }
 
   /* ---------- 对外 API ---------- */
-  function init() {
-    if (ready || failed) return ready;
-    if (!isAvailable()) { fail('three.js 未加载'); return false; }
-    host = document.getElementById('map3dHost');
-    if (!host) { fail('缺少容器'); return false; }
+  function boot(useArt) {
     try {
-      T = THREE;
       renderer = new T.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
       renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = T.PCFSoftShadowMap;
       host.appendChild(renderer.domElement);
+      if (useArt) ensureArtTexture();
       buildScene();
       resize();
       bindEvents();
       ready = true;
       // 隐藏 2D 小地图（3D 地图已提供完整视野），并给出提示
       try { document.body.classList.add('map3d-on'); } catch (e) {}
+      // 贴图是异步等来的，建好场景时战斗可能已经开始：立刻补一次棋子落位
+      try { if (typeof battleState !== 'undefined' && battleState) { syncFromGame(); renderBattleMap(); } } catch (e) {}
       // 布局稳定后再校准一次尺寸（首次 init 时 flex 高度可能还没算好）
       setTimeout(function () { try { resize(); } catch (e) {} }, 260);
       setTimeout(function () { try { resize(); } catch (e) {} }, 900);
@@ -4162,6 +4335,27 @@ var Map3D = (function () {
       return false;
     }
   }
+  function init() {
+    if (ready || failed) return ready;
+    if (loading) return false;
+    if (!isAvailable()) { fail('three.js 未加载'); return false; }
+    host = document.getElementById('map3dHost');
+    if (!host) { fail('缺少容器'); return false; }
+    T = THREE;
+    if (artSettled) return boot(artUsable);
+    // 地图贴图还在下载：等它落定再建场景，避免先建出无贴图的棋盘
+    loading = true;
+    var waited = 0;
+    var iv = setInterval(function () {
+      waited += 100;
+      if (artSettled || waited >= 6000) {
+        clearInterval(iv);
+        loading = false;
+        boot(artSettled && artUsable);
+      }
+    }, 100);
+    return true;
+  }
   // 与战斗状态同步（updateBattleUI 会调用）
   function syncFromGame() {
     if (!ready || !battleState) return;
@@ -4169,8 +4363,9 @@ var Map3D = (function () {
       var p = battleState[s];
       if (!p) return;
       if (lastSync[s] !== p.position) {
+        var first = (lastSync[s] === -1);
         lastSync[s] = p.position;
-        movePieceTo(s, p.position);
+        movePieceTo(s, p.position, first);
       }
     });
   }
@@ -4180,7 +4375,7 @@ var Map3D = (function () {
     var btn = document.getElementById('map3dViewBtn');
     if (btn) btn.textContent = (mode === 'ortho') ? '🎥 斜俯视角' : '🎥 上帝视角';
     var hint = document.getElementById('map3dHint');
-    if (hint) hint.textContent = (mode === 'ortho') ? '上帝视角：点击格子查看 · 切回斜俯可拖动旋转' : '拖动旋转 · 滚轮缩放 · 点击格子查看';
+    if (hint) hint.textContent = (mode === 'ortho') ? '上帝视角：点击格子查看 · 切回斜俯可拖动旋转' : '拖动旋转 · 滚轮缩放（放大可看清原图格子）· 点击格子查看';
     updateCamera();
     addBattleLog('system', mode === 'ortho' ? '地图视角：上帝视角' : '地图视角：斜俯视角');
   }
@@ -4191,18 +4386,21 @@ var Map3D = (function () {
     var wp = worldPos(t);
     camTarget = { x: wp.x, z: wp.z };
     // 平滑把镜头中心移到该格
-    var steps = 14, i = 0, fromX = 0, fromZ = 0;
-    if (camPersp) { fromX = camPersp.position.x; fromZ = camPersp.position.z; }
+    var steps = 16, i = 0;
     var iv = setInterval(function () {
       i++;
       var k = i / steps;
       var e = 1 - Math.pow(1 - k, 3);
-      if (camPersp) {
-        var r = camDist, y = r * Math.sin(camPitch), flat = r * Math.cos(camPitch);
-        camPersp.position.set(Math.sin(camYaw) * flat + camTarget.x * e, y, Math.cos(camYaw) * flat + camTarget.z * e);
-        camPersp.lookAt(camTarget.x * e, 0.4, camTarget.z * e);
+      var tx = camTarget.x * e, tz = camTarget.z * e;
+      if (mode === 'ortho') {
+        camOrtho.position.set(tx, 26, tz + 0.01);
+        camOrtho.lookAt(tx, 0, tz);
+      } else {
+        var dist = viewDistance();
+        var flat = dist * Math.cos(camPitch);
+        camPersp.position.set(tx + Math.sin(camYaw) * flat, 0.9 + dist * Math.sin(camPitch), tz + Math.cos(camYaw) * flat);
+        camPersp.lookAt(tx, 0.9, tz);
       }
-      if (mode === 'ortho') { camOrtho.position.set(camTarget.x * e, 22, camTarget.z * e + 0.01); camOrtho.lookAt(camTarget.x * e, 0, camTarget.z * e); }
       if (i >= steps) clearInterval(iv);
     }, 22);
     addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格');
@@ -4220,11 +4418,13 @@ var Map3D = (function () {
   return {
     init: init, syncFromGame: syncFromGame, toggleView: toggleView, focusPlayer: focusPlayer,
     resetCamera: resetCamera, resize: resize, dispose: dispose,
-    isReady: function () { return ready; }, isFailed: function () { return failed; }
+    isReady: function () { return ready; }, isFailed: function () { return failed; },
+    hasArtwork: function () { return !!(ready && artTex); },
+    tileRect: function (id) { return TILE_RECT[id] || null; },
+    artUrl: ART_URL
   };
 })();
 
-// 判断两个格子是否在同一行（基于MAP_TILES的y坐标）
 // 卡图加载失败：先自动重试一次，仍失败则弱化占位，避免直接消失/裂图
 function imgRetry(el){
   try{
@@ -4239,13 +4439,29 @@ function imgRetry(el){
     el.style.opacity='0.25'; el.alt='卡图加载失败'; el.title='卡图加载失败，可刷新重试';
   }catch(e){}
 }
+// ===== 几何「同一行」判定 =====
+// 环形跑道 42 格的四个直边（前进方向 = id 增大，与地图原图的四边一一对应）：
+//   下边 0→13 · 左边 13→21 · 上边 21→34 · 右边 34→0（34,35,…,41,0 绕回来）
+// 四角格同时属于相邻的两条边（第0格既是下边端点也是右边端点，第13格是下边+左边，依此类推），
+// 所以「同一行」= 两格至少共享一条边。判定完全由棋盘几何决定，不再依赖坐标阈值近似：
+// 左右两条竖边同高度的两格不会被误判成同一行。
+var RING_EDGES = [[0, 13], [13, 21], [21, 34], [34, 0]];
+var TILE_EDGE_MASK = (function () {
+  var N = (MAP_TILES && MAP_TILES.length) ? MAP_TILES.length : 42;
+  var masks = new Array(N), i, e;
+  for (i = 0; i < N; i++) masks[i] = 0;
+  for (e = 0; e < RING_EDGES.length; e++) {
+    var a = RING_EDGES[e][0], b = RING_EDGES[e][1];
+    var span = ((b - a) % N + N) % N;          // 沿前进方向 a→b 的步数（含两端）
+    for (i = 0; i <= span; i++) masks[(a + i) % N] |= (1 << e);
+  }
+  return masks;
+})();
 function isSameRow(pos1, pos2) {
   if (!MAP_TILES || !MAP_TILES[pos1] || !MAP_TILES[pos2]) return false;
-  var y1 = MAP_TILES[pos1].y;
-  var y2 = MAP_TILES[pos2].y;
-  if (Math.abs(y1 - y2) <= 5) return true; // 同一行（上/下横边）
-  var x1 = MAP_TILES[pos1].x, x2 = MAP_TILES[pos2].x;
-  return Math.abs(x1 - x2) <= 5; // 同一列也算"同一行"（左/右竖边，用户口径）
+  var m = TILE_EDGE_MASK;
+  if (!m || m[pos1] === undefined || m[pos2] === undefined) return false;
+  return (m[pos1] & m[pos2]) !== 0;
 }
 
 // ===== 统一攻击范围引擎（严格按卡牌 attack_range 文本解析，环形跑道 N=42，前进=id增大）=====
