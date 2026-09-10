@@ -4649,12 +4649,18 @@ var Online = {
   ws:null, mySession:'', oppSession:'', mySide:'p1',
   seed:0, roomId:'', endpoint:'',
   myName:'', oppName:'',
-  _decSeq:0,            // 决策序列号：双机同一流程中严格同步递增
-  _decOwner:'p1',       // 当前决策归属（p1=本机玩家走UI；p2=远端位走答案流）
-  _decOwnerStack:[],    // 嵌套流程的归属栈（p2 远程流程内部所有弹窗都归 p2）
-  _answers:{},          // seq -> {got, v, waiters}
+  _decSeq:0,            // 旧序列号计数器（已作废，保留仅为兼容）
+  _decOwner:'p1',       // 当前决策归属（p1=本机玩家走UI；p2=远端位走问答流）
+  _decOwnerStack:[],    // 嵌套流程的归属栈
+  _answers:{},          // 旧答案表（已作废，保留仅为兼容）
   _waitingCount:0,
-  // 决策序列失步自检：两端定期交换 _decSeq，静默期仍不一致即判定失步
+  /* ---------------- 权威式联机（新） ----------------
+     role:'host' 房主跑规则并把快照发给客人；role:'guest' 客人只画不跑。
+     _asks: 房主发出的问题 id -> {cb, spec, timer}
+     SPEC_TIMEOUT_MS: 对手多久不选就按默认项继续（不再永久卡死） */
+  role:'', isGuest:false,
+  _askSeq:0, _asks:{}, SPEC_TIMEOUT_MS:60000,
+  _snapTimer:null, _snapSeq:0, _lastSnapAt:0,
   _peerSeq:-1, _peerWait:-1, _seqBadStreak:0, _seqWarned:false, _seqTimer:null,
   _intentQueue:[], _intentBusy:false, _intentCb:null, _intentStalled:false,
   _oppDeck:null, _oppDeckWaiters:[],
@@ -4700,6 +4706,7 @@ var Online = {
   _relay:function(m){ this._send({t:'relay', m:m}); },
   createRoom:function(){
     var self=this;
+    this.role='host'; this.isGuest=false;      // 建房者 = 权威方（跑规则并把状态同步给对手）
     this.relayBase=this._wsUrl(this._serverInput());
     this.endpoint=this.relayBase;
     this._rememberRelay((this._serverInput()||'').trim());
@@ -4725,6 +4732,7 @@ var Online = {
     if(!id){ showToast('请输入对方房号', 'warn'); return; }
     if(!/^[A-Z0-9]{4}$/.test(id)){ showToast('房号是 4 位字母或数字', 'warn'); return; }
     var self=this;
+    this.role='guest'; this.isGuest=true;      // 加入者 = 客人（不跑规则，只按房主快照绘制）
     this.relayBase=this._wsUrl(this._serverInput());
     this.endpoint=this.relayBase;
     this._rememberRelay((this._serverInput()||'').trim());
@@ -4818,18 +4826,22 @@ var Online = {
     this._hideWaiting();
     var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=true;
   },
-  /* ---------------- 开局：种子 + 卡组交换 + 换位 ---------------- */
+  /* ---------------- 开局：权威式分工 ----------------
+     中继的 start 消息本来就把 first 设成房主（hostSid），所以【房主天然先手】，
+     房主引擎里 p1 = 房主本人、p2 = 对手，永远如此，不需要"先手/后手 × 槽位"那套绕圈逻辑。
+       · 房主：建本地对局，然后把权威状态推给客人
+       · 客人：**不建本地对局**，等房主的快照（收到第一份快照才切到战斗界面） */
   _onGameStart:function(m){
     var self=this;
     this.seed=m.seed; this.active=true;
-    // 开局把决策序列号归零（双机在同一点执行 => 仍然对齐），并启动失步自检
-    this._decSeq=0; this._answers={}; this._waitingCount=0; this._seqBadStreak=0; this._seqWarned=false;
-    this._startSeqWatch();
-    setGameSeed(m.seed);                 // 双方同一权威种子 -> 本地推演确定一致
-    this.mySide=(m.first===this.mySession)?'p1':'p2';
-    this.isHost=(this.mySide==='p1');
-    this.status('对局开始！权威种子 '+m.seed+'，你是 '+(this.isHost?'先手':'后手')+'。正在同步双方卡组…');
-    // 交换卡组：本机 deckConfig.p1 是我的卡组；对方发来的将填入 deckConfig.p2
+    this.isGuest=(this.role==='guest');
+    this._asks={}; this._askSeq=0; this._enteredBattle=false; this._verWarned=false; this._snapSeq=0;
+    if(typeof NetSync!=='undefined') NetSync.resetRegistry();   // 新客人接入：卡定义要重发
+    setGameSeed(m.seed);
+    this.mySide='p1';                    // 两种角色在各自引擎/视图里都是"自己占 p1"
+    this.isHost=!this.isGuest;
+    this.status('对局开始！'+(this.isGuest?'你是客人，等待房主同步状态…':'你是房主（先手），正在把状态同步给对手…'));
+    // 卡组交换：客人也要把自己的卡组发给房主（房主需要它来建立 p2）
     var cfg={chars:[],items:[],carries:[]};
     try{
       if(deckConfig && deckConfig.p1){
@@ -4841,8 +4853,11 @@ var Online = {
     this._relay({k:'deck', cfg:cfg, name:this.myName});
     this._deckSent=true;
     this._waitOppDeck(function(){
-      self.status('双方卡组已同步，开始对局。你是 '+(self.isHost?'先手':'后手')+'。');
+      if(self.isGuest){ self.status('已收到对手卡组，等待房主开始对局…'); return; }  // 客人等快照，不建局
+      self.status('双方卡组已同步，对局建立中…');
       try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
+      self._enteredBattle=true;
+      self._sendSnapshotNow();          // 立刻把权威状态给客人
     });
   },
   _waitOppDeck:function(cb){
@@ -4870,20 +4885,58 @@ var Online = {
         this._oppDeckWaiters.forEach(function(f){ try{f();}catch(e){} });
         this._oppDeckWaiters=[];
         break;
+      /* ---------- 权威式联机的四类消息 ---------- */
+      case 'act':                       // 房主：收到客人要做的操作
+        this._onGuestAct(m.a);
+        break;
+      case 'ans':                       // 房主：收到客人对某个问题的回答
+        this._onAnswer(m);
+        break;
+      case 'ask':                       // 客人：收到房主的问题，画出来让玩家选
+        this._onAsk(m);
+        break;
+      case 'snap':                      // 客人：收到权威状态快照，整包覆盖并重绘
+        this._onSnapshot(m.s);
+        break;
+      /* ---------- 旧协议（不再使用，保留仅为兼容旧页面）---------- */
       case 'intent':
-        this._intentQueue.push(m.a||{});
-        this._drainIntents();
+        this._onGuestAct(m.a);
         break;
       case 'answer':
-        this._applyAnswer(m);
+        this._onAnswer({ id:m.seq, v:m.v });
         break;
       case 'emote':
         try{ if(typeof sendEmote==='function' && m && typeof m.idx==='number') sendEmote(m.idx, true); }catch(e){}
         break;
       case 'seq':
-        if(typeof m.n==='number') this._peerSeq=m.n;
-        if(typeof m.w==='number') this._peerWait=m.w;
         break;
+    }
+  },
+  /* 房主：套用客人提交的操作（复用已有的 online*P2 流程，客人选什么由 ask/ans 送来） */
+  _onGuestAct:function(a){
+    if(!this.active || this.isGuest) return;
+    if(!a || !a.type) return;
+    this._intentQueue.push(a);
+    this._drainIntents();
+  },
+  /* 客人：套用权威快照。这是客人侧唯一的"状态来源"，它自己不推进任何规则。 */
+  _onSnapshot:function(s){
+    if(!this.active || !this.isGuest || !s) return;
+    if(s.v!==undefined && typeof NetSync!=='undefined' && s.v!==NetSync.VERSION){
+      if(!this._verWarned){
+        this._verWarned=true;
+        __onlineDiverge('双方游戏版本不一致（快照版本 '+s.v+' / 本机 '+NetSync.VERSION+'）——请双方都刷新页面');
+      }
+      return;
+    }
+    try{
+      if(typeof NetSync!=='undefined') NetSync.applySnapshot(s);
+    }catch(e){ console.error('套用快照失败',e); }
+    this._lastSnapApplied=(s.n||0); this._snapRecv=(this._snapRecv||0)+1;
+    this.status('已与房主同步（快照 #'+(s.n||'?')+'）');
+    if(!this._enteredBattle && battleState){
+      this._enteredBattle=true;
+      try{ showScreen('battleScreen'); }catch(e){}
     }
   },
   _onOpponentLeft:function(){
@@ -4892,11 +4945,13 @@ var Online = {
     this.leave();
     if(inBattle && typeof showScreen==='function') showScreen('mainMenu');
   },
-  /* ---------------- 意图（本机 p1 操作 → 对方 p2 流程） ---------------- */
+  /* ---------------- 操作传播 ----------------
+     权威式架构下这个函数**不再需要做任何事**：
+       · 房主：本地操作由它自己的引擎执行完毕，状态变化会自动触发快照推送（见 pushSnapshot 的接入点）
+       · 客人：各操作入口已改为走 guestSendAct 把操作发给房主，根本不会跑到本地执行
+     保留为空函数，是为了不再逐个改动那十几个调用点。 */
   sendIntent:function(a){
-    if(!this.active) return;
-    this._relay({k:'intent', a:a});
-    if(this._dbg) console.log('[联机] 发出意图', a);
+    if(this._dbg) console.log('[联机] sendIntent（权威式下为空操作）', a);
   },
   _drainIntents:function(){
     var self=this;
@@ -4930,36 +4985,72 @@ var Online = {
   pushDecOwner:function(owner){ this._decOwnerStack.push(this._decOwner); this._decOwner=owner; },
   popDecOwner:function(){ if(this._decOwnerStack.length) this._decOwner=this._decOwnerStack.pop(); else this._decOwner='p1'; },
   currentDecOwner:function(){ return this.active ? this._decOwner : 'p1'; },
-  // 远端位决策点：登记序列号并等待答案（对方 p1 弹窗广播同一序列号的答案）
+  /* ---------------- 决策问答（权威式） ----------------
+     旧的"序列号配对"整体作废：那套要求两台机器每一步都产生数量、顺序完全相同的决策点，
+     任何一处镜像写得不一样就永久错位（表现：出牌/造伤对手收不到、延迟很久、卡死）。
+     现在只有房主跑规则：房主遇到"该对手选"的地方，就发一个带 id 的问题过去；
+     客人用现成的弹窗把它画出来、把选项下标回传。**两边不需要对齐任何计数器。**
+     这两个保留为兼容旧调用点的空操作（原来的注册/广播已无意义）。 */
+  registerLocalAnswer:function(){ return 0; },
+  broadcastAnswer:function(){},
+  // 远端位决策点：向客人提问并等待回答（带超时自动放弃，不再永久卡死）
   awaitAnswer:function(opts, cb){
     opts=opts||{};
-    var seq=++this._decSeq;
-    var rec=this._answers[seq]||(this._answers[seq]={got:false,v:undefined,waiters:[]});
-    if(rec.got){ cb(rec.v); return; }
-    rec.waiters.push(cb);
-    this._waitingCount++;
-    this._showWaiting(true, opts.label||'等待对手选择');
+    if(!this.active){ cb(null); return; }
+    if(this.isGuest){ cb(null); return; }   // 客人不跑规则，不应走到这里（防御）
+    this.askRemote({ kind:'prompt', label:opts.label||'请选择', cards:opts.cards||null, choices:opts.choices||null }, cb);
+  },
+  // 房主 → 客人：问一个问题。spec = {kind,label,cardName,effect,choices,cards,indices,defVal}
+  askRemote:function(spec, cb){
     var self=this;
-    // 兜底：45s 未收到答案则放弃等待（防断线死锁）
-    rec.timer=setTimeout(function(){
-      if(!rec.got){ rec.got=true; rec.v=null; rec.waiters.forEach(function(f){ try{f(null);}catch(e){} }); rec.waiters=[]; self._waitingCount--; if(self._waitingCount<=0) self._hideWaiting(); }
-    },45000);
+    spec=spec||{};
+    if(!this.connected || !this.ws || this.ws.readyState!==1){
+      __onlineDiverge('与对手的连接已断开，无法询问选择「'+(spec.label||'')+'」');
+      cb(null); return;
+    }
+    var id='q'+(++this._askSeq);
+    this._asks[id]={ cb:cb, spec:spec };
+    this._send({t:'relay', m:{k:'ask', id:id, spec:spec}});
+    this._showWaiting(true, spec.label||'等待对手选择');
+    this._asks[id].timer=setTimeout(function(){
+      if(!self._asks[id]) return;
+      delete self._asks[id];
+      try{ addBattleLog('system','【联机】对手超时未选择（'+(spec.label||'')+'），已按默认项继续'); }catch(e){}
+      self._hideWaiting();
+      cb(null);
+    }, this.SPEC_TIMEOUT_MS);
   },
-  // 本机玩家决策点：登记序列号、展示UI、回答后广播（在 showChoiceModal 等包装器中调用）
-  registerLocalAnswer:function(){
-    return ++this._decSeq;
+  _onAnswer:function(m){
+    var rec=this._asks[m.id];
+    if(!rec) return;                       // 超时后迟到的回答：直接丢弃
+    delete this._asks[m.id];
+    if(rec.timer) clearTimeout(rec.timer);
+    this._hideWaiting();
+    rec.cb(m.v===undefined?null:m.v);
   },
-  broadcastAnswer:function(seq, v){
-    this._relay({k:'answer', seq:seq, v:v});
-  },
-  _applyAnswer:function(m){
-    var rec=this._answers[m.seq]||(this._answers[m.seq]={got:false,v:undefined,waiters:[]});
-    if(rec.timer){ clearTimeout(rec.timer); rec.timer=null; }
-    rec.got=true; rec.v=m.v;
-    rec.waiters.forEach(function(f){ try{f(m.v);}catch(e){} });
-    rec.waiters=[];
-    if(this._waitingCount>0) this._waitingCount--;
-    if(this._waitingCount<=0) this._hideWaiting();
+  sendAnswer:function(id, v){ this._send({t:'relay', m:{k:'ans', id:id, v:v}}); },
+  // 客人侧：收到房主的问题，用现成弹窗画出来再把选择回传
+  _onAsk:function(m){
+    var self=this, spec=m.spec||{};
+    var done=function(v){ self.sendAnswer(m.id, v); };
+    var label=spec.label||'请选择';
+    try{
+      if(spec.choices && spec.choices.length){
+        showChoiceModal(label, spec.cardName||'', spec.effect||'', spec.choices, function(i){ done(i); });
+        return;
+      }
+      if(spec.cards && spec.cards.length){
+        // 从区域里选卡：内容是客人自己的（或公开的），房主把卡名一并送来
+        var opts=spec.cards.map(function(n,i){ return (i+1)+'. '+n; });
+        showChoiceModal(label, '', '请选择一项', opts, function(i){ done(spec.indices?spec.indices[i]:i); });
+        return;
+      }
+      var v=window.prompt(label, spec.defVal===undefined?'':spec.defVal);
+      done(v===null?null:String(v));
+    }catch(e){
+      __onlineDiverge('渲染房主的问题失败：'+(e&&e.message));
+      done(null);
+    }
   },
   // 同步阻塞式 prompt 的联机替身：本机玩家=window.prompt并广播；远端位=等答案
   promptChoice:function(title, defVal, cb){
@@ -4990,7 +5081,7 @@ var Online = {
      此后所有答案都会配错决策点：表现就是"出牌/造伤对手收不到、延迟很久（每次 45s 超时）、投骰卡死"。
      这里定期交换 _decSeq：只有在【两端都不在等待答案】且连续两次心跳都不一致时才告警，
      避免把"某一端正在思考"这种正常瞬时差误报。 */
-  _startSeqWatch:function(){
+  _startSeqWatchLegacyDead:function(){
     var self=this;
     if(this._seqTimer) return;
     this._peerSeq=-1; this._peerWait=-1; this._seqBadStreak=0; this._seqWarned=false;
@@ -5012,7 +5103,51 @@ var Online = {
       } else if(self._peerSeq===self._decSeq){ self._seqBadStreak=0; }
     }, 2500);
   },
+  /* ---------------- 失步自检：作废 ----------------
+     旧架构要求两台机器逐点分配同一序列号，所以需要心跳比对 _decSeq。
+     新架构下只有房主跑规则、客人整包覆盖状态，**不存在"两台各自演化"这回事**，
+     因此这个自检已无意义，保留为空操作以免旧调用点报错。 */
+  _startSeqWatch:function(){},
   _stopSeqWatch:function(){ if(this._seqTimer){ clearInterval(this._seqTimer); this._seqTimer=null; } },
+
+  /* ---------------- 房主侧：推送状态快照 ----------------
+     去抖合并：一次动作往往触发多次 updateBattleUI，合并成一次推送（实测每次约 5KB）。
+     客人收到后整包覆盖自己的 battleState 再重绘 —— 失步在结构上不可能发生。 */
+  pushSnapshot:function(){
+    if(!this.active || this.isGuest) return;
+    var self=this;
+    if(this._snapTimer) return;                       // 已有排队的推送
+    this._snapTimer=setTimeout(function(){ self._snapTimer=null; self._sendSnapshotNow(); }, 90);
+  },
+  _sendSnapshotNow:function(){
+    if(!this.active || this.isGuest) return;
+    if(!this.connected || !this.ws || this.ws.readyState!==1) return;
+    if(!battleState || typeof NetSync==='undefined') return;
+    var snap;
+    try{ snap=NetSync.buildSnapshot(); }catch(e){ console.error('快照构建失败',e); return; }
+    if(!snap) return;
+    snap.n=++this._snapSeq;
+    this._lastSnapAt=Date.now();
+    if(!this._send({t:'relay', m:{k:'snap', s:snap}})){
+      try{ addBattleLog('system','【联机】状态同步发送失败（连接已断）'); }catch(e){}
+    }
+  },
+  // 客人手上的牌"能不能出"由房主判定（客人不跑规则）
+  playableOf:function(i){
+    if(typeof NetSync!=='undefined') return NetSync.playableOf(i);
+    return { ok:true, reason:'' };
+  },
+  /* 客人侧：把玩家的操作发给房主（客人自己绝不执行规则）。
+     返回 true 表示"已接管"，调用方应立即 return。 */
+  guestSendAct:function(a){
+    if(!this.active || !this.isGuest) return false;
+    if(!this.connected || !this.ws || this.ws.readyState!==1){
+      showToast('与房主的连接已断开，操作无法提交', 'warn');
+      return true;
+    }
+    this._send({t:'relay', m:{k:'act', a:a}});
+    return true;
+  },
   /* ---------------- 表情 ---------------- */
   sendEmote:function(idx){ this._relay({k:'emote', idx:idx}); },
   oppDisplayName:function(){ return this.oppName||'对手'; }
@@ -10772,15 +10907,18 @@ function showChoiceModal(title, cardName, effect, choices, callback) {
 }
 // 联机·显式归属决策弹窗：side='p1' 本机弹窗（showChoiceModal 包装器负责登记+广播）；side='p2' 等待远端答案
 function onlineDecideModal(side, title, cardName, effect, choices, callback) {
-  if (typeof Online === 'undefined' || !Online.active || !battleState || battleState._over) {
+  var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+  // 本地决策，或客人侧（客人不跑规则，理论上到不了这里）：直接弹窗
+  if (!__OL || side !== 'p2' || Online.isGuest) {
     showChoiceModal(title, cardName, effect, choices, callback);
     return;
   }
-  if (side === 'p2') {
-    Online.awaitAnswer({ label: title }, function (v) { if (callback) callback((v === null || v === undefined) ? null : v); });
-    return;
-  }
-  showChoiceModal(title, cardName, effect, choices, callback);
+  // 房主：把整个问题（含选项文字）原样发给客人，客人画出来选，选完把下标回传。
+  // 不再依赖"两台机器在同一流程位置分配同一序列号" —— 那正是旧架构失步的根源。
+  Online.askRemote({ kind:'choice', label:title, cardName:cardName||'', effect:effect||'',
+                     choices:(choices||[]).slice() }, function (v) {
+    if (callback) callback((v === null || v === undefined) ? null : v);
+  });
 }
 function _showChoiceModalNow(title, cardName, effect, choices, callback) {
   var modal = document.getElementById('choiceModal');
@@ -11165,8 +11303,10 @@ function updateBattleUI() {
             addBattleLog('system', '【提示】当前阶段手牌全部不可用：' + battleState.p1.hand.map(function (c) { var __pv2 = evaluatePlayable(c, 'p1'); return c.name + '（' + (__pv2.reason || '未知') + '）'; }).join('；') + '。也可点击灰色卡查看具体原因。');
           }
           var handHtml = battleState.p1.hand.map(function(card, i) {
-            // 可用性统一走 evaluatePlayable：灰态/禁用与点击后拦截同一套规则，杜绝割裂
-            var pv = evaluatePlayable(card, 'p1');
+            // 可用性统一走 evaluatePlayable：灰态/禁用与点击后拦截同一套规则，杜绝割裂。
+            // 联机客人侧：客人不跑规则，改用房主（权威）在快照里给出的判定结果。
+            var pv = (typeof Online !== 'undefined' && Online.active && Online.isGuest)
+              ? Online.playableOf(i) : evaluatePlayable(card, 'p1');
             var canClick = pv.ok;
             // 灰色卡点击时弹出具体不可用原因（便于诊断），可用卡正常使用
             var clickHandler = canClick ? 'useCard(' + i + ')' : 'showBlockedReason(this)';
@@ -18675,6 +18815,304 @@ useCard = useCardComplete;
   ['touchend','touchmove','touchcancel'].forEach(function(ev){ document.addEventListener(ev,function(){ if(timer){clearTimeout(timer);timer=null;} },{passive:true}); });
 })();
 
+</script>
+<script>
+/* ============================================================
+ * NetSync —— 权威式联机的状态同步层
+ * ------------------------------------------------------------
+ * 为什么要有这一层：
+ *   旧的"镜像锁步"要求两台浏览器各自跑完整引擎、各自把对手的手牌和牌库都算出来，
+ *   再靠一个共享计数器把决策点配对。这带来三个结构性问题：
+ *     ① 失步是必然的（任何一处镜像写得不一致，此后所有答案都配错决策点）
+ *     ② 信息不公平（本机内存里就有对手的手牌和牌库顺序，开控制台即可看穿）
+ *     ③ 断了就无法恢复
+ *   新架构：**只有房主跑规则**。房主把"该给对面看的状态"打包发过去，
+ *   客人不推进任何规则，收到就覆盖自己的 battleState 再重绘。
+ *   => 失步在结构上不可能发生；对手的隐藏信息在客人客户端里根本不存在。
+ *
+ * 本模块只负责两件事（阶段0）：
+ *   buildSnapshot(viewerIsGuest)  房主侧：把 battleState 编码成可传的快照（遮蔽 + 换位 + 卡注册表）
+ *   applySnapshot(snap)           客人侧：把快照解回 battleState 并原地覆盖，然后重绘
+ * ============================================================ */
+var NetSync = {
+  VERSION: 1,
+  _defs: {},      // 房主侧记账：uid -> 已发送过定义（不重复发）
+  _cache: {},     // 客人侧缓存：uid -> 本地卡对象（必须复用同一实例，引擎靠引用比较）
+  _uidSeq: 0,
+
+  // 对手视角下必须遮蔽的区域（只发张数）
+  HIDDEN_ZONES: ['hand', 'deck', 'faceDownCards', 'eventCards', 'musicCards'],
+
+  /* ---------- 卡牌识别 ---------- */
+  // 换了一位新客人（或重开一局）时必须重置：否则新客人只会收到 {__u} 引用而拿不到卡定义
+  resetRegistry: function () {
+    NetSync._defs = {};
+    NetSync._cache = {};
+    NetSync._uidSeq = 0;
+    NetSync._pending = null;
+    NetSync._lastPlayable = [];
+  },
+  isCard: function (v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.name === 'string' &&
+      (v.cost !== undefined || v.effect !== undefined || v._category !== undefined ||
+       v.attribute !== undefined || v.score !== undefined || v.type !== undefined);
+  },
+  uidOf: function (card) {
+    if (!card.__u) card.__u = 'u' + (++NetSync._uidSeq);
+    return card.__u;
+  },
+  // 客人的占位卡（对手隐藏区域的"一张未知卡"）
+  _unknownCard: function () {
+    return { __unknown: true, name: '？？？', cost: '?', effect: '', _category: 'unknown' };
+  },
+  _missingCard: function (uid) {
+    return { __u: uid, __missing: true, name: '未知卡', cost: 0, effect: '', _category: 'unknown' };
+  },
+
+  /* ---------- 编码：卡对象只发身份（新卡才带定义） ---------- */
+  encode: function (v, out) {
+    if (v === null || v === undefined) return v;
+    var t = typeof v;
+    if (t === 'function' || t === 'symbol' || t === 'bigint') return undefined;
+    if (t !== 'object') return v;
+    if (Array.isArray(v)) {
+      var arr = [];
+      for (var i = 0; i < v.length; i++) { var e0 = NetSync.encode(v[i], out); if (e0 !== undefined) arr.push(e0); }
+      return arr;
+    }
+    if (NetSync.isCard(v)) {
+      var uid = NetSync.uidOf(v);
+      if (!NetSync._defs[uid]) {
+        NetSync._defs[uid] = true;            // 先占位，防止卡互相引用时无限递归
+        var def = {};
+        for (var k in v) {
+          if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+          if (k === '__u') continue;
+          var e1 = NetSync.encode(v[k], out);
+          if (e1 !== undefined) def[k] = e1;
+        }
+        out.cards[uid] = def;
+      }
+      return { __u: uid };
+    }
+    var o = {};
+    for (var k2 in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k2)) continue;
+      var e2 = NetSync.encode(v[k2], out);
+      if (e2 !== undefined) o[k2] = e2;
+    }
+    return o;
+  },
+
+  /* ---------- 座位换位：把 'p1'/'p2' 同时作为【值】和【键】互换 ----------
+     客人侧引擎槽固定为 p1=客人本人、p2=对手（沿用其现有 UI），
+     而房主引擎里 p2 才是客人，所以发快照前必须整体换位。 */
+  swapSeats: function (v) {
+    if (v === null || v === undefined) return v;
+    if (typeof v === 'string') return v === 'p1' ? 'p2' : (v === 'p2' ? 'p1' : v);
+    if (typeof v !== 'object') return v;
+    if (Array.isArray(v)) { for (var i = 0; i < v.length; i++) v[i] = NetSync.swapSeats(v[i]); return v; }
+    var out = {};
+    for (var k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      var nk = (k === 'p1') ? 'p2' : (k === 'p2' ? 'p1' : k);
+      out[nk] = NetSync.swapSeats(v[k]);
+    }
+    return out;
+  },
+
+  /* ---------- 房主侧：构建发给客人的快照 ----------
+     hostIsP1: 房主在引擎里是否占 p1（当前恒为 true）
+     opts.mySlotHost / opts.oppSlotHost: 房主引擎视角下"客人"与"房主"的槽位 */
+  buildSnapshot: function () {
+    if (!battleState) return null;
+    var out = { v: NetSync.VERSION, cards: {}, t: Date.now() };
+    var raw = NetSync.encode(battleState, out);
+    // 房主引擎：p1=房主本人，p2=对手（客人）。给客人看时：p1↔p2 整体互换，
+    // 这样客人侧仍是"自己占 p1"，其现有 UI（自己的手牌在下）无需改动。
+    var snap = NetSync.swapSeats(raw);
+    // 现在 snap.p1 = 客人自己（完整），snap.p2 = 房主（要遮蔽）
+    var me = snap.p1, opp = snap.p2;
+    if (opp && typeof opp === 'object') {
+      for (var i = 0; i < NetSync.HIDDEN_ZONES.length; i++) {
+        var z = NetSync.HIDDEN_ZONES[i];
+        if (Array.isArray(opp[z])) opp[z] = { __hidden: true, n: opp[z].length };
+      }
+    }
+    // 客人自己手牌的"能不能出"由房主（权威）判定，客人不必也不该自己跑规则
+    out.playable = [];
+    try {
+      var myHand = (battleState.p2 && battleState.p2.hand) || [];
+      for (var h = 0; h < myHand.length; h++) {
+        var pv = (typeof evaluatePlayable === 'function') ? evaluatePlayable(myHand[h], 'p2') : { ok: true };
+        out.playable.push({ ok: !!pv.ok, reason: pv.reason || '' });
+      }
+    } catch (e) { out.playable = []; }
+    out.state = snap;
+    out.grave = (typeof publicGraveyard !== 'undefined' && publicGraveyard) ? NetSync.encode(publicGraveyard, out) : null;
+    // 对手的卡组"角色"是公开信息（场上站着的队长谁都看得见），其余不公开
+    try {
+      var dc = (typeof deckConfig !== 'undefined') ? deckConfig : null;
+      out.oppChars = (dc && dc.p1 && dc.p1.chars) ? dc.p1.chars.filter(Boolean).map(function (c) { return NetSync.encode(c, out); }) : [];
+    } catch (e) { out.oppChars = []; }
+    return out;
+  },
+
+  /* ---------- 客人侧：解回并原地覆盖 ---------- */
+  decode: function (v) {
+    if (v === null || v === undefined) return v;
+    if (typeof v !== 'object') return v;
+    if (Array.isArray(v)) { var a = []; for (var i = 0; i < v.length; i++) a.push(NetSync.decode(v[i])); return a; }
+    if (v.__u) {
+      var u = v.__u;
+      if (!NetSync._cache[u]) {
+        var def = NetSync._pending && NetSync._pending[u];
+        NetSync._cache[u] = def ? NetSync.decode(def) : NetSync._missingCard(u);
+      }
+      return NetSync._cache[u];
+    }
+    if (v.__hidden) {
+      var n = v.n || 0, arr = [];
+      for (var k = 0; k < n; k++) arr.push(NetSync._unknownCard());
+      return arr;
+    }
+    var o = {};
+    for (var kk in v) { if (!Object.prototype.hasOwnProperty.call(v, kk)) continue; o[kk] = NetSync.decode(v[kk]); }
+    return o;
+  },
+
+  // 原地覆盖：保持 battleState 对象身份不变（引擎里到处持有它的引用）
+  _overwrite: function (target, src) {
+    for (var k in target) { if (Object.prototype.hasOwnProperty.call(target, k) && !(k in src)) { try { delete target[k]; } catch (e) {} } }
+    for (var k2 in src) { if (Object.prototype.hasOwnProperty.call(src, k2)) target[k2] = src[k2]; }
+    return target;
+  },
+
+  applySnapshot: function (snap) {
+    if (!snap || !snap.state) return false;
+    NetSync._pending = snap.cards || {};
+    /* 预先把本批新卡定义解进缓存。
+       否则会踩这个坑：一张卡若一直处在【被遮蔽的区域】（例如对手手牌），
+       客人侧从没遇到过对它的引用，也就不会建缓存；等它后来进墓地/被公开时，
+       定义早已记在"已发送"里不再重发 → 永远解析成"未知卡"。
+       holder 先占位是为了防自引用（卡里引用卡）导致的无限递归。 */
+    for (var u in NetSync._pending) {
+      if (!Object.prototype.hasOwnProperty.call(NetSync._pending, u)) continue;
+      if (NetSync._cache[u]) continue;
+      var holder = {};
+      NetSync._cache[u] = holder;
+      var full = NetSync.decode(NetSync._pending[u]);
+      for (var fk in full) { if (Object.prototype.hasOwnProperty.call(full, fk)) holder[fk] = full[fk]; }
+    }
+    var st = NetSync.decode(snap.state);
+    if (!battleState) { try { battleState = st; } catch (e) { return false; } }
+    else NetSync._overwrite(battleState, st);
+    NetSync._lastPlayable = snap.playable || [];
+    try {
+      if (snap.grave && typeof publicGraveyard !== 'undefined') NetSync._overwrite(publicGraveyard, NetSync.decode(snap.grave));
+    } catch (e) {}
+    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) { console.error('NetSync 重绘失败', e); }
+    try { if (typeof NetSync.onApplied === 'function') NetSync.onApplied(snap); } catch (e) {}
+    return true;
+  },
+
+  // 客人侧只读查询：房主给的"这张手牌能不能出"
+  playableOf: function (i) {
+    var a = NetSync._lastPlayable || [];
+    return a[i] || { ok: true, reason: '' };
+  },
+
+  // 调试/自检用：统计当前快照里有多少张"未知卡"（应当只出现在对手的隐藏区域）
+  countUnknown: function () {
+    var n = 0;
+    (function walk(v) {
+      if (!v || typeof v !== 'object') return;
+      if (v.__unknown) { n++; return; }
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) walk(v[k]);
+    })(battleState);
+    return n;
+  }
+};
+
+/* ============================================================
+ * 接入点：房主的状态变化自动推快照
+ * ------------------------------------------------------------
+ * 不逐个去改"每次状态变化"的地方（那样必漏），而是挂在 updateBattleUI 上——
+ * 引擎在任何状态变化后都会调它来刷新界面，这里顺手把权威状态推给客人。
+ * pushSnapshot 内部有 90ms 去抖，一次动作触发的多次重绘会合并成一次推送。
+ * ============================================================ */
+(function () {
+  if (typeof updateBattleUI !== 'function') return;
+  var __origUpdateBattleUI = updateBattleUI;
+  updateBattleUI = function () {
+    var r = __origUpdateBattleUI.apply(this, arguments);
+    try {
+      if (typeof Online !== 'undefined' && Online.active && !Online.isGuest) Online.pushSnapshot();
+    } catch (e) {}
+    return r;
+  };
+})();
+
+/* ============================================================
+ * 接入点：客人侧"只发操作、不执行规则"
+ * ------------------------------------------------------------
+ * 不逐个去改那十几个操作入口（那样必漏一两个，而漏掉的那个就是下一个失步源），
+ * 在这里统一包裹，一处声明式、可审计：
+ *   客人点任何操作 → 只把【操作名 + 参数】发给房主；规则由房主执行，
+ *   客人随后收到的权威快照会把它该看到的样子画出来。
+ * 房主侧这些函数完全不受影响（包装器直接放行）。
+ * ============================================================ */
+(function () {
+  function hand() { return (typeof battleState !== 'undefined' && battleState && battleState.p1 && battleState.p1.hand) || []; }
+  function nmHand(i) { var c = hand()[i]; return c ? (c.name || '') : ''; }
+  function nmZone(zone, i) {
+    var p = (typeof battleState !== 'undefined' && battleState) ? battleState.p1 : null;
+    var arr = (p && p[zone]) || [];
+    var c = arr[i];
+    return c ? (c.name || '') : '';
+  }
+  var ACTS = {
+    useCardComplete:       function (i) { return { type: 'card', idx: i, name: nmHand(i) }; },
+    rollDice:              function () { return { type: 'roll' }; },
+    nextPhase:             function () { return { type: 'phase' }; },
+    endTurn:               function () { return { type: 'end' }; },
+    drawByCost:            function () { return { type: 'drawCost' }; },
+    doSacrifice:           function () { return { type: 'sacrifice' }; },
+    useCharacterPassive:   function () { return { type: 'skill' }; },
+    useEventCard:          function (i) { return { type: 'event', idx: i, name: nmZone('eventCards', i) }; },
+    useMusicCard:          function (i) { return { type: 'music', idx: i, name: nmZone('eventCards', i) }; },
+    faceDownFromHand:      function (i) { return { type: 'fdPlace', idx: i, name: nmHand(i) }; },
+    uiActivateFaceDown:    function (i) { return { type: 'fd', idx: i, name: nmZone('faceDownCards', i) }; },
+    activatePermanentCard: function (i) { return { type: 'perm', idx: i, name: nmZone('permanent', i) }; }
+  };
+  Object.keys(ACTS).forEach(function (fn) {
+    var orig = window[fn];
+    if (typeof orig !== 'function') return;
+    var wrapped = function () {
+      try {
+        if (typeof Online !== 'undefined' && Online.active && Online.isGuest) {
+          var a = ACTS[fn].apply(null, arguments);
+          if (a) { Online.guestSendAct(a); return; }
+        }
+      } catch (e) {}
+      return orig.apply(this, arguments);
+    };
+    window[fn] = wrapped;
+    // 主块末尾执行过 useCard = useCardComplete，它指向的是【旧函数对象】，必须一起换掉
+    if (fn === 'useCardComplete') { try { window.useCard = wrapped; } catch (e) {} }
+  });
+})();
+
+/* 客人侧：不跑 startTurn（那是推进回合的引擎入口；客人只按快照绘制） */
+(function () {
+  if (typeof startTurn !== 'function') return;
+  var __origStartTurn = startTurn;
+  startTurn = function () {
+    if (typeof Online !== 'undefined' && Online.active && Online.isGuest) return;
+    return __origStartTurn.apply(this, arguments);
+  };
+})();
 </script>
 </body>
 </html>
