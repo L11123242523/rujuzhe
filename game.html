@@ -8606,7 +8606,7 @@ function aiMaybeUseEvent(done) {
   if (!p || !foe || battleState._over || battleState.currentPlayer !== 'p2') { if (done) done(); return; }
   if (!(p.eventCards || []).length) { if (done) done(); return; }
   var L = function (msg) { addBattleLog('p2', msg); };
-  var order = ['独奏', '即兴演出', '闲庭信步', '躁动之心', '交互冲动', '赌徒游戏', '命运之回声', '王车易位'];
+  var order = ['独奏', '即兴演出', '闲庭信步', '躁动之心', '交互冲动', '赌徒游戏', '命运之回声', '王车易位', '圆桌会议', '大风'];
   var card = null;
   for (var oi = 0; oi < order.length && !card; oi++) {
     for (var ci = 0; ci < p.eventCards.length; ci++) {
@@ -8740,6 +8740,34 @@ function aiMaybeUseEvent(done) {
     MAP_TILES[w2].type = o1.type; MAP_TILES[w2].name = o1.name;
     battleState._swappedTiles.push({ tile1: w1, tile2: w2, original1: o1, original2: o2, turnsLeft: 2 });
     L('王车易位[AI]：交换第' + w1 + '格与第' + w2 + '格效果，持续两轮');
+    __finished(); return;
+  }
+  // 圆桌会议：所有玩家降1入迷，降了的玩家移到 GAME 格（AI 也能用）
+  if (nm === '圆桌会议') {
+    var __rt = [];
+    ['p2', 'p1'].forEach(function (w) {
+      var q = battleState[w]; if (!q) return;
+      if ((q.fascination || 0) > 0) { q.fascination = Math.max(0, q.fascination - 1); __rt.push(w); }
+    });
+    var __gTile = -1;
+    for (var gi = 0; gi < MAP_TILES.length; gi++) { if (MAP_TILES[gi].type === 'game') { __gTile = gi; break; } }
+    __rt.forEach(function (w) {
+      if (__gTile >= 0) { battleState[w].position = __gTile; if (typeof triggerTileEffect === 'function') triggerTileEffect(w); }
+    });
+    L('圆桌会议[AI]：降入迷玩家 ' + (__rt.join('/') || '（无）') + ' 移至 GAME 格');
+    __finished(); return;
+  }
+  // 大风：终止所有移动动作；双方下次位移-2（里绪/光太郎免疫）
+  if (nm === '大风') {
+    battleState._stopAllMove = true;
+    ['p1', 'p2'].forEach(function (w) {
+      var q = battleState[w]; if (!q) return;
+      var __cap = (q.captain && q.captain.name) || '';
+      if (__cap.indexOf('里绪') >= 0 || __cap.indexOf('光太郎') >= 0) return; // 免疫
+      if (!q.moveDebuff) q.moveDebuff = {};
+      q.moveDebuff.nextMoveMinus2 = true;
+    });
+    L('大风[AI]：终止所有移动动作；双方下次位移-2（里绪/光太郎免疫）');
     __finished(); return;
   }
   } // end __applyAiEvent
@@ -9727,6 +9755,12 @@ function aiUseActiveSP(player, done) {
       var w = foe, zone = (battleState[w].permanent || []).length ? 'permanent' : (((battleState[w].hand || []).length) ? 'hand' : null);
       if (zone) { var rc = battleState[w][zone].shift(); moveCardToGrave(w, rc, 'destroy'); battleState[w].cost = Math.min(battleState[w].cost + 4, battleState[w].maxCost); p._edwardSPTurn = T; L('AI【露璐SP】破坏对手区域【' + rc.name + '】，其回4音韵'); }
       setTimeout(next, 250); return;
+    }
+    // 引导核心：直接升1级（AI 此前拿到核心永不消耗，白给）
+    if ((p._guideCore || 0) > 0 && typeof useGuideCore === 'function') {
+      L('AI【引导核心】消耗1个立即升级（持有' + p._guideCore + '个）');
+      useGuideCore('p2');
+      setTimeout(next, 300); return;
     }
     // AI 永续主动（直尺/镌刻/手机/供给者/狼牙/巧匠/福金 等每回合/每局主动）：角色SP之后、出牌之前执行
     if (typeof aiUsePermanentActive === 'function') {
