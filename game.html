@@ -3631,7 +3631,7 @@ var Map3D = (function () {
   var hoverTile = null, camTarget = null, camDist = 10.5, camYaw = 0.28, camPitch = 0.86;
   var dragging = false, lastX = 0, lastY = 0, moved = 0;
   var ready = false, failed = false, loading = false, animT = 0, rafId = 0;
-  var tileMat = {}, artTex = null;
+  var tileMat = {}, artTex = null, boardMesh = null;
 
   /* ---------- 地图原图几何（像素量测值） ---------- */
   var ART_W = 10401, ART_H = 6963;        // 地图原图像素尺寸
@@ -3722,17 +3722,26 @@ var Map3D = (function () {
     try { renderBattleMap(); } catch (e) {}
   }
 
-  /* ---------- 地图贴图预加载 ---------- */
-  var artImg = null, artSettled = false, artUsable = false;
-  (function preloadArt() {
+  /* ---------- 地图贴图加载（**懒加载**）----------
+     以前这里是个立即执行的 IIFE，等于一打开页面就开始下载整张棋盘贴图：
+     玩家可能只是进主菜单 / 看卡组，却先被 1.4MB 的图占掉带宽，页面明显变慢。
+     改成等真正要建 3D 地图（init()）时才开始下载。 */
+  var artImg = null, artSettled = false, artUsable = false, artStarted = false;
+  function preloadArt() {
+    if (artStarted) return;
+    artStarted = true;
     try {
       if (typeof Image !== 'function') { artSettled = true; artUsable = false; return; }
       artImg = new Image();
-      artImg.onload = function () { artSettled = true; artUsable = !!(artImg.naturalWidth || artImg.width); };
+      artImg.onload = function () {
+        artSettled = true;
+        artUsable = !!(artImg.naturalWidth || artImg.width);
+        if (artUsable) tryUpgradeArt();     // 场景已建好就直接换上贴图
+      };
       artImg.onerror = function () { artSettled = true; artUsable = false; };
       artImg.src = ART_URL;
     } catch (e) { artSettled = true; artUsable = false; }
-  })();
+  }
 
   function ensureArtTexture() {
     if (!artUsable || !artImg || !T) return null;
@@ -3894,6 +3903,7 @@ var Map3D = (function () {
     board.position.y = -slabT / 2;
     board.receiveShadow = true;
     scene.add(board);
+    boardMesh = board;
 
     // 金色描边（四条）
     var trimMat = new T.MeshStandardMaterial({ color: 0xc9a44a, metalness: 0.95, roughness: 0.28, emissive: 0x3a2a08, emissiveIntensity: 0.6 });
@@ -3951,10 +3961,10 @@ var Map3D = (function () {
       scene.add(hi);
       mesh.userData.highlight = hi;
 
-      // 缺失贴图的回退模式：补一个图标徽章与序号，保证可读
+      // 缺失贴图的回退模式：补一个图标徽章与序号，保证可读（贴图到货后会被隐藏）
       if (!topArt) {
         var emb = buildEmblem(TILE_ICON[t.type] || '❓', '#' + col.toString(16).padStart(6, '0'));
-        if (emb) { emb.position.set(w.cx, h + 0.45, w.cz); scene.add(emb); }
+        if (emb) { emb.position.set(w.cx, h + 0.45, w.cz); scene.add(emb); mesh.userData.emblem = emb; }
       }
 
       // 玩家所在格的光柱
@@ -3966,6 +3976,29 @@ var Map3D = (function () {
       scene.add(glow);
       mesh.userData.glow = glow;
     }
+  }
+
+  /* 贴图后到：把已经在场景里的棋盘「就地换成原图贴图」。
+     慢网下先秒出程序化棋盘、贴图下完自动升级，不会永久停在错的棋盘上。 */
+  function applyArtToTiles() {
+    if (!artTex || !scene || !tiles.length) return false;
+    var topArt = new T.MeshStandardMaterial({ map: artTex, roughness: 0.92, metalness: 0.02 });
+    if (boardMesh && boardMesh.material && boardMesh.material.length) {
+      boardMesh.material[2] = new T.MeshStandardMaterial({ map: artTex, roughness: 0.9, metalness: 0.02 });
+    }
+    for (var i = 0; i < tiles.length; i++) {
+      var mesh = tiles[i];
+      var id = mesh.userData.tileId;
+      if (!mesh.material || !mesh.material.length || id === undefined) continue;
+      if (TILE_RECT[id]) remapTopUV(mesh.geometry, rectUV(TILE_RECT[id], 3));
+      mesh.material[2] = topArt;
+      if (mesh.userData.emblem) mesh.userData.emblem.visible = false;
+    }
+    return true;
+  }
+  function tryUpgradeArt() {
+    if (!ready || artTex || !artUsable) return;
+    try { if (ensureArtTexture()) applyArtToTiles(); } catch (e) { console.warn('贴图升级失败', e); }
   }
 
   function buildPieces() {
@@ -4362,7 +4395,7 @@ var Map3D = (function () {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = T.PCFSoftShadowMap;
       host.appendChild(renderer.domElement);
-      if (useArt) ensureArtTexture();
+      if (useArt || artUsable) ensureArtTexture();   // artUsable 只有真加载成功才为 true
       buildScene();
       resize();
       bindEvents();
@@ -4388,19 +4421,10 @@ var Map3D = (function () {
     host = document.getElementById('map3dHost');
     if (!host) { fail('缺少容器'); return false; }
     T = THREE;
-    if (artSettled) return boot(artUsable);
-    // 地图贴图还在下载：等它落定再建场景，避免先建出无贴图的棋盘
-    loading = true;
-    var waited = 0;
-    var iv = setInterval(function () {
-      waited += 100;
-      if (artSettled || waited >= 6000) {
-        clearInterval(iv);
-        loading = false;
-        boot(artSettled && artUsable);
-      }
-    }, 100);
-    return true;
+    preloadArt();                       // 懒加载：等真要建地图了才开始下载棋盘贴图
+    // 不再等贴图：立刻把棋盘建出来（慢网也能秒进对战界面）。
+    // 贴图下完由 artImg.onload -> tryUpgradeArt() 就地换上，不会卡住、也不会永久停在备用棋盘。
+    return boot(artSettled && artUsable);
   }
   // 与战斗状态同步（updateBattleUI 会调用）
   function syncFromGame() {
