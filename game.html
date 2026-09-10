@@ -5278,10 +5278,11 @@ var Online = {
     onlineSurrender('p1');
   },
   /* 投降 UI：联机对局中在右下角放一个按钮。
-     【暂时关闭】实测调用 onlineSurrender 后进程会同步卡死（输出停止、连看门狗都不触发，
-     说明是对局结束路径上的同步死循环，嫌疑在 onlineSurrender → updateBattleUI）。
-     定位修好之前先不把按钮放出来，避免玩家点到就卡死。逻辑本身保留，改完打开即可。 */
-  SURRENDER_UI_ENABLED:false,
+     曾经以为它会卡死，后来查明那是【实测环境的假 DOM】造成的：
+     战斗日志有 while(children.length>上限) removeChild(firstChild) 的裁剪循环，
+     而假 DOM 的 removeChild 只 return 不移除 → 日志超限后每次 addBattleLog 都死循环。
+     真浏览器里是正常的（两实例实测：房主判定、客人通过快照得知、胜负与座位换位全部正确）。 */
+  SURRENDER_UI_ENABLED:true,
   _ensureSurrenderBtn:function(){
     if(!this.SURRENDER_UI_ENABLED) return;
     if(typeof document==='undefined' || !document.body) return;
