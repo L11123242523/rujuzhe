@@ -7146,8 +7146,20 @@ function initBattle() {
   }
   
   // 洗牌
-  shuffleArray(p1Deck);
-  shuffleArray(p2Deck);
+  // 【联机锁步关键】洗牌和起手抽牌都在消耗同一条随机流，所以两台机器上
+  // 消耗的顺序必须是「逻辑上的先手 → 后手」，而不是槽位顺序 p1→p2。
+  // 因为后手方本机的 p1 是后手、p2 才是先手（见 startBattle 里的 mySide 处理），
+  // 按槽位顺序洗牌会让同一副牌在两边洗出不同结果、起手手牌不一致，
+  // 于是 sendIntent 传的 {idx,name} 在对方那边找不到对应手卡 —— 表现就是「各打各的、
+  // 出牌对方看不到、伤害只有自己视角可见」。下面被动结算已经用了同样的主机优先顺序。
+  var __ordA = 'p1', __ordB = 'p2';
+  if (typeof Online !== 'undefined' && Online.active) {
+    __ordA = Online.isHost ? 'p1' : 'p2';
+    __ordB = Online.isHost ? 'p2' : 'p1';
+  }
+  var __deckOf = { p1: p1Deck, p2: p2Deck };
+  shuffleArray(__deckOf[__ordA]);
+  shuffleArray(__deckOf[__ordB]);
   
   var __cap1 = (deckConfig && deckConfig.p1 && (deckConfig.p1.captain || (deckConfig.p1.chars||[]).filter(Boolean)[0])) || null;
   var __cap2 = (deckConfig && deckConfig.p2 && (deckConfig.p2.captain || (deckConfig.p2.chars||[]).filter(Boolean)[0])) || null;
@@ -7183,11 +7195,13 @@ function initBattle() {
   
   // 初始抽牌：双方统一起手4张；先手多出的1张由其第一回合“准备阶段抽1”自然获得（先手=5）。
   // 有宁雨清的不在这里抽，由被动处理7选5
-  if (!p1HasNing) {
-    for (var i = 0; i < 4; i++) drawCard('p1'); // 起手4张
+  // 【联机锁步关键】抽牌顺序同样必须「先手→后手」（理由同上面的洗牌）
+  var __ningOf = { p1: p1HasNing, p2: p2HasNing };
+  if (!__ningOf[__ordA]) {
+    for (var i = 0; i < 4; i++) drawCard(__ordA);
   }
-  if (!p2HasNing) {
-    for (var i = 0; i < 4; i++) drawCard('p2');
+  if (!__ningOf[__ordB]) {
+    for (var i = 0; i < 4; i++) drawCard(__ordB);
   }
   
   // ========== 角色被动和SP初始化处理 ==========
