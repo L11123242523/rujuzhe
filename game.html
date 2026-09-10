@@ -3903,7 +3903,7 @@ var Map3D = (function () {
     try { sz = renderer.getSize(new T.Vector2()); } catch (e) {}
     var w = (sz && sz.x) || 900, h = (sz && sz.y) || 380;
     var aspect = Math.max(0.3, w / Math.max(1, h));
-    var needW = 8.4, needH = 7.2;               // 棋盘半宽/半高（含描边与浮标留白）
+    var needW = 7.6, needH = 6.5;               // 棋盘半宽/半高（含描边与浮标留白；数值越小棋盘越大）
     var halfW, halfH;
     if (aspect >= needW / needH) { halfH = needH; halfW = halfH * aspect; }
     else { halfW = needW; halfH = halfW / aspect; }
@@ -3947,11 +3947,11 @@ var Map3D = (function () {
       var vFov = camPersp.fov * Math.PI / 180;
       var hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
       // 按"棋盘完整外接圆"求距离：用完整半宽而不是半宽的一半，避免近端被裁掉
-      var extent = 8.6;                          // 棋盘含描边的外接半径（世界单位）
+      var extent = 7.4;                          // 取景半径：让棋盘尽量铺满画面
       var fitH = extent / Math.tan(vFov / 2);
       var fitW = extent / Math.tan(hFov / 2);
-      // 1.34 系数补偿斜俯视角下棋盘对角在屏幕上的额外占位（近角最容易出画）
-      var dist = Math.max(fitH, fitW) * 1.34 * (camDist / 10.5);
+      // 1.12 系数补偿斜俯视角下棋盘近端的额外占位（防止近角出画）
+      var dist = Math.max(fitH, fitW) * 1.12 * (camDist / 10.5);
       if (window.__M3D_DEBUG) {
         var __dbg = 'w=' + w + ' h=' + h + ' aspect=' + aspect.toFixed(2) + ' dist=' + dist.toFixed(2);
         console.log('[Map3D] ' + __dbg);
