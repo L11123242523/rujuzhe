@@ -4768,6 +4768,12 @@ var Online = {
     switch(m.t){
       case 'joined':
         this.roomId=m.id; this.mySession=m.sid; this.isHost=!!m.isHost; this.connected=true;
+        this._reconnectTry=0;
+        if(m.resumed){
+          // 重连回到原房间：向服务器要权威快照恢复对局
+          this._onRejoined();
+          break;
+        }
         this.status((m.isHost?'已创建房间':'已加入房间')+'，房号：'+m.id+'\n等待双方准备…（把房号发给对手，对手输入后点加入）');
         var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=false;
         break;
@@ -4785,7 +4791,24 @@ var Online = {
       case 'relay':
         this._onRelay(m.m);
         break;
+      /* ---------- 掉线/重连 ---------- */
+      case 'resyncReq':                 // 房主：客人重连回来了，重发一份"客人视角"的完整快照
+        if(!this.isGuest){
+          try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch(e){}
+          this._sendSnapshotNow({ full:true });
+        }
+        break;
+      case 'resync':
+        this._onResync(m);
+        break;
+      case 'peerLost':
+        this._onPeerLost(m);
+        break;
+      case 'peerBack':
+        this._onPeerBack();
+        break;
       case 'oppLeft':
+        // 服务器只在【宽限期过后仍未回来】时才发这个 —— 也就是真的退出了
         this._onOpponentLeft();
         break;
       case 'error':
@@ -4795,9 +4818,10 @@ var Online = {
   },
   _onClose:function(){
     this.connected=false;
-    if(this._gotStart && this._battleStarted){
-      // 对局中掉线：显示提示，仍保留本地对局（可继续打完）
-      this.status('与服务器断开');
+    if(this._gotStart && this.active){
+      // 对局中掉线：不结束对局，自动尝试重连（权威在房主那边，恢复是安全的）
+      this.status('与服务器断开，正在尝试自动重连…');
+      this._scheduleReconnect();
     }
   },
   /* ---------------- 房间/准备 ---------------- */
@@ -4857,7 +4881,9 @@ var Online = {
       self.status('双方卡组已同步，对局建立中…');
       try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
       self._enteredBattle=true;
-      self._sendSnapshotNow();          // 立刻把权威状态给客人
+      self._savedAt=0; self._savedOnce=false;
+      self._sendSnapshotNow({ full:true });   // 立刻把权威状态给客人（完整卡定义）
+      self._ensureSurrenderBtn();
     });
   },
   _waitOppDeck:function(cb){
@@ -4937,6 +4963,12 @@ var Online = {
     if(!this._enteredBattle && battleState){
       this._enteredBattle=true;
       try{ showScreen('battleScreen'); }catch(e){}
+    }
+    try{ this._ensureSurrenderBtn(); }catch(e){}
+    // 房主判定投降后，客人会在快照里看到 _over（且 _winner 已随之换位）
+    if(battleState && battleState._over && !this._wasOver){
+      this._wasOver=true;
+      try{ __showSurrenderResult(); }catch(e){}
     }
   },
   _onOpponentLeft:function(){
@@ -5119,18 +5151,20 @@ var Online = {
     if(this._snapTimer) return;                       // 已有排队的推送
     this._snapTimer=setTimeout(function(){ self._snapTimer=null; self._sendSnapshotNow(); }, 90);
   },
-  _sendSnapshotNow:function(){
+  _sendSnapshotNow:function(opts){
+    opts=opts||{};
     if(!this.active || this.isGuest) return;
     if(!this.connected || !this.ws || this.ws.readyState!==1) return;
     if(!battleState || typeof NetSync==='undefined') return;
     var snap;
-    try{ snap=NetSync.buildSnapshot(); }catch(e){ console.error('快照构建失败',e); return; }
+    try{ snap=NetSync.buildSnapshot({ full:!!opts.full }); }catch(e){ console.error('快照构建失败',e); return; }
     if(!snap) return;
     snap.n=++this._snapSeq;
     this._lastSnapAt=Date.now();
     if(!this._send({t:'relay', m:{k:'snap', s:snap}})){
       try{ addBattleLog('system','【联机】状态同步发送失败（连接已断）'); }catch(e){}
     }
+    this._saveSnapshotSoon();   // 顺便把"权威自存"快照存到服务器（内部节流），供重连恢复
   },
   // 客人手上的牌"能不能出"由房主判定（客人不跑规则）
   playableOf:function(i){
@@ -5147,6 +5181,117 @@ var Online = {
     }
     this._send({t:'relay', m:{k:'act', a:a}});
     return true;
+  },
+  /* ---------------- 掉线重连 ----------------
+     权威式架构下重连很自然：
+       · 客人回来 → 向房主请求，房主重发一份【完整】快照即可（客人本地缓存已丢，卡定义要重发）
+       · 房主回来 → 向服务器要最近那份【权威自存】快照恢复自己的引擎状态
+     掉线不再直接判负：服务器给 90 秒宽限，期间对方只看到"对手掉线了，等待重连"。 */
+  _peerLost:false, _reconnectTry:0, _reconnectTimer:null, _savedAt:0, _wasOver:false,
+  _onPeerLost:function(m){
+    this._peerLost=true;
+    var who=(m&&m.role==='host')?'房主':'对手';
+    this.status('⚠ '+who+'掉线了，正在等待重连（'+((m&&m.grace)||90)+' 秒）…');
+    try{ showToast(who+'掉线了，等待其重连…（90 秒内回来对局可继续）', 'warn'); }catch(e){}
+  },
+  _onPeerBack:function(){
+    this._peerLost=false; this._reconnectTry=0;
+    try{ showToast('对手已重连，对局继续', 'info'); }catch(e){}
+    if(!this.isGuest){
+      // 对方是全新连接：它的卡定义缓存是空的，必须重置注册表再发一份完整快照
+      try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch(e){}
+      this._sendSnapshotNow({ full:true });
+    }
+  },
+  // 自己重连成功后：按角色走不同的恢复路径
+  _onRejoined:function(){
+    this.status('已重连，正在恢复对局状态…');
+    if(this.isGuest){
+      /* 客人要的是【客人视角】的完整快照（已换位、已遮蔽），只有房主能生成。
+         绝不能直接拿服务器那份 —— 那是房主视角且未遮蔽，发给客人既错位又泄漏手牌。 */
+      var self=this;
+      this._relay({k:'resyncReq'});
+      this._resyncTries=(this._resyncTries||0)+1;
+      if(this._resyncTries<=5){
+        setTimeout(function(){
+          if(typeof battleState==='undefined' || !battleState) self._relay({k:'resyncReq'});
+        }, 2500*self._resyncTries);
+      } else {
+        this.status('房主尚未恢复，暂时无法同步（请让房主刷新后重新进入房间）');
+      }
+      return;
+    }
+    this._send({ t:'resync' });     // 房主：向服务器要权威自存快照
+  },
+  _onResync:function(m){
+    var s=m&&m.s;
+    if(!s){
+      this.status('服务器没有可恢复的对局快照');
+      try{ showToast('服务器上没有可恢复的对局快照，本局无法继续，请重开房间', 'warn'); }catch(e){}
+      return;
+    }
+    try{
+      if(typeof NetSync!=='undefined'){
+        NetSync.resetRegistry();                 // 本地缓存已随刷新丢失
+        NetSync.applySnapshot(s);
+      }
+    }catch(e){ console.error('恢复对局失败',e); }
+    this._enteredBattle=true;
+    try{ showScreen('battleScreen'); }catch(e){}
+    try{ addBattleLog('system','已从服务器快照恢复对局状态'); }catch(e){}
+    if(!this.isGuest) this._sendSnapshotNow({ full:true });   // 房主恢复后立刻把状态补给客人
+  },
+  // 房主把"权威自存"快照存到服务器（供任意一方重连恢复）。
+  // 只带【新增】卡定义（约 5KB），服务器会累积成一份自含快照 —— 这样每次都快、且回滚窗口 <1 秒。
+  // （早期版本节流 8 秒，实测导致房主重连后退回几秒前的战局，把对方的出牌也一起抹掉了。）
+  _saveSnapshotSoon:function(force){
+    if(!this.active || this.isGuest) return;
+    var now=Date.now();
+    if(!force && now-(this._savedAt||0)<700) return;
+    this._savedAt=now;
+    try{
+      if(typeof NetSync==='undefined') return;
+      var needFull=!this._savedOnce;                  // 本局第一次必须带全部定义，服务器才有底
+      var s=NetSync.buildSnapshot({ mode:'self', full:needFull });
+      if(s){ this._savedOnce=true; this._send({ t:'relay', m:{ k:'snapSave', s:s } }); }
+    }catch(e){}
+  },
+  _scheduleReconnect:function(){
+    var self=this;
+    if(this._reconnectTimer) return;
+    this._reconnectTry=(this._reconnectTry||0)+1;
+    if(this._reconnectTry>8){ this.status('多次重连失败，请刷新页面重新进入房间'); return; }
+    var wait=Math.min(Math.round(1000*Math.pow(1.6,this._reconnectTry)),15000);
+    this._reconnectTimer=setTimeout(function(){
+      self._reconnectTimer=null;
+      self.status('正在重连（第 '+self._reconnectTry+' 次）…');
+      self._connect(function(){
+        self._send({ t:'hello', role:self.isGuest?'guest':'host', name:self.myName||'玩家', resume:true });
+      }, self.roomId);
+    }, wait);
+  },
+  /* ---------------- 投降 ---------------- */
+  surrender:function(){
+    if(!this.active || !battleState || battleState._over) return;
+    if(!window.confirm('确定要认输吗？')) return;
+    if(this.isGuest){ this.guestSendAct({ type:'surrender' }); return; }
+    onlineSurrender('p1');
+  },
+  /* 投降 UI：联机对局中在右下角放一个按钮。
+     【暂时关闭】实测调用 onlineSurrender 后进程会同步卡死（输出停止、连看门狗都不触发，
+     说明是对局结束路径上的同步死循环，嫌疑在 onlineSurrender → updateBattleUI）。
+     定位修好之前先不把按钮放出来，避免玩家点到就卡死。逻辑本身保留，改完打开即可。 */
+  SURRENDER_UI_ENABLED:false,
+  _ensureSurrenderBtn:function(){
+    if(!this.SURRENDER_UI_ENABLED) return;
+    if(typeof document==='undefined' || !document.body) return;
+    if(!this.active) return;
+    if(document.getElementById('olSurrenderBtn')) return;
+    var b=document.createElement('button');
+    b.id='olSurrenderBtn'; b.textContent='🏳 认输'; b.className='modal-btn';
+    b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9997;padding:6px 14px;font-size:13px;opacity:.85;';
+    b.onclick=function(){ Online.surrender(); };
+    try{ document.body.appendChild(b); }catch(e){}
   },
   /* ---------------- 表情 ---------------- */
   sendEmote:function(idx){ this._relay({k:'emote', idx:idx}); },
@@ -5166,12 +5311,28 @@ function __onlineDiverge(msg) {
   try { showToast('联机不同步：' + msg + '\n该操作在对方机器上没有生效，本局状态可能已分叉，建议双方退出重开房间。', 'warn'); } catch (e) {}
   try { if (typeof Online !== 'undefined' && Online.status) Online.status('⚠ 不同步：' + msg); } catch (e) {}
 }
+/* 投降：由权威方（房主）判定并广播。loser 用【房主引擎的槽位】表示。
+   客人侧收到快照后 _over/_winner 已随之换位，所以提示文案用本机视角判定即可。 */
+function onlineSurrender(loser){
+  if (!battleState || battleState._over) return;
+  var winner = (loser === 'p1') ? 'p2' : 'p1';
+  battleState._over = true;
+  battleState._winner = winner;
+  try { addBattleLog('system', '对局结束：' + (loser === 'p1' ? '房主' : '客人') + '认输，' + (winner === 'p1' ? '房主' : '客人') + '获胜'); } catch (e) {}
+  try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+  __showSurrenderResult();
+}
+function __showSurrenderResult(){
+  if (!battleState || !battleState._winner) return;
+  var iWon = (battleState._winner === 'p1');   // 本机视角：两台机器上"自己"都占 p1
+  try { showToast(iWon ? '🏆 对局结束：你获胜！' : '对局结束：你已认输', iWon ? 'info' : 'warn'); } catch (e) {}
+}
 function onlineApplyIntent(a, done) {
   if (!battleState || battleState._over) { if (done) done(); return; }
   if (!a || !a.type) { if (done) done(); return; }
   // 'card'/'event'/'music'/'fdPlace'/'fd' 意图任意回合都套用（对手回合可发动技能卡/事件卡/盖伏，与 p1 入口同规则）；
   // 其余意图仅作用于远端位回合
-  if (a.type !== 'card' && a.type !== 'event' && a.type !== 'music' && a.type !== 'fdPlace' && a.type !== 'fd' && battleState.currentPlayer !== 'p2') { __onlineDiverge('对方执行了「' + a.type + '」，但本机认为不是对方回合，已忽略'); if (done) done(); return; }
+  if (a.type !== 'card' && a.type !== 'event' && a.type !== 'music' && a.type !== 'fdPlace' && a.type !== 'fd' && a.type !== 'surrender' && battleState.currentPlayer !== 'p2') { __onlineDiverge('对方执行了「' + a.type + '」，但本机认为不是对方回合，已忽略'); if (done) done(); return; }
   function __fin() { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); }
   switch (a.type) {
     case 'card':
@@ -5216,6 +5377,10 @@ function onlineApplyIntent(a, done) {
       return;
     case 'drawCost':
       onlineDrawByCostP2(__fin);
+      return;
+    case 'surrender':
+      onlineSurrender('p2');       // 客人认输
+      __fin();
       return;
     default:
       addBattleLog('system', '【联机】未支持的意图：' + (a.type || '?') + '（双方版本不一致？）');
@@ -18844,13 +19009,15 @@ var NetSync = {
   HIDDEN_ZONES: ['hand', 'deck', 'faceDownCards', 'eventCards', 'musicCards'],
 
   /* ---------- 卡牌识别 ---------- */
-  // 换了一位新客人（或重开一局）时必须重置：否则新客人只会收到 {__u} 引用而拿不到卡定义
+  /* 换新客人 / 重连时调用：让卡定义重新发一遍。
+     【绝不重置 _uidSeq】卡对象上的 __u 是"终身身份"，而卡对象本身不在 battleState 里、
+     不会被快照重建 —— 一旦把计数器归零，新卡就会拿到已被占用的 uid，
+     客人侧缓存会把卡解析成完全不同的另一张（实测踩过：墓地里的卡变成了别的卡）。 */
   resetRegistry: function () {
-    NetSync._defs = {};
-    NetSync._cache = {};
-    NetSync._uidSeq = 0;
+    NetSync._defs = {};       // 只清"已发送"记账，让下一份快照重发全部定义
     NetSync._pending = null;
     NetSync._lastPlayable = [];
+    // _cache 也不清：uid 稳定，缓存依然有效
   },
   isCard: function (v) {
     return !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.name === 'string' &&
@@ -18921,36 +19088,45 @@ var NetSync = {
     return out;
   },
 
-  /* ---------- 房主侧：构建发给客人的快照 ----------
-     hostIsP1: 房主在引擎里是否占 p1（当前恒为 true）
-     opts.mySlotHost / opts.oppSlotHost: 房主引擎视角下"客人"与"房主"的槽位 */
-  buildSnapshot: function () {
+  /* ---------- 房主侧：构建快照 ----------
+     opts.mode: 'guest'（默认）给客人看 —— 整体换位（客人占 p1）+ 遮蔽对手隐藏区域
+                'self'          权威自存 —— 不换位、不遮蔽、完整，供重连恢复用
+     opts.full: 强制带上全部卡定义（客人/房主重连时本地缓存已丢，必须重发） */
+  buildSnapshot: function (opts) {
     if (!battleState) return null;
+    opts = opts || {};
+    var mode = opts.mode || 'guest';
     var out = { v: NetSync.VERSION, cards: {}, t: Date.now() };
-    var raw = NetSync.encode(battleState, out);
-    // 房主引擎：p1=房主本人，p2=对手（客人）。给客人看时：p1↔p2 整体互换，
-    // 这样客人侧仍是"自己占 p1"，其现有 UI（自己的手牌在下）无需改动。
-    var snap = NetSync.swapSeats(raw);
-    // 现在 snap.p1 = 客人自己（完整），snap.p2 = 房主（要遮蔽）
-    var me = snap.p1, opp = snap.p2;
-    if (opp && typeof opp === 'object') {
-      for (var i = 0; i < NetSync.HIDDEN_ZONES.length; i++) {
-        var z = NetSync.HIDDEN_ZONES[i];
-        if (Array.isArray(opp[z])) opp[z] = { __hidden: true, n: opp[z].length };
-      }
-    }
-    // 客人自己手牌的"能不能出"由房主（权威）判定，客人不必也不该自己跑规则
-    out.playable = [];
+    var savedDefs = NetSync._defs;
+    if (opts.full) NetSync._defs = {};
+    var raw;
     try {
-      var myHand = (battleState.p2 && battleState.p2.hand) || [];
-      for (var h = 0; h < myHand.length; h++) {
-        var pv = (typeof evaluatePlayable === 'function') ? evaluatePlayable(myHand[h], 'p2') : { ok: true };
-        out.playable.push({ ok: !!pv.ok, reason: pv.reason || '' });
+      raw = NetSync.encode(battleState, out);
+    } finally {
+      if (opts.full) { for (var kd in NetSync._defs) { if (Object.prototype.hasOwnProperty.call(NetSync._defs, kd)) savedDefs[kd] = true; } NetSync._defs = savedDefs; }
+    }
+    var snap = (mode === 'guest') ? NetSync.swapSeats(raw) : raw;
+    if (mode === 'guest') {
+      // 现在 snap.p1 = 客人自己（完整），snap.p2 = 房主（要遮蔽）
+      var opp = snap.p2;
+      if (opp && typeof opp === 'object') {
+        for (var i = 0; i < NetSync.HIDDEN_ZONES.length; i++) {
+          var z = NetSync.HIDDEN_ZONES[i];
+          if (Array.isArray(opp[z])) opp[z] = { __hidden: true, n: opp[z].length };
+        }
       }
-    } catch (e) { out.playable = []; }
+      // 客人自己手牌的"能不能出"由房主（权威）判定，客人不必也不该自己跑规则
+      out.playable = [];
+      try {
+        var myHand = (battleState.p2 && battleState.p2.hand) || [];
+        for (var h = 0; h < myHand.length; h++) {
+          var pv = (typeof evaluatePlayable === 'function') ? evaluatePlayable(myHand[h], 'p2') : { ok: true };
+          out.playable.push({ ok: !!pv.ok, reason: pv.reason || '' });
+        }
+      } catch (e) { out.playable = []; }
+    }
     out.state = snap;
     out.grave = (typeof publicGraveyard !== 'undefined' && publicGraveyard) ? NetSync.encode(publicGraveyard, out) : null;
-    // 对手的卡组"角色"是公开信息（场上站着的队长谁都看得见），其余不公开
     try {
       var dc = (typeof deckConfig !== 'undefined') ? deckConfig : null;
       out.oppChars = (dc && dc.p1 && dc.p1.chars) ? dc.p1.chars.filter(Boolean).map(function (c) { return NetSync.encode(c, out); }) : [];
