@@ -3508,7 +3508,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
       name.indexOf('侦探放大镜') >= 0 || name.indexOf('猎手爪链') >= 0);
     var isNegate = eff.indexOf('抵消') >= 0 && eff.indexOf('伤害') >= 0;
     // 反制整效：当其他玩家发动特定效果时可连锁、令那个效果无效（崩塌之乌托邦类）
-    var isNegateEffect = name.indexOf('崩塌之乌托邦') >= 0 || (/效果无效/.test(eff) && /发动了?[^。；]{0,24}时/.test(eff));
+    // 判定走共用的 __isCounterText（不再用字数窗口猜语义，见其注释）；
+    // 卡名作为兼容兜底，保证这张卡即使再次改文案也不会掉出分类。
+    var isNegateEffect = name.indexOf('崩塌之乌托邦') >= 0 || __isCounterText(eff);
     // 大风等事件卡：终止所有移动动作（移动将执行前可连锁打断，全时点）
     var isStopMove = name.indexOf('大风') >= 0 || /终止所有[^。；]*移动|终止所有进行中的移动/.test(eff);
     // Twice：让一名玩家重新进行一次判定（在判定结果出现、确定适用前连锁，重掷判定）
@@ -12475,10 +12477,30 @@ function normalizeClause(raw) {
   return t.trim();
 }
 
+/* 反制整效 / 响应型反制的【语义】判定 —— 全游戏只此一份，两处调用共用：
+     · RJEngine.classifyChainCard → 判定为 'negate_effect'（连锁分类）
+     · classifyClause             → 判定为 'trigger'（该句在出牌时不执行）
+   ⚠ 不要再用"字数窗口"当语义代理。旧写法有 /当[^。；]{0,20}时…来?发动/ 与
+     /发动了?[^。；]{0,24}时/ 两处人为字数上限，卡面文案一改长就失配 ——
+     崩塌之乌托邦 最新版卡面正是因此在新引擎里同时踩了两个坑。
+     这里改为以【句读】为界：[^。；] 本身已限定在同一句内，数字上限是多余的第二重约束，去掉。
+   判定只看结构：① 结果是"无效/抵消" ② 明确在讲"令某个效果无效" 或 "把这张卡…来发动"这种以自身为代价的响应。 */
+function __isCounterText(eff) {
+  if (!eff) return false;
+  // 自身抗性（"不会被效果无效"之类）不是反制，先排除
+  if (/不会被?[^。；]{0,6}无效|不能被?[^。；]{0,6}无效|不受[^。；]{0,6}无效/.test(eff)) return false;
+  if (!/无效|抵消/.test(eff)) return false;
+  // 明确"令某效果无效"（那个/这个/该/其…效果无效，或直接写"效果无效"）
+  if (/(?:那个|这个|该|其)[^。；]{0,8}效果[^。；]{0,6}无效/.test(eff)) return true;
+  if (/效果无效/.test(eff)) return true;
+  // 响应时点 + 以自身为代价的发动（"发动…时可以把这张卡送入墓地来发动"），不限字数、只要同句
+  if (/把这张卡[^。；]{0,16}?发动/.test(eff) && /发动[^。；]{0,120}?时/.test(eff)) return true;
+  return false;
+}
 // 句子分类：action 执行 / passive 常驻或永续主动(打出时不执行) / trigger 触发陷阱 / flavor 无效果
 function classifyClause(raw) {
   var t = String(raw || '');
-  if (/当有玩家|当[^。；]{0,20}时(可以)?把这张卡(送入墓地)?来?发动/.test(t) && /无效|抵消/.test(t)) return 'trigger';
+  if (__isCounterText(t)) return 'trigger';
   var onPlay = /发动时|打出时/.test(t);
   if (/最终伤害|不耗音韵|无视距离|付金币增伤|每500金币/.test(t)) return 'passive';
   if (!onPlay && /每个自己回合开始时|每回合开始时|每个自己回合可以发动一次|每回合可以发动一次|一回合一次|每回合一次|存在区域内|正面形式存在|造成的最终伤害|受到的最终伤害|最终伤害\+|造成的判定伤害|路障|强制改为|放置期间|不会消失|所需要的音韵值|所需音韵|使用攻击卡(?:和|与)?技能卡?所?需要|每失去\s*[0-9一二两三四五六七八九十]+\s*点|概率增加|持有者|单回合触发|每回合回复|消耗金币的场合|新领域覆盖|每回合的献祭次数|等价交换|一局游戏只能(使用|发动)一次/.test(t)) return 'passive';
