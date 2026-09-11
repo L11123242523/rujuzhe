@@ -5278,6 +5278,13 @@ var Online = {
     var tick=function(){
       if(!self._actPending) return;
       var s=(Date.now()-self._actPending.at)/1000;
+      // 兜底：房主可能静默拒绝这个操作（不发快照），别让提示永远挂着
+      if(s>15){
+        self._hideWaiting();
+        self._actPending=null;
+        if(self._actTimer){ clearTimeout(self._actTimer); self._actTimer=null; }
+        return;
+      }
       self._showWaiting(true, s<1.2
         ? ('已提交：'+self._actPending.label+'（等待房主结算…）')
         : ('仍在等待房主结算：'+self._actPending.label+'（已等 '+s.toFixed(1)+' 秒）'));
