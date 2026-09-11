@@ -4990,7 +4990,7 @@ var Online = {
   _drainIntents:function(){
     var self=this;
     if(this._intentBusy) return;
-    if(!this._intentQueue.length){ if(this._intentCb){ var c=this._intentCb; this._intentCb=null; c(); } return; }
+    if(!this._intentQueue.length){ if(this._intentCb){ var c=this._intentCb; this._intentCb=null; c(); } this.pushSnapshot(); return; }
     this._intentBusy=true;
     var a=this._intentQueue.shift();
     if(this._dbg) console.log('[联机] 应用意图', a);
@@ -5032,7 +5032,14 @@ var Online = {
     opts=opts||{};
     if(!this.active){ cb(null); return; }
     if(this.isGuest){ cb(null); return; }   // 客人不跑规则，不应走到这里（防御）
-    this.askRemote({ kind:'prompt', label:opts.label||'请选择', cards:opts.cards||null, choices:opts.choices||null }, cb);
+    // 必须把 need/allowLess/indices/defVal 一起转发：旧实现只转 label/cards/choices，
+    // 于是"选N张""可少选""默认值"在客人侧全部失效（多选退化成只选1张，默认值传不过去）
+    this.askRemote({
+      kind:'prompt', label:opts.label||'请选择',
+      cards:opts.cards||null, choices:opts.choices||null,
+      need:opts.need||0, allowLess:!!opts.allowLess, indices:opts.indices||null,
+      defVal:(opts.defVal===undefined?null:opts.defVal), cardName:opts.cardName||'', effect:opts.effect||''
+    }, cb);
   },
   // 房主 → 客人：问一个问题。spec = {kind,label,cardName,effect,choices,cards,indices,defVal}
   askRemote:function(spec, cb){
@@ -5060,7 +5067,10 @@ var Online = {
     delete this._asks[m.id];
     if(rec.timer) clearTimeout(rec.timer);
     this._hideWaiting();
-    rec.cb(m.v===undefined?null:m.v);
+    try{ rec.cb(m.v===undefined?null:m.v); }catch(e){ console.error('处理回答失败',e); }
+    // 客人的回答会推进房主这边的流程；流程后段往往还有异步结算，补一次推送，免得客人停在旧快照
+    var self=this;
+    setTimeout(function(){ try{ self.pushSnapshot(); }catch(e){} }, 260);
   },
   sendAnswer:function(id, v){ this._send({t:'relay', m:{k:'ans', id:id, v:v}}); },
   // 客人侧：收到房主的问题，用现成弹窗画出来再把选择回传
@@ -5068,15 +5078,35 @@ var Online = {
     var self=this, spec=m.spec||{};
     var done=function(v){ self.sendAnswer(m.id, v); };
     var label=spec.label||'请选择';
+    // 客人回传的是"房主那份列表的下标"：若房主给了 indices 映射就翻译，否则原样回传
+    var toHost=function(idxs){ return idxs.map(function(i){ return (spec.indices&&spec.indices[i]!==undefined)?spec.indices[i]:i; }); };
     try{
       if(spec.choices && spec.choices.length){
         showChoiceModal(label, spec.cardName||'', spec.effect||'', spec.choices, function(i){ done(i); });
         return;
       }
       if(spec.cards && spec.cards.length){
-        // 从区域里选卡：内容是客人自己的（或公开的），房主把卡名一并送来
-        var opts=spec.cards.map(function(n,i){ return (i+1)+'. '+n; });
-        showChoiceModal(label, '', '请选择一项', opts, function(i){ done(spec.indices?spec.indices[i]:i); });
+        // 从区域里选卡：候选卡名由房主随问题送来（可能来自客人自己的手牌/牌库/墓地，客人能看）
+        var need=(spec.need|0)>0?(spec.need|0):1;
+        if(need<=1){
+          var opts=spec.cards.map(function(n,i){ return (i+1)+'. '+n; });
+          showChoiceModal(label, '', '请选择一项', opts, function(i){ done(spec.indices?spec.indices[i]:i); });
+          return;
+        }
+        // 需要选多张：一次只点得了一项，就逐张问，选满 need 或主动结束为止
+        var picked=[], avail=spec.cards.map(function(n,i){ return i; });
+        var step=function(){
+          if(picked.length>=need || !avail.length){ done(toHost(picked)); return; }
+          var opts2=avail.map(function(i){ return (i+1)+'. '+spec.cards[i]; });
+          if(spec.allowLess) opts2=opts2.concat(['（不再选择，直接确定）']);
+          showChoiceModal(label+'（还需选'+(need-picked.length)+'张）', '', '请选择一项', opts2, function(k){
+            if(k==null || (spec.allowLess && k===avail.length)){ done(toHost(picked)); return; }
+            var real=avail[k];
+            if(real===undefined || real===null){ step(); return; }
+            picked.push(real); avail.splice(k,1); step();
+          });
+        };
+        step();
         return;
       }
       var v=window.prompt(label, spec.defVal===undefined?'':spec.defVal);
@@ -5153,16 +5183,59 @@ var Online = {
     if(this._snapTimer) return;                       // 已有排队的推送
     this._snapTimer=setTimeout(function(){ self._snapTimer=null; self._sendSnapshotNow(); }, 90);
   },
+  /* 权威状态指纹：只读 battleState，**不能**用 buildSnapshot 来算 ——
+     buildSnapshot 里有 `t: Date.now()`（每次都不同，指纹永远不等），而且 encode 会把卡定义
+     标记成"已发送"；如果拿它做探测再丢弃快照，客人以后就会收到未知卡。 */
+  _stateSig:function(){
+    var b=battleState; if(!b) return '';
+    var nm=function(a){ return (a||[]).map(function(c){ return (c&&(c.name||'?'))||'?'; }).join(','); };
+    var o=[b.turn,b.round,b.phase,b.currentPlayer,b._over?1:0,b._winner||'',b.pendingDamage||0,
+           b.pendingDamageTarget||'',b.damageResponseWindow?1:0,b.effectChainActive?1:0,(b.log||[]).length,
+           (typeof publicGraveyard!=='undefined'&&publicGraveyard)?(nm(publicGraveyard.event_cards)+'/'+nm(publicGraveyard.music_cards)):''];
+    ['p1','p2'].forEach(function(k){
+      var p=b[k]; if(!p){ o.push('x'); return; }
+      o.push(p.position,p.sync,p.maxSync,p.fascination,p.cost,p.maxCost,p.gold,p.level,p.motivation,
+             p.defense,p.shield,p.passedStart,p.closedTile,p.attackBuff||0,p._sacrificeUsedThisTurn||0,
+             p._diceControlBonus||0,(p.captain&&p.captain.name)||'',p.teamAttribute||'',
+             (p.negativeEffects||[]).length);
+      o.push(nm(p.hand),nm(p.grave),nm(p.permanent),nm(p.faceDownCards),nm(p.eventCards),nm(p.musicCards));
+      o.push((p.deck||[]).length,(p.removed||[]).length);
+    });
+    return o.join('~');
+  },
+  /* 一致性巡检：快照推送原本只挂在 updateBattleUI 上（90ms 去抖）。
+     但有些状态变化发生在别的代码路径里（远端意图的后续异步结算、决策答案之后的推进……），
+     那一处没有重绘就不会推送 —— 客人就会停在旧快照上（表现为"我出牌对手半天收不到"）。
+     这里每 1.5 秒比对一次指纹：变了才补推。开销很小，但保证"任何变化最终一定会送达"。 */
+  _startConsistencyTick:function(){
+    var self=this;
+    if(this._tickOn) return;
+    this._tickOn=true;
+    this._lastSig=this._stateSig();
+    this._tickTimer=setInterval(function(){
+      try{
+        if(!self.active||self.isGuest||!battleState) return;
+        if(!self.connected||!self.ws||self.ws.readyState!==1) return;
+        var sig=self._stateSig();
+        if(sig===self._lastSig) return;                 // 状态没变，不推
+        self._lastSig=sig;
+        self._sendSnapshotNow();
+      }catch(e){}
+    }, 1500);
+  },
+  _stopConsistencyTick:function(){ if(this._tickTimer){ clearInterval(this._tickTimer); this._tickTimer=null; } this._tickOn=false; },
   _sendSnapshotNow:function(opts){
     opts=opts||{};
     if(!this.active || this.isGuest) return;
     if(!this.connected || !this.ws || this.ws.readyState!==1) return;
     if(!battleState || typeof NetSync==='undefined') return;
+    this._startConsistencyTick();                     // 首次推送时顺带开巡检
     var snap;
     try{ snap=NetSync.buildSnapshot({ full:!!opts.full }); }catch(e){ console.error('快照构建失败',e); return; }
     if(!snap) return;
     snap.n=++this._snapSeq;
     this._lastSnapAt=Date.now();
+    if(this._tickOn) this._lastSig=this._stateSig();   // 刚推过：更新指纹，避免巡检紧接着重复推
     if(!this._send({t:'relay', m:{k:'snap', s:snap}})){
       try{ addBattleLog('system','【联机】状态同步发送失败（连接已断）'); }catch(e){}
     }
@@ -5370,7 +5443,7 @@ function onlineApplyIntent(a, done) {
       __fin();
       return;
     case 'sacrifice':
-      onlineSacrificeP2(a.idx, __fin);
+      onlineSacrificeP2(a.idx, a.name, __fin);
       return;
     case 'skill':
       onlineUseSkillP2(__fin);
@@ -5452,7 +5525,7 @@ function onlineUseCardP2(handIndex, cardName, done) {
     var __tt2 = (typeof parseTargetType === 'function') ? parseTargetType(effectText) : 'any_player';
     var __tOpts = __onlineTargetNeutralOptions(__tt2);
     if (__tOpts === null) { __go('p2'); return; } // 纯自身：无决策点
-    Online.awaitAnswer({ label: '选择使用目标（对手）' }, function (v) {
+    Online.awaitAnswer({ label: '选择使用目标（对手）', choices: __tOpts.map(function(t){ return t==='self'?'自己':'对手'; }) }, function (v) {
       if (v === null || v === undefined) { __go(null); return; }
       var neutral = __tOpts[v];
       __go(neutral === 'self' ? 'p2' : 'p1');
@@ -5485,7 +5558,7 @@ function onlineNextPhaseP2(done) {
     if (p._airportFreeMoveNext) {
       p._airportFreeMoveNext = false;
       // 机场：对方 p1 用 prompt 输入目标格并广播；这里等待答案（答案为格子编号字符串）
-      Online.awaitAnswer({ label: '机场·自由移动（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '机场·自由移动（对手）', choices: MAP_TILES.map(function(t,i){ return '第'+i+'格 '+((t&&t.name)||''); }) }, function (v) {
         var __apT = parseInt(v, 10);
         var __apCur = p.position;
         if (!isNaN(__apT) && __apT >= 0 && __apT <= 41 && __apT !== __apCur) {
@@ -5525,14 +5598,16 @@ function onlineNextPhaseP2(done) {
   if (done) done();
 }
 // 远端位献祭：镜像 p1 的 doSacrifice（选卡与光太郎SP三选一为决策点）
-function onlineSacrificeP2(idx, done) {
+function onlineSacrificeP2(idx, name, done) {
+  if (typeof name === 'function') { done = name; name = ''; }   // 兼容旧签名 (idx, done)
   var p = battleState.p2;
   var maxSac = 1 + (p._sacrificeBonus || 0) + (p._megumiSacBonusThisTurn || 0) + ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('巧匠') >= 0; }) ? 1 : 0);
   var usedSac = p._sacrificeUsedThisTurn || 0;
   if (usedSac >= maxSac || !p.hand.length) { if (done) done(); return; }
-  Online.awaitAnswer({ label: '选择要献祭的手卡（对手）' }, function (v) {
-    var ix = Array.isArray(v) ? v[0] : v;
-    if (ix == null || ix === undefined || ix < 0 || ix >= p.hand.length) { if (done) done(); return; }
+  var __apply = function (ix) {
+    ix = Number(ix);
+    if (!isFinite(ix) || ix < 0 || ix >= p.hand.length) { if (done) done(); return; }
+    ix = Math.floor(ix);
     var sacCard = p.hand.splice(ix, 1)[0];
     p.grave.push(sacCard);
     var __kotaroEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
@@ -5559,6 +5634,16 @@ function onlineSacrificeP2(idx, done) {
       return;
     }
     if (done) done();
+  };
+  /* 客人已经在自己机器上选好了（意图带 idx+name）：直接用，不再回问 —— 客人点完立刻见效。
+     旧实现无条件忽略 idx 去回问，而回问又不带候选卡名，客人只能盲打字 → "客机无法献祭"。 */
+  var __ix = -1;
+  if (typeof idx === 'number' && idx >= 0 && idx < p.hand.length && (!name || (p.hand[idx] && p.hand[idx].name === name))) __ix = idx;
+  if (__ix < 0 && name) { for (var __i = 0; __i < p.hand.length; __i++) { if (p.hand[__i].name === name) { __ix = __i; break; } } }
+  if (__ix >= 0) { __apply(__ix); return; }
+  // 兜底（旧客户端/异常路径）：回问，且必须把候选卡名一起送过去
+  Online.awaitAnswer({ label: '选择要献祭的手卡（对手）', cards: p.hand.map(function (c) { return c.name; }) }, function (v) {
+    __apply(Array.isArray(v) ? v[0] : v);
   });
 }
 /* ---- 联机：角色技能远端位镜像（与 p1 的 useCharacterPassive 各 activate* 同流程/同决策序列） ---- */
@@ -5572,7 +5657,7 @@ function onlineUseSkillP2(done) {
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({ name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p2') + '）', run: function (n) { onlineEdwardP2(n); } });
   if ((p._guideCore || 0) > 0) options.push({ name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', run: function (n) { useGuideCore('p2'); n(); } });
   if (!options.length) { if (done) done(); return; }
-  Online.awaitAnswer({ label: '角色技能（对手）' }, function (i) {
+  Online.awaitAnswer({ label: '角色技能（对手）', choices: options.map(function(o){ return o.name + '：' + o.desc; }) }, function (i) {
     if (i == null || i === undefined || i < 0 || i >= options.length) { if (done) done(); return; }
     options[i].run(done);
   });
@@ -5593,7 +5678,7 @@ function onlineKasumiP2(done) {
   }
   function choosePermanent(handReturned) {
     if (p.permanent.length >= 1) {
-      Online.awaitAnswer({ label: '整肃·选永续区卡放回（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '整肃·选永续区卡放回（对手）', cards: p.permanent.map(function(c){ return c.name; }), need: 1, allowLess: true }, function (v) {
         var arr = Array.isArray(v) ? v : (v === null || v === undefined ? [] : [v]);
         var cnt = 0;
         arr.slice().sort(function (a, b) { return b - a; }).forEach(function (pi) { if (pi >= 0 && pi < p.permanent.length) { var rc = p.permanent.splice(pi, 1)[0]; p.deck.push(rc); cnt++; addBattleLog('p2', '【霞被动·整肃】永续【' + rc.name + '】放回牌组'); } });
@@ -5602,7 +5687,7 @@ function onlineKasumiP2(done) {
     } else finalize(handReturned);
   }
   if (p.hand.length > 0) {
-    Online.awaitAnswer({ label: '整肃·选手卡放回（对手）' }, function (v) {
+    Online.awaitAnswer({ label: '整肃·选手卡放回（对手）', cards: p.hand.map(function(c){ return c.name; }), need: 2, allowLess: true }, function (v) {
       var arr = Array.isArray(v) ? v : [];
       arr.slice().sort(function (a, b) { return b - a; }).forEach(function (hi) { if (hi >= 0 && hi < p.hand.length) { var rc = p.hand.splice(hi, 1)[0]; p.deck.push(rc); addBattleLog('p2', '【霞被动·整肃】手卡【' + rc.name + '】放回牌组'); } });
       choosePermanent(arr.length);
@@ -8624,7 +8709,7 @@ function accumulateMovePassives(player, amount, oldPos) {
         }, true);
       } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2') {
         // 联机：远端位等待对方选择回收目标（p1 弹窗广播索引，双机同序）
-        Online.awaitAnswer({ label: '枫(水着)被动·回收（对手）' }, function (v) {
+        Online.awaitAnswer({ label: '枫(水着)被动·回收（对手）', cards: __kml.map(function(c){ return c.name; }) }, function (v) {
           var __ii3 = Array.isArray(v) ? v[0] : v;
           if (__ii3 != null && __ii3 >= 0 && __ii3 < __kml.length) {
             var __kc2 = __kml[__ii3], __ix4 = p.grave.indexOf(__kc2);
@@ -8835,6 +8920,14 @@ function rollPlayerDice(player) {
   if (player !== 'p1' && p && !(typeof Online!=='undefined' && Online.active)) {
     if (p._lilyPassive && cnt === 1) { var __lo = sides + 1 - d; if (__lo > d) { d = __lo; p._lastRoll = __lo; addBattleLog(player, '【莉莉被动】AI选择对立面值 ' + __lo + ' 作为最终结果'); } }
     if (p._ioriPassive && d < 2) { d = 2; p._lastRoll = 2; addBattleLog(player, '【伊织被动】AI选择2作为最终结果'); }
+    // 控骰（AI 自动结算）：每 20% 控骰 = 骰子点数 ±1，移动投掷最多适用 100%（±5）
+    if (typeof __diceControlSteps === 'function') {
+      var __aiSteps = __diceControlSteps(player, __CTRL_PCT_NORMAL);
+      if (__aiSteps > 0) {
+        var __aiAdj = Math.min(d + __aiSteps, sides * cnt);
+        if (__aiAdj !== d) { addBattleLog(player, '【控骰】移动投掷点数' + d + '→' + __aiAdj + '（AI自动，±' + __aiSteps + '档）'); d = __aiAdj; p._lastRoll = d; }
+      }
+    }
   }
   p._hinaMoveUsedThisAction = false; // 羽奈被动：新行动重置[移动]道具触发标记
   // 里绪(水着)SP：首次投掷后回复与点数相同的音韵值
@@ -9090,8 +9183,30 @@ function rollDiceForPlayer(player) {
         }
         showChoiceModal('逃脱·Lv4', '下一次投掷点数可以增减1点（当前' + finalDice + '）', '', ['+1 点', '-1 点', '不变'], __ttApply);
       }
-      if (__lilyOn || __ioriOn || __rp._nextRollAdjustable) {
-        __lilyAsk(function () { __ioriAsk(function () { __taotuoAsk(function () { setTimeout(__beginDiceWindow, 300); }); }); });
+      // 控骰（规则书第五章）：每 20% 控骰能力 = 骰子点数 ±1；移动投掷属「普通投掷」，最多适用 100% 控骰（±5）
+      var __ctrlSteps = (typeof __diceControlSteps === 'function') ? __diceControlSteps(player, __CTRL_PCT_NORMAL) : 0;
+      function __ctrlAsk(done) {
+        if (__ctrlSteps <= 0 || typeof __diceControlAsk !== 'function') { done(); return; }
+        // 多枚骰点数相加时，点数下限=骰子枚数、上限=面数×枚数；调整分摊到各骰（每枚保持 1..面数）
+        var __multi = (__rp._lastRolls && __rp._lastRolls.length > 1);
+        var __minV = __multi ? __rp._lastRolls.length : 1;
+        var __maxV = __multi ? (__sides * __rp._lastRolls.length) : __sides;
+        var __askOpts = { capPct: __CTRL_PCT_NORMAL, min: __minV };
+        if (__multi) { __askOpts.arr = __rp._lastRolls; __askOpts.arrSides = __sides; }
+        __diceControlAsk(player, finalDice, __maxV, '移动投掷', function (v) {
+          if (v !== finalDice) {
+            addBattleLog(player, '【控骰】移动投掷点数' + finalDice + '→' + v + '（手动选择）');
+            finalDice = v; __rp._lastRoll = v;
+            var __show = __multi ? (__rp._lastRolls.join('+') + '=' + v) : String(v);
+            if (diceEl) diceEl.textContent = (__sides === 6 && __cnt === 1 && !__multi) ? (['⚀','⚁','⚂','⚃','⚄','⚅'][v - 1] || String(v)) : __show;
+            if (resultEl) resultEl.textContent = __show + ' 点';
+            if (messageEl) messageEl.textContent = '投出 ' + __show + ' 点！';
+          }
+          done();
+        }, __askOpts);
+      }
+      if (__lilyOn || __ioriOn || __rp._nextRollAdjustable || __ctrlSteps > 0) {
+        __lilyAsk(function () { __ioriAsk(function () { __taotuoAsk(function () { __ctrlAsk(function () { setTimeout(__beginDiceWindow, 300); }); }); }); });
       } else { setTimeout(__beginDiceWindow, 600); }
     }
   }, 80);
@@ -9283,7 +9398,9 @@ function checkHandLimit(player) {
     if (!battleState[p]) return;
     var hand = battleState[p].hand || [];
     if (hand.length > 5 && battleState.phase === 'end') {
-      if (p === 'p1') { promptDiscardToLimit('p1'); return; } // 玩家自选弃牌
+      // 玩家自选弃牌：p1 是本机玩家；联机时 p2 也是活人（客人），同样要问他
+      // （以前这里对 p2 无条件自动弃尾张 —— 单机时那是对 AI 的处理，联机时会变成"房主替客人弃牌"）
+      if (p === 'p1' || (typeof Online !== 'undefined' && Online.active && !Online.isGuest)) { promptDiscardToLimit(p); return; }
       while (hand.length > 5) {
         var d = hand.pop();
         moveCardToGrave(p, d, 'discard');
@@ -9313,13 +9430,8 @@ function promptDiscardToLimit(player, done) {
       return;
     }
     var overNow = hand.length - 5;
-    if (typeof showCardPickerMulti !== 'function') {
-      // 兜底：选择器不可用时弃最尾张（保持流程不中断）
-      var d0 = hand.pop(); moveCardToGrave(player, d0, 'discard');
-      addBattleLog(player, '手牌超限，弃置【' + d0.name + '】');
-      step(); return;
-    }
-    showCardPickerMulti(hand.slice(), '手牌超过上限：请选择要弃掉的卡（还需弃' + overNow + '张）', function (sel) {
+    // 把"弃哪张"的结算收成一个函数：本机弹窗与联机问客人两条路径共用，保证语义完全一致
+    function __take(sel) {
       var idx = Array.isArray(sel) ? sel[0] : sel;
       if (idx === null || idx === undefined || idx < 0 || idx >= p.hand.length) {
         // 取消选择：仍必须弃牌，兜底弃最后一张，保证回合能正常结束
@@ -9334,7 +9446,23 @@ function promptDiscardToLimit(player, done) {
       }
       if (typeof updateBattleUI === 'function') updateBattleUI();
       setTimeout(step, 120);
-    }, 1);
+    }
+    // 联机：p2 是活人（客人），必须由他自己选并把候选卡名发过去
+    if (typeof Online !== 'undefined' && Online.active && !Online.isGuest && player !== 'p1') {
+      Online.awaitAnswer({
+        label: '手牌超过上限：请选择要弃掉的卡（还需弃' + overNow + '张）',
+        cards: hand.map(function (c) { return c.name; }),
+        need: 1
+      }, __take);
+      return;
+    }
+    if (typeof showCardPickerMulti !== 'function') {
+      // 兜底：选择器不可用时弃最尾张（保持流程不中断）
+      var d0 = hand.pop(); moveCardToGrave(player, d0, 'discard');
+      addBattleLog(player, '手牌超限，弃置【' + d0.name + '】');
+      step(); return;
+    }
+    showCardPickerMulti(hand.slice(), '手牌超过上限：请选择要弃掉的卡（还需弃' + overNow + '张）', __take, 1);
   }
   addBattleLog(player, '手牌超过上限5张（当前' + p.hand.length + '张），请选择弃掉' + over + '张');
   step();
@@ -10157,18 +10285,21 @@ function actCalibrate() {
     return;
   }
   
-  var roll = GameRNG.dice(20);
-  var success = roll >= 14;
-  
-  if (success) {
-    battleState.p1.fascination = Math.max(0, battleState.p1.fascination - 2);
-    addBattleLog('p1', '🎵 20面骰校准：' + roll + '点，成功！入迷值-2 → ' + battleState.p1.fascination);
-  } else {
-    addBattleLog('p1', '🎵 20面骰校准：' + roll + '点，失败（需≥14），入迷值不变');
-  }
-  
-  checkBattleEnd();
-  updateBattleUI();
+  // 校准投骰属「普通投掷」：控骰最多适用 100% 控骰（每 20% = 点数 ±1，最多 ±5）
+  var __calSettle = function (roll) {
+    var success = roll >= 14;
+    if (success) {
+      battleState.p1.fascination = Math.max(0, battleState.p1.fascination - 2);
+      addBattleLog('p1', '🎵 20面骰校准：' + roll + '点，成功！入迷值-2 → ' + battleState.p1.fascination);
+    } else {
+      addBattleLog('p1', '🎵 20面骰校准：' + roll + '点，失败（需≥14），入迷值不变');
+    }
+    checkBattleEnd();
+    updateBattleUI();
+  };
+  var __calRaw = GameRNG.dice(20);
+  if (typeof __diceControlAsk === 'function') __diceControlAsk('p1', __calRaw, 20, '20面骰校准(≥14)', __calSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+  else __calSettle(typeof applyDiceControl === 'function' ? applyDiceControl('p1', __calRaw, 20, __CTRL_PCT_NORMAL) : __calRaw);
 }
 
 
@@ -10249,12 +10380,18 @@ function triggerTileEffect(player) {
       if (!__kasumiRide && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); break; }
       if (__kasumiRide) addBattleLog(player, '【小仓霞SP】乘坐' + tile.name + '免支付、免判定');
       else p.gold -= __goldPrice(p, 200);
-      var busDice = (typeof rollPlayerDice === 'function') ? (function(){var __v=GameRNG.dice(4);return typeof applyDiceControl==='function'?applyDiceControl(player,__v,4):__v;})() : (GameRNG.dice(4));
-      p._ridingThisAction = true; // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
-      var oldPos2 = p.position;
-      p.position = (p.position + busDice) % 42;
-      addBattleLog(player, '【' + tile.name + '】支付200金币，四面骰' + busDice + '点，前进' + busDice + '格到第' + p.position + '格');
-      triggerTileEffect(player);
+      var __busSettle = function (busDice) {
+        p._ridingThisAction = true; // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
+        var oldPos2 = p.position;
+        p.position = (p.position + busDice) % 42;
+        addBattleLog(player, '【' + tile.name + '】支付200金币，四面骰' + busDice + '点，前进' + busDice + '格到第' + p.position + '格');
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+        triggerTileEffect(player);
+      };
+      // 四面骰乘车属「普通投掷」：控骰最多适用 100% 控骰（每20%=±1，受骰面1~4限制）
+      var __busRaw = GameRNG.dice(4);
+      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __busRaw, 4, tile.name + '·四面骰', __busSettle, { capPct: __CTRL_PCT_NORMAL });
+      else __busSettle((typeof applyDiceControl === 'function') ? applyDiceControl(player, __busRaw, 4, __CTRL_PCT_NORMAL) : __busRaw);
       break; }
     case 'power': {
       // 配电室（权威）：可关闭1个非四角格（每人限1），到达也可重新开启自己已关闭的格
@@ -10292,7 +10429,7 @@ function triggerTileEffect(player) {
           if (reopen) { addBattleLog(player, '配电室：重新开启第' + p.closedTile + '格'); p.closedTile = null; if (typeof updateBattleUI === 'function') updateBattleUI(); }
           else if (closeNow) {
             // 对方 p1 侧 prompt 输入格子编号并广播（字符串）；这里等待并校验
-            Online.awaitAnswer({ label: '配电室·关闭格子编号（对手）' }, function (v) {
+            Online.awaitAnswer({ label: '配电室·关闭格子编号（对手）', choices: MAP_TILES.map(function(t,i){ return '第'+i+'格 '+((t&&t.name)||''); }) }, function (v) {
               var ct = parseInt(v, 10);
               if (isNaN(ct) || ct < 0 || ct > 41 || MAP_TILES[ct].big) { ct = __firstNonCorner(); addBattleLog(player, '输入非法或为四角，改为第一个非四角格'); }
               p.closedTile = ct; addBattleLog(player, '配电室：关闭第' + ct + '格【' + MAP_TILES[ct].name + '】');
@@ -10387,7 +10524,7 @@ function triggerTileEffect(player) {
             if ((p.gold || 0) < 500) { addBattleLog(player, '易物：金币不足500'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
             p.gold -= __goldPrice(p, 500); var d = drawCard(player); addBattleLog(player, '易物：花费500金币抽到【' + (d ? d.name : '无') + '】'); if (typeof updateBattleUI === 'function') updateBattleUI(); return;
           }
-          Online.awaitAnswer({ label: '易物·选择手牌送墓（对手）' }, function (v) {
+          Online.awaitAnswer({ label: '易物·选择手牌送墓（对手）', cards: p.hand.map(function(c){ return c.name; }) }, function (v) {
             var ix = Array.isArray(v) ? v[0] : v;
             if (ix != null && ix >= 0 && ix < p.hand.length) {
               var sel = p.hand.splice(ix, 1)[0];
@@ -10856,7 +10993,7 @@ function checkLevelUp(player) {
             if (ii != null && ii >= 0) { var real = p.removed.indexOf(rm[ii]); if (real >= 0) { var rc = p.removed.splice(real, 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); p._supplierRecovered = true; addBattleLog(player, '【核心的供给者】回收移出卡【' + rc.name + '】加入手卡'); } }
             __supOnce(remain - 1);
           }
-          if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）' }, __recoverSup);
+          if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）', cards: rm.map(function(c){ return c.name; }) }, __recoverSup);
           else showCardPickerMulti(rm, '供给者：选一张移出游戏的卡加入手卡', __recoverSup, 1);
         } else {
           var __tgt = player === 'p1' ? 'p2' : 'p1';
@@ -10956,16 +11093,18 @@ function drawGiftCard(player) {
       p.motivation += calMotivation;
       addBattleLog(player, '获得' + calMotivation + '点激励点数' + (__lilExtra ? '（里尔亚斯被动+1）' : '') + '，当前' + p.motivation + '点激励');
       checkLevelUp(player);
-      performCalibration(player, card.difficulty, card.reduce);
-      checkBattleEnd(); // 校准降入迷后即时胜负判定（修复破局获胜不结算）
+      performCalibration(player, card.difficulty, card.reduce, function () {
+        checkBattleEnd(); // 校准降入迷后即时胜负判定（修复破局获胜不结算）
+      });
     }
     // 和声保底：第6次必定额外附赠1张和声（≥14成功降2入迷，激励3）
     if (__giftGuarantee) {
       p.motivation = (p.motivation || 0) + 3 + __lilExtra;
       addBattleLog(player, '🎁 馈赠保底：连续6次未中和声，额外附赠1张【和声】（+' + (3 + __lilExtra) + '激励，当前' + p.motivation + '）');
       checkLevelUp(player);
-      performCalibration(player, '≥14', 2);
-      checkBattleEnd(); // 保底和声校准后即时胜负判定
+      performCalibration(player, '≥14', 2, function () {
+        checkBattleEnd(); // 保底和声校准后即时胜负判定
+      });
     }
   }
   // 里绪(水着)的“可以随机剔除2张”为选发：玩家弹窗选择，AI 自动剔除；联机远端位等待对方答案
@@ -11012,17 +11151,20 @@ function drawOmikuji(player, opt) {
   checkLevelUp(player);
 
   if (card.type === 'calibrate' || card.type === 'calibrate_risk') {
-    // 校准类御神签：立即进行校准
-    var success = performCalibration(player, card.difficulty, card.reduce);
-    if (card.refund) {
-      recoverCost(player, card.refund, '御神签');
-      addBattleLog(player, '回复' + card.refund + '音韵值，当前' + p.cost + '音韵');
-    }
-    if (!success && card.type === 'calibrate_risk') {
-      p.sync = Math.max(0, p.sync - card.fail_sync);
-      p.cost = Math.max(0, p.cost - card.fail_cost);
-      addBattleLog(player, '校准失败！失去' + card.fail_sync + '同步值和' + card.fail_cost + '音韵值');
-    }
+    // 校准类御神签：立即进行校准（控骰询问为异步，结算与胜负判定放进回调）
+    performCalibration(player, card.difficulty, card.reduce, function (success) {
+      if (card.refund) {
+        recoverCost(player, card.refund, '御神签');
+        addBattleLog(player, '回复' + card.refund + '音韵值，当前' + p.cost + '音韵');
+      }
+      if (!success && card.type === 'calibrate_risk') {
+        p.sync = Math.max(0, p.sync - card.fail_sync);
+        p.cost = Math.max(0, p.cost - card.fail_cost);
+        addBattleLog(player, '校准失败！失去' + card.fail_sync + '同步值和' + card.fail_cost + '音韵值');
+      }
+      checkBattleEnd();
+      updateBattleUI();
+    });
   } else if (card.type === 'buff') {
     // 祝福类御神签：弹出选择权弹窗
     var __buffChoices = [
@@ -11143,30 +11285,38 @@ function __dequeueChoice() {
 }
 
 // 执行校准
-function performCalibration(player, difficulty, reduce) {
-  if (!battleState) return false;
+function performCalibration(player, difficulty, reduce, cb) {
+  if (!battleState) { if (cb) cb(false); return false; }
   var p = battleState[player];
   
-  var roll = GameRNG.dice(20);
-  var success = false;
-  
-  if (difficulty === '>10') success = roll > 10;
-  else if (difficulty === '≤10') success = roll <= 10;
-  else if (difficulty === '≥14') success = roll >= 14;
-  else if (difficulty === '≥17') success = roll >= 17;
-  else if (difficulty === '≥12') success = roll >= 12;
-  else if (difficulty === '>13') success = roll > 13;
-  // 播放20面骰校准动画（结果已同步确定，动画仅作过程展示，不改变返回值）
-  if (player === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'dice', sides: 20, fixed: roll, label: '20面骰校准(' + difficulty + ')' }, function () {});
+  // 校准投骰属「普通投掷」：控骰最多适用 100%（每 20% = 点数 ±1，最多 ±5）
+  // cb 存在时改为异步回调：先让玩家决定控骰档位，再结算成功/失败并回调 cb(success)
+  function __settle(roll) {
+    var success = false;
+    if (difficulty === '>10') success = roll > 10;
+    else if (difficulty === '≤10') success = roll <= 10;
+    else if (difficulty === '≥14') success = roll >= 14;
+    else if (difficulty === '≥17') success = roll >= 17;
+    else if (difficulty === '≥12') success = roll >= 12;
+    else if (difficulty === '>13') success = roll > 13;
+    // 播放20面骰校准动画（结果已同步确定，动画仅作过程展示，不改变返回值）
+    if (player === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'dice', sides: 20, fixed: roll, label: '20面骰校准(' + difficulty + ')' }, function () {});
 
-  if (success) {
-    p.fascination = Math.max(0, p.fascination - reduce);
-    addBattleLog(player, '🎵 20面骰校准：' + roll + '点，成功（需' + difficulty + '）！入迷值-' + reduce + ' → ' + p.fascination);
-  } else {
-    addBattleLog(player, '🎵 20面骰校准：' + roll + '点，失败（需' + difficulty + '），入迷值不变');
+    if (success) {
+      p.fascination = Math.max(0, p.fascination - reduce);
+      addBattleLog(player, '🎵 20面骰校准：' + roll + '点，成功（需' + difficulty + '）！入迷值-' + reduce + ' → ' + p.fascination);
+    } else {
+      addBattleLog(player, '🎵 20面骰校准：' + roll + '点，失败（需' + difficulty + '），入迷值不变');
+    }
+    if (cb) cb(success);
+    return success;
   }
-  
-  return success;
+  var __calRaw = GameRNG.dice(20);
+  if (typeof __diceControlAsk === 'function') {
+    __diceControlAsk(player, __calRaw, 20, '20面骰校准(' + difficulty + ')', __settle, { capPct: __CTRL_PCT_NORMAL, prefer: (difficulty === '≤10' ? 'low' : 'high') });
+    return undefined; // 已转为异步：结果只通过 cb 交付
+  }
+  return __settle(__calRaw);
 }
 
 // 触发事件卡
@@ -13187,10 +13337,17 @@ function pickFromList(user, list, title, need, cb, allowLess) {
       showCardPickerMulti(list.map(function (x) { return x.card; }), title, __finish, need, allowLess === true);
     }
   } else if (__online) {
-    // 远端位(p2)选卡：等待对方 p1 弹窗广播的答案（list 双机同序，索引直接映射）
-    Online.awaitAnswer({ label: title }, function (v) {
+    // 远端位(p2)选卡：把【候选卡名】随问题一起发给客人，让它在自己机器上点选。
+    // 旧写法只发 label，客人侧既无选项也无卡名，只能退化成一个空白输入框 → 客机"检索/选卡没反应"。
+    // 索引映射是安全的：列表由房主本机构造、原样发出，客人回传的就是这个列表的下标。
+    Online.awaitAnswer({
+      label: title,
+      cards: list.map(function (x) { return (x && x.card && x.card.name) || (x && x.name) || '（未知卡）'; }),
+      need: need,
+      allowLess: allowLess === true
+    }, function (v) {
       var arr = Array.isArray(v) ? v : [v];
-      cb(arr.filter(function (i) { return i != null && i >= 0; }).map(function (i) { return list[i]; }));
+      cb(arr.filter(function (i) { return i != null && i >= 0 && i < list.length; }).map(function (i) { return list[i]; }));
     });
   } else cb(list.slice(0, need));
 }
@@ -13339,7 +13496,7 @@ function startDuel(user, foe, done) {
         // 本机玩家出示
         showTargetCards('p1', 'hand', '对弈：选择一张手牌出示决斗（对手出示）', true, function (c) { __resolve2(c); });
       } else {
-        Online.awaitAnswer({ label: '对弈·对方出示手牌' }, function (v) {
+        Online.awaitAnswer({ label: '对弈·对方出示手牌', cards: op.hand.map(function(c){ return (c&&c.name||'') + (c&&c.attribute?('（'+c.attribute+'）'):''); }) }, function (v) {
           var ix = Array.isArray(v) ? v[0] : v;
           __resolve2((ix != null && ix >= 0 && ix < op.hand.length) ? op.hand[ix] : null);
         });
@@ -13361,7 +13518,7 @@ function startDuel(user, foe, done) {
   if (user === 'p1' && me.hand.length && typeof showTargetCards === 'function') showTargetCards('p1', 'hand', '对弈：选择一张手牌出示决斗', true, function (c) { __resolve(c); });
   else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2' && me.hand.length) {
     // 联机：发起者为远端位，其出示卡等待对方 p1 弹窗答案
-    Online.awaitAnswer({ label: '对弈·发起者出示手牌' }, function (v) {
+    Online.awaitAnswer({ label: '对弈·发起者出示手牌', cards: me.hand.map(function(c){ return (c&&c.name||'') + (c&&c.attribute?('（'+c.attribute+'）'):''); }) }, function (v) {
       var ix = Array.isArray(v) ? v[0] : v;
       __resolve((ix != null && ix >= 0 && ix < me.hand.length) ? me.hand[ix] : null);
     });
@@ -13433,7 +13590,7 @@ function triggerYaodaoOnDamage(user, dmg, done) {
         var pool = [], side = [];
         ['p1', 'p2'].forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
         if (!pool.length) { addBattleLog(user, '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
-        Online.awaitAnswer({ label: '妖刀五月雨·破坏目标（对手）' }, function (v) {
+        Online.awaitAnswer({ label: '妖刀五月雨·破坏目标（对手）', cards: pool.map(function(c,i){ return c.name + '（' + (side[i]==='p1'?'房主':'自己') + '）'; }) }, function (v) {
           var ids = Array.isArray(v) ? v[0] : v;
           if (ids != null && ids >= 0 && pool[ids]) {
             var c = pool[ids], sd = side[ids], arr = battleState[sd].permanent, ri = arr.indexOf(c);
@@ -14312,7 +14469,7 @@ function runOneOp(op, ctx, next) {
         var br = okJ ? __jb.thenOps : __jb.elseOps;
         if (br && br.length) runOps(br, ctx, next); else next();
       };
-      if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定' }, __settleJB);
+      if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定', ctrlFull: true }, __settleJB);
       else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定' }, __settleJB);
       else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, GameRNG.dice(__sides), __sides) : GameRNG.dice(__sides); __settleJB(__rr); }
       return;
@@ -14323,7 +14480,7 @@ function runOneOp(op, ctx, next) {
       if (user === 'p1' && typeof showTargetCards === 'function' && __rpMe.hand.length) {
         showTargetCards('p1', 'hand', '选择' + (op.need || 1) + '张手牌放回牌组最下方', true, function (card) { if (card) __rpPut(card); if (typeof updateBattleUI === 'function') updateBattleUI(); next(); });
       } else if (typeof Online !== 'undefined' && Online.active && user === 'p2' && __rpMe.hand.length) {
-        Online.awaitAnswer({ label: '选择手牌放回牌组最下方（对手）' }, function (v) {
+        Online.awaitAnswer({ label: '选择手牌放回牌组最下方（对手）', cards: __rpMe.hand.map(function(c){ return c.name; }) }, function (v) {
           var ix = Array.isArray(v) ? v[0] : v;
           if (ix != null && ix >= 0 && ix < __rpMe.hand.length) __rpPut(__rpMe.hand[ix]);
           if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -15236,27 +15393,34 @@ function useEventCardFor(player, index, name, done) {
       // 惠在场3枚骰并立即回3音韵；<8回3费；=8选1名玩家回1入迷；>8降1入迷
       var __megumi = false;
       try { __megumi = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('惠') >= 0; }); } catch (e) {}
-      var __dN = __megumi ? 3 : 2, __sum = 0, __rolls = [];
+      var __dN = __megumi ? 3 : 2, __rolls = [], __sum = 0;
       for (var __ri = 0; __ri < __dN; __ri++) { var __r = GameRNG.dice(6); __rolls.push(__r); __sum += __r; }
-      addBattleLog(player, '即兴演出：投出' + __rolls.join('+') + '=' + __sum + '点' + (__megumi ? '（松山惠：3枚骰）' : ''));
-      if (__megumi) { recoverCost(player, 3, '即兴演出[松山惠]'); addBattleLog(player, '即兴演出[松山惠]：立即回复3点音韵值'); }
-      if (__sum < 8) {
-        recoverCost(player, 3, '即兴演出');
-        addBattleLog(player, '即兴演出：<8，回复3点音韵值，当前' + p.cost + '点');
-      } else if (__sum === 8) {
-        var __jxOpts = ['自己（+1入迷值）', (__ecOL ? '对手' : 'AI') + '（+1入迷值）'];
-        function __jxApply(o) {
-          var __tp = o === 0 ? p : battleState[__ecFoe];
-          __tp.fascination = Math.min(__tp.fascination + 1, 6);
-          addBattleLog(player, '即兴演出：=8，回复' + (o === 0 ? '自己' : '对手') + '1点入迷值');
+      // 点数相加的投骰属普通投掷：控骰最多适用 100%（每20%=±1，点数下限=骰子枚数）
+      var __jxSettle = function (__sum) {
+        addBattleLog(player, '即兴演出：投出' + __rolls.join('+') + '=' + __sum + '点' + (__megumi ? '（松山惠：3枚骰）' : ''));
+        if (__megumi) { recoverCost(player, 3, '即兴演出[松山惠]'); addBattleLog(player, '即兴演出[松山惠]：立即回复3点音韵值'); }
+        if (__sum < 8) {
+          recoverCost(player, 3, '即兴演出');
+          addBattleLog(player, '即兴演出：<8，回复3点音韵值，当前' + p.cost + '点');
+          updateBattleUI(); checkBattleEnd();
+        } else if (__sum === 8) {
+          var __jxOpts = ['自己（+1入迷值）', (__ecOL ? '对手' : 'AI') + '（+1入迷值）'];
+          function __jxApply(o) {
+            var __tp = o === 0 ? p : battleState[__ecFoe];
+            __tp.fascination = Math.min(__tp.fascination + 1, 6);
+            addBattleLog(player, '即兴演出：=8，回复' + (o === 0 ? '自己' : '对手') + '1点入迷值');
+            updateBattleUI(); checkBattleEnd();
+          }
+          if (__ecOL && player === 'p2') { onlineDecideModal('p2', '即兴演出（对手）', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply); }
+          else showChoiceModal('即兴演出', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply);
+        } else {
+          p.fascination = Math.max(0, p.fascination - 1);
+          addBattleLog(player, '即兴演出：>8，降低1点入迷值，当前' + p.fascination + '点');
           updateBattleUI(); checkBattleEnd();
         }
-        if (__ecOL && player === 'p2') { onlineDecideModal('p2', '即兴演出（对手）', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply); }
-        else showChoiceModal('即兴演出', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply);
-      } else {
-        p.fascination = Math.max(0, p.fascination - 1);
-        addBattleLog(player, '即兴演出：>8，降低1点入迷值，当前' + p.fascination + '点');
-      }
+      };
+      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __sum, __dN * 6, '即兴演出·' + __dN + '枚六面骰', __jxSettle, { capPct: __CTRL_PCT_NORMAL, min: __dN, prefer: 'high', arr: __rolls, arrSides: 6 });
+      else __jxSettle(__sum);
       break;
     }
       
@@ -15292,7 +15456,7 @@ function useEventCardFor(player, index, name, done) {
       }
       if (__pool.length) {
         if (__ecOL && player === 'p2') {
-          Online.awaitAnswer({ label: '命运之回声·选卡破坏（对手）' }, function (v) {
+          Online.awaitAnswer({ label: '命运之回声·选卡破坏（对手）', cards: __pool.map(function(c,i){ return c.name + '（' + (__sides[i]===player?'自己':'对方') + '）'; }) }, function (v) {
             __destroy(Array.isArray(v) ? v[0] : v);
           });
         } else showCardPickerMulti(__pool, '命运之回声：选场上1张功能卡破坏并移出本局游戏', function (idx) { __destroy(Array.isArray(idx) ? idx[0] : idx); });
@@ -15343,13 +15507,20 @@ function useEventCardFor(player, index, name, done) {
       
     case '独奏': {
       // 一次20面骰，满足的条件“全部”并列适用（不是择一）：①偶数回2费 ②个位为4的正整数倍数(个位4/8)降1入迷 ③4的倍数回2费 ④≥16降1入迷
-      var d20 = GameRNG.dice(20);
-      addBattleLog(player, '独奏：20面骰投出' + d20 + '点，满足的条件全部适用');
-      if (d20 % 2 === 0) { recoverCost(player, 2, '独奏①偶数'); addBattleLog(player, '独奏①偶数：回复2音韵，当前' + p.cost); }
-      if (d20 % 10 === 4) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏②个位为4：降1入迷，当前' + p.fascination); }
-      if (d20 % 4 === 0) { recoverCost(player, 2, '独奏③为4的倍数'); addBattleLog(player, '独奏③为4的倍数：回复2音韵，当前' + p.cost); }
-      if (d20 >= 16) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏④≥16：降1入迷，当前' + p.fascination); }
-      if (teamHasChar(player, '惠')) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏[松山惠]：额外降1入迷，当前' + p.fascination); }
+      // 投骰属普通投掷：控骰最多适用 100%（每20%=±1）
+      var __jzSettle = function (d20) {
+        addBattleLog(player, '独奏：20面骰投出' + d20 + '点，满足的条件全部适用');
+        if (d20 % 2 === 0) { recoverCost(player, 2, '独奏①偶数'); addBattleLog(player, '独奏①偶数：回复2音韵，当前' + p.cost); }
+        if (d20 % 10 === 4) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏②个位为4：降1入迷，当前' + p.fascination); }
+        if (d20 % 4 === 0) { recoverCost(player, 2, '独奏③为4的倍数'); addBattleLog(player, '独奏③为4的倍数：回复2音韵，当前' + p.cost); }
+        if (d20 >= 16) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏④≥16：降1入迷，当前' + p.fascination); }
+        if (teamHasChar(player, '惠')) { p.fascination = Math.max(0, p.fascination - 1); addBattleLog(player, '独奏[松山惠]：额外降1入迷，当前' + p.fascination); }
+        updateBattleUI();
+        checkBattleEnd();
+      };
+      var __jzRaw = GameRNG.dice(20);
+      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __jzRaw, 20, '独奏·20面骰', __jzSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+      else __jzSettle(__jzRaw);
       break;
     }
       
@@ -15388,9 +15559,9 @@ function useEventCardFor(player, index, name, done) {
           try { Online.broadcastAnswer(__seq2, tile2); } catch (e) {}
           __applySwap(tile1, tile2);
         } else {
-          Online.awaitAnswer({ label: '王车易位·第1格（对手）' }, function (v1) {
+          Online.awaitAnswer({ label: '王车易位·第1格（对手）', choices: MAP_TILES.map(function(t,i){ return '第'+i+'格 '+((t&&t.name)||''); }) }, function (v1) {
             var t1 = (v1 != null) ? (((parseInt(v1, 10) % 42) + 42) % 42) : __defTile(null);
-            Online.awaitAnswer({ label: '王车易位·第2格（对手）' }, function (v2) {
+            Online.awaitAnswer({ label: '王车易位·第2格（对手）', choices: MAP_TILES.map(function(t,i){ return '第'+i+'格 '+((t&&t.name)||''); }) }, function (v2) {
               var t2 = (v2 != null) ? (((parseInt(v2, 10) % 42) + 42) % 42) : __defTile(t1);
               if (t2 === t1) t2 = __defTile(t1);
               __applySwap(t1, t2);
@@ -15432,49 +15603,66 @@ function useEventCardFor(player, index, name, done) {
       var __diceN = __muyuan ? 4 : 3;
       var diceArr = [];
       for (var __dk = 0; __dk < __diceN; __dk++) diceArr.push(GameRNG.dice(6));
-      addBattleLog(player, '赌徒游戏：支付' + __pay + '金币，投出' + diceArr.join('+') + (__muyuan ? '（木原家族：4枚骰）' : ''));
-      var counts = {};
-      for (var di = 0; di < diceArr.length; di++) {
-        counts[diceArr[di]] = (counts[diceArr[di]] || 0) + 1;
-      }
-      var maxCount = Math.max.apply(null, Object.values(counts));
-      if (maxCount >= 3) {
-        p.gold += 3000;
-        addBattleLog(player, '赌徒游戏：三个相同！获得3000金币，当前' + p.gold + '金币');
-      } else if (maxCount === 2) {
-        p.gold += 2000;
-        addBattleLog(player, '赌徒游戏：两个相同！获得2000金币，当前' + p.gold + '金币');
-      } else {
-        addBattleLog(player, '赌徒游戏：骰子均不相同，后退1格并触发所在格效果');
-        if (typeof applyMove === 'function') applyMove(player, -1); // 统一移动：落点格子效果随之触发
-        else { p.position = ((p.position - 1) % 42 + 42) % 42; if (typeof triggerTileEffect === 'function') triggerTileEffect(player); }
-      }
+      // 多枚骰投掷：控骰最多适用 100%（每20%=±1），调整分摊到各骰（每枚保持 1~6）
+      var __gtSettle = function () {
+        addBattleLog(player, '赌徒游戏：支付' + __pay + '金币，投出' + diceArr.join('+') + (__muyuan ? '（木原家族：4枚骰）' : ''));
+        var counts = {};
+        for (var di = 0; di < diceArr.length; di++) {
+          counts[diceArr[di]] = (counts[diceArr[di]] || 0) + 1;
+        }
+        var maxCount = Math.max.apply(null, Object.values(counts));
+        if (maxCount >= 3) {
+          p.gold += 3000;
+          addBattleLog(player, '赌徒游戏：三个相同！获得3000金币，当前' + p.gold + '金币');
+        } else if (maxCount === 2) {
+          p.gold += 2000;
+          addBattleLog(player, '赌徒游戏：两个相同！获得2000金币，当前' + p.gold + '金币');
+        } else {
+          addBattleLog(player, '赌徒游戏：骰子均不相同，后退1格并触发所在格效果');
+          if (typeof applyMove === 'function') applyMove(player, -1); // 统一移动：落点格子效果随之触发
+          else { p.position = ((p.position - 1) % 42 + 42) % 42; if (typeof triggerTileEffect === 'function') triggerTileEffect(player); }
+        }
+        updateBattleUI();
+        checkBattleEnd();
+      };
+      var __gtSum = diceArr.reduce(function (a, b) { return a + b; }, 0);
+      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __gtSum, __diceN * 6, '赌徒游戏·' + __diceN + '枚六面骰', __gtSettle, { capPct: __CTRL_PCT_NORMAL, min: __diceN, prefer: 'high', arr: diceArr, arrSides: 6 });
+      else __gtSettle();
       break;
     }
       
-    case '躁动之心':
+    case '躁动之心': {
       // 3次校准（12面≥6，8面≥6，6面≥6）；入间予在场每次校准回1音韵
+      // 每次校准都是独立「投掷」：逐次询问控骰（每20%=±1，最多±5），AI/远端按同一顺序询问
       var __yu2 = false;
       try { __yu2 = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('予') >= 0 && c.name.indexOf('水着') < 0; }); } catch (e) {}
       var successCount = 0;
-      var cal1 = GameRNG.dice(12);
-      if (cal1 >= 6) successCount++;
-      if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
-      addBattleLog(player, '躁动之心：第1次校准12面骰出' + cal1 + '点，' + (cal1 >= 6 ? '成功' : '失败'));
-      var cal2 = GameRNG.dice(8);
-      if (cal2 >= 6) successCount++;
-      if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
-      addBattleLog(player, '躁动之心：第2次校准8面骰出' + cal2 + '点，' + (cal2 >= 6 ? '成功' : '失败'));
-      var cal3 = GameRNG.dice(6);
-      if (cal3 >= 6) successCount++;
-      if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
-      addBattleLog(player, '躁动之心：第3次校准6面骰出' + cal3 + '点，' + (cal3 >= 6 ? '成功' : '失败'));
-      if (__yu2) addBattleLog(player, '躁动之心[入间予]：每次校准回复1点音韵值');
-      if (successCount > 0) {
-        p.fascination = Math.max(0, p.fascination - successCount);
-        addBattleLog(player, '躁动之心：成功' + successCount + '次，降低' + successCount + '点入迷值，当前' + p.fascination + '点');
-      }
+      var __calStep = function (sides, idx, next) {
+        var __raw = GameRNG.dice(sides);
+        var __apply = function (v) {
+          if (v >= 6) successCount++;
+          if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
+          addBattleLog(player, '躁动之心：第' + idx + '次校准' + sides + '面骰出' + v + '点，' + (v >= 6 ? '成功' : '失败'));
+          next();
+        };
+        if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __raw, sides, '躁动之心·第' + idx + '次校准(' + sides + '面骰)', __apply, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+        else __apply(__raw);
+      };
+      __calStep(12, 1, function () {
+        __calStep(8, 2, function () {
+          __calStep(6, 3, function () {
+            if (__yu2) addBattleLog(player, '躁动之心[入间予]：每次校准回复1点音韵值');
+            if (successCount > 0) {
+              p.fascination = Math.max(0, p.fascination - successCount);
+              addBattleLog(player, '躁动之心：成功' + successCount + '次，降低' + successCount + '点入迷值，当前' + p.fascination + '点');
+            }
+            updateBattleUI();
+            checkBattleEnd();
+          });
+        });
+      });
       break;
+    }
       
     case '闲庭信步': {
       // 二选一：前进/后退1格回2音韵（触发格子效果） / 原地跳跃一次（原地同样触发格子效果）；现实间里绪两项先后都执行
@@ -16026,9 +16214,12 @@ function processCharacterPassives(player) {
           }, 5);
         } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
           // 联机远端位：等待对方 p1 选择广播（保留索引数组）
-          Online.awaitAnswer({ label: '宁雨清被动·初始7选5' }, function (v) {
-            var keepIdxs = Array.isArray(v) ? v : [0,1,2,3,4];
-            if (keepIdxs.length !== 5) keepIdxs = [0,1,2,3,4];
+          Online.awaitAnswer({ label: '宁雨清被动·初始7选5', cards: ningDrawn.map(function(c){ return c.name; }), need: 5 }, function (v) {
+            var keepIdxs = Array.isArray(v) ? v.slice() : [];
+            keepIdxs = keepIdxs.filter(function (i) { return typeof i === 'number' && i >= 0 && i < ningDrawn.length; })
+                               .filter(function (i, at, a) { return a.indexOf(i) === at; });
+            // 客人不足 5 张时，用剩下的按原顺序补齐到 5 张（而不是把客人的选择整体丢弃）
+            for (var f = 0; f < ningDrawn.length && keepIdxs.length < 5; f++) { if (keepIdxs.indexOf(f) < 0) keepIdxs.push(f); }
             for (var k = 0; k < ningDrawn.length; k++) {
               if (keepIdxs.indexOf(k) >= 0) p.hand.push(ningDrawn[k]);
               else moveCardToGrave(player, ningDrawn[k], 'effect');
@@ -16314,7 +16505,7 @@ function kaedeSPSelect(player) {
       else if (selected.id === 2) { for (var j = 0; j < 2; j++) { var c = takeTopCard(player); if (c) p.hand.push(c); } }
       else if (selected.id === 3) p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
       addBattleLog(player, '【入间枫SP】选择' + selected.label);
-      Online.awaitAnswer({ label: '入间枫SP选择（第2项）' }, function (idx2) {
+      Online.awaitAnswer({ label: '入间枫SP选择（第2项）', choices: __kAll.filter(function(o){ return o.id!==selected.id; }).map(function(o){ return o.label; }) }, function (idx2) {
         if (idx2 == null || idx2 === undefined || idx2 < 0) idx2 = 1; // 默认第二项
         var s2 = __kAll.filter(function (o) { return o.id !== selected.id; })[idx2 % 2] || __kAll[1];
         if (s2.id === 1) p.cost = Math.min(p.cost + 6, p.maxCost);
@@ -16325,7 +16516,7 @@ function kaedeSPSelect(player) {
         if (typeof updateBattleUI === 'function') updateBattleUI();
       });
     };
-    Online.awaitAnswer({ label: '入间枫SP选择（第1项）' }, __kPick);
+    Online.awaitAnswer({ label: '入间枫SP选择（第1项）', choices: __kAll.map(function(o){ return o.label; }) }, __kPick);
     return;
   }
   // AI 自动选择最通用的①回6音韵 + ②抽2张，不弹窗
@@ -16381,10 +16572,13 @@ function kaedeSPSelect(player) {
   selectNext();
 }
 
-// 控骰能力：骰子点数调整（20%控骰=点数±1）
-// 判定伤害最多适用20%控骰能力，即最多调整±1点
-// 控骰百分比：入间予被动登记在 _diceControlBonus，状态系统登记在 control_dice，
+// ========== 控骰能力（规则书 第五章【控骰能力】） ==========
+// 每 20% 控骰能力可让一次投掷的骰子点数 ±1；
+// 普通投掷最多可适用 100% 控骰（即 ±5）；但「判定伤害」最多只适用 20% 控骰（即 ±1）。
+// 控骰百分比来源：入间予被动登记在 _diceControlBonus，状态系统登记在 control_dice，
 // 风纪委员臂章（永续区）额外 +20%。
+var __CTRL_PCT_NORMAL = 1.0;      // 普通投掷：最多适用 100% 控骰 → ±5
+var __CTRL_PCT_JUDGE_DMG = 0.2;   // 判定伤害：最多适用 20% 控骰 → ±1
 function __diceControlPct(player) {
   if (!battleState || !battleState[player]) return 0;
   var p = battleState[player];
@@ -16392,41 +16586,95 @@ function __diceControlPct(player) {
   if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) pct += 0.2;
   return pct;
 }
-/* 控骰【手动按钮】：点数已确定后询问玩家是否使用 ±1 能力，而不是替他自动选"更有利"。
-   选项顺序固定三项（不使用 / +1 / -1），双机同序 => 答案索引可直接映射。
+/* 本次投掷实际可用的控骰「档数」：1 档 = 骰子点数 ±1 = 20% 控骰。
+   capPct = 本次可适用的控骰上限百分比（普通投掷 1.0，判定伤害 0.2）。
+   例：持有 60% 控骰时，普通投掷最多 ±3；同样的 60% 用于判定伤害时只有 ±1。 */
+function __diceControlSteps(player, capPct) {
+  var pct = __diceControlPct(player);
+  if (capPct === undefined || capPct === null) capPct = __CTRL_PCT_NORMAL;
+  var usable = Math.min(pct, capPct);
+  if (!(usable > 0)) return 0;
+  return Math.max(0, Math.floor(usable / 0.2 + 1e-9));
+}
+/* 多枚骰：每枚骰子的可增/可减余量（用于把控骰档数分摊到各骰，且每枚保持 1..sides） */
+function __diceArrSlack(arr, sides) {
+  var up = 0, dn = 0;
+  (arr || []).forEach(function (v) { up += Math.max(0, sides - v); dn += Math.max(0, v - 1); });
+  return { up: up, dn: dn };
+}
+/* 多枚骰：把 delta（±档数）分摊进各骰点数，返回是否全部用掉 */
+function __diceArrAdjust(arr, delta, sides) {
+  var left = Math.abs(delta), sign = delta > 0 ? 1 : -1;
+  for (var i = 0; i < (arr || []).length && left > 0; i++) {
+    var room = sign > 0 ? (sides - arr[i]) : (arr[i] - 1);
+    var take = Math.min(room, left);
+    arr[i] += sign * take; left -= take;
+  }
+  return left === 0;
+}
+/* 控骰【手动按钮】：点数已确定后询问玩家是否使用 ±N 能力，而不是替他自动选"更有利"。
+   选项顺序固定（不使用 / +1..+S 升序 / -1..-S 降幂），双机同序 => 答案索引可直接映射。
+   opts.capPct：本次可适用的控骰上限（普通投掷=1.0 即最多±5；判定伤害=0.2 即最多±1）
+   opts.min   ：点数下限（多枚骰点数相加时=骰子枚数），缺省 1
+   opts.prefer：AI/自动结算的取点方向 'high'（缺省）或 'low'（如判定条件为 "< N"、校准难度为 "≤N"）
+   opts.arr / opts.arrSides：多枚骰时传各骰点数数组与单枚面数；调整会分摊到各骰上，
+               回调收到调整后的点数合计（每枚骰保持 1..arrSides）
    联机：本机玩家走 showChoiceModal（其联机包装自动登记序列号并广播答案）；
          远端位走 onlineDecideModal('p2')，两边在同一流位弹同一组选项，确定性一致。 */
-function __diceControlAsk(user, rawVal, diceMax, label, done) {
-  if (!battleState || !battleState[user]) { done(rawVal); return; }
+function __diceControlAsk(user, rawVal, diceMax, label, done, opts) {
+  if (!battleState || !battleState[user]) { done(rawVal, 0); return; }
+  opts = opts || {};
+  var capPct = (opts.capPct === undefined || opts.capPct === null) ? __CTRL_PCT_NORMAL : opts.capPct;
+  var minVal = (opts.min === undefined || opts.min === null) ? 1 : opts.min;
+  var preferLow = (opts.prefer === 'low');
+  var arr = opts.arr || null, arrSides = opts.arrSides || 0;
+  function __sumArr() { var s = 0; (arr || []).forEach(function (x) { s += x; }); return s; }
   var pct = __diceControlPct(user);
-  if (pct <= 0) { done(rawVal); return; }
-  var up = Math.min(rawVal + 1, diceMax), dn = Math.max(rawVal - 1, 1);
-  if (up === rawVal && dn === rawVal) { done(rawVal); return; }
-  var opts = [
-    '不使用控骰（保留 ' + rawVal + ' 点）',
-    (up !== rawVal) ? ('控骰 +1 → ' + up + ' 点') : ('控骰 +1（已是最大 ' + diceMax + ' 点）'),
-    (dn !== rawVal) ? ('控骰 -1 → ' + dn + ' 点') : ('控骰 -1（已是最小 1 点）')
-  ];
-  var title = '控骰 · ' + (label || '判定');
-  var desc = '本次投出 ' + rawVal + ' 点（' + diceMax + '面骰）。你有 ' + Math.round(Math.min(pct, 0.2) * 100) + '% 控骰能力，可将点数调整 ±1。';
-  var apply = function (o) { if (o === 1) done(up); else if (o === 2) done(dn); else done(rawVal); };
+  var steps = __diceControlSteps(user, capPct);
+  if (steps <= 0) { done(rawVal, 0); return; }
+  var maxUp = steps, maxDown = steps;
+  if (arr && arrSides) { var __sl = __diceArrSlack(arr, arrSides); maxUp = Math.min(steps, __sl.up); maxDown = Math.min(steps, __sl.dn); }
+  // 可选档位：先把能加的都列出（升序），再列出能减的（降幂），保证两端顺序完全一致
+  var moves = [], i, v;
+  for (i = 1; i <= maxUp; i++) { v = rawVal + i; if (v <= diceMax) moves.push({ d: i, v: v }); }
+  for (i = 1; i <= maxDown; i++) { v = rawVal - i; if (v >= minVal) moves.push({ d: -i, v: v }); }
+  if (!moves.length) { done(rawVal, 0); return; }
+  var opts_ = ['不使用控骰（保留 ' + rawVal + ' 点）'];
+  moves.forEach(function (mv) { opts_.push('控骰 ' + (mv.d > 0 ? '+' : '') + mv.d + ' → ' + mv.v + ' 点'); });
+  var title = '控骰 · ' + (label || '投掷');
+  var desc = '本次投出 ' + rawVal + ' 点。你有 ' + Math.round(pct * 100) + '% 控骰能力，每 20% 可将骰子点数 ±1，'
+    + '本次最多 ±' + steps + '（适用 ' + Math.round(Math.min(pct, capPct) * 100) + '% 控骰）'
+    + ((capPct <= __CTRL_PCT_JUDGE_DMG + 1e-9) ? '。判定伤害最多只适用 20% 控骰' : '')
+    + '。点数范围 ' + minVal + '~' + diceMax + '。';
+  var apply = function (o) {
+    if (o >= 1 && o <= moves.length) {
+      var mv = moves[o - 1];
+      if (arr) { __diceArrAdjust(arr, mv.d, arrSides); done(__sumArr(), mv.d); }
+      else done(mv.v, mv.d);
+    } else done(rawVal, 0);
+  };
   var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
-  if (__OL && user === 'p2') { onlineDecideModal('p2', title + '（对手）', desc, '', opts, apply); return; }
-  // 单机时 p2 是 AI：不能给玩家弹 AI 的控骰窗，沿用原来的"自动取更有利"（+1 且不超过骰面）
-  if (!__OL && user !== 'p1') { done(up); return; }
-  showChoiceModal(title, desc, '', opts, apply);
+  if (__OL && user === 'p2') { onlineDecideModal('p2', title + '（对手）', desc, '', opts_, apply); return; }
+  // 单机时 p2 是 AI：不能给玩家弹 AI 的控骰窗，自动取更有利（不超过骰面上限；判定条件为"小于"时取更低）
+  if (!__OL && user !== 'p1') {
+    var __d = preferLow ? -maxDown : maxUp;
+    if (__d === 0) { done(rawVal, 0); return; }
+    if (arr) { __diceArrAdjust(arr, __d, arrSides); done(__sumArr(), __d); }
+    else done(Math.min(Math.max(rawVal + __d, minVal), diceMax), __d);
+    return;
+  }
+  showChoiceModal(title, desc, '', opts_, apply);
 }
-function applyDiceControl(player, diceResult, diceMax) {
+/* 无弹窗的自动结算版（仅供无法插入弹窗的流程/兜底使用）：按档数取更有利结果。
+   capPct 缺省按「判定伤害」口径（±1），普通投掷请显式传 __CTRL_PCT_NORMAL。 */
+function applyDiceControl(player, diceResult, diceMax, capPct) {
   if (!battleState) return diceResult;
-  var diceControl = __diceControlPct(player);
-  if (diceControl <= 0) return diceResult;
-  // 判定伤害最多适用20%控骰能力，即最多±1点
-  var maxAdjust = Math.min(Math.floor(diceControl / 0.2), 1);
-  if (maxAdjust <= 0) return diceResult;
-  // 取更有利的结果（点数+1，不超过骰子最大值）
-  var adjusted = Math.min(diceResult + maxAdjust, diceMax);
+  if (capPct === undefined || capPct === null) capPct = __CTRL_PCT_JUDGE_DMG;
+  var steps = __diceControlSteps(player, capPct);
+  if (steps <= 0) return diceResult;
+  var adjusted = Math.min(diceResult + steps, diceMax);
   if (adjusted > diceResult) {
-    addBattleLog(player, '【控骰】判定骰子点数' + diceResult + '→' + adjusted + '（适用' + Math.min(diceControl,0.2)*100 + '%控骰）');
+    addBattleLog(player, '【控骰】骰子点数' + diceResult + '→' + adjusted + '（每20%=±1，本次±' + steps + '，适用' + Math.round(Math.min(__diceControlPct(player), capPct) * 100) + '%控骰）');
   }
   return adjusted;
 }
@@ -16542,17 +16790,17 @@ function checkGraveTrigger(player, card, reason) {
     }
     if (player === 'p1' && typeof showChoiceModal === 'function') {
       showChoiceModal('来自地狱的盒子·SP', '因卡的效果送入墓地', '选择一项：①4面骰判定，按点数回复音韵 ②对一名玩家造一次4面骰判定伤害', ['① 4面骰判定回音韵', '② 4面骰判定造伤害'], function (ci) {
-        if (ci === 0) judgePerform('p1', { kind: 'dice', sides: 4, label: '来自地狱的盒子·回音韵判定' }, __hellBoxRecover);
+        if (ci === 0) judgePerform('p1', { kind: 'dice', sides: 4, label: '来自地狱的盒子·回音韵判定', ctrlFull: true }, __hellBoxRecover);
         else if (ci === 1) judgePerform('p1', { kind: 'dice', sides: 4, label: '来自地狱的盒子·判定伤害' }, __hellBoxDamage);
       });
     } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2') {
       onlineDecideModal('p2', '来自地狱的盒子·SP（对手）', '因卡的效果送入墓地', '选择一项：①4面骰判定，按点数回复音韵 ②对一名玩家造一次4面骰判定伤害', ['① 4面骰判定回音韵', '② 4面骰判定造伤害'], function (ci) {
-        if (ci === 0) judgePerform('p2', { kind: 'dice', sides: 4, label: '来自地狱的盒子·回音韵判定' }, __hellBoxRecover);
+        if (ci === 0) judgePerform('p2', { kind: 'dice', sides: 4, label: '来自地狱的盒子·回音韵判定', ctrlFull: true }, __hellBoxRecover);
         else if (ci === 1) judgePerform('p2', { kind: 'dice', sides: 4, label: '来自地狱的盒子·判定伤害' }, __hellBoxDamage);
       });
     } else {
       // AI：回音韵（收益稳定）
-      judgePerform(player, { kind: 'dice', sides: 4, label: '来自地狱的盒子·SP判定' }, __hellBoxRecover);
+      judgePerform(player, { kind: 'dice', sides: 4, label: '来自地狱的盒子·SP判定', ctrlFull: true }, __hellBoxRecover);
     }
     return;
   }
@@ -16687,7 +16935,7 @@ function applyJudgeChain(side, pick, je, done) {
     if (side === 'p1') showChoiceModal(name, '将本次判定结果改为几点', '当前结果 ' + je.val, __jopts, function (i) { __set(i + 1); });
     else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && side === 'p2') {
       // 联机：对方改点选择的点数经第二个答案同步（对方 p1 弹窗广播索引）
-      Online.awaitAnswer({ label: '遥控骰子·改点（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '遥控骰子·改点（对手）', choices: __jopts }, function (v) {
         var __vi = (v === null || v === undefined) ? (__js - 1) : v;
         __set(Math.min(Math.max(1, __vi + 1), __js));
       });
@@ -16767,12 +17015,16 @@ function judgeAnimate(user, spec, cb) {
     return GameRNG.dice(spec.sides || 6); // 只取原始点数：控骰已改为由玩家手动决定
   }
   var finalVal = __isFixed ? spec.fixed : __roll();
-  // 控骰【手动按钮】：点数已知后询问玩家是否 ±1（不再替玩家自动选"更有利"的结果）
+  // 控骰【手动按钮】：点数已知后询问玩家是否 ±N（不再替玩家自动选"更有利"的结果）
+  // 上限口径：判定伤害最多适用 20% 控骰（±1）；非伤害类判定（御神签校准/回音韵判定等）属普通投掷，最多 100%（±5）
   if (!isCoin && !__isFixed && typeof __diceControlAsk === 'function') {
+    var __ctrlCap = spec.ctrlFull ? __CTRL_PCT_NORMAL : __CTRL_PCT_JUDGE_DMG;
+    // 判定条件为"< N / ≤ N"时，点数越低越有利：AI/自动结算方向取低
+    var __ctrlPrefer = (spec.cmp === '<' || spec.cmp === '<=') ? 'low' : 'high';
     __diceControlAsk(user, finalVal, spec.sides || 6, spec.label, function (v) {
       if (v !== finalVal) addBattleLog(user, '【控骰】判定骰子点数' + finalVal + '→' + v + '（手动选择）');
       __judgeAnimPlay(user, spec, false, v, cb);
-    });
+    }, { capPct: __ctrlCap, prefer: __ctrlPrefer });
     return;
   }
   __judgeAnimPlay(user, spec, isCoin, finalVal, cb);
@@ -17620,9 +17872,10 @@ var PERMANENT_ONPLAY_HANDLERS = {
     if (__ol) {
       var attackCards2 = p.hand.filter(function (c) { return c._category === 'attack_cards'; });
       if (!attackCards2.length) { addBattleLog(user, '【善意面具】手中没有攻击卡'); cb && cb(); return; }
-      Online.awaitAnswer({ label: '善意面具·选攻击卡（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '善意面具·选攻击卡（对手）', cards: attackCards2.map(function(c){ return c.name; }) }, function (v) {
         var ix = Array.isArray(v) ? v[0] : v;
-        __kindPlay((ix != null && ix >= 0 && ix < p.hand.length) ? p.hand[ix] : null);
+        // 候选表是 attackCards2，索引就必须映射回 attackCards2；用 p.hand[ix] 会选错卡（索引空间不一致）
+        __kindPlay((ix != null && ix >= 0 && ix < attackCards2.length) ? attackCards2[ix] : null);
       });
       return;
     }
@@ -17645,7 +17898,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
       });
     } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2' && battleState.p1.permanent.length) {
       // 联机：远端位等待对方选择破坏目标（p1 弹窗广播索引）
-      Online.awaitAnswer({ label: '妖刀五月雨·选破坏目标（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '妖刀五月雨·选破坏目标（对手）', cards: battleState.p1.permanent.map(function(c){ return c.name; }) }, function (v) {
         var ix = Array.isArray(v) ? v[0] : v;
         if (ix != null && ix >= 0 && ix < battleState.p1.permanent.length) {
           var sc = battleState.p1.permanent[ix];
@@ -17697,7 +17950,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
     }
     if ((user !== 'p1' && !__ol) || !p.hand.length) { draw(); return; }
     var hand = p.hand.slice();
-    if (__ol) { Online.awaitAnswer({ label: '巧匠之手·选献祭手卡（对手）' }, __qjApply); return; }
+    if (__ol) { Online.awaitAnswer({ label: '巧匠之手·选献祭手卡（对手）', cards: hand.map(function(c){ return c.name; }) }, __qjApply); return; }
     showCardPickerMulti(hand, '巧匠之手：选一张手卡献祭（回复2音韵），完成后抽1张', __qjApply);
   }
 };
@@ -17752,7 +18005,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
       updateBattleUI();
     }
     if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
-      Online.awaitAnswer({ label: '福金与穆宁·选[侵略]回收（对手）' }, __applyHuginn);
+      Online.awaitAnswer({ label: '福金与穆宁·选[侵略]回收（对手）', cards: pool.map(function(c,i){ return c.name + '（' + (zone[i]==='grave'?'墓地':'移出区') + '）'; }) }, __applyHuginn);
     } else {
       showCardPickerMulti(pool, '福金与穆宁：支付3音韵选一张[侵略]加入手卡（一局一次）', __applyHuginn);
     }
@@ -17787,7 +18040,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
           if (OL2) onlineDecideModal('p2', '智能手机②（对手）', '对谁造成3点理智伤害？', '', ['对手', '自己'], __phoneTarget);
           else showChoiceModal('智能手机②', '对谁造成3点理智伤害？', '', ['对手', '自己'], __phoneTarget);
         }
-        if (OL2) Online.awaitAnswer({ label: '智能手机②·选送墓手卡（对手）' }, __phoneHand);
+        if (OL2) Online.awaitAnswer({ label: '智能手机②·选送墓手卡（对手）', cards: h.map(function(c){ return c.name; }) }, __phoneHand);
         else showCardPickerMulti(h, '智能手机②：选一张手卡送入墓地', __phoneHand);
       }
     }
@@ -17834,10 +18087,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
         var rc = pool[ri], ii = p.removed.indexOf(rc); if (ii >= 0) p.removed.splice(ii, 1);
         p.hand.push(rc); __emitAddHand(user, rc, 'removed'); addBattleLog(user, '【巧匠之手】移出区【' + rc.name + '】加入手卡'); updateBattleUI();
       }
-      if (OL2) Online.awaitAnswer({ label: '巧匠之手·选移出卡回收（对手）' }, __qjRecover);
+      if (OL2) Online.awaitAnswer({ label: '巧匠之手·选移出卡回收（对手）', cards: pool.map(function(c){ return c.name; }) }, __qjRecover);
       else showCardPickerMulti(pool, '巧匠之手：选该卡以外、自己被移出的一张卡加入手卡', __qjRecover);
     }
-    if (OL2) Online.awaitAnswer({ label: '巧匠之手·选献祭手卡（对手）' }, __qjHand);
+    if (OL2) Online.awaitAnswer({ label: '巧匠之手·选献祭手卡（对手）', cards: h.map(function(c){ return c.name; }) }, __qjHand);
     else showCardPickerMulti(h, '巧匠之手：选一张手卡献祭（送入墓地回复音韵，随后移出游戏；一局一次）', __qjHand);
     return true;
   },
@@ -17879,7 +18132,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
           p.position = (p.position + 3) % 42; addBattleLog(user, '【绿宝之杖·择】②前进到第' + p.position + '格');
           checkMoveTriggers(user, 3, __oldG2); triggerTileEffect(user); updateBattleUI();
         }
-        if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择②·选效果区卡（对手）' }, __lvPerm);
+        if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择②·选效果区卡（对手）', cards: c2.map(function(c){ return c.name; }) }, __lvPerm);
         else showCardPickerMulti(c2, '② 选你效果处理区一张送入墓地', __lvPerm);
       } else {
         if (!p.grave.length) { addBattleLog(user, '【绿宝之杖·择】③ 墓地无卡可回收'); updateBattleUI(); return; }
@@ -17896,10 +18149,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
             if (gc.attribute === dc.attribute || gc.cost === dc.cost) { recoverCost(user, 1, '绿宝之杖·择'); addBattleLog(user, '【绿宝之杖·择】同色/同费回1音韵，当前' + p.cost); }
             updateBattleUI();
           }
-          if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择③·选手牌送墓（对手）' }, __lvHand);
+          if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择③·选手牌送墓（对手）', cards: h3.map(function(c){ return c.name; }) }, __lvHand);
           else showCardPickerMulti(h3, '再选手牌一张送入墓地', __lvHand);
         }
-        if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择③·选墓地回收（对手）' }, __lvGrave);
+        if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择③·选墓地回收（对手）', cards: g3.map(function(c){ return c.name; }) }, __lvGrave);
         else showCardPickerMulti(g3, '③ 选墓地一张加入手卡', __lvGrave);
       }
     }
@@ -18462,7 +18715,7 @@ function postUsePassiveHooks(user, card, done) {
             } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
               // 联机：对方选择破坏的手卡（其 p1 弹窗广播索引，双机同序）
               var __ewList = __wp.hand.map(function (c, i) { return { card: c, zone: 'hand', index: i }; });
-              Online.awaitAnswer({ label: '爱德华被动·破坏手卡（对手）' }, function (v) {
+              Online.awaitAnswer({ label: '爱德华被动·破坏手卡（对手）', cards: (who==='p2') ? __ewList.map(function(x){ return x.card.name; }) : __wp.hand.map(function(c,i){ return '第'+(i+1)+'张（内容保密）'; }) }, function (v) {
                 var __vi2 = Array.isArray(v) ? v[0] : v;
                 if (__vi2 != null && __vi2 >= 0 && __vi2 < __ewList.length) {
                   var __pc2 = __ewList[__vi2].card, __ix5 = __wp.hand.indexOf(__pc2);
@@ -18563,7 +18816,7 @@ function postUsePassiveHooks(user, card, done) {
           next();
         }, true);
       } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
-        Online.awaitAnswer({ label: '结衣被动·移出卡（对手）' }, function (v) {
+        Online.awaitAnswer({ label: '结衣被动·移出卡（对手）', cards: __yList.map(function(x,i){ return (x.zone==='permanent') ? ((x.card&&x.card.name)||'（未知卡）') : ('（'+(x.zone==='hand'?'手牌':'盖伏')+'第'+(i+1)+'项·内容保密）'); }) }, function (v) {
           var __yi = Array.isArray(v) ? v[0] : v;
           if (__yi != null && __yi >= 0 && __yi < __yList.length) {
             var __pk2 = __yList[__yi], __arr2 = __yFp[__pk2.zone], __ix2 = __arr2.indexOf(__pk2.card);
@@ -18797,7 +19050,7 @@ function chooseTargetPlayer(user, card, cb) {
       var __tt3 = parseTargetType(card.effect || card.text || '');
       var __tOpts = __onlineTargetNeutralOptions(__tt3);
       if (__tOpts === null) { cb('p2'); return; } // 纯自身：无决策点
-      Online.awaitAnswer({ label: '选择目标玩家（对手）' }, function (v) {
+      Online.awaitAnswer({ label: '选择目标玩家（对手）', choices: __tOpts.map(function(t){ return t==='self'?'自己':'对手'; }) }, function (v) {
         if (v === null || v === undefined) { cb(null); return; }
         cb(__tOpts[v] === 'self' ? 'p2' : 'p1');
       });
@@ -18820,7 +19073,7 @@ function chooseZoneCard(user, who, zone, title, cb) {
   if (!arr.length) { cb(null, -1); return; }
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
     if (user === 'p2') {
-      Online.awaitAnswer({ label: title + '（对手）' }, function (v) {
+      Online.awaitAnswer({ label: title + '（对手）', cards: arr.map(function(c,i){ return (zone==='hand' && who!=='p2') ? ('第'+(i+1)+'张（内容保密）') : ((c&&c.name)||'（未知卡）'); }) }, function (v) {
         var ix = Array.isArray(v) ? v[0] : v;
         if (ix === null || ix === undefined || ix < 0 || ix >= arr.length) { cb(null, -1); return; }
         cb(arr[ix], ix);
@@ -19300,12 +19553,28 @@ var NetSync = {
     uiActivateFaceDown:    function (i) { return { type: 'fd', idx: i, name: nmZone('faceDownCards', i) }; },
     activatePermanentCard: function (i) { return { type: 'perm', idx: i, name: nmZone('permanent', i) }; }
   };
+  /* 需要"客人先在本机把选择做好、再把结果随意图发过去"的入口。
+     返回 true = 已接管（异步进行中）；返回 false = 交回普通意图路径。
+     这样做客人在自己机器上点了立刻有反馈，而不是等房主回问一个没有选项的空白输入框。 */
+  var LOCAL_PICK_ACTS = {
+    doSacrifice: function () {
+      var h = hand();
+      if (!h.length || typeof showCardPickerMulti !== 'function') return false;
+      showCardPickerMulti(h.slice(), '选择要献祭的手卡（送入墓地并回复音韵值）', function (idx) {
+        if (idx === null || idx === undefined || idx < 0) return;
+        var c = h[idx];
+        Online.guestSendAct({ type: 'sacrifice', idx: idx, name: c ? (c.name || '') : '' });
+      });
+      return true;
+    }
+  };
   Object.keys(ACTS).forEach(function (fn) {
     var orig = window[fn];
     if (typeof orig !== 'function') return;
     var wrapped = function () {
       try {
         if (typeof Online !== 'undefined' && Online.active && Online.isGuest) {
+          if (LOCAL_PICK_ACTS[fn] && LOCAL_PICK_ACTS[fn].apply(null, arguments)) return;
           var a = ACTS[fn].apply(null, arguments);
           if (a) { Online.guestSendAct(a); return; }
         }
