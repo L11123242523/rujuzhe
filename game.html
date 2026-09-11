@@ -4961,6 +4961,7 @@ var Online = {
       if(typeof NetSync!=='undefined') NetSync.applySnapshot(s);
     }catch(e){ console.error('套用快照失败',e); }
     this._lastSnapApplied=(s.n||0); this._snapRecv=(this._snapRecv||0)+1;
+    this._clearActPending();          // 乐观 UI 的"已提交"提示到此结束（自己出的牌已经有结果了）
     this.status('已与房主同步（快照 #'+(s.n||'?')+'）');
     if(!this._enteredBattle && battleState){
       this._enteredBattle=true;
@@ -5181,7 +5182,9 @@ var Online = {
     if(!this.active || this.isGuest) return;
     var self=this;
     if(this._snapTimer) return;                       // 已有排队的推送
-    this._snapTimer=setTimeout(function(){ self._snapTimer=null; self._sendSnapshotNow(); }, 90);
+    // 去抖 30ms：实测这段去抖直接计入玩家感知的往返（90ms 版整轮 ~250ms）。
+    // 一次动作触发的多次 updateBattleUI 基本同步发生，30ms 足够合并；漏掉的由一致性巡检兜底。
+    this._snapTimer=setTimeout(function(){ self._snapTimer=null; self._sendSnapshotNow(); }, 30);
   },
   /* 权威状态指纹：只读 battleState，**不能**用 buildSnapshot 来算 ——
      buildSnapshot 里有 `t: Date.now()`（每次都不同，指纹永远不等），而且 encode 会把卡定义
@@ -5255,7 +5258,39 @@ var Online = {
       return true;
     }
     this._send({t:'relay', m:{k:'act', a:a}});
+    // 乐观 UI：客人这一下点击到看见结果，实测要 ~250ms（两个网络单程）。
+    // 这段空白期以前什么都没有，玩家会以为"没点到"。立刻给一条不阻塞操作的浮动提示，
+    // 收到快照后自动消失；超过 1.2 秒还在等就显示已等秒数（让人知道不是卡死）。
+    this._markActPending(a);
     return true;
+  },
+  _actLabel:function(a){
+    var m={card:'出牌',roll:'投骰移动',phase:'进入下个阶段',end:'结束回合',drawCost:'抽卡',
+           sacrifice:'献祭',skill:'发动角色技能',event:'发动事件卡',music:'发动乐谱卡',
+           fdPlace:'盖伏一张卡',fd:'发动盖伏卡',perm:'发动永续卡',surrender:'认输'};
+    var t=(a&&a.type)||'';
+    return (m[t]||t||'操作')+((a&&a.name)?('【'+a.name+'】'):'');
+  },
+  _markActPending:function(a){
+    var self=this;
+    this._actPending={label:this._actLabel(a),at:Date.now()};
+    if(this._actTimer) clearTimeout(this._actTimer);
+    var tick=function(){
+      if(!self._actPending) return;
+      var s=(Date.now()-self._actPending.at)/1000;
+      self._showWaiting(true, s<1.2
+        ? ('已提交：'+self._actPending.label+'（等待房主结算…）')
+        : ('仍在等待房主结算：'+self._actPending.label+'（已等 '+s.toFixed(1)+' 秒）'));
+      self._actTimer=setTimeout(tick,300);
+    };
+    tick();
+  },
+  _clearActPending:function(){
+    if(this._actTimer){ clearTimeout(this._actTimer); this._actTimer=null; }
+    if(!this._actPending) return;
+    this._actPending=null;
+    // 若同时还有"等对手回答"的提示在，就不要关掉它
+    if(!Object.keys(this._asks||{}).length) this._showWaiting(false);
   },
   /* ---------------- 掉线重连 ----------------
      权威式架构下重连很自然：
