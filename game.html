@@ -7625,15 +7625,30 @@ function initBattle() {
     return true;
   }
   var p1Deck = [];
-  for (var i = 0; i < 8; i++) if (deckConfig.p1.items[i]) p1Deck.push(deckConfig.p1.items[i]);
+  for (var i = 0; i < 8; i++) if (deckConfig.p1.items[i]) {
+    // 口径修正（用户确认）：小野葵被动里的"携带卡"指**整副牌组 12 张**（8道具 + 4角色携带卡），
+    // 8 张道具卡同样享受"首次使用费用-1"。以前只标了 4 张 carries，导致被动实际覆盖不全。
+    // 同时每局把 _aoiDiscountUsed 重置：卡对象是跨局复用的，不重置会导致第二局起被动直接失效。
+    deckConfig.p1.items[i]._fromDeck = true;
+    deckConfig.p1.items[i]._aoiDiscountUsed = false;
+    p1Deck.push(deckConfig.p1.items[i]);
+  }
   for (var i = 0; i < 4; i++) if (deckConfig.p1.carries[i] && __teamCarryOk('p1', deckConfig.p1.carries[i])) {
     deckConfig.p1.carries[i]._isCarry = true;
+    deckConfig.p1.carries[i]._fromDeck = true;
+    deckConfig.p1.carries[i]._aoiDiscountUsed = false;
     p1Deck.push(deckConfig.p1.carries[i]);
   }
   var p2Deck = [];
-  for (var i = 0; i < 8; i++) if (deckConfig.p2.items[i]) p2Deck.push(deckConfig.p2.items[i]);
+  for (var i = 0; i < 8; i++) if (deckConfig.p2.items[i]) {
+    deckConfig.p2.items[i]._fromDeck = true;
+    deckConfig.p2.items[i]._aoiDiscountUsed = false;
+    p2Deck.push(deckConfig.p2.items[i]);
+  }
   for (var i = 0; i < 4; i++) if (deckConfig.p2.carries[i] && __teamCarryOk('p2', deckConfig.p2.carries[i])) {
     deckConfig.p2.carries[i]._isCarry = true;
+    deckConfig.p2.carries[i]._fromDeck = true;
+    deckConfig.p2.carries[i]._aoiDiscountUsed = false;
     p2Deck.push(deckConfig.p2.carries[i]);
   }
   
@@ -18575,7 +18590,8 @@ function computeActualCost(card, user) {
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     actual = cost + (card._escalateCount || 0);
   }
-  if (p._aoiPassive && card._isCarry && !card._aoiDiscountUsed) {
+  // 小野葵：整副牌组（8道具 + 4角色携带卡 = 12张）每张的"首次使用"费用-1
+  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) {
     actual = Math.max(0, cost - 1);
     card._aoiDiscountUsed = true;
     addBattleLog(user, '【小野葵被动】携带卡首次使用费用-1（原' + cost + '费，现' + actual + '费）');
