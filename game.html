@@ -2798,6 +2798,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   #battleScreen .opponent-area{display:flex;align-items:center;justify-content:center;gap:10px;
     flex-wrap:nowrap;padding:6px 10px;margin-bottom:0;min-height:0;}
   #battleScreen .opponent-area #p2ZoneCounts{white-space:nowrap;}
+  /* 对手牌组堆：与对手区同一行，所以尺寸要比自己的更紧凑 */
+  #battleScreen .opponent-area .opp-deck-zone{width:52px;height:auto;padding:2px 3px;flex:0 0 auto;background:none;border:none;box-shadow:none;}
+  #battleScreen .opponent-area .opp-deck-zone .deck-pile{width:40px;height:44px;}
+  #battleScreen .opponent-area .opp-deck-zone .pile-layer,
+  #battleScreen .opponent-area .opp-deck-zone .pile-top{height:34px;}
+  #battleScreen .opponent-area .opp-deck-zone .zone-name{font-size:9px;line-height:1.05;}
+  #battleScreen .opponent-area .opp-deck-zone .zone-count{font-size:11px;padding:0 4px;}
   #battleScreen .opponent-area .permanent-slots{flex:0 0 auto;min-height:0;flex-wrap:nowrap;gap:6px;}
   #battleScreen .opponent-area .permanent-slot{width:56px;height:70px;}
   #battleScreen .opponent-area .permanent-slot .slot-img{width:42px;height:42px;}
@@ -3107,6 +3114,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <div id="hitFlash"></div>
   <div class="battle-main-area">
     <div class="opponent-area">
+      <div class="deck-zone opp-deck-zone" id="p2DeckZone" title="对手牌组（张数可见，最上方被公开时显示卡面）">
+        <div class="deck-pile" id="p2DeckPile">
+          <div class="pile-layer l1"></div>
+          <div class="pile-layer l2"></div>
+          <div class="pile-layer l3"></div>
+          <div class="pile-top" id="p2DeckTop">
+            <img id="p2DeckTopImg" alt="对手牌组顶公开的卡">
+            <span class="pile-top-label" id="p2DeckTopLabel">牌组</span>
+          </div>
+          <div class="zone-count" id="p2DeckCount">0</div>
+        </div>
+        <div class="zone-name">对手牌组</div>
+      </div>
       <div class="opp-zone-counts" id="p2ZoneCounts" style="font-size:12px;color:#cde;padding:2px 4px;">对手 手牌×0 · 区域×0</div>
       <div style="display:flex;gap:6px;padding:2px 4px;flex-wrap:wrap;">
         <button onclick="showOppZone('grave')" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#cde;font-size:11px;padding:2px 8px;cursor:pointer;">⚰️ 墓地 <span id="p2GraveN">0</span></button>
@@ -8120,22 +8140,24 @@ function revealDeckTopNow(who, reason) {
 function __renderDeckPile() {
   try {
     if (typeof document === 'undefined') return;
-    var top = document.getElementById('p1DeckTop');
-    if (!top) return;
-    var img = document.getElementById('p1DeckTopImg');
-    var label = document.getElementById('p1DeckTopLabel');
-    var card = deckTopReveal ? deckTopReveal.p1 : null;
-    if (card) {
-      top.classList.add('revealed');
-      top.title = '牌组最上方（已公开）：' + (card.name || '');
-      if (img) { img.src = card.image_url || ''; img.alt = card.name || ''; }
-      if (label) label.textContent = '';
-    } else {
-      top.classList.remove('revealed');
-      top.title = '牌组（点击查看）';
-      if (img) { img.removeAttribute('src'); img.alt = ''; }
-      if (label) label.textContent = '牌组';
-    }
+    ['p1', 'p2'].forEach(function (who) {
+      var top = document.getElementById(who + 'DeckTop');
+      if (!top) return;   // 对方牌组堆在某些布局下可能没有（例如窄屏隐藏），不是错误
+      var img = document.getElementById(who + 'DeckTopImg');
+      var label = document.getElementById(who + 'DeckTopLabel');
+      var card = deckTopReveal ? deckTopReveal[who] : null;
+      if (card) {
+        top.classList.add('revealed');
+        top.title = (who === 'p1' ? '你的牌组最上方（已公开）：' : '对手牌组最上方（已公开）：') + (card.name || '');
+        if (img) { img.src = card.image_url || ''; img.alt = card.name || ''; }
+        if (label) label.textContent = '';
+      } else {
+        top.classList.remove('revealed');
+        top.title = who === 'p1' ? '牌组（点击查看）' : '对手牌组（张数可见）';
+        if (img) { img.removeAttribute('src'); img.alt = ''; }
+        if (label) label.textContent = '牌组';
+      }
+    });
   } catch (e) {}
 }
 /* 准备阶段抽卡动画：从牌组堆飞到"抽到"的位置——纯视觉，不回调、不阻塞（因此不参与测试的静默判定） */
@@ -11982,6 +12004,9 @@ function updateBattleUI() {
     }
     var __p2g = document.getElementById('p2GraveN');
     if (__p2g) __p2g.textContent = battleState.p2.grave.length;
+    // 对手牌组堆的数量角标（与 p1 的 #deckCount 同构；可见的只有张数，卡面只在被公开时显示）
+    var __p2dc = document.getElementById('p2DeckCount');
+    if (__p2dc) __p2dc.textContent = (battleState.p2.deck || []).length;
     var __p2r = document.getElementById('p2RemovedN');
     if (__p2r) __p2r.textContent = ((battleState.p2.removed || []).length + (battleState.p2.removedFromGame || []).length);
     flashStat('p1Sync', battleState.p1.sync);
