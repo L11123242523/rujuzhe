@@ -8090,6 +8090,7 @@ function startTurn() {
 
 // 将效果压入栈
 function pushEffect(effect) {
+  if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;   // 活动心跳
   if (!battleState.effectStack) battleState.effectStack = [];
   effect.id = Date.now() + Math.random();
   effect.dependencies = effect.dependencies || {};
@@ -8099,6 +8100,7 @@ function pushEffect(effect) {
 }
 // 对称弹栈（修复 A5：effectStack 此前只 push 从不 pop 的 grow-only 泄漏）
 function popEffect(effect) {
+  if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;   // 活动心跳
   if (!battleState.effectStack || !effect) return;
   var i = battleState.effectStack.indexOf(effect);
   if (i >= 0) battleState.effectStack.splice(i, 1);
@@ -8516,13 +8518,20 @@ function resolveSimultaneous(tp, candidates, allDone) {
     function step() {
       if (i < 0) { addBattleLog('system', '═══ 连锁全部结算完成 ═══'); if (typeof ChainAnim !== 'undefined') ChainAnim.end(); if (typeof allDone === 'function') allDone(); return; }
       var idx = i, node = chain[i--];
-      if (typeof ChainAnim !== 'undefined') ChainAnim.resolving(idx, node.label);
-      if (typeof node.alive === 'function' && !node.alive()) { if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, true, node.label); addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理'); setTimeout(step, 170); return; }
-      addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
       var fired = false;
       function next() { if (fired) return; fired = true; if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, false, node.label); setTimeout(step, 170); }
-      try { if (typeof node.fire === 'function') node.fire(next); else next(); }
-      catch (e) { console.error('resolveSimultaneous node error', node && node.label, e); next(); }
+      // 异常安全：本环的日志/动画/alive 判定任何抛出都必须继续推进，否则 allDone（调用方的收尾：释放结算锁）永不执行
+      try {
+        if (typeof ChainAnim !== 'undefined') ChainAnim.resolving(idx, node.label);
+        if (typeof node.alive === 'function' && !node.alive()) { if (typeof ChainAnim !== 'undefined') ChainAnim.done(idx, true, node.label); addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理'); setTimeout(step, 170); return; }
+        addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
+        if (typeof node.fire === 'function') node.fire(next); else next();
+      }
+      catch (e) {
+        try { console.error('resolveSimultaneous node error', node && node.label, e); } catch (e2) {}
+        try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
+        next();
+      }
     }
     step();
   }
@@ -8632,10 +8641,22 @@ function resolveChainStack(effect, onDone) {
     while (__pgIdx < list.length) {
       var pg = list[__pgIdx++];
       if (!pg || !pg.card) continue;
-      var __pp = battleState[pg.player]; if (!__pp) continue;
-      (__pp.grave = __pp.grave || []).push(pg.card);
-      addBattleLog(pg.player, '【' + (pg.name || pg.card.name || '') + '】结算完毕，送入墓地');
-      if (typeof checkGraveTrigger === 'function') checkGraveTrigger(pg.player, pg.card, 'use');
+      // 逐张隔离：某张卡的送墓触发（checkGraveTrigger → 该卡SP/被动）抛错时，
+      // 不能让异常打断逆结算循环，否则 _chainLock 会永久保留（全场手卡被判定为"结算中"）
+      try {
+        var __pp = battleState[pg.player]; if (!__pp) continue;
+        // 统一走送墓出口（顺带覆盖「发动后直接销毁不进墓」的卡：它们不该出现在墓地）
+        if (typeof moveCardToGrave === 'function') {
+          moveCardToGrave(pg.player, pg.card, 'use');
+        } else {
+          (__pp.grave = __pp.grave || []).push(pg.card);
+          addBattleLog(pg.player, '【' + (pg.name || pg.card.name || '') + '】结算完毕，送入墓地');
+          if (typeof checkGraveTrigger === 'function') checkGraveTrigger(pg.player, pg.card, 'use');
+        }
+      } catch (e) {
+        try { console.error('连锁送墓触发异常（已跳过该张，连锁继续）', pg && pg.card && pg.card.name, e); } catch (e2) {}
+        try { addBattleLog('system', '【连锁】送墓触发【' + ((pg.card && pg.card.name) || '?') + '】异常，已跳过并继续结算（不影响其余连锁环）'); } catch (e3) {}
+      }
     }
   }
   function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); }
@@ -8707,13 +8728,24 @@ function resolveChainStack(effect, onDone) {
     }
     __flushGrave(); // 本链环已逆结算完成：其用卡此刻进墓并触发送墓时点
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('C' + (i + 1) + (__lostSet[i] ? ' 失去对象' : ' 结算完成'), __lostSet[i] ? 'flash-lost' : 'flash-ok');
-    setTimeout(__step, 340);
+    setTimeout(__stepSafe, 340);
   }
-  __step();
+  // 异常安全：__step 内任何抛出都必须继续推进（或收尾），绝不能让逆结算循环断掉——
+  // 断掉会使 _chainLock 永久为 true，全场手卡都会被判为"效果/连锁结算中"而无法发动。
+  function __stepSafe() {
+    try { __step(); }
+    catch (e) {
+      try { console.error('resolveChainStack 逆结算异常（已强制收尾，释放连锁锁）', e); } catch (e2) {}
+      try { addBattleLog('system', '【连锁】逆结算异常，已强制收尾并释放结算锁：' + ((e && e.message) || e)); } catch (e3) {}
+      try { __ci = -1; __endChain(); } catch (e4) { try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; } catch (e5) {} }
+    }
+  }
+  __stepSafe();
 }
 function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
+  __eeMarkInc('beforeEffectExecution·效果执行前连锁窗口');
   if(__eeB)__eeB._resolveDepth=(__eeB._resolveDepth||0)+1;
   var __releasedB=false;
   function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); }
@@ -8922,6 +8954,7 @@ function accumulateMovePassives(player, amount, oldPos) {
 function executeMoveEffect(effect) {
   // 结算锁：移动落地与踩格级联期间禁止手动插入发动
   var __eeM=(typeof effectEngine!=='undefined')?effectEngine:null;
+  __eeMarkInc('executeMoveEffect·移动投掷结算');
   if(__eeM)__eeM._resolveDepth=(__eeM._resolveDepth||0)+1;
   var __releasedM=false;
   function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); }
@@ -12210,6 +12243,8 @@ var LOG_META = {
 };
 var battleLogs = []; // 结构化日志（可导出/回看）
 function addBattleLog(type, msg) {
+  // 效果活动心跳：任何一条战斗日志都说明"效果还在推进"，看门狗据此判断锁是否真的僵住了
+  if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;
   var rec = { turn: (battleState && battleState.turn) || 0,
               phase: (battleState && battleState.phase) || '',
               type: type || 'system', msg: String(msg == null ? '' : msg), t: Date.now() };
@@ -12477,6 +12512,75 @@ var effectEngine = {
   isProcessing: false,
   _resolveDepth: 0 // 效果结算嵌套深度：>0 或连锁逆结算中，禁止手动插入发动
 };
+
+/* ============================================================
+ * 效果结算锁 · 看门狗（用户报"有概率卡死"）
+ * ------------------------------------------------------------
+ * 现象：一串效果（例：先哲之"馈赠"送墓【来自地狱的盒子】触发其SP）跑完之后，
+ *       结算锁没释放 → **所有手卡都提示"效果/连锁结算中，无法插入发动"，实际早已结算完**。
+ * 口径（用户确认）：只要文字描述因满足发动条件而被发动，就属于"效果产生"并应开启连锁
+ *   —— 道具卡 / 角色被动 / 角色SP / 角色携带卡 …… 一律如此。
+ *
+ * 这里做的是一道**兜底**（不是根因修复，根因要在具体泄漏路径上找）：
+ *   有锁 且 没有任何人在等待（无弹窗、无待答问题、无判定/抽卡动画）且 **10 秒内没有任何效果活动**
+ *   → 判定为残留锁，自动复位，并**明确写日志**（绝不静默），让玩家看得见、也便于回传定位。
+ *   任何一条战斗日志、任何一次 push/pop 效果都会重置这 10 秒计时，所以正常的长连锁不会误触发。
+ * ============================================================ */
+/* 记录最近一次"结算深度 +1"发生的源码位置，用于把残留锁定位到具体调用点。
+   任何一次 +1 都会覆盖它；复位时把最后一次 +1 的位置写进日志 → 玩家回传日志即可定位泄漏路径。 */
+function __eeMarkInc(site) {
+  try {
+    if (typeof effectEngine === 'undefined' || !effectEngine) return;
+    var stack = '';
+    try { stack = (new Error()).stack || ''; } catch (e) {}
+    effectEngine._lastInc = { site: site, at: Date.now(), stack: stack.split('\n').slice(1, 4).join(' | ') };
+  } catch (e) {}
+}
+function __eeIdleWatchdog() {
+  try {
+    if (typeof effectEngine === 'undefined' || !effectEngine) return;
+    if (typeof battleState === 'undefined' || !battleState) return;
+    var ee = effectEngine;
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
+    if (!locked) { ee._stuckSince = 0; return; }
+    // 有人还在等 → 这不是残留，不计时
+    var waiting = false;
+    try { if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) waiting = true; } catch (e) {}
+    try { if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) waiting = true; } catch (e) {}
+    try { if (typeof Online !== 'undefined' && Online && Online.active && Object.keys(Online._asks || {}).length) waiting = true; } catch (e) {}
+    try {
+      var da = document.getElementById('diceAnimationArea');
+      if (da && da.style && da.style.display && da.style.display !== 'none') waiting = true;
+      var dr = document.getElementById('drawAnimOverlay');
+      if (dr && dr.children && dr.children.length) waiting = true;
+    } catch (e) {}
+    if (waiting) { ee._stuckSince = 0; return; }
+    if (!ee._stuckSince) { ee._stuckSince = Date.now(); return; }
+    if (Date.now() - ee._stuckSince < 10000) return;
+    // 复位（可见地）
+    var wasDepth = ee._resolveDepth, wasLock = ee._chainLock;
+    var lastInc = ee._lastInc || null;
+    ee._resolveDepth = 0; ee._chainLock = false; ee._stuckSince = 0;
+    if (battleState.effectStack) battleState.effectStack.length = 0;
+    addBattleLog('system', '【效果锁】检测到结算锁残留（空闲超过10秒：深度' + wasDepth + '/连锁锁' + (wasLock ? '开' : '关') +
+      '），已自动复位；如果这一步之后有卡牌效果没生效，请把这条日志回传');
+    if (lastInc && lastInc.site) {
+      addBattleLog('system', '【效果锁】最后一次上锁位置：' + lastInc.site + '（' + Math.round((Date.now() - lastInc.at) / 1000) + '秒前）');
+    } else {
+      addBattleLog('system', '【效果锁】未记录到上锁位置（本次会话内没有经过带标记的 +1 调用点）');
+    }
+    try { if (lastInc && lastInc.stack) console.warn('[效果锁] 残留锁最后一次上锁调用栈：', lastInc.stack); } catch (e) {}
+    // 联机：客人的"手卡能不能出"是房主随快照下发的（NetSync.playableOf），
+    // 所以房主这边复位后必须**立刻补推一次**，否则客人那边还要继续锁着
+    try {
+      if (typeof Online !== 'undefined' && Online && Online.active && !Online.isGuest && typeof Online._sendSnapshotNow === 'function') {
+        Online._sendSnapshotNow();
+      }
+    } catch (e) {}
+    try { updateBattleUI(); } catch (e) {}
+  } catch (e) {}
+}
+try { setInterval(__eeIdleWatchdog, 2000); } catch (e) {}
 // 效果正在结算（含连锁逆结算）时，不允许手动另发效果；连锁询问发生在上锁之前，故不拦截合法连锁
 function __resolveLocked() {
   if (typeof effectEngine === 'undefined' || !effectEngine) return false;
@@ -13317,8 +13421,8 @@ function __compileBody(t) {
   var dcs = t.match(/下次投掷改为\s*(\d+)\s*面骰/);
   var dja = t.match(/判定伤害\s*([-+])\s*(\d+)/);
   var __adj = dja ? (dja[1] === '-' ? -+dja[2] : +dja[2]) : 0;
-  if (dcm2) ops.push({ op: 'set_dice_sides', sides: +dcm2[2], count: +dcm2[1], judgeAdj: __adj });
-  else if (dcs) ops.push({ op: 'set_dice_sides', sides: +dcs[1], count: 1, judgeAdj: __adj });
+  if (dcm2) ops.push({ op: 'set_dice_sides', sides: +dcm2[2], count: +dcm2[1], judgeAdj: __adj, toTarget: /选一名玩家|一名玩家|其/.test(t) });
+  else if (dcs) ops.push({ op: 'set_dice_sides', sides: +dcs[1], count: 1, judgeAdj: __adj, toTarget: /选一名玩家|一名玩家|其/.test(t) });
   // 持续回复：每回合回复N同步（持续M回合）
   var rg = t.match(new RegExp('每回合回复\\s*' + __NUM + '\\s*点?同步[^。；]*?持续\\s*' + __NUM + '\\s*回合'));
   if (rg) ops.push({ op: 'regen_sync', amount: __toNum(rg[1]), turns: __toNum(rg[2]) });
@@ -14088,6 +14192,14 @@ function __offensiveBuffSum(user, opt) {
   var p = battleState[user], add = 0, logs = [];
   if (p.attackBuff) { add += Math.floor((p.attackBuff || 0) / 2); }
   if (opt.judge && p._judgeDamageBonus) { add += p._judgeDamageBonus; logs.push('判定伤害+' + p._judgeDamageBonus); }
+  // 20面骰/碰碰冰茶：「因此次投掷造成的判定伤害-N」——该玩家下一次造成判定伤害时结算一次并清空。
+  // （口径提示：与作者确认前，我按"该玩家下一次判定伤害整体-N"实现；若原意是"仅那一次投掷衍生出的伤害"，
+  //   只需把这里换成带掷骰来源标记的判断，落点仍是这一处。）
+  if (opt.judge && p._nextJudgeAdj) {
+    add += p._nextJudgeAdj;
+    logs.push('改骰判定伤害' + (p._nextJudgeAdj > 0 ? '+' : '') + p._nextJudgeAdj);
+    p._nextJudgeAdj = 0;
+  }
   if ((opt.kind === 'sanity' || /理智/.test(opt.attr || '')) && p._intellectBonus) { add += p._intellectBonus; logs.push('理智伤害+' + p._intellectBonus); }
   var atkA = opt.attr || ((typeof getTeamAttribute === 'function') ? getTeamAttribute(user) : (p.captain && p.captain.attribute));
   var tgt = battleState[opt.target], defA = tgt ? ((typeof getTeamAttribute === 'function') ? getTeamAttribute(opt.target) : (tgt.captain && tgt.captain.attribute)) : null;
@@ -14513,7 +14625,16 @@ function runOneOp(op, ctx, next) {
     }
     case 'modify_dice': p._modifyDiceNext = true; break;
     case 'roll_dice': { var __sd = op.sides || 6; var __rv = GameRNG.dice(__sd); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }
-    case 'set_dice_sides': p._nextDiceSides = op.sides; p._nextDiceCount = op.count || 1; p._nextJudgeAdj = op.judgeAdj || 0; addBattleLog(user, '下次投掷改为' + (op.count || 1) + '枚' + op.sides + '面骰'); break;
+    case 'set_dice_sides': {
+      // 卡面口径：「自己回合选一名玩家，其下次投掷改为N面骰」——落点是**被选中的那名玩家**，
+      // 不是使用者自己（旧实现固定写 p=使用者，导致引擎弹了目标选择却把效果挂在自己身上）
+      var __dsw = op.toTarget ? target : user;
+      var __dsp = battleState[__dsw] || p;
+      __dsp._nextDiceSides = op.sides; __dsp._nextDiceCount = op.count || 1; __dsp._nextJudgeAdj = op.judgeAdj || 0;
+      addBattleLog(user, (__dsw === user ? '' : '目标（' + (__dsw === 'p1' ? '你' : 'AI') + '）') + '下次投掷改为' + (op.count || 1) + '枚' + op.sides + '面骰' + (op.judgeAdj ? ('（该次投掷的判定伤害' + op.judgeAdj + '）') : ''));
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      break;
+    }
     case 'regen_sync': p._regen = { amount: op.amount, turns: op.turns }; addBattleLog(user, '持续回复：每回合回' + op.amount + '同步，持续' + op.turns + '回合'); break;
     case 'interrupt_move': { var iw = op.who === 'self' ? user : target; if (iw !== user && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, iw)) break; battleState[iw]._moveInterrupted = true; addBattleLog(user, '打断' + (iw === user ? '自己' : '目标') + '移动'); break; }
     case 'next_cost_down': p._nextCostReduction = op.amount; if (op.alsoTarget && target !== user) q._nextCostReduction = op.amount; break;
@@ -14746,6 +14867,7 @@ function runOneOp(op, ctx, next) {
 }
 function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
+  __eeMarkInc('runOps·效果步骤序列');
   if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
   var i = 0;
   (function step() {
@@ -14883,6 +15005,7 @@ function dispatchStep(text, ctx, next) {
 
 
 function executeEffectSteps(steps, context, finalCallback, showLog) {
+  __eeMarkInc('executeEffectSteps·逐步骤结算');
   var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null; if(__ee2)__ee2._resolveDepth=(__ee2._resolveDepth||0)+1;
   // 嵌套链保护：保存外层日志与自动结算标志，链结束后恢复，避免外层 AI 链被内层提前复位
   var __prevLog = effectEngine.effectLog;
@@ -16921,6 +17044,14 @@ function moveCardToGrave(player, card, reason) {
   if (!__pg || !card) return false;
   // 蓝图复制的卡离场送入墓地：变回蓝图原本卡面与效果
   if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
+  // 「发动后直接销毁不进墓」（底牌 / 制裁之刃）：卡面明确不进墓地 → 此处拦截，卡直接销毁。
+  // 旧实现只在指令里置 _consumeOnUse，全文件没有第二处读它（死标志），两张卡照样进墓。
+  if (card._consumeOnUse && (reason === 'use' || reason === undefined || reason === null)) {
+    card._consumeOnUse = false;   // 用完即清：避免卡对象跨局复用把标志带进下一局（小野葵 _aoiDiscountUsed 同类事故）
+    addBattleLog(player, '【' + (card.name || '?') + '】发动后直接销毁（不进墓）');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    return true;
+  }
   (__pg.grave = __pg.grave || []).push(card);
   if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, card, reason || 'effect');
   return true;
@@ -17284,6 +17415,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   }
   // 结算锁：伤害响应窗/结算期间禁止手动插入发动
   var __eeD=(typeof effectEngine!=='undefined')?effectEngine:null;
+  __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
   var __releasedD=false;
   function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); }
@@ -18806,6 +18938,11 @@ function placeAfterUse(user, card, isPerm) {
     // 蓝图转化：该卡已作为被复制的卡回到手牌，本次结算不送入墓地
     card._skipGraveOnce = false;
     addBattleLog(user, '【魔法蓝图】已变为被复制的卡并回到手牌（等待再次使用）');
+  } else if (card._consumeOnUse) {
+    // 「发动后直接销毁不进墓」（底牌 / 制裁之刃）：卡面明确不进墓地 → 直接销毁，不落在任何区域。
+    // 旧实现只在指令里置 _consumeOnUse，全文件没有第二处读它（死标志），两张卡照样进墓。
+    card._consumeOnUse = false;   // 用完即清：避免卡对象跨局复用把标志带进下一局（小野葵 _aoiDiscountUsed 同类事故）
+    addBattleLog(user, '【' + card.name + '】发动后直接销毁（不进墓）');
   } else {
     // 蓝图复制的卡使用结算完毕：送入墓地前变回蓝图原本卡面与效果
     if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
@@ -18890,8 +19027,10 @@ function postUsePassiveHooks(user, card, done) {
             if (typeof drawGiftCard === 'function') drawGiftCard(user);
             addBattleLog(user, '【惠被动·音律感应】特殊序列[3,2,5]乐曲γ：回复4点同步并抽取1张馈赠卡');
           } else if (inc) {
-            p.cost = Math.min(p.cost + 2, p.maxCost); drawCard(user);
-            addBattleLog(user, '【惠被动·音律感应】费用递增乐曲α：回2音韵并抽1');
+            // 卡面口径（用户确认：严格按照卡面执行）：[乐曲α] = 回复4点音韵值并抽1张。
+            // 旧实现这里写死 +2（与卡面定义的 4 点不一致，属实现走样）。
+            p.cost = Math.min(p.cost + 4, p.maxCost); drawCard(user);
+            addBattleLog(user, '【惠被动·音律感应】费用递增乐曲α：回4音韵并抽1');
           } else if (dec) {
             p.position = (p.position + 2) % 42; triggerTileEffect(user);
             addBattleLog(user, '【惠被动·音律感应】费用递减乐曲β：前进2格');
