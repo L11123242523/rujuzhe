@@ -4663,6 +4663,10 @@ var Online = {
   role:'', isGuest:false,
   _askSeq:0, _asks:{}, SPEC_TIMEOUT_MS:60000,
   _snapTimer:null, _snapSeq:0, _lastSnapAt:0,
+  /* 增量事件流（②）：房主留一份"上一次发出的编码快照"做基线，之后只发改动路径；
+     客人留一份"上一次收到的编码快照"，把补丁打上去再走同一个 applySnapshot。 */
+  _lastSentSnap:null, _remoteSnap:null, _evSinceFull:0,
+  _keyframeEvery:20, _lastResyncAsk:0, _netStat:{},
   _peerSeq:-1, _peerWait:-1, _seqBadStreak:0, _seqWarned:false, _seqTimer:null,
   _intentQueue:[], _intentBusy:false, _intentCb:null, _intentStalled:false,
   _oppDeck:null, _oppDeckWaiters:[],
@@ -4926,6 +4930,17 @@ var Online = {
       case 'snap':                      // 客人：收到权威状态快照，整包覆盖并重绘
         this._onSnapshot(m.s);
         break;
+      case 'ev':                        // 客人：收到增量补丁（打在上一份编码快照上）
+        this._onSnapshotDelta(m);
+        break;
+      case 'resyncReq':                 // 房主：客人说"增量序号对不上，给我一份整包"
+        // 注意：客人是用 _relay({k:'resyncReq'}) 发的，属于**中继内层消息**，
+        // 所以必须在这里处理；只写在顶层 _onServer 里的话请求到了也没人接（我踩过）。
+        if(!this.isGuest){
+          try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch(e){}
+          this._sendSnapshotNow({ full:true });
+        }
+        break;
       /* ---------- 旧协议（不再使用，保留仅为兼容旧页面）---------- */
       case 'intent':
         this._onGuestAct(m.a);
@@ -4960,6 +4975,9 @@ var Online = {
     try{
       if(typeof NetSync!=='undefined') NetSync.applySnapshot(s);
     }catch(e){ console.error('套用快照失败',e); }
+    /* 增量基线：整包到达时把这份编码快照留作基线，后续补丁打在它身上。
+       增量路径（_onSnapshotDelta）也会走到这里，那时 _remoteSnap 已经更新为打好补丁的版本。 */
+    try{ this._remoteSnap=JSON.parse(JSON.stringify(s)); }catch(e){ this._remoteSnap=null; }
     this._lastSnapApplied=(s.n||0); this._snapRecv=(this._snapRecv||0)+1;
     this._clearActPending();          // 乐观 UI 的"已提交"提示到此结束（自己出的牌已经有结果了）
     this.status('已与房主同步（快照 #'+(s.n||'?')+'）');
@@ -5236,13 +5254,128 @@ var Online = {
     var snap;
     try{ snap=NetSync.buildSnapshot({ full:!!opts.full }); }catch(e){ console.error('快照构建失败',e); return; }
     if(!snap) return;
-    snap.n=++this._snapSeq;
+    var n=++this._snapSeq;
     this._lastSnapAt=Date.now();
     if(this._tickOn) this._lastSig=this._stateSig();   // 刚推过：更新指纹，避免巡检紧接着重复推
-    if(!this._send({t:'relay', m:{k:'snap', s:snap}})){
+    /* 增量事件流（②）：整包约 6.3KB，其中绝大多数字段没变。改成"补丁为主 + 全量兜底"：
+         · 有基线且补丁够小 → 只发改动路径 {k:'ev'}
+         · 没有基线 / full / 补丁过大 / 每 _keyframeEvery 次 → 发整包 {k:'snap'}
+       补丁打在"上一次发出的编码快照"上（遮盖与换位早已体现在那份编码里，不会泄漏隐藏信息），
+       客人打上补丁后走的仍是同一个 NetSync.applySnapshot —— 两条路径必然同源。 */
+    var ops=null, opsSize=0, fullSize=0;
+    try{ fullSize=JSON.stringify(snap).length; }catch(e){ fullSize=0; }
+    if(!opts.full && this._lastSentSnap){
+      try{ ops=this._snapDiff(this._lastSentSnap, snap); }catch(e){ ops=null; }
+      try{ opsSize=ops?JSON.stringify(ops).length:0; }catch(e){ opsSize=0; }
+    }
+    var needFull=(!ops || !ops.length || opsSize>=fullSize*0.6 || opsSize>2048 ||
+                  ((this._evSinceFull||0)>=(this._keyframeEvery||20)));
+    var baseline=null;
+    try{ baseline=JSON.parse(JSON.stringify(snap)); }catch(e){ baseline=null; }   // 深拷贝做基线，防原地修改
+    var msg;
+    if(needFull){
+      snap.n=n;
+      msg={k:'snap', s:snap};
+      this._lastSentSnap=baseline; this._evSinceFull=0;
+      this._netStat.full=(this._netStat.full||0)+1;
+      this._netStat.fullBytes=(this._netStat.fullBytes||0)+fullSize;
+    }else{
+      msg={k:'ev', n:n, base:n-1, ops:ops};
+      this._lastSentSnap=baseline; this._evSinceFull=(this._evSinceFull||0)+1;
+      this._netStat.ev=(this._netStat.ev||0)+1;
+      this._netStat.evBytes=(this._netStat.evBytes||0)+opsSize;
+    }
+    if(!this._send({t:'relay', m:msg})){
       try{ addBattleLog('system','【联机】状态同步发送失败（连接已断）'); }catch(e){}
     }
     this._saveSnapshotSoon();   // 顺便把"权威自存"快照存到服务器（内部节流），供重连恢复
+  },
+  /* 编码快照的字段级补丁：路径用数组（避免键里含点号时歧义）；数组整体替换；
+     删除用 {d:[...]} 显式表达（不用 null 当哨兵，因为 null 也是合法值）。 */
+  _snapDiff:function(from,to){
+    var ops=[];
+    function walk(a,b,p){
+      if(a===b) return;
+      var ta=Array.isArray(a), tb=Array.isArray(b);
+      if(ta&&tb){
+        /* 数组：能看出是"纯追加"时只发改动的那几项（战斗日志 _logs 只会增长，
+           整段替换会让每次推送都变成几十 KB → 只能退回整包，增量就白做了）。 */
+        if(a.length<=b.length){
+          var same=true;
+          try{ if(a.length) same=(JSON.stringify(a)===JSON.stringify(b.slice(0,a.length))); }catch(e){ same=false; }
+          if(same){ var extra=b.slice(a.length); if(extra.length) ops.push({p:p, ap:extra}); return; }
+        }
+        var ja=null, jb=null;
+        try{ ja=JSON.stringify(a); jb=JSON.stringify(b); }catch(e){}
+        if(ja!==jb) ops.push({p:p,v:b});
+        return;
+      }
+      if(ta||tb){
+        var ja2=null, jb2=null;
+        try{ ja2=JSON.stringify(a); jb2=JSON.stringify(b); }catch(e){}
+        if(ja2!==jb2) ops.push({p:p,v:b});
+        return;
+      }
+      if(a&&b&&typeof a==='object'&&typeof b==='object'){
+        for(var k in b){ if(Object.prototype.hasOwnProperty.call(b,k)) walk(a[k],b[k],p.concat([k])); }
+        // 卡定义（cards）是增量下发的：绝不对它产出"删除"补丁，
+        // 否则客人那份基线会把已收到的定义删掉 → 之后解不出卡（历史上出现过的"未知卡"）
+        if(p[0]!=='cards'){
+          for(var k2 in a){ if(Object.prototype.hasOwnProperty.call(a,k2) && !Object.prototype.hasOwnProperty.call(b,k2)) ops.push({d:p.concat([k2])}); }
+        }
+        return;
+      }
+      ops.push({p:p,v:b});
+    }
+    walk(from,to,[]);
+    return ops;
+  },
+  _applySnapOps:function(target,ops){
+    for(var i=0;i<ops.length;i++){
+      var op=ops[i]; if(!op) continue;
+      var path, cur, j, kk, o;
+      if(op.d){
+        path=op.d; o=target;
+        for(kk=0;kk<path.length-1;kk++){ if(o[path[kk]]==null||typeof o[path[kk]]!=='object'){ o=null; break; } o=o[path[kk]]; }
+        if(o&&typeof o==='object') delete o[path[path.length-1]];
+        continue;
+      }
+      if(op.ap){                                  // 数组追加（战斗日志这类只增长的数组走这里）
+        path=op.p||[]; cur=target;
+        for(j=0;j<path.length-1;j++){ if(cur[path[j]]==null||typeof cur[path[j]]!=='object') cur[path[j]]={}; cur=cur[path[j]]; }
+        var last=path[path.length-1];
+        if(!Array.isArray(cur[last])) cur[last]=[];
+        cur[last]=cur[last].concat(op.ap);
+        continue;
+      }
+      path=op.p||[]; cur=target;
+      for(j=0;j<path.length-1;j++){ if(cur[path[j]]==null||typeof cur[path[j]]!=='object') cur[path[j]]={}; cur=cur[path[j]]; }
+      cur[path[path.length-1]]=op.v;
+    }
+  },
+  /* 客人：收到增量补丁。必须先对上序号 —— 对不上就要整包，绝不"猜"着往下打。 */
+  _onSnapshotDelta:function(m){
+    if(!this.active || !this.isGuest || !m) return;
+    if(!this._remoteSnap || m.base!==this._lastSnapApplied){
+      this._deltaResync('序号失配 base='+(m.base===undefined?'?':m.base)+' 本地='+(this._lastSnapApplied===undefined?'?':this._lastSnapApplied));
+      return;
+    }
+    var patched=null;
+    try{ patched=JSON.parse(JSON.stringify(this._remoteSnap)); }catch(e){ this._deltaResync('基线无法复制'); return; }
+    try{ this._applySnapOps(patched, m.ops||[]); }catch(e){ this._deltaResync('补丁应用失败：'+(e&&e.message)); return; }
+    patched.n=m.n;
+    this._remoteSnap=patched;
+    this._netStat.evRecv=(this._netStat.evRecv||0)+1;
+    this._onSnapshot(patched);
+  },
+  _deltaResync:function(why){
+    var now=Date.now();
+    if(now-(this._lastResyncAsk||0)<600) return;      // 防抖：避免短时间反复要整包
+    this._lastResyncAsk=now;
+    this._remoteSnap=null;                            // 基线作废，等下一份整包
+    this._netStat.resync=(this._netStat.resync||0)+1;
+    try{ addBattleLog('system','【联机】增量同步失配（'+why+'），已请求重发完整状态'); }catch(e){}
+    this._relay({k:'resyncReq'});
   },
   // 客人手上的牌"能不能出"由房主判定（客人不跑规则）
   playableOf:function(i){
@@ -14005,10 +14138,10 @@ function applyDamageOps(user, target, op, done, srcCard) {
     var __afterRoll = function (roll, __cancelled) {
       if (__cancelled || roll === null || roll === undefined) { addBattleLog(user, '本次判定被连锁无效，不造成伤害'); __deal(0); return; }
       var base;
-      if (op.dice === 'coin') { base = (roll === '正面') ? (op.base || 2) : 0; addBattleLog(user, '硬币判定伤害：' + roll + (base ? '，造成' + base : '，不造成伤害')); }
+      if (op.dice === 'coin') { base = (roll === '正面') ? (op.base || 2) : 0; addBattleLog(user, '硬币判定伤害：' + roll + (base ? '，造成' + base : '，不造成伤害'));
+        if (roll === '正面') __ruriMaxJudgeSP(user, 'coin', roll); }        // 硬币最大=正面2点
       else { base = roll; p._lastRoll = base; addBattleLog(user, '判定伤害骰点：' + base);
-        var __mx = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6;
-        if (p._ruriSP && roll === __mx) { if (typeof drawCard === 'function') drawCard(user); recoverCost(user, 2, '小沙香琉璃SP'); addBattleLog(user, '【小沙香琉璃SP】判定适用最大伤害，抽1卡回2音韵'); }
+        __ruriMaxJudgeSP(user, op.dice, roll);                              // 骰子：原始骰点等于最大面（不看增伤）
       }
       __settle(base);
     };
@@ -14867,12 +15000,13 @@ function processSingleEffect(effectText, context, callback) {
         judgePerform(user, { kind: 'coin', label: __judgeLabel }, function (face, cxl) {
           var dmg = (cxl || face == null) ? 0 : (face === '正面' ? __front : 0);
           effectEngine.effectLog.push({ label: '【硬币判定】', text: cxl ? '判定被连锁无效' : ('硬币结果' + face + (face === '正面' ? ('，造成' + dmg + '点') : '，不造成伤害')), class: 'effect-step step-result' });
+          if (!cxl && face === '正面') __ruriMaxJudgeSP(user, 'coin', face);        // 琉璃SP：硬币最大=正面2点
           __doDeal(dmg, face !== '正面');
         });
       } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
-        judgePerform(user, { kind: 'dice', sides: 4, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【四面骰判定】', text: cxl ? '判定被连锁无效' : ('四面骰' + dmg + '点'), class: 'effect-step step-result' }); __doDeal(dmg, false); });
+        judgePerform(user, { kind: 'dice', sides: 4, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【四面骰判定】', text: cxl ? '判定被连锁无效' : ('四面骰' + dmg + '点'), class: 'effect-step step-result' }); if (!cxl) __ruriMaxJudgeSP(user, 'd4', r); __doDeal(dmg, false); });
       } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
-        judgePerform(user, { kind: 'dice', sides: 6, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【六面骰判定】', text: cxl ? '判定被连锁无效' : ('六面骰' + dmg + '点'), class: 'effect-step step-result' }); __doDeal(dmg, false); });
+        judgePerform(user, { kind: 'dice', sides: 6, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【六面骰判定】', text: cxl ? '判定被连锁无效' : ('六面骰' + dmg + '点'), class: 'effect-step step-result' }); if (!cxl) __ruriMaxJudgeSP(user, 'd6', r); __doDeal(dmg, false); });
       } else __doDeal(damage, false);
     } else {
       if (__isJudge) {
@@ -14880,12 +15014,15 @@ function processSingleEffect(effectText, context, callback) {
           var coinResult = (GameRNG.coin() ? '反面' : '正面');
           if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', fixed: coinResult, label: __judgeLabel }, function () {});
           if (coinResult !== '正面') { damage = 0; __coinFail = true; }
+          else __ruriMaxJudgeSP(user, 'coin', coinResult);                      // 琉璃SP：硬币最大=正面2点
         } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
           damage = applyDiceControl(user, GameRNG.dice(4), 4);
           if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 4, fixed: damage, label: __judgeLabel }, function () {});
+          __ruriMaxJudgeSP(user, 'd4', damage);
         } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
           damage = applyDiceControl(user, GameRNG.dice(6), 6);
           if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 6, fixed: damage, label: __judgeLabel }, function () {});
+          __ruriMaxJudgeSP(user, 'd6', damage);
         }
       }
       __doDeal(damage, __coinFail);
@@ -17060,6 +17197,29 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
   __proceed();
 }
 // 统一判定入口：先掷骰/动画得到初始结果，再走“确定前连锁窗”，最终把（可能被改点/重判后的）结果交给 applyFn
+/* 小沙香琉璃SP：造成判定伤害且"适用最大伤害"后抽1卡回2音韵。
+   口径（用户确认，我之前理解错了）：
+     · "适用最大伤害" = 该判定的骰子掷出**最大面** —— 硬币（正面=2）、四面骰4、六面骰6、20面骰20；
+     · **增伤不影响判定**：因为增伤会让"对应的最大伤害"一起变大，所以只看**原始骰点**是否等于最大面。
+   之前只有"骰子"分支里有这个检查、硬币分支完全没有，而且效果引擎那条判定伤害路径整条都没接，
+   导致这个 SP 实际上打不出来。现在收成一个函数，两条路径的每个落点都调用它。 */
+function __ruriMaxJudgeSP(user, diceKind, roll) {
+  try {
+    if(!battleState) return false;
+    var p = battleState[user];
+    if(!p || !p._ruriSP) return false;
+    var maxOf = { coin: 2, d4: 4, d6: 6, d20: 20 };
+    var mx = maxOf[diceKind];
+    if(!mx) return false;                                  // 固定值判定没有"最大面"，不触发
+    var hit = (diceKind === 'coin') ? (roll === '正面') : (Number(roll) === mx);
+    if(!hit) return false;
+    if(typeof drawCard === 'function') drawCard(user);
+    if(typeof recoverCost === 'function') recoverCost(user, 2, '小沙香琉璃SP');
+    addBattleLog(user, '【小沙香琉璃SP】判定适用最大伤害（' +
+      (diceKind === 'coin' ? '硬币正面，2点' : (mx + '面骰掷出' + mx + '点')) + '），抽1卡并回复2音韵');
+    return true;
+  } catch(e) { return false; }
+}
 function judgePerform(user, spec, applyFn) {
   judgeAnimate(user, spec, function (initVal) { judgeSettleWindow(user, spec, initVal, applyFn); });
 }
