@@ -599,6 +599,17 @@ body.map3d-on .minimap-container { display: none !important; }
 /* 连锁 C1 结算位：正在使用/结算中的卡（放在效果处理区里，占 1 格） */
 .permanent-slot.chain-c1 { border-color: #74b9ff !important; background: rgba(116,185,255,0.16) !important; box-shadow: 0 0 16px rgba(116,185,255,0.55) !important; animation: c1Pulse 1.6s ease-in-out infinite; }
 .permanent-slot.chain-c1 .slot-type { color: #74b9ff; font-weight: 800; }
+.permanent-slot.chain-c1-over { border-color: #ff7675 !important; box-shadow: 0 0 16px rgba(255,118,117,.6) !important; opacity: .92; }
+.permanent-slot.chain-c1-over .slot-type { color: #ff7675; }
+/* ---- 卡组配置：两套卡组的模式切换条 ---- */
+.deck-mode-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:1180px;margin:0 auto 12px;padding:10px 14px;
+  background:linear-gradient(165deg,rgba(30,36,74,.9),rgba(16,20,44,.92));border:1px solid var(--line);border-radius:12px;}
+.deck-mode-btn{background:rgba(255,255,255,.08);border:1px solid var(--line-2);color:#dbe4ff;border-radius:9px;padding:8px 14px;
+  font-size:13.5px;font-weight:700;cursor:pointer;transition:all .18s var(--ease);}
+.deck-mode-btn:hover{border-color:var(--gold);color:#fff;transform:translateY(-1px);}
+.deck-mode-btn.active{background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#241a05;border-color:transparent;
+  box-shadow:0 6px 18px rgba(240,177,62,.35);}
+.deck-mode-hint{color:var(--dim);font-size:12.5px;}
 @keyframes c1Pulse { 0%,100% { box-shadow: 0 0 12px rgba(116,185,255,.42); } 50% { box-shadow: 0 0 22px rgba(116,185,255,.8); } }
 .permanent-slot.single-card { border-color: #ff6b6b; background: rgba(255,107,107,0.15); }
 .slot-cost { position: absolute; top: 4px; left: 4px; background: #feca57; color: #2d3436; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; z-index: 10; }
@@ -2973,9 +2984,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <p class="game-subtitle">入 局 者</p>
   <div class="menu-buttons">
     <button class="menu-btn btn-pve" onclick="startBattle()">⚔️ 单机对战</button>
+    <button class="menu-btn" style="background:linear-gradient(135deg,#e67e22,#f1c40f);" onclick="openDeckBuilder('pve')">🎛 单机卡组（你 + AI）</button>
     <button class="menu-btn" style="background:linear-gradient(135deg,#2563eb,#0ea5e9);" onclick="showScreen('onlineLobby');Online.refreshLobby();">🌐 联机对战(PvP)</button>
     <button class="menu-btn btn-pve" onclick="showToast('🚧 肉鸽模式开发中\n专属卡牌设计完成后开放', 'info')" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);opacity:0.6;cursor:not-allowed;">🚧 肉鸽模式（开发中）</button>
-    <button class="menu-btn btn-deck" onclick="showScreen('deckBuilder')">🃏 卡组配置</button>
+    <button class="menu-btn btn-deck" onclick="openDeckBuilder('online')">🃏 卡组配置（联机）</button>
     <button class="menu-btn btn-cards" onclick="showScreen('cardViewer')">📖 卡牌图鉴</button>
     <button class="menu-btn btn-rules" onclick="showScreen('rulesScreen')">📜 游戏规则</button>
   </div>
@@ -3395,15 +3407,21 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <h2 class="screen-title">🃏 卡组配置</h2>
     <button class="back-btn" onclick="showScreen('mainMenu')">← 返回主菜单</button>
   </div>
+  <!-- 两套卡组：联机只配你自己的；单机 vs AI 配你 + AI 两套（作者要求分开） -->
+  <div class="deck-mode-bar">
+    <button class="deck-mode-btn" id="deckModeOnline" onclick="openDeckBuilder('online')">🌐 联机卡组（只有你）</button>
+    <button class="deck-mode-btn" id="deckModePve" onclick="openDeckBuilder('pve')">⚔️ 单机 vs AI（你 + AI）</button>
+    <span class="deck-mode-hint" id="deckModeHint"></span>
+  </div>
   <div class="deck-config">
     <div class="deck-side">
-      <div class="deck-side-title player1-color">🔴 玩家1（你） <button style="margin-left:10px;padding:4px 10px;font-size:12px;background:#feca57;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="randomDeck('p1')">🎲 随机配置</button> <button style="margin-left:6px;padding:4px 10px;font-size:12px;background:#54a0ff;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="recommendDeck('p1')">✨ 智能推荐</button> <button style="margin-left:6px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="exportDeckCode()">📤 导出码</button> <button style="margin-left:4px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="importDeckCode()">📥 导入码</button></div>
+      <div class="deck-side-title player1-color">🔴 玩家1（你） <button style="margin-left:10px;padding:4px 10px;font-size:12px;background:#feca57;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="randomDeck('p1')">🎲 随机配置</button> <button style="margin-left:6px;padding:4px 10px;font-size:12px;background:#54a0ff;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="recommendDeck('p1')">✨ 智能推荐</button> <button style="margin-left:6px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="exportDeckCode('p1')">📤 导出码</button> <button style="margin-left:4px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="importDeckCode('p1')">📥 导入码</button> <button style="margin-left:6px;padding:4px 8px;font-size:12px;background:#ff7675;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="clearDeckSide('p1')" title="一键清空这一方的 3 角色 / 8 道具 / 4 携带卡">🗑 清空</button></div>
       <div class="deck-section"><div class="deck-section-title">角色（3张）</div><div class="deck-slots" id="p1Chars"></div></div>
       <div class="deck-section"><div class="deck-section-title">道具卡（8张）</div><div class="deck-slots" id="p1Items"></div></div>
       <div class="deck-section"><div class="deck-section-title">携带卡（4张）</div><div class="deck-slots" id="p1Carries"></div></div>
     </div>
-    <div class="deck-side">
-      <div class="deck-side-title player2-color">🔵 玩家2（AI） <button style="margin-left:10px;padding:4px 10px;font-size:12px;background:#48dbfb;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="randomDeck('p2')">🎲 随机配置</button> <button style="margin-left:6px;padding:4px 10px;font-size:12px;background:#5f27cd;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="recommendDeck('p2')">✨ 智能推荐</button></div>
+    <div class="deck-side" id="p2DeckSide">
+      <div class="deck-side-title player2-color">🔵 玩家2（AI） <button style="margin-left:10px;padding:4px 10px;font-size:12px;background:#48dbfb;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="randomDeck('p2')">🎲 随机配置</button> <button style="margin-left:6px;padding:4px 10px;font-size:12px;background:#5f27cd;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="recommendDeck('p2')">✨ 智能推荐</button> <button style="margin-left:6px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="exportDeckCode('p2')">📤 导出码</button> <button style="margin-left:4px;padding:4px 8px;font-size:12px;background:#1dd1a1;color:#1a1a2e;border:none;border-radius:4px;cursor:pointer;" onclick="importDeckCode('p2')">📥 导入码</button> <button style="margin-left:6px;padding:4px 8px;font-size:12px;background:#ff7675;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="clearDeckSide('p2')" title="一键清空 AI 这一方的 3 角色 / 8 道具 / 4 携带卡">🗑 清空</button></div>
       <div class="deck-section"><div class="deck-section-title">角色（3张）</div><div class="deck-slots" id="p2Chars"></div></div>
       <div class="deck-section"><div class="deck-section-title">道具卡（8张）</div><div class="deck-slots" id="p2Items"></div></div>
       <div class="deck-section"><div class="deck-section-title">携带卡（4张）</div><div class="deck-slots" id="p2Carries"></div></div>
@@ -6283,26 +6301,108 @@ var deckConfig = {
 };
 var pickerState = { player: '', type: '', index: 0 };
 
+/* ============================================================
+   两套卡组（作者要求 2026-09-13）
+   · 联机卡组（online）：只配**你自己**的 12 张，联机对战时使用
+   · 单机 vs AI 卡组（pve）：你 + AI 各一套，只有「单机对战」使用
+   实现：`deckConfig` 仍然是**当前正在编辑/使用的那一套**（战斗代码不用改），
+        `deckSets` 存两套的快照（按卡名），切换模式时互相搬运。
+   ============================================================ */
+var deckSetMode = 'online';                       // 'online' | 'pve'
+var deckSets = { online: null, pve: null };
+var __deckSetsKey = 'rujuzhe_decks_v2';
+
+function __deckSlimOf(pl) {
+  var c = deckConfig[pl] || {};
+  function nm(arr) { return (arr || []).map(function (x) { return x ? x.name : null; }); }
+  return { chars: nm(c.chars), items: nm(c.items), carries: nm(c.carries) };
+}
+function __deckSlimAll() { return { p1: __deckSlimOf('p1'), p2: __deckSlimOf('p2') }; }
+function __applyDeckSlim(slim) {
+  if (!slim || !allCards || !allCards.length) return false;
+  var byName = {}; allCards.forEach(function (c) { byName[c.name] = c; });
+  ['p1', 'p2'].forEach(function (pl) {
+    var s = slim[pl]; if (!s) return;
+    function back(arr, n) {
+      var out = (arr || []).map(function (n2) { return n2 ? (byName[n2] || null) : null; });
+      while (out.length < n) out.push(null);
+      return out.slice(0, n);
+    }
+    deckConfig[pl].chars = back(s.chars, 3);
+    deckConfig[pl].items = back(s.items, 8);
+    deckConfig[pl].carries = back(s.carries, 4);
+  });
+  return true;
+}
+/** 切到某一套并刷新界面（联机模式隐藏 AI 那列） */
+function setDeckMode(mode, silent) {
+  mode = (mode === 'pve') ? 'pve' : 'online';
+  if (mode === deckSetMode && deckSets[mode]) { __deckModeUI(); return; }
+  try { saveDeckConfig(); } catch (e) {}          // 先把当前这套存进它自己的槽
+  deckSetMode = mode;
+  if (deckSets[mode]) __applyDeckSlim(deckSets[mode]);   // 首次没有快照 → 沿用当前配置
+  else deckSets[mode] = __deckSlimAll();
+  __deckModeUI();
+  if (!silent) { try { renderDeckSide('p1'); renderDeckSide('p2'); } catch (e) {} }
+}
+function __deckModeUI() {
+  try {
+    var side = document.getElementById('p2DeckSide');
+    if (side) side.style.display = (deckSetMode === 'pve') ? '' : 'none';
+    var b1 = document.getElementById('deckModeOnline'), b2 = document.getElementById('deckModePve');
+    if (b1) b1.classList.toggle('active', deckSetMode === 'online');
+    if (b2) b2.classList.toggle('active', deckSetMode === 'pve');
+    var hint = document.getElementById('deckModeHint');
+    if (hint) hint.textContent = (deckSetMode === 'pve')
+      ? '当前编辑：单机 vs AI 卡组（你 + AI 各 12 张，只用于单机对战）'
+      : '当前编辑：联机卡组（只有你自己的 12 张，用于联机对战；AI 那套在「单机卡组」里配）';
+  } catch (e) {}
+}
+/** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
+function openDeckBuilder(mode) {
+  setDeckMode(mode);
+  showScreen('deckBuilder');
+  __deckModeUI();
+}
+/** 一键清空某一方（作者要求：现在只能一张张换） */
+function clearDeckSide(player) {
+  if (player !== 'p1' && player !== 'p2') return;
+  if (!window.confirm((player === 'p1' ? '你' : 'AI') + '这一方的卡组要全部清空吗？（3 角色 / 8 道具 / 4 携带）')) return;
+  deckConfig[player].chars = [null, null, null];
+  deckConfig[player].items = Array(8).fill(null);
+  deckConfig[player].carries = Array(4).fill(null);
+  renderDeckSide(player);
+  saveDeckConfig();
+  showToast((player === 'p1' ? '你的' : 'AI 的') + '卡组已清空，可以逐个添加或直接📥导入码');
+}
+
 /* —— 卡组配置持久化：刷新/重开浏览器不丢失 —— */
 var __deckStorageKey = 'rujuzhe_deck_v1';
 function saveDeckConfig() {
   try {
-    var slim = {};
-    ['p1', 'p2'].forEach(function (pl) {
-      slim[pl] = {
-        chars: (deckConfig[pl].chars || []).map(function (c) { return c ? c.name : null; }),
-        items: (deckConfig[pl].items || []).map(function (c) { return c ? c.name : null; }),
-        carries: (deckConfig[pl].carries || []).map(function (c) { return c ? c.name : null; })
-      };
-    });
-    localStorage.setItem(__deckStorageKey, JSON.stringify(slim));
+    deckSets[deckSetMode] = __deckSlimAll();      // 当前这套存回它自己的槽
+    localStorage.setItem(__deckSetsKey, JSON.stringify(deckSets));
+    // 兼容旧 key（旧版本只存一套）：保留"联机那套"，避免旧存档丢失
+    localStorage.setItem(__deckStorageKey, JSON.stringify(deckSets.online || deckSets.pve || __deckSlimAll()));
   } catch (e) { /* 隐私模式等场景静默失败 */ }
 }
 function tryLoadDeckConfig() {
   try {
-    var raw = localStorage.getItem(__deckStorageKey);
-    if (!raw || !allCards || !allCards.length) return;
-    var slim = JSON.parse(raw);
+    if (!allCards || !allCards.length) return;
+    // 新格式（两套）优先；没有就迁移旧格式（旧格式那一套视为"联机卡组"，同时复制给单机）
+    var v2 = null;
+    try { v2 = JSON.parse(localStorage.getItem(__deckSetsKey) || 'null'); } catch (e) { v2 = null; }
+    if (v2 && typeof v2 === 'object') {
+      deckSets.online = v2.online || null;
+      deckSets.pve = v2.pve || null;
+    }
+    var legacyRaw = localStorage.getItem(__deckStorageKey);
+    if (legacyRaw) {
+      try { if (!deckSets.online) deckSets.online = JSON.parse(legacyRaw); } catch (e) {}
+    }
+    if (!deckSets.pve) deckSets.pve = deckSets.online ? JSON.parse(JSON.stringify(deckSets.online)) : null;
+    var slim = deckSets[deckSetMode];
+    if (!slim) return;
     var byName = {};
     allCards.forEach(function (c) { byName[c.name] = c; });
     function restore(arr, n) {
@@ -6316,6 +6416,7 @@ function tryLoadDeckConfig() {
       deckConfig[pl].items = restore(slim[pl].items, 8);
       deckConfig[pl].carries = restore(slim[pl].carries, 4);
     });
+    try { __deckModeUI(); } catch (e) {}
   } catch (e) { /* 数据损坏时忽略 */ }
 }
 
@@ -6344,7 +6445,7 @@ function showScreen(id) {
     target.classList.add('active');
   }
   if (id === 'cardViewer') renderCardGrid();
-  if (id === 'deckBuilder') renderDeckBuilder();
+  if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) {} }
   // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
   if (id === 'battleScreen' && typeof Map3D !== 'undefined') {
     setTimeout(function () {
@@ -7005,16 +7106,18 @@ function validateDeck(player) {
   Object.keys(cnm).forEach(function(n){ if(cnm[n]>1) errs.push('同名携带卡不能重复：'+n); });
   return errs;
 }
-function exportDeckCode() {
-  var errs = validateDeck('p1');
+function exportDeckCode(player) {
+  player = (player === 'p2') ? 'p2' : 'p1';
+  var errs = validateDeck(player);
   if (errs.length) { showToast('卡组不合法，无法导出：\n'+errs.join('\n'), 'warn'); return; }
-  function pick(k){ return deckConfig.p1[k].filter(Boolean).map(function(c){return c.name;}); }
+  function pick(k){ return deckConfig[player][k].filter(Boolean).map(function(c){return c.name;}); }
   var obj = { v:1, c:pick('chars'), i:pick('items'), k:pick('carries') };
   var code = 'RJZ' + btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
-  window.prompt('卡组码已生成（Ctrl+C 复制保存）：', code);
+  window.prompt((player === 'p1' ? '你的' : 'AI 的') + '卡组码已生成（Ctrl+C 复制保存）：', code);
 }
-function importDeckCode() {
-  var raw = window.prompt('粘贴卡组码：'); if (!raw) return;
+function importDeckCode(player) {
+  player = (player === 'p2') ? 'p2' : 'p1';
+  var raw = window.prompt('粘贴' + (player === 'p1' ? '你的' : 'AI 的') + '卡组码：'); if (!raw) return;
   var obj;
   try { obj = JSON.parse(decodeURIComponent(escape(atob(raw.trim().replace(/^RJZ/,''))))); }
   catch(e) { showToast('卡组码解析失败，请检查是否完整复制', 'warn'); return; }
@@ -7023,17 +7126,20 @@ function importDeckCode() {
   var miss=[];
   function missCheck(src,got){ src.forEach(function(n,i){ if(!got[i]) miss.push(n); }); }
   missCheck(obj.c||[],ch); missCheck(obj.i||[],it); missCheck(obj.k||[],ck);
-  deckConfig.p1.chars = ch.concat(Array(Math.max(0,3-ch.length)).fill(null)).slice(0,3);
-  deckConfig.p1.items = it.concat(Array(Math.max(0,8-it.length)).fill(null)).slice(0,8);
-  deckConfig.p1.carries = ck.concat(Array(Math.max(0,4-ck.length)).fill(null)).slice(0,4);
-  renderDeckSide('p1');
-  var __ve = validateDeck('p1');
-  var __head = miss.length ? ('以下卡未在卡库找到（已留空，请手动补全）：\n'+miss.join('、')) : '卡组导入成功';
+  deckConfig[player].chars = ch.concat(Array(Math.max(0,3-ch.length)).fill(null)).slice(0,3);
+  deckConfig[player].items = it.concat(Array(Math.max(0,8-it.length)).fill(null)).slice(0,8);
+  deckConfig[player].carries = ck.concat(Array(Math.max(0,4-ck.length)).fill(null)).slice(0,4);
+  renderDeckSide(player);
+  saveDeckConfig();
+  var __ve = validateDeck(player);
+  var __head = miss.length ? ('以下卡未在卡库找到（已留空，请手动补全）：\n'+miss.join('、')) : ((player === 'p1' ? '你的' : 'AI 的') + '卡组导入成功');
   showToast(__head + (__ve.length ? ('\n\n⚠ 当前卡组不合法（开战前请修正）：\n'+__ve.join('\n')) : ''));
 }
 
 // ========== 对战 ==========
 function startBattle() {
+  // 单机对战使用「单机 vs AI 卡组」那一套（作者要求：与联机卡组分开）
+  try { setDeckMode('pve', true); } catch (e) {}
   // 检查双方卡组是否完整
   for (var player of ['p1', 'p2']) {
     var config = deckConfig[player];
@@ -12347,13 +12453,23 @@ function renderZoneSlots(pl) {
   var P = battleState[pl];
   var mine = (pl === 'p1');
   var list = [];
-  // 自己的 3 格只放"常驻"的永续卡与盖伏卡；正在结算的 C1 卡单独一格追加显示（作者口径：占格）
   (P.permanent || []).forEach(function (c, i) { if (c && !c._chainC1) list.push({ card: c, type: 'permanent', index: i }); });
   (P.faceDownCards || []).forEach(function (c, i) { if (c) list.push({ card: c, type: 'facedown', index: i }); });
+  // 作者口径：C1 卡**占用效果处理区的格子**（计入 3 格上限）→ 它排进这 3 格里，
+  // 而不是"3 个空位 + 额外第 4 格"（我第一版就是这么渲染的，看起来等于没占格）
+  var __c1entries = [];
+  (P.permanent || []).forEach(function (c, i) { if (c && c._chainC1) __c1entries.push({ card: c, type: 'chainC1', index: i }); });
+  var __all = list.concat(__c1entries);   // 常驻/盖伏在前，C1 进队尾 → 有空位就先占空位
   var html = '';
   for (var i = 0; i < 3; i++) {
-    var it = list[i];
+    var it = __all[i];
     if (!it) { html += '<div class="permanent-slot empty">空位' + (i + 1) + '</div>'; continue; }
+    if (it.type === 'chainC1') {
+      html += '<div class="permanent-slot permanent-card chain-c1" title="连锁 C1（结算中）：' + (it.card.name || '') + ' — 结算完毕后按种类送墓">' +
+        (it.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + it.card.image_url + '" class="slot-img" alt="' + it.card.name + '">' : '') +
+        '<div class="slot-name">' + (it.card.name || '') + '</div><div class="slot-type">C1 结算中</div></div>';
+      continue;
+    }
     if (it.type === 'facedown') {
       var canAct = mine && !(it.card._faceDownTurn === battleState.turn && it.card._faceDownPlayer === pl && battleState.currentPlayer === pl);
       var fdTitle = mine ? (canAct ? '盖伏卡 - 点击发动' : '盖伏卡 - 本回合无法发动') : '对手的盖伏卡';
@@ -12376,13 +12492,15 @@ function renderZoneSlots(pl) {
         (mine ? (permCanAct ? '(点击发动)' : '(不可主动发动)') : '（对手）') + '</div></div>';
     }
   }
-  // 连锁 C1 结算位：正在使用/结算中的卡就摆在效果处理区里（作者口径："放在永续区内变为 c1"）
-  (P.permanent || []).forEach(function (c, i) {
-    if (!c || !c._chainC1) return;
-    html += '<div class="permanent-slot permanent-card chain-c1" title="连锁 C1（结算中）：' + (c.name || '') + ' — 结算完毕后按种类送墓">' +
-      (c.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + c.image_url + '" class="slot-img" alt="' + c.name + '">' : '') +
-      '<div class="slot-name">' + (c.name || '') + '</div><div class="slot-type">C1 结算中</div></div>';
-  });
+  // 超出 3 格的 C1 卡（场上常驻已满 3 格时使用卡）：仍然显示出来，但明确标注"超出上限"，
+  // 让玩家看得见"这一下已经超格了"，而不是悄悄消失
+  for (var __k = 3; __k < __all.length; __k++) {
+    var __x = __all[__k];
+    if (!__x || __x.type !== 'chainC1') continue;
+    html += '<div class="permanent-slot permanent-card chain-c1 chain-c1-over" title="连锁 C1（结算中，**超出效果处理区 3 格上限**）：' + (__x.card.name || '') + '">' +
+      (__x.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + __x.card.image_url + '" class="slot-img" alt="' + __x.card.name + '">' : '') +
+      '<div class="slot-name">' + (__x.card.name || '') + '</div><div class="slot-type">C1·超出上限</div></div>';
+  }
   box.innerHTML = html;
 }
 
