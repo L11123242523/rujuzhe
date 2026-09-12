@@ -3739,7 +3739,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   }
   // 对方先响应，轮流询问；turnIdx 为已询问次数
   function nextResponder(initiator, turnIdx) {
-    var order = [initiator === 'p1' ? 'p2' : 'p1', initiator];
+    var order = othersOf(initiator).concat([initiator]);
     return order[turnIdx % 2];
   }
   function shouldResolve(passStreak) { return passStreak >= 2; } // 连续两方 pass 才结算
@@ -4800,7 +4800,7 @@ function hasEnemyInAttackRange(card, player){
   var spec=parseAttackRange(card&&card.attack_range);
   if (spec.kind==='noneed') return true;
   if(!battleState||!battleState[player]) return false;
-  var opp=battleState[player==='p1'?'p2':'p1'];
+  var opp=battleState[foeOf(player)];
   if(!opp) return false;
   return canReachByRange(spec, battleState[player].position||0, opp.position||0);
 }
@@ -6299,6 +6299,28 @@ var deckConfig = {
   p1: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) },
   p2: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) }
 };
+/* ============================================================
+   A 阶段地基 · 玩家集合抽象（为 1v1v1 / 2v2 准备；作者 2026-09-13 选定 A+B 方案）
+   ------------------------------------------------------------
+   目的：把"只有 p1/p2 两个玩家"这个假设**收敛到这一层**。
+   1v1 时下列函数的行为与原来的硬编码**完全等价**（例如 othersOf('p1') = ['p2']、foeOf('p1') = 'p2'），
+   多人模式只需在开局时 setPlayerIds(['p1','p2','p3']) 即可让"其他玩家"自动变多。
+   ⚠ 任何新代码都不要手写"某人是 p1 就取 p2"这种硬编码，一律用这里的函数。
+   ============================================================ */
+var PLAYER_IDS = ['p1', 'p2'];                  // 当前对局的座位（多人模式开局时扩展）
+function playerCount() { return PLAYER_IDS.length; }
+function playerIds() { return PLAYER_IDS.slice(); }
+function setPlayerIds(ids) { PLAYER_IDS = (ids && ids.length) ? ids.slice() : ['p1', 'p2']; }
+function isPlayer(x) { return PLAYER_IDS.indexOf(x) >= 0; }
+function eachPlayer(fn) { PLAYER_IDS.forEach(function (p, i) { fn(p, i); }); }
+function othersOf(me) { return PLAYER_IDS.filter(function (p) { return p !== me; }); }   // 除我以外的所有座位
+function foesOf(me) { return othersOf(me); }    // 目前"其他玩家即对手"；2v2 时改为排除队友
+function alliesOf(me) { return PLAYER_IDS.filter(function (p) { return p === me || isAllied(me, p); }); }
+function isAllied(a, b) { return a === b; }     // 目前无队伍；2v2 时按队伍表判断
+function foeOf(me) { var o = othersOf(me); return o.length ? o[0] : me; }   // 1v1 等价于 foeOf(me)
+function nextPlayerOf(me) { var i = PLAYER_IDS.indexOf(me); return PLAYER_IDS[(i + 1) % PLAYER_IDS.length] || me; }
+function stateOf(p) { return (typeof battleState !== 'undefined' && battleState) ? battleState[p] : null; }
+function deckOf(p) { return (typeof deckConfig !== 'undefined' && deckConfig) ? deckConfig[p] : null; }
 var pickerState = { player: '', type: '', index: 0 };
 
 /* ============================================================
@@ -8807,7 +8829,7 @@ function aiDecideChain(list, effect){
 globalThis.__aiChainDecide = function (who, pool, chain) {
   try {
     if (!pool || !pool.length) return -1;
-    var foe = who === 'p1' ? 'p2' : 'p1';
+    var foe = foeOf(who);
     var me = battleState[who], op = battleState[foe];
     if (!me || !op) return -1;
     var chainLen = (chain || []).length;
@@ -8879,11 +8901,11 @@ var ChainAnim = {
 function resolveSimultaneous(tp, candidates, allDone) {
   candidates = (candidates || []).filter(Boolean);
   if (!candidates.length) { if (typeof allDone === 'function') allDone(); return; }
-  var foe = tp === 'p1' ? 'p2' : 'p1';
+  var foe = foeOf(tp);
   var chain = [];
   if (typeof ChainAnim !== 'undefined') ChainAnim.begin();
   function addChain(c) { chain.push(c); if (typeof ChainAnim !== 'undefined') ChainAnim.push(c); }
-  function other(w) { return w === 'p1' ? 'p2' : 'p1'; }
+  function other(w) { return foeOf(w); }
   function whoName(w) { return w === 'p1' ? '你' : 'AI'; }
   function avail(o) { return candidates.filter(function (c) { return c.owner === o && chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); }); }
   function chainText() { return chain.length ? chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + whoName(c.owner) + '·' + c.label; }).join('、') : '（暂无）'; }
@@ -9037,7 +9059,7 @@ function resolveChainStack(effect, onDone) {
       }
     }
   }
-  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); }
+  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -9170,6 +9192,92 @@ function __chainC1WasTakenAway(owner, card) {
     return p.permanent.indexOf(card) < 0;
   } catch (e) { return false; }
 }
+
+/* ============================================================
+   连锁完整性 · 待处理触发队列（作者口径 2026-09-13）
+   ------------------------------------------------------------
+   规则原文：「只要是效果发动就进连锁，然后等结算再逆执行」＋
+            「连锁处理中产生的新效果，在本次连锁处理完成后**另开一个新连锁**」。
+   旧实现在结算过程中触发的新效果（例：【永奏进行曲】抽2丢1 丢掉【来自地狱的盒子】→ 盒子SP 满足条件）
+   是**就地结算**的（日志里能看到"【弹窗排队】…等待当前询问结束后弹出"），玩家没有连锁的交互机会。
+   现在：结算中（深度>0 / 连锁锁开 / 新一轮连锁进行中）触发的新效果一律**入队**，
+        等本次连锁彻底处理完，再由 `__tryDrainTriggers()` 把它们组成**新一轮连锁**（C1 起）逆结算；
+        新一轮里再产生的新效果继续入队 → 递归形成"链中链"的正确结构。
+   ============================================================ */
+function __chainIsBusy() {
+  try {
+    if (!effectEngine) return false;
+    return (effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock || !!effectEngine._inNewChain;
+  } catch (e) { return false; }
+}
+/** 结算中 → 入队；否则立即执行 */
+function queueOrRunTrigger(desc) {
+  try {
+    if (!desc || typeof desc.fire !== 'function') return 'ran';
+    if (!__chainIsBusy()) { desc.fire(); return 'ran'; }
+    effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
+    effectEngine._pendingTriggers.push(desc);
+    addBattleLog(desc.owner || 'system', '【连锁】结算中产生新效果：' + (desc.label || '效果') + ' → 等本次连锁处理完另开新连锁');
+    return 'queued';
+  } catch (e) { try { desc.fire(); } catch (e2) {} return 'ran'; }
+}
+/** 本次连锁处理完 → 若有待处理触发，另开新一轮连锁（C1 起，双方仍可连锁，然后逆结算） */
+function __tryDrainTriggers() {
+  try {
+    if (!effectEngine) return;
+    if (__chainIsBusy()) return;                       // 还在结算中，等下一次释放点再来
+    var q = effectEngine._pendingTriggers || [];
+    if (!q.length) return;
+    effectEngine._pendingTriggers = [];
+    addBattleLog('system', '【连锁】本次连锁处理完毕 → 其中产生的新效果另开新连锁（共 ' + q.length + ' 个：' +
+      q.map(function (x) { return x.label || '效果'; }).join('、') + '）');
+    effectEngine._inNewChain = true;
+    var owner = (q[0] && q[0].owner) || 'p1';
+    // 包裹每个触发节点：
+    //  ①标记 `_drainingCard` = 正在结算的那张卡 → 它自己不会再被入队（避免"自己入队自己"的无限循环）
+    //  ②等它真正结算完（深度归零）或最多 5 秒再推进连锁，这样连锁条显示的是真实进度
+    function __chainBusyForDrain() {
+      try { return (effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock; } catch (e) { return false; }
+    }
+    function __wrapDrainNode(x) {
+      return {
+        owner: x.owner, label: x.label, mandatory: x.mandatory !== false, alive: x.alive,
+        fire: function (next) {
+          var __done = false;
+          function finish() {
+            if (__done) return; __done = true;
+            try { effectEngine._drainingCard = null; } catch (e) {}
+            if (typeof next === 'function') next();
+          }
+          try { effectEngine._drainingCard = x.card || null; } catch (e) {}
+          try { x.fire(); } catch (e) {
+            try { addBattleLog('system', '【连锁】新一轮里的效果结算异常：' + ((e && e.message) || e)); } catch (e2) {}
+          }
+          var __t0 = Date.now();
+          (function __wait() {
+            setTimeout(function () {
+              if (__done) return;
+              if (__chainBusyForDrain() && Date.now() - __t0 < 5000) { __wait(); return; }   // 还在结算 → 继续等
+              finish();
+            }, 120);
+          })();
+        }
+      };
+    }
+    try {
+      resolveSimultaneous(owner, q.map(__wrapDrainNode), function () {
+        effectEngine._inNewChain = false;
+        try { effectEngine._drainingCard = null; } catch (e) {}
+        setTimeout(__tryDrainTriggers, 80);            // 新一轮里可能又产生新效果 → 继续开
+      });
+    } catch (e) {
+      effectEngine._inNewChain = false;
+      try { effectEngine._drainingCard = null; } catch (e3) {}
+      addBattleLog('system', '【连锁】新一轮连锁建立失败，改为逐个直接结算：' + ((e && e.message) || e));
+      q.forEach(function (x) { try { x.fire(); } catch (e2) {} });
+    }
+  } catch (e) { try { effectEngine._inNewChain = false; } catch (e2) {} }
+}
 function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
@@ -9180,7 +9288,7 @@ function beforeEffectExecution(effect, callback) {
   var __c1who = (effect && (effect.player || effect.user)) || 'p1';
   if (__c1card) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
-  function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); }
+  function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
@@ -9213,7 +9321,7 @@ function beforeEffectExecution(effect, callback) {
     });
   }
   var initiator=effect.player||'p1';
-  var order=[initiator==='p1'?'p2':'p1', initiator];
+  var order=othersOf(initiator).concat([initiator]);
   var sideIdx=0, passStreak=0;
   function chained(){ passStreak=0; proceed(); }
   function pass(){ passStreak++; proceed(); }
@@ -9278,7 +9386,7 @@ function rioAccumulateMove(player, delta) {
 }
 function rioTriggerOnce(player) {
   var p = battleState[player]; if (!p) return;
-  var foe = player === 'p1' ? 'p2' : 'p1';
+  var foe = foeOf(player);
   // 最新卡面：支付1音韵造成四面骰判定伤害；发动时可改为支付2音韵改为六面骰判定伤害（均为无属性判定伤害，吃判定增伤、不吃属性克制）
   function __fire(sides, cost) {
     if ((p.cost || 0) < cost) { addBattleLog(player, '【现实间里绪被动】音韵不足' + cost + '点，无法发动' + sides + '面骰判定造伤'); return; }
@@ -9314,7 +9422,7 @@ function accumulateMovePassives(player, amount, oldPos) {
     p._zhichiMoveCount = (p._zhichiMoveCount || 0) + amt;
     var __zteam = ((typeof deckConfig !== 'undefined') && deckConfig[player] && deckConfig[player].chars || []).filter(Boolean);
     var __zmov = __zteam.filter(function (c) { return (c.roles || []).some(function (r) { return (r || '').indexOf('位移') >= 0; }); }).length;
-    var __zdmg = __zmov >= 2 ? 3 : 2, __zfoe = player === 'p1' ? 'p2' : 'p1';
+    var __zdmg = __zmov >= 2 ? 3 : 2, __zfoe = foeOf(player);
     while (p._zhichiMoveCount >= 8) {
       p._zhichiMoveCount -= 8;
       dealDamageWithResponse(__zfoe, __zdmg, '设计师直尺SP·累计移动8格', null, '理智');
@@ -9344,14 +9452,14 @@ function accumulateMovePassives(player, amount, oldPos) {
     p._tomaMoveCount = (p._tomaMoveCount || 0) + amt;
     while (p._tomaMoveCount >= __tThr) {
       p._tomaMoveCount -= __tThr;
-      var __tFoe = player === 'p1' ? 'p2' : 'p1';
+      var __tFoe = foeOf(player);
       dealDamageWithResponse(__tFoe, __tDmg, '冬马被动·移动累计', null, '无序', player);
       addBattleLog(player, '【冬马被动·分析大师】累计移动' + __tThr + '格（Lv' + __tl + '），对其他玩家造成' + __tDmg + '点无序伤害');
     }
   }
   // 星奈(水着)被动·戏水：单次移动位移量>5格 → 对一名其他玩家造成2段1点理智属性伤害（无回合次数限制）
   if (p._senaPassive && amt > 5) {
-    var __sfoe = player === 'p1' ? 'p2' : 'p1';
+    var __sfoe = foeOf(player);
     dealDamageWithResponse(__sfoe, 1, '星奈(水着)被动·戏水', null, '理智');
     dealDamageWithResponse(__sfoe, 1, '星奈(水着)被动·戏水', null, '理智');
     addBattleLog(player, '【星奈(水着)被动·戏水】单次移动' + amt + '格（>5），对一名其他玩家造成2段1点理智伤害');
@@ -9401,7 +9509,7 @@ function executeMoveEffect(effect) {
   __eeMarkInc('executeMoveEffect·移动投掷结算');
   if(__eeM)__eeM._resolveDepth=(__eeM._resolveDepth||0)+1;
   var __releasedM=false;
-  function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); }
+  function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
   // 异常安全：移动落地/踩格级联中任何抛出都要释放结算锁，否则深度残留会锁死全场操作
   try {
   runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
@@ -11387,7 +11495,7 @@ function activateEdwardSP() {
 }
 // AI 主动型 SP 决策（玩家由 useCharacterPassive 手动发动；AI 自动按收益发动，每回合一次门控一致）
 function aiUseActiveSP(player, done) {
-  var p = battleState[player], T = battleState.turn, foe = player === 'p1' ? 'p2' : 'p1';
+  var p = battleState[player], T = battleState.turn, foe = foeOf(player);
   function L(x){ addBattleLog(player, x); }
   function next() {
     // 惠·乐曲：保命γ > 补费β/α > 进攻δ
@@ -11459,7 +11567,7 @@ function aiUseActiveSP(player, done) {
 function aiUsePermanentActive(player, done) {
   var p = battleState[player];
   if (!p || battleState._over || (battleState.currentPlayer !== player)) { if (done) done(); return; }
-  var foe = player === 'p1' ? 'p2' : 'p1';
+  var foe = foeOf(player);
   var acts = [];
   (p.permanent || []).forEach(function (card) {
     var st = (typeof permanentStruct === 'function') ? permanentStruct(card) : null;
@@ -11664,7 +11772,7 @@ function checkLevelUp(player) {
           if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）', cards: rm.map(function(c){ return c.name; }) }, __recoverSup);
           else showCardPickerMulti(rm, '供给者：选一张移出游戏的卡加入手卡', __recoverSup, 1);
         } else {
-          var __tgt = player === 'p1' ? 'p2' : 'p1';
+          var __tgt = foeOf(player);
           if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
           else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
           else { dealDamageWithResponse(__tgt, 1 + GameRNG.dice(4), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }
@@ -14215,7 +14323,7 @@ function applyMove(user, signedN) {
   // 能量饮料SP：下次移动位移量>7造3热忱，>14改为5
   if (p.moveBuff && p.moveBuff.energyDrinkSP) {
     p.moveBuff.energyDrinkSP = false;
-    var __ed = Math.abs(n), __edFoe = user === 'p1' ? 'p2' : 'p1';
+    var __ed = Math.abs(n), __edFoe = foeOf(user);
     if (__ed > 14) { dealDamageWithResponse(__edFoe, 5, '能量饮料SP·位移' + __ed, null, '热忱', user); addBattleLog(user, '【能量饮料SP】位移' + __ed + '格(>14)，造成5点热忱伤害'); }
     else if (__ed > 7) { dealDamageWithResponse(__edFoe, 3, '能量饮料SP·位移' + __ed, null, '热忱', user); addBattleLog(user, '【能量饮料SP】位移' + __ed + '格(>7)，造成3点热忱伤害'); }
   }
@@ -14549,7 +14657,7 @@ function __ningAddHandHook(ctx, next) {
   if (!battleState || !ctx || !ctx.player || !ctx.card) { next(); return; }
   var __np = battleState[ctx.player];
   if (!__np || !__np._ningPassive) { next(); return; }
-  var __tgt = ctx.player === 'p1' ? 'p2' : 'p1', __tp = battleState[__tgt];
+  var __tgt = foeOf(ctx.player), __tp = battleState[__tgt];
   if (!__tp || (__tp.sync || 0) <= 0) { next(); return; }
   if (ctx.player === 'p1') {
     showChoiceModal('宁雨清被动·图书管理员的矜持', '因效果将【' + ctx.card.name + '】加入手卡', '可以扣除一名其他玩家3点同步值', ['扣除对方3点同步值', '不发动'], function (o) {
@@ -15219,7 +15327,7 @@ function runOneOp(op, ctx, next) {
         if (p.cost < need) { addBattleLog(user, '音韵不足：发动墓地【' + tc.name + '】需要' + need + '点（其费用' + (tc.cost || 0) + '+' + (op.extraCost || 0) + '）'); next(); return; }
         p.cost -= need;
         addBattleLog(user, '支付' + need + '点音韵，发动墓地【' + tc.name + '】的卡牌效果（取卡牌效果，非SP）');
-        var subCtx = Object.assign({}, ctx, { card: tc, target: ctx.target || (user === 'p1' ? 'p2' : 'p1') });
+        var subCtx = Object.assign({}, ctx, { card: tc, target: ctx.target || (foeOf(user)) });
         if (tc.effect && typeof dispatchStep === 'function') dispatchStep(tc.effect, subCtx, next);
         else { addBattleLog(user, '【' + tc.name + '】无可执行的卡牌效果'); next(); }
       });
@@ -15427,7 +15535,7 @@ function runOps(ops, ctx, done) {
   if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
   var i = 0;
   (function step() {
-    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); return; }
+    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
@@ -15579,6 +15687,7 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
     effectEngine.effectLog = __prevLog;
     effectEngine.autoResolve = __prevAuto;
     if (finalCallback) finalCallback();
+    try { __tryDrainTriggers(); } catch (e) {}
   }
 
   function executeNextStep() {
@@ -16159,7 +16268,7 @@ function useEventCard(index) {
 // 参数化事件卡使用：单机 p1 与联机远端位 p2 共用同一代码路径（决策/RNG 双机一致）
 function useEventCardFor(player, index, name, done) {
   if (!battleState) return;
-  var __ecFoe = player === 'p1' ? 'p2' : 'p1';
+  var __ecFoe = foeOf(player);
   var __ecOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
   if (typeof effectEngine !== 'undefined' && effectEngine && (effectEngine._resolveDepth > 0 || effectEngine._chainLock)) { addBattleLog('system', '效果结算中，暂时不能使用事件卡'); if (done) done(); return; }
   var __oppTurn = battleState.currentPlayer !== player;
@@ -17629,6 +17738,21 @@ function moveCardToGrave(player, card, reason) {
 
 // 检查卡牌进入墓地时的触发效果
 function checkGraveTrigger(player, card, reason) {
+  // 作者口径：**连锁处理中产生的新效果，在本次连锁处理完成后另开一个新连锁**（不再就地结算）。
+  // 例外：正在被"新一轮连锁"结算的那张卡自己（由 _drainingCard 标记）必须直通执行，
+  //       否则它会把自己再次入队 → 无限循环（我第一版就踩了这个，探针里表现为同一张卡反复"另开新连锁"）。
+  var __isDrainSelf = false;
+  try { __isDrainSelf = !!(effectEngine && effectEngine._drainingCard && effectEngine._drainingCard === card); } catch (e) {}
+  if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && !__isDrainSelf && __chainIsBusy()) {
+    queueOrRunTrigger({
+      owner: player,
+      card: card,
+      label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
+      mandatory: true,
+      fire: function () { checkGraveTrigger(player, card, reason); }
+    });
+    return;
+  }
   runTiming(TIMING.ON_TO_GRAVE, { player: player, card: card, reason: reason || "" });
   if (!battleState || !card) return;
   // 未显式传 reason 的送墓一律按"因效果送墓"处理（规则书第十一章二-1：献祭≠效果送墓；
@@ -17649,7 +17773,7 @@ function checkGraveTrigger(player, card, reason) {
     var n = tpp._yongzouCount, dmg = n >= 14 ? 3 : (n >= 7 ? 2 : 1);
     function __hit(t) { dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp); addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓，对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害'); if (typeof updateBattleUI === 'function') updateBattleUI(); }
     if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地，选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
-    else __hit(tp === 'p1' ? 'p2' : 'p1');
+    else __hit(foeOf(tp));
   })();
 
   // 神乐铃 SP：每进入墓地一次，永久+1层（上限9层，使用不消耗；之后每次使用最终伤害+当前层数）
@@ -17679,7 +17803,7 @@ function checkGraveTrigger(player, card, reason) {
     }
     function __hellBoxDamage(roll, __cancelled) {
       if (__cancelled || roll == null) { addBattleLog(player, '【来自地狱的盒子SP】判定被连锁无效，不造伤害'); return; }
-      var __hbFoe = player === 'p1' ? 'p2' : 'p1';
+      var __hbFoe = foeOf(player);
       dealDamageWithResponse(__hbFoe, roll, '来自地狱的盒子SP', null, null, player, { judge: true });
       addBattleLog(player, '【来自地狱的盒子SP】4面骰' + roll + '点，对' + (player === 'p1' ? '对手' : '你') + '造成' + roll + '点判定伤害');
     }
@@ -17857,7 +17981,7 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
   if (!__q1.length && !__q2.length) { __close(); return; } // 快速路径：双方都无可连锁卡，不打扰
   addBattleLog('system', '【判定结果确定前】' + (spec.label || '判定') + '结果=' + initVal + '，双方可连锁（改点/重判）');
   if (typeof renderChainBar === 'function') renderChainBar(je);
-  var order = [user === 'p1' ? 'p2' : 'p1', user], sideIdx = 0, passStreak = 0;
+  var order = othersOf(user).concat([user]), sideIdx = 0, passStreak = 0;
   function __chained() { passStreak = 0; __proceed(); }
   function __pass() { passStreak++; __proceed(); }
   function __ask(side) {
@@ -17988,7 +18112,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
   var __releasedD=false;
-  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); }
+  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
   try {
   var p = battleState[target];
   if (p) p._lastHitTaken = 0; // C16 “命中且造成N点以上伤害后可以打落”类条件：每次伤害结算前先清零本次实际伤害记录
@@ -18723,7 +18847,7 @@ function permanentHasActiveEffect(card) {
   var st = permanentStruct(card);
   return !!(st && st.active && st.active.handler);
 }
-function permOther(user) { return user === 'p1' ? 'p2' : 'p1'; }
+function permOther(user) { return foeOf(user); }
 // 当前所有在场玩家（不区分阵营/模式，供“选一名玩家”类效果统一列选项）
 function allInGamePlayers() { var __bs = battleState || {}; return ['p1','p2','p3','p4'].filter(function(k){return __bs[k];}); }
 function playerDisplayName(k) { return ({ p1: '你', p2: '对手', p3: '玩家3', p4: '玩家4' })[k] || ('玩家' + k); }
@@ -18888,7 +19012,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
   },
   // 直尺：每1音韵前进1格（每回合一次）
   ruler: function (card, user) {
-    var p = battleState[user], foe = user === 'p1' ? 'p2' : 'p1';
+    var p = battleState[user], foe = foeOf(user);
     if (p.cost <= 0) { if (user === 'p1') showToast('【设计师的直尺】音韵值不足，无法支付前进。', 'warn'); return false; }
     var opts = [];
     for (var k = 1; k <= p.cost; k++) opts.push('支付 ' + k + ' 音韵，前进 ' + Math.min(k, 20) + ' 格');
@@ -18932,7 +19056,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
   },
   // 智能手机：扣700金币选①攻击+1②手卡送墓造3理智（可扣500追加一次）
   phone: function (card, user) {
-    var p = battleState[user], foe = user === 'p1' ? 'p2' : 'p1';
+    var p = battleState[user], foe = foeOf(user);
     if (!p.gold) p.gold = 0;
     var OL2 = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2');
     if (card._phoneUsedThisTurn && !card._phoneExtraThisTurn) {
@@ -19016,7 +19140,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
   // 狼牙鹰爪（一回合一次）：选墓地[侵略]单次卡，付其费用+1适用其效果（留墓地）
   langya: function (card, user) {
     // 统一走指令层 grave_copy：标签匹配按 type/tags/attribute 一致判定（破损电子设备 type=侵略、attribute=混沌 也能命中），取目标卡 effect 而非 SP
-    var foe = user === 'p1' ? 'p2' : 'p1';
+    var foe = foeOf(user);
     var list = (typeof collectZoneCards === 'function') ? collectZoneCards(user, ['grave'], ['侵略'], ['item_single']) : [];
     if (!list.length) { if (user === 'p1') showToast('【狼牙鹰爪】墓地没有[侵略]标签的单次卡。', 'warn'); return false; }
     var ops = compileStepOps('选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。');
@@ -19366,7 +19490,7 @@ function showAttackCardSelect(attackCards, callback) {
 
 // 默认目标推导（玩家可视化选择的底层依据，AI 直接使用）：以统一目标类型器为准
 function decideDefaultTarget(card, user) {
-  var foe = user === 'p1' ? 'p2' : 'p1';
+  var foe = foeOf(user);
   var tt = parseTargetType(card.effect || card.text || '');
   if (tt === 'self') return user;
   if (tt === 'opponent' || tt === 'other_player') return foe;
@@ -19706,7 +19830,7 @@ function postUsePassiveHooks(user, card, done) {
   if (p._hinaPassive && !p._hinaMoveUsedThisAction && __isMoveItemCard(card)) {
     p._hinaMoveUsedThisAction = true;
     __add(user, true, '羽奈被动·移动道具造伤', function (next) {
-      var __hinaFoe = user === 'p1' ? 'p2' : 'p1';
+      var __hinaFoe = foeOf(user);
       dealDamageWithResponse(__hinaFoe, 1, '雨宫羽奈被动·移动道具', null, '理智');
       addBattleLog(user, '【羽奈被动】使用[移动]道具后造成1点理智伤害');
       next();
@@ -19729,7 +19853,7 @@ function postUsePassiveHooks(user, card, done) {
       var __tl2 = p.level || 7;
       var __tThr2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 4 : 5);
       var __tDmg2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 2 : 1);
-      var __tFoe2 = user === 'p1' ? 'p2' : 'p1';
+      var __tFoe2 = foeOf(user);
       dealDamageWithResponse(__tFoe2, __tDmg2, '冬马被动·Lv7道具触发', null, '无序', user);
       addBattleLog(user, '【冬马被动·Lv7】使用道具卡触发：对其他玩家造成' + __tDmg2 + '点无序伤害（本回合首次）');
       next();
@@ -19739,7 +19863,7 @@ function postUsePassiveHooks(user, card, done) {
   // 结衣被动·小野一刀流：使用攻击卡或[侵略]道具卡（指定了目标）后可将其一张卡移出游戏直到回合结束（选发）
   if (p._yuiPassive && card && (card._category === 'attack_cards' || (/item/.test(card._category || '') && __cardTags(card).indexOf('侵略') >= 0))) {
     __add(user, false, '结衣被动·小野一刀流', function (next) {
-      var __yFoe = user === 'p1' ? 'p2' : 'p1', __yFp = battleState[__yFoe];
+      var __yFoe = foeOf(user), __yFp = battleState[__yFoe];
       var __yList = [];
       ['hand', 'permanent', 'faceDownCards'].forEach(function (z) { (__yFp[z] || []).forEach(function (c) { __yList.push({ card: c, zone: z }); }); });
       if (!__yList.length) { addBattleLog(user, '【结衣被动】对方没有可移出游戏的卡'); next(); return; }
@@ -19801,7 +19925,7 @@ function postUsePassiveHooks(user, card, done) {
   // 琉璃(水着)被动①：用热忱卡后造1热忱伤+回1同步（必发）
   if (p._ruriMizugiPassive && card && (card.attribute || '') === '热忱') {
     __add(user, true, '琉璃(水着)被动·热忱卡', function (next) {
-      var __rmFoe = user === 'p1' ? 'p2' : 'p1';
+      var __rmFoe = foeOf(user);
       dealDamageWithResponse(__rmFoe, 1, '琉璃(水着)被动·使用热忱卡', null, '热忱', user);
       p.sync = Math.min(p.sync + 1, p.maxSync || 999);
       addBattleLog(user, '【琉璃(水着)被动】使用热忱属性卡，造1点热忱伤害并回复1点同步值');
@@ -19884,7 +20008,7 @@ function __afterAttackHitSP(user, card, target, done) {
   var m = sp.match(/命中后可以(?:再)?支付\s*(\d+)\s*点音韵值?来?造成\s*(\d+)\s*点([一-龥]{2,4})属性伤害/);
   if (!m) { if (done) done(); return; }
   var pay = parseInt(m[1], 10), dmg = parseInt(m[2], 10), attr = m[3];
-  var tgt = target || (user === 'p1' ? 'p2' : 'p1');
+  var tgt = target || (foeOf(user));
   var tp = battleState[tgt];
   if (!tp || (tp._lastHitTaken || 0) <= 0) { addBattleLog(user, '【' + (card.name || '') + '·SP】本次攻击未命中，不适用'); if (done) done(); return; }
   var __spP = battleState[user];
@@ -20000,7 +20124,7 @@ function chooseTargetPlayer(user, card, cb) {
     return;
   }
   if (user === 'p1') { showTargetSelect(card, card.effect || card.text || '', cb); }
-  else { cb(user === 'p1' ? 'p2' : 'p1'); }
+  else { cb(foeOf(user)); }
 }
 // 从某玩家某区域选一张卡：玩家可视化选，AI 自动取第一张；无卡返回 (null,-1)
 function chooseZoneCard(user, who, zone, title, cb) {
@@ -20052,7 +20176,7 @@ var SPECIAL_CARD_HANDLERS = {
       var __apply2 = function (i) {
         if (i === 0) { p._diceDefaultDouble = true; addBattleLog(user, '【颠倒骰子】默认方向：下一次移动完成后再进行一段相同移动'); done(); }
         else if (i === 1) { p._diceCancelToStart = true; addBattleLog(user, '【颠倒骰子】相反方向：取消下一次移动并回到起点'); done(); }
-        else __setReverse(user === 'p1' ? 'p2' : 'p1');
+        else __setReverse(foeOf(user));
       };
       if (user === 'p1') {
         showChoiceModal('颠倒骰子', card.name, card.effect || '', ['对自己使用·默认方向（移动完成后再进行一段相同移动）', '对自己使用·相反方向（取消移动并回到起点）', '对对手使用（反转其下一次移动方向）'], __apply2);
@@ -20070,7 +20194,7 @@ var SPECIAL_CARD_HANDLERS = {
     play: function (card, user, done) {
       var opts = ['从牌组选1张卡加入手卡', '修改一次掷骰结果', '选对手墓地1张卡放回其牌组'];
       function apply(ci) {
-        var p = battleState[user], foe = user === 'p1' ? 'p2' : 'p1';
+        var p = battleState[user], foe = foeOf(user);
         if (ci === 0) {
           chooseZoneCard(user, user, 'deck', '特制手套：从牌组选1张卡加入手卡', function (c, i) {
             if (i >= 0) { p.deck.splice(i, 1); p.hand.push(c); __emitAddHand(user, c, 'deck'); addBattleLog(user, '【特制手套】将【' + c.name + '】加入手卡'); }
