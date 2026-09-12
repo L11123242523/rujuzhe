@@ -2778,6 +2778,150 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 }
 
 /* ============================================================
+   UI 6.0 · 桌面端真正的"一屏看全" + 牌组堆模型 + 准备阶段抽卡动画
+   ------------------------------------------------------------
+   实测依据（1600×900 无头 Chrome 量的几何，见 _relaytest/_ui_metrics.js）：
+     · .battle-main-area 可视高 534px，内容高 1031px → **需要滚 497px**（这就是"要一直滚轮"）
+     · 手牌区落在 y=942，而视口只有 746 高 → 手牌完全在屏幕外
+     · 对手永续区插槽高 106px，而 .opponent-area 被压成 42px 高 →
+       内容溢出 64px，压在下方 3D 地图上（这就是"无法完全显示对手的永续区"）
+   根因：.battle-main-area 是 flex 列，各行默认 flex-shrink:1 → 被逐行压扁、整体溢出；
+        地图容器又是固定高度。修法：除地图外一律 flex:0 0 auto（不压缩），
+        地图行 flex:1 1 auto + min-height 吃剩余空间；对手区改紧凑插槽并把信息收成一行。
+   ============================================================ */
+@media screen and (min-width: 769px){
+  #battleScreen .battle-main-area{display:flex;flex-direction:column;gap:6px;overflow:hidden;padding:0;}
+  #battleScreen .opponent-area,#battleScreen .center-area,
+  #battleScreen .player-area{flex:0 0 auto;}
+  #battleScreen .battle-map-container{flex:1 1 auto;min-height:132px;margin-bottom:0;}
+  /* 对手区：一行放完（计数/按钮/永续插槽/增益），插槽紧凑但**完整可见** */
+  #battleScreen .opponent-area{display:flex;align-items:center;justify-content:center;gap:10px;
+    flex-wrap:nowrap;padding:6px 10px;margin-bottom:0;min-height:0;}
+  #battleScreen .opponent-area #p2ZoneCounts{white-space:nowrap;}
+  #battleScreen .opponent-area .permanent-slots{flex:0 0 auto;min-height:0;flex-wrap:nowrap;gap:6px;}
+  #battleScreen .opponent-area .permanent-slot{width:56px;height:70px;}
+  #battleScreen .opponent-area .permanent-slot .slot-img{width:42px;height:42px;}
+  #battleScreen .opponent-area .permanent-slot .slot-name{font-size:9.5px;line-height:1.05;}
+  #battleScreen .opponent-area .buff-bar{min-height:0;max-width:330px;margin:0;padding:3px 8px;flex:0 1 auto;}
+  /* 我方：永续区 / 状态栏 / 手牌区都压紧，但插槽保持可点 */
+  #battleScreen .center-area{gap:5px;}
+  #battleScreen .permanent-area{min-height:0;max-width:560px;padding:6px 12px;}
+  #battleScreen .permanent-slot{width:70px;height:86px;}
+  #battleScreen .permanent-slot .slot-img{width:50px;height:52px;}
+  #battleScreen .player-status-bar{margin:3px 0;padding:5px 14px;gap:10px;}
+  #battleScreen .player-area{align-items:stretch;gap:12px;}
+  #battleScreen .hand-area{min-height:0;padding:6px 12px;}
+  #battleScreen .hand-cards{min-height:0;}
+  #battleScreen .hand-card{width:106px;height:134px;}
+  #battleScreen .hand-card-img{width:78px;height:82px;}
+  #battleScreen .hand-card-name{font-size:11.5px;padding:2px 4px;}
+  #battleScreen .deck-zone,#battleScreen .grave-zone{width:64px;height:78px;}
+  #battleScreen .zone-count{font-size:17px;}
+}
+/* ---- 高度预算不足时继续压紧：按**视口高度**分流（用户的问题是"高度不够、要一直滚轮"）。
+       1600×900 实测：固定行合计 549px，只剩 534px → 必须砍掉约 150px 才能一屏放下。 ---- */
+@media screen and (min-width: 769px) and (max-height: 940px){
+  #battleScreen{padding:6px 10px 8px;}
+  #battleScreen .battle-top-bar{margin:0 0 5px;padding:3px 10px;}
+  #battleScreen .duel-panel{padding:4px 8px;gap:8px;}
+  #battleScreen .duel-portrait{width:42px;height:42px;border-radius:9px;}
+  #battleScreen .duel-hp-track{height:14px;}
+  #battleScreen .battle-map-container{min-height:84px;margin-bottom:0;}
+  #battleScreen .opponent-area{padding:4px 8px;gap:8px;}
+  #battleScreen .opponent-area .permanent-slot{width:50px;height:60px;}
+  #battleScreen .opponent-area .permanent-slot .slot-img{width:36px;height:36px;}
+  #battleScreen .permanent-area{padding:4px 10px;}
+  #battleScreen .permanent-slot{width:60px;height:72px;}
+  #battleScreen .permanent-slot .slot-img{width:42px;height:44px;}
+  #battleScreen .player-status-bar{margin:2px 0;padding:2px 10px;gap:6px;}
+  #battleScreen .status-item{min-width:52px;padding:2px 8px;}
+  #battleScreen .buff-bar{margin:1px auto 0;padding:1px 8px;min-height:16px;}
+  #battleScreen .hand-area{padding:0 10px 2px;align-self:stretch;}
+  #battleScreen .hand-label{font-size:12px;margin-bottom:0;}
+  /* 手牌行：deck/grave 与手牌等高（flex-end 会让侧区顶端溢出 9px —— 实测 player-area over=9） */
+  #battleScreen .side-zones{justify-content:flex-end;}
+  #battleScreen .hand-label{font-size:12px;margin-bottom:3px;}
+  #battleScreen .hand-card{width:90px;height:100px;}
+  #battleScreen .hand-card-img{width:66px;height:58px;}
+  #battleScreen .hand-card-name{font-size:11px;padding:2px 3px;}
+  #battleScreen .deck-zone,#battleScreen .grave-zone{width:58px;height:60px;}
+  /* 墓地格里"图标+计数+名称"三行需要 ~72px，压到 60px 就会溢出 10px（实测 graveZone scrollH 72 > clientH 62），
+     而这一行溢出会一路顶到 battle-main-area → 又出现滚动。紧凑模式下墓地改成与牌组同构：图标省掉。 */
+  #battleScreen .grave-zone .zone-icon{display:none;}
+  #battleScreen .deck-zone .zone-name,#battleScreen .grave-zone .zone-name{font-size:10px;line-height:1.1;}
+  #battleScreen .deck-pile{width:50px;height:52px;}
+  #battleScreen .deck-pile .pile-layer,#battleScreen .deck-pile .pile-top{height:42px;}
+  #battleScreen .battle-bottom-bar{margin:6px 0 0;padding:6px;}
+}
+@media screen and (min-width: 769px) and (max-height: 800px){
+  #battleScreen .battle-map-container{min-height:78px;}
+  #battleScreen .map3d-hint{display:none;}     /* 空间紧时藏掉地图提示行 */
+  #battleScreen .duel-portrait{width:36px;height:36px;}
+  #battleScreen .opponent-area .permanent-slot{width:46px;height:56px;}
+  #battleScreen .permanent-slot{width:56px;height:70px;}
+  #battleScreen .hand-card{width:86px;height:108px;}
+  #battleScreen .hand-card-img{width:62px;height:60px;}
+  #battleScreen .hand-card-name{font-size:10.5px;}
+  #battleScreen .deck-zone,#battleScreen .grave-zone{width:54px;height:64px;}
+  #battleScreen .deck-pile{width:46px;height:50px;}
+  #battleScreen .deck-pile .pile-layer,#battleScreen .deck-pile .pile-top{height:40px;}
+}
+/* 1366×768 这类"窗口高度只有 ~614px"的场景：再砍一轮（标签行/提示行都让位给内容） */
+@media screen and (min-width: 769px) and (max-height: 700px){
+  #battleScreen{padding:4px 8px 6px;}
+  #battleScreen .battle-top-bar{padding:2px 8px;margin-bottom:4px;}
+  #battleScreen .duel-portrait{width:28px;height:28px;}
+  #battleScreen .duel-panel{padding:2px 6px;gap:6px;}
+  #battleScreen .battle-map-container{min-height:64px;}
+  #battleScreen .map3d-topbar{padding:1px 6px;font-size:10px;}
+  #battleScreen .opponent-area{padding:2px 6px;gap:6px;}
+  #battleScreen .opponent-area .permanent-slot{width:38px;height:46px;}
+  #battleScreen .opponent-area .permanent-slot .slot-img{width:28px;height:28px;}
+  #battleScreen .zone-label{display:none;}
+  #battleScreen .hand-label{display:none;}
+  #battleScreen .permanent-area{padding:2px 8px;}
+  #battleScreen .permanent-slot{width:46px;height:56px;}
+  #battleScreen .permanent-slot .slot-img{width:34px;height:34px;}
+  #battleScreen .player-status-bar{padding:2px 8px;gap:5px;margin:1px 0;}
+  #battleScreen .status-item{min-width:44px;padding:1px 6px;}
+  #battleScreen .hand-area{padding:2px 8px;}
+  #battleScreen .hand-card{width:74px;height:92px;}
+  #battleScreen .hand-card-img{width:54px;height:48px;}
+  #battleScreen .hand-card-name{font-size:10px;}
+  #battleScreen .deck-zone,#battleScreen .grave-zone{width:44px;height:52px;}
+  #battleScreen .deck-pile{width:38px;height:42px;}
+  #battleScreen .deck-pile .pile-layer,#battleScreen .deck-pile .pile-top{height:32px;}
+  #battleScreen .battle-bottom-bar{padding:4px;margin-top:4px;}
+}
+/* ---- 牌组堆模型：可点、可计数、能展示"被公开到牌组最上方"的那张卡 ---- */
+.deck-pile{position:relative;width:58px;height:64px;margin:0 auto;perspective:420px;cursor:pointer;}
+.deck-pile .pile-layer{position:absolute;left:3px;right:3px;height:52px;border-radius:6px;
+  background:linear-gradient(160deg,#3a4670,#222a4c);border:1px solid rgba(255,255,255,.22);
+  box-shadow:0 3px 8px rgba(0,0,0,.45);}
+.deck-pile .pile-layer.l1{top:8px;transform:translateX(4px) rotate(2.5deg);opacity:.7;}
+.deck-pile .pile-layer.l2{top:4px;transform:translateX(-3px) rotate(-2deg);opacity:.85;}
+.deck-pile .pile-layer.l3{top:0;transform:none;}
+.deck-zone:hover .deck-pile .pile-layer.l1{transform:translateX(7px) rotate(5deg);}
+.deck-pile .pile-top{position:absolute;inset:auto 0 12px 0;top:0;height:52px;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  background:rgba(0,0,0,.35);border:1px dashed rgba(255,255,255,.22);}
+.deck-pile .pile-top.revealed{border:2px solid var(--gold,#feca57);box-shadow:0 0 14px rgba(254,202,87,.55);background:#0d1020;}
+.deck-pile .pile-top img{width:100%;height:100%;object-fit:cover;display:none;}
+.deck-pile .pile-top.revealed img{display:block;}
+.deck-pile .pile-top .pile-top-label{font-size:9px;color:#cde;text-align:center;padding:0 2px;line-height:1.1;}
+.deck-pile .pile-top.revealed .pile-top-label{display:none;}
+.deck-pile .zone-count{position:absolute;right:-6px;bottom:-2px;background:rgba(10,12,26,.92);
+  border:1px solid rgba(255,255,255,.3);border-radius:99px;padding:0 6px;font-size:13px;font-weight:800;color:#fff;}
+/* ---- 准备阶段抽卡：从牌组堆飞到手牌（纯视觉，不阻塞流程、不参与测试静默判定） ---- */
+.prep-draw-fly{position:fixed;z-index:99998;pointer-events:none;width:78px;height:104px;border-radius:7px;
+  overflow:hidden;border:2px solid var(--gold,#feca57);box-shadow:0 10px 26px rgba(0,0,0,.55);
+  background:#1b2140;will-change:transform,opacity;}
+.prep-draw-fly img{width:100%;height:100%;object-fit:cover;display:block;}
+.prep-draw-fly .prep-draw-name{color:#fff;font-size:11px;font-weight:700;text-align:center;padding:6px 2px;}
+.hand-area.prep-draw-flash{animation:prepDrawFlash .55s ease;}
+@keyframes prepDrawFlash{0%{box-shadow:0 0 0 0 rgba(254,202,87,0);}35%{box-shadow:0 0 22px 4px rgba(254,202,87,.55);}100%{box-shadow:0 0 0 0 rgba(254,202,87,0);}}
+
+/* ============================================================
    UI 5.2 · 表情系统 —— 底部按钮 / 选择面板 / 气泡动画
    ============================================================ */
 .btn-emote{background:linear-gradient(135deg,#f59e0b,#e76f51)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 8px 22px rgba(0,0,0,.35)!important;}
@@ -3052,7 +3196,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     </div>
     <div class="player-area">
       <div class="side-zones">
-        <div class="deck-zone" onclick="showDeckList()"><div class="zone-icon">📚</div><div class="zone-count" id="deckCount">0</div><div class="zone-name">牌组</div></div>
+        <div class="deck-zone" id="p1DeckZone" onclick="showDeckList()" title="牌组（点击查看）">
+          <div class="deck-pile" id="p1DeckPile">
+            <div class="pile-layer l1"></div>
+            <div class="pile-layer l2"></div>
+            <div class="pile-layer l3"></div>
+            <div class="pile-top" id="p1DeckTop">
+              <img id="p1DeckTopImg" alt="牌组顶公开的卡">
+              <span class="pile-top-label" id="p1DeckTopLabel">牌组</span>
+            </div>
+            <div class="zone-count" id="deckCount">0</div>
+          </div>
+          <div class="zone-name">牌组</div>
+        </div>
         <div class="grave-zone" onclick="showGraveList()"><div class="zone-icon">⚰️</div><div class="zone-count" id="graveCount">0</div><div class="zone-name">墓地</div></div>
       </div>
       <div class="hand-area">
@@ -7930,8 +8086,91 @@ function takeTopCard(player) {
   if (__p.deck.length === 0) __refillDeckIfEmpty(player);
   return __c;
 }
-function drawCard(player) {
-  var __p = battleState[player];
+/* ============================================================
+   牌组堆模型 + "牌组最上方公开卡"API（为以后"把卡公开放到牌组最上方"的效果预留）
+   ------------------------------------------------------------
+   · 模型：场景里的 .deck-pile（三层堆叠 + 顶部槽位 + 数量角标），顶部槽位默认显示"牌组"，
+     一旦有卡被公开到牌组最上方，就显示那张卡的卡图 + 高亮描边。
+   · 效果侧只需调用：setDeckTopCard('p1', card, '因卡效果公开') / clearDeckTopCard('p1')。
+     两张牌组（p1/p2）都支持，p2 没有可视槽位时只记状态并写日志（联机/隐藏信息不受影响：
+     公开到牌组最上方按卡面就是给双方看的，所以这里不做隐藏处理）。
+   ============================================================ */
+var deckTopReveal = { p1: null, p2: null };
+function setDeckTopCard(who, card, reason) {
+  if (!deckTopReveal) deckTopReveal = { p1: null, p2: null };
+  deckTopReveal[who] = card || null;
+  if (card) addBattleLog(who, '【牌组顶公开】' + (reason ? reason + '：' : '') + '牌组最上方为【' + (card.name || '?') + '】');
+  try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+  return card || null;
+}
+function clearDeckTopCard(who, reason) {
+  if (!deckTopReveal) deckTopReveal = { p1: null, p2: null };
+  var had = deckTopReveal[who];
+  deckTopReveal[who] = null;
+  if (had) addBattleLog(who, '【牌组顶公开】结束' + (reason ? '（' + reason + '）' : '') + '，牌组顶恢复盖伏');
+  try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+  return had || null;
+}
+/* 把"现在牌组最上方那张"公开（供以后的效果直接调用）：只读，不改牌组顺序 */
+function revealDeckTopNow(who, reason) {
+  var p = battleState && battleState[who];
+  if (!p || !p.deck || !p.deck.length) { addBattleLog(who, '牌组已空，无法公开牌组顶'); return null; }
+  return setDeckTopCard(who, p.deck[0], reason || '公开牌组最上方');
+}
+function __renderDeckPile() {
+  try {
+    if (typeof document === 'undefined') return;
+    var top = document.getElementById('p1DeckTop');
+    if (!top) return;
+    var img = document.getElementById('p1DeckTopImg');
+    var label = document.getElementById('p1DeckTopLabel');
+    var card = deckTopReveal ? deckTopReveal.p1 : null;
+    if (card) {
+      top.classList.add('revealed');
+      top.title = '牌组最上方（已公开）：' + (card.name || '');
+      if (img) { img.src = card.image_url || ''; img.alt = card.name || ''; }
+      if (label) label.textContent = '';
+    } else {
+      top.classList.remove('revealed');
+      top.title = '牌组（点击查看）';
+      if (img) { img.removeAttribute('src'); img.alt = ''; }
+      if (label) label.textContent = '牌组';
+    }
+  } catch (e) {}
+}
+/* 准备阶段抽卡动画：从牌组堆飞到"抽到"的位置——纯视觉，不回调、不阻塞（因此不参与测试的静默判定） */
+function playPrepDrawAnim(player, card) {
+  try {
+    if (typeof document === 'undefined' || !card) return false;
+    var from = document.getElementById(player === 'p1' ? 'p1DeckPile' : 'p2DeckPile') || document.querySelector('.deck-zone');
+    var hand = document.getElementById('battleHand');
+    var area = document.querySelector('.hand-area');
+    if (!from || !hand) return false;
+    var a = from.getBoundingClientRect(), b = (hand.querySelector('.hand-card') || hand).getBoundingClientRect();
+    if (!a || !a.width || !b || !b.width) return false;   // 无头/未布局：直接不播（不影响任何流程）
+    var fly = document.createElement('div');
+    fly.className = 'prep-draw-fly';
+    if (card.image_url) fly.innerHTML = '<img src="' + card.image_url + '" alt="">';
+    else fly.innerHTML = '<div class="prep-draw-name">' + (card.name || '') + '</div>';
+    document.body.appendChild(fly);
+    var x0 = a.left + a.width / 2 - 39, y0 = a.top + a.height / 2 - 52;
+    var x1 = b.left + b.width / 2 - 39, y1 = b.top + b.height / 2 - 52;
+    fly.style.left = x0 + 'px'; fly.style.top = y0 + 'px';
+    var done = function () { try { if (fly.parentNode) fly.parentNode.removeChild(fly); } catch (e) {} };
+    if (typeof fly.animate === 'function') {
+      var anim = fly.animate([
+        { transform: 'translate(0,0) scale(.9) rotate(-6deg)', opacity: 0.15 },
+        { transform: 'translate(' + ((x1 - x0) * 0.55) + 'px,' + ((y1 - y0) * 0.55 - 26) + 'px) scale(1.06) rotate(3deg)', opacity: 1, offset: 0.62 },
+        { transform: 'translate(' + (x1 - x0) + 'px,' + (y1 - y0) + 'px) scale(1) rotate(0deg)', opacity: 0.92 }
+      ], { duration: 620, easing: 'cubic-bezier(.22,.75,.3,1)' });
+      try { anim.onfinish = done; } catch (e) { setTimeout(done, 700); }
+      try { anim.oncancel = done; } catch (e) {}
+    } else { done(); return false; }
+    if (area) { try { area.classList.add('prep-draw-flash'); setTimeout(function () { area.classList.remove('prep-draw-flash'); }, 600); } catch (e) {} }
+    return true;
+  } catch (e) { return false; }
+}
+function drawCard(player) {  var __p = battleState[player];
   if (__p.deck.length === 0) {
     if (!__refillDeckIfEmpty(player)) { addBattleLog(player, '牌库与墓地均已空，无卡可抽'); return null; }
   }
@@ -8026,7 +8265,11 @@ function startTurn() {
       __p._lastNaturalRegen = __reg;
     })();
     var drawn = drawCard(player);
-    if (drawn) addBattleLog(player, '准备阶段：回复5费用，抽到【' + drawn.name + '】');
+    if (drawn) {
+      addBattleLog(player, '准备阶段：回复5费用，抽到【' + drawn.name + '】');
+      // 准备阶段抽卡动画（用户要求）：纯视觉，不阻塞流程；无头/无布局环境下自动跳过
+      playPrepDrawAnim(player, drawn);
+    }
   } else {
     battleState[player]._firstRegenSkipped = true;
     addBattleLog(player, '首回合准备阶段：自然回复与抽卡已在游戏开始时结算，不再重复');
@@ -8042,7 +8285,10 @@ function startTurn() {
   // 光太郎被动：每个自己回合开始时额外抽取1张卡
   if (battleState[player]._kotaroPassive) {
     var extraDraw = drawCard(player);
-    if (extraDraw) addBattleLog(player, '【光太郎被动·千金之势】回合开始额外抽1张卡：【' + extraDraw.name + '】');
+    if (extraDraw) {
+      addBattleLog(player, '【光太郎被动·千金之势】回合开始额外抽1张卡：【' + extraDraw.name + '】');
+      playPrepDrawAnim(player, extraDraw);   // 同样是准备阶段抽卡：同样给飞卡动画
+    }
   }
   
   // 重置光太郎献祭标记（一回合一次的“视为因卡效果送墓”窗口）
@@ -11692,6 +11938,8 @@ function renderBuffBar(user) {
 }
 function updateBattleUI() {
   if (!battleState) return;
+  // 牌组堆模型：把"是否公开了牌组最上方那张卡"画出来（模型本身在 .deck-zone 里）
+  try { if (typeof __renderDeckPile === 'function') __renderDeckPile(); } catch (e) {}
   // 回音韵时点兜底（补齐绕过 recoverCost 的直接改费路径）
   try { if (typeof __syncRecoverTiming === 'function') __syncRecoverTiming(); } catch (e) {}
   
@@ -12496,6 +12744,27 @@ window.addEventListener('load', function() {
         } catch (e) { console.error('debug3d 启动失败', e); }
       }, 120);
     }
+  } catch (e) {}
+
+  // UI 6.0：地图行改为 flex:1 吃剩余空间 → 它的高度会随"手牌/增益栏行数变化"而变。
+  // 容器尺寸变了必须让 three.js 重算画布与相机，否则地图被拉伸/裁切（只在窗口 resize 时重算是不够的）
+  try {
+    var __mapBox = document.querySelector('#battleScreen .battle-map-container');
+    if (__mapBox && typeof ResizeObserver !== 'undefined') {
+      var __lastW = 0, __lastH = 0;
+      var __ro = new ResizeObserver(function (entries) {
+        try {
+          var r = entries[0].contentRect;
+          if (Math.abs(r.width - __lastW) < 2 && Math.abs(r.height - __lastH) < 2) return;
+          __lastW = r.width; __lastH = r.height;
+          if (typeof Map3D !== 'undefined' && Map3D.isReady && Map3D.isReady()) Map3D.resize();
+        } catch (e) {}
+      });
+      __ro.observe(__mapBox);
+    }
+    // 兜底：进对战页/回合推进后布局还会再变一次，Observer 首次可能量到旧值 → 稍后再校准一次画布
+    setTimeout(function () { try { if (typeof Map3D !== 'undefined' && Map3D.isReady && Map3D.isReady()) Map3D.resize(); } catch (e) {} }, 300);
+    setTimeout(function () { try { if (typeof Map3D !== 'undefined' && Map3D.isReady && Map3D.isReady()) Map3D.resize(); } catch (e) {} }, 1200);
   } catch (e) {}
 });
 
