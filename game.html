@@ -13110,7 +13110,17 @@ function compileChoice(core, permanent) {
     return bsubs.length ? compileClauses(bsubs, permanent) : [];
   });
   if (branches.some(function (b) { return b === null; })) return null;
-  return [{ op: 'choice', title: '选择一项发动', subtitle: __choiceHead(headTxt), labels: parts.map(__branchLabel), branches: branches }];
+  // 引导语里可能带着**必修的主段效果**——旧实现把引导语整段丢掉，导致主段静默消失。
+  // 实例：【拿手好戏】「……破坏其区域内的一张卡。Lv4追加：根据被破坏卡的属性还可以适用效果：①…」
+  //   ・主段"破坏其区域内的一张卡"必须在**任何等级**都执行 → 先编译成 destroy_pick 放在 choice 之前
+  //   ・"Lv4追加"的那组①～④是追加分支 → 给 choice 打 ifLevel:4，未到等级时不弹、不适用
+  var __headOps = [];
+  var __choiceOp = { op: 'choice', title: '选择一项发动', subtitle: __choiceHead(headTxt), labels: parts.map(__branchLabel), branches: branches };
+  if (/破坏其区域内的(?:一张|1张)卡/.test(headTxt)) {
+    __headOps.push({ op: 'destroy_pick', zone: 'permanent', to: 'grave', who: 'target', required: true });
+    if (/Lv\s*4\s*追加/.test(headTxt)) __choiceOp.ifLevel = 4;
+  }
+  return __headOps.concat([__choiceOp]);
 }
 // 无圈号“N选一：A；B；C”：引导语作前置效果先执行，分号分隔各分支
 function compileDelimChoice(headText, bodyText, sep, permanent) {
@@ -13328,10 +13338,14 @@ function __compileBody(t) {
   if (has('同步')) {
     var hm = __matchNum(new RegExp('(?:回复|回)\\s*(?:自身|自己|其|目标|一名玩家)?\\s*' + __NUM + '\\s*点?\\s*(?:同步值?|生命值?|血量)'), t);
     var lm = __matchNum(new RegExp('(?:扣除|扣|失去|失)\\s*(?:其|目标|对方|自身|自己)?\\s*' + __NUM + '\\s*点?\\s*同步'), t);
+    // 「每回合回复N点同步值（持续M回合）」是**持续效果**（由 regen_sync 处理）：
+    // 不能再被"立即回复"规则抓一次，否则同一句既当场回 N 点、又挂上持续回复
+    // （实测【闲暇时光】"立即回复4点"变成了回6点，就是这里重复计了一次）
+    var __isRegenClause = /每回合[^。；]{0,8}(?:回复|回)/.test(t) || /持续\s*\d+\s*回合/.test(t);
     if (/回\s*\/\s*扣/.test(t)) { var an = __matchNum(new RegExp('扣自身\\s*' + __NUM), t) || 2; ops.push({ op: 'self_alt_sync', amount: an }); }
-    else if (hm != null) ops.push({ op: 'heal_sync', amount: hm });
+    else if (hm != null && !__isRegenClause) ops.push({ op: 'heal_sync', amount: hm });
     else if (lm != null && !__preDmgSync) ops.push({ op: 'loss_sync', amount: lm, targetWho: (has('自身') || has('自己')) ? 'self' : 'target' });
-    else if (!__preDmgSync && new RegExp('(?:回复|回|扣除|扣|失去)\\s*(?:自身|自己|其|目标|一名玩家)?\\s*' + __NUM + '?\\s*点?\\s*同步').test(t)) uncovered.push('sync');
+    else if (!__preDmgSync && !__isRegenClause && new RegExp('(?:回复|回|扣除|扣|失去)\\s*(?:自身|自己|其|目标|一名玩家)?\\s*' + __NUM + '?\\s*点?\\s*同步').test(t)) uncovered.push('sync');
   }
 
   // 音韵
@@ -13459,11 +13473,15 @@ function __compileBody(t) {
   if (critd) ops.push({ op: 'apply_status', status: 'crit_damage', value: +critd[1], actions: __dur });
   var ctrl = t.match(/\+\s*(\d+)\s*%\s*控骰/);
   if (ctrl) ops.push({ op: 'apply_status', status: 'control_dice', value: +ctrl[1], actions: __dur });
-  var named = t.match(/(?:获得|施加|赋予|得到)\s*(?:其|目标|一名玩家)?\s*(?:持续\s*\d+\s*(?:次行动|轮|回合)的?)?\s*\[([^\]]+)\]/);
-  if (named) {
-    var dur = __matchNum(/持续\s*(\d+)\s*(?:次行动|轮|回合)/, t);
+  // 「施加1轮的[缴械]」这种**不带"持续"字样**的时长也要认（安静些的写法；旧正则要求"持续N轮"才匹配）。
+  // 但【安静些】那种"检查其手牌…攻击卡…[缴械]"必须**整段交给 disarm_target** 处理：
+  // 否则状态会被这里无条件施加一次（哪怕目标手牌根本没有攻击卡）。
+  var __disarmClauseTxt = /检查其手牌/.test(t) && /攻击卡/.test(t);
+  var named = t.match(/(?:获得|施加|赋予|得到)\s*(?:其|目标|一名玩家)?\s*(?:(?:持续\s*)?(\d+)\s*(?:次行动|轮|回合)的?)?\s*\[([^\]]+)\]/);
+  if (named && !__disarmClauseTxt) {
+    var dur = named[1] != null ? +named[1] : __matchNum(/持续\s*(\d+)\s*(?:次行动|轮|回合)/, t);
     // 状态名归一：卡面【超频】与贷款/暴击结算使用的 overclock 统一
-    var __stName = (named[1] === '超频') ? 'overclock' : named[1];
+    var __stName = (named[2] === '超频') ? 'overclock' : named[2];
     ops.push({ op: 'apply_status', status: __stName, actions: (dur == null ? 1 : dur) });
   }
 
@@ -13497,7 +13515,14 @@ function __compileBody(t) {
   if (/回收上一张使用的卡/.test(t)) ops.push({ op: 'recycle_last' });
 
   // 选卡送入墓地（可献祭/可再抽）
-  if (!__threatHit && /送入墓地|送墓/.test(t) && /选|一张|\d\s*张|手卡|区域|手牌/.test(t)) {
+  // 例外：【安静些】的「检查**其（目标）**手牌，若其中有攻击卡的场合则将那张攻击卡送入墓地并对其施加1轮的[缴械]」
+  // 主语是目标、候选限定为攻击卡、且有条件（没有攻击卡就不适用）——用通用 discard 会变成"自己手卡强制弃1"，
+  // 既弄错主语又静默失效（旧实现就是这条路）。
+  var __disarmClause = /检查其手牌/.test(t) && /攻击卡/.test(t) && /缴械/.test(t);
+  if (__disarmClause) {
+    var __disarmR = __matchNum(new RegExp('(\\d+)\\s*(?:次行动|轮|回合)'), t) || 1;
+    ops.push({ op: 'disarm_target', rounds: __disarmR });
+  } else if (!__threatHit && /送入墓地|送墓/.test(t) && /选|一张|\d\s*张|手卡|区域|手牌/.test(t)) {
     var zones = []; if (/手卡|手牌/.test(t)) zones.push('hand'); if (/区域|场上|永续/.test(t)) zones.push('permanent'); if (!zones.length) zones.push('hand');
     var dneed = __matchNum(new RegExp('至多?\\s*' + __NUM + '\\s*张'), t) || 1;
     // “至多N张”：可少选甚至不选（先哲之"馈赠"类）
@@ -14415,7 +14440,37 @@ function runOneOp(op, ctx, next) {
       return;
     }
     case 'damage_by_removed': { var cnt = (q.removedFromGame || []).length + (q.removed || []).length; applyDamageOps(user, target, { judge: false, base: cnt + (op.plus || 0), kind: op.kind }, next); return; }
-    case 'break_shield': applyDamageOps(user, target, { judge: false, base: q.shield || 0 }, next); return;
+    case 'break_shield': {
+      // 卡面：「造成足以击碎其当前护盾的伤害」；SP 追加「对没有护盾的单位**固定造成N点伤害**」
+      // （该结束了！）。旧实现只取 q.shield，护盾为 0 时等于 0 点伤害 + 克制 → 实测只掉 1 点。
+      var __bsSp = (ctx && ctx.card && ctx.card.sp) || '';
+      var __bsFix = __bsSp.match(/没有护盾的单位固定造成\s*(\d+)\s*点伤害/);
+      var __bsShield = q.shield || 0;
+      if (__bsShield > 0) { applyDamageOps(user, target, { judge: false, base: __bsShield }, next); return; }
+      if (__bsFix) {
+        addBattleLog(user, '【' + ((ctx.card && ctx.card.name) || '') + '·SP】目标没有护盾，固定造成' + __bsFix[1] + '点伤害');
+        applyDamageOps(user, target, { judge: false, base: +__bsFix[1] }, next); return;
+      }
+      addBattleLog(user, '目标当前没有护盾，本次伤害为 0（该卡无"无护盾固定伤害"条款）');
+      applyDamageOps(user, target, { judge: false, base: 0 }, next); return;
+    }
+    case 'disarm_target': {
+      // 安静些：「检查其（目标）手牌，若其中有攻击卡的场合则将那张攻击卡送入墓地并对其施加1轮的[缴械]」
+      var __dsHand = (battleState[target].hand || []).filter(function (c) { return c && (c._category === 'attack_cards' || /攻击/.test(c.type || '')); });
+      if (!__dsHand.length) { addBattleLog(user, '检查目标手牌：没有攻击卡，本段不适用（不送墓、不施加[缴械]）'); break; }
+      var __dsApply = function (card) {
+        var __dsArr = battleState[target].hand, __dsIx = __dsArr.indexOf(card);
+        if (__dsIx >= 0) __dsArr.splice(__dsIx, 1);
+        moveCardToGrave(target, card, 'effect');
+        addBattleLog(user, '检查目标手牌：将攻击卡【' + card.name + '】送入墓地');
+        StatusSys.add(target, { type: '缴械', actions: (op.rounds || 1), addedBy: user });
+        addBattleLog(user, '对目标施加' + (op.rounds || 1) + '轮[缴械]（持续期间不可打出[侵略]标签卡）');
+      };
+      if (__dsHand.length === 1) { __dsApply(__dsHand[0]); break; }
+      pickFromList(user, __dsHand.map(function (c) { return { card: c, zone: 'hand', index: battleState[target].hand.indexOf(c) }; }),
+        '选择要送入墓地的攻击卡', 1, function (picks) { if (picks && picks[0]) __dsApply(picks[0].card); });
+      return;
+    }
     case 'heal_sync': { var __hs = op.amount; if (ctx && ctx.card && typeof __lvHealSync === 'function') __hs = __lvHealSync(ctx.card, user, __hs); p.sync = Math.min(p.sync + __hs, p.maxSync || 999); break; }
     case 'loss_sync': { var w = op.targetWho === 'self' ? user : target; battleState[w].sync = Math.max(0, battleState[w].sync - op.amount); break; }
     case 'self_alt_sync':
@@ -14690,6 +14745,8 @@ function runOneOp(op, ctx, next) {
     case 'sacrifice_now': { var sl = collectZoneCards(user, ['hand'], null, null); pickFromList(user, sl, '选择献祭的手卡', 1, function (picks) { sacrificeCards(user, picks, op.thenDraw, next); }); return; }
     case 'destroy_pick': {
       var dw = op.who === 'self' ? user : target, dl2 = collectZoneCards(dw, [op.zone], null, null);
+      // 没有可破坏的卡时**必须说话**：旧实现静默结束，测试/玩家都会误以为"这张卡坏了"
+      if (!dl2.length) { addBattleLog(user, '【' + ((ctx && ctx.card && ctx.card.name) || '效果') + '】目标区域内没有可破坏的卡，本段不适用'); break; }
       pickFromList(user, dl2, '选择要破坏的卡', 1, function (picks) {
         picks.forEach(function (pk) { var arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(pk.card); runTiming(TIMING.ON_REMOVE, { player: dw, card: pk.card }); } else { battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { dealDamageWithResponse(dw, 2, '血之佑戒反噬（无来源热忱）', null, '热忱', null, { sourceless: true }); addBattleLog(dw, '【血之佑戒·红泪拉克莎】自己的卡被破坏，受到2点无来源热忱伤害'); } } addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + '【' + pk.card.name + '】'); });
         if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -14823,6 +14880,8 @@ function runOneOp(op, ctx, next) {
       return;
     }
     case 'choice': {
+      // Lv 门槛（拿手好戏「Lv4追加」）：未到等级时整组追加分支不适用，也不再弹选择框
+      if (op.ifLevel && ((p.level || 1) < op.ifLevel)) { addBattleLog(user, '等级未到 Lv' + op.ifLevel + '，追加效果不适用'); break; }
       var branches = op.branches;
       var __choiceLabels = op.labels || branches.map(function (b, i) { return '效果' + (i + 1); });
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
