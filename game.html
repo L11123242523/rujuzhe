@@ -596,6 +596,10 @@ body.map3d-on .minimap-container { display: none !important; }
   color: #feca57 !important;
 }
 .permanent-slot.permanent-card { border-color: #feca57; background: rgba(254,202,87,0.15); box-shadow: 0 0 15px rgba(254,202,87,0.4); }
+/* 连锁 C1 结算位：正在使用/结算中的卡（放在效果处理区里，占 1 格） */
+.permanent-slot.chain-c1 { border-color: #74b9ff !important; background: rgba(116,185,255,0.16) !important; box-shadow: 0 0 16px rgba(116,185,255,0.55) !important; animation: c1Pulse 1.6s ease-in-out infinite; }
+.permanent-slot.chain-c1 .slot-type { color: #74b9ff; font-weight: 800; }
+@keyframes c1Pulse { 0%,100% { box-shadow: 0 0 12px rgba(116,185,255,.42); } 50% { box-shadow: 0 0 22px rgba(116,185,255,.8); } }
 .permanent-slot.single-card { border-color: #ff6b6b; background: rgba(255,107,107,0.15); }
 .slot-cost { position: absolute; top: 4px; left: 4px; background: #feca57; color: #2d3436; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; z-index: 10; }
 .slot-img { width: 70px; height: 80px; object-fit: cover; border-radius: 4px; }
@@ -6029,10 +6033,12 @@ function onlineKasumiP2(done) {
   }
   function choosePermanent(handReturned) {
     if (p.permanent.length >= 1) {
-      Online.awaitAnswer({ label: '整肃·选永续区卡放回（对手）', cards: p.permanent.map(function(c){ return c.name; }), need: 1, allowLess: true }, function (v) {
+      var __p2permIdx = [];
+      p.permanent.forEach(function (c, i) { if (c && !c._chainC1) __p2permIdx.push(i); });
+      Online.awaitAnswer({ label: '整肃·选永续区卡放回（对手）', cards: __p2permIdx.map(function(i){ return p.permanent[i].name; }), need: 1, allowLess: true }, function (v) {
         var arr = Array.isArray(v) ? v : (v === null || v === undefined ? [] : [v]);
         var cnt = 0;
-        arr.slice().sort(function (a, b) { return b - a; }).forEach(function (pi) { if (pi >= 0 && pi < p.permanent.length) { var rc = p.permanent.splice(pi, 1)[0]; p.deck.push(rc); cnt++; addBattleLog('p2', '【霞被动·整肃】永续【' + rc.name + '】放回牌组'); } });
+        arr.slice().sort(function (a, b) { return b - a; }).forEach(function (k) { var pi = __p2permIdx[k]; if (pi === undefined || pi >= p.permanent.length) return; var rc = p.permanent.splice(pi, 1)[0]; if (!rc) return; p.deck.push(rc); cnt++; addBattleLog('p2', '【霞被动·整肃】永续【' + rc.name + '】放回牌组'); });
         finalize(handReturned + cnt);
       });
     } else finalize(handReturned);
@@ -9010,11 +9016,53 @@ function resolveChainStack(effect, onDone) {
   }
   __stepSafe();
 }
+/* ============================================================
+   连锁 C1 占位（作者口径，2026-09-13 确认"占用上限"）
+   ------------------------------------------------------------
+   口径原文：「使用卡时，放在永续区内变为 c1，无玩家连锁开始逆执行。效果结毕后再根据卡的种类判断是否送入墓地
+             （单次种类的道具卡、技能卡、攻击卡均送入自己墓地；事件卡、乐谱卡送入公共墓地）」
+   · 使用卡 → 先把这张卡移出原区域并放进**永续区（效果处理区）**，标记 `_chainC1`，显示为 C1；
+   · 这张卡**占用效果处理区的格子**（计入 3 格上限）；
+   · 结算完毕由送墓出口 `placeAfterUse`（或事件/乐谱的公共墓地出口）把 C1 位清掉，再按种类送墓。
+   ============================================================ */
+function __chainC1Enter(owner, card) {
+  try {
+    if (typeof battleState === 'undefined' || !battleState || !owner || !card) return false;
+    var p = battleState[owner]; if (!p) return false;
+    p.permanent = p.permanent || [];
+    if (p.permanent.indexOf(card) >= 0) { card._chainC1 = true; return true; }
+    // 从"原区域"移出（手牌/事件区/乐谱区/盖伏区都可能）
+    ['hand', 'eventCards', 'musicCards', 'faceDownCards'].forEach(function (z) {
+      var arr = p[z]; if (!arr) return;
+      var ix = arr.indexOf(card); if (ix >= 0) arr.splice(ix, 1);
+    });
+    card._chainC1 = true;
+    p.permanent.push(card);
+    addBattleLog(owner, '【连锁】C1 置于效果处理区：【' + (card.name || '?') + '】（占 1 格，结算完毕后按种类送墓）');
+    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+function __chainC1Exit(owner, card) {
+  try {
+    if (typeof battleState === 'undefined' || !battleState || !owner || !card) return false;
+    var p = battleState[owner]; if (!p || !p.permanent) return false;
+    var ix = p.permanent.indexOf(card);
+    if (ix >= 0) p.permanent.splice(ix, 1);
+    if (card._chainC1) card._chainC1 = false;
+    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    return ix >= 0;
+  } catch (e) { return false; }
+}
 function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('beforeEffectExecution·效果执行前连锁窗口');
   if(__eeB)__eeB._resolveDepth=(__eeB._resolveDepth||0)+1;
+  // 作者口径：使用卡时先把这张卡放进永续区（效果处理区）作为 C1（占用格数），结算完毕再按种类送墓
+  var __c1card = effect && effect.card;
+  var __c1who = (effect && (effect.player || effect.user)) || 'p1';
+  if (__c1card) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
   function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
@@ -9025,9 +9073,21 @@ function beforeEffectExecution(effect, callback) {
   // 记录当前响应窗口类型，供 AI 盖伏响应（aiPickFaceDownForWindow）判定
   if (battleState) { battleState._curWindowStage = effect._stage || effect.type || ''; battleState._curWindowDamage = effect.pendingDamage || effect.damage || 0; }
   // 快速路径：双方都没有任何可连锁卡时静默放行，不刷日志/不弹连锁条，避免普通用卡被打扰
+  // 作者口径：**不管有几个效果都要开连锁处理**。即使双方都没有可连锁卡，也组成"C1=这张卡"的连锁，
+  // 然后双方连续 PASS 直接进入逆结算（不弹窗、不等待），并写明连锁组成 —— 旧实现这条快速路径是完全静默的。
   var __q1 = collectChainable('p1', effect), __q2 = collectChainable('p2', effect);
-  if (!__q1.length && !__q2.length) { if (typeof popEffect === 'function') popEffect(effect); __releaseB(); callback(effect); return; }
+  if (!__q1.length && !__q2.length) {
+    addBattleLog('system', '【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : 'AI') + '·' +
+      (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')));
+    addBattleLog('system', '【连锁】双方均无可用连锁卡 → 连续 PASS，直接逆结算');
+    if (typeof popEffect === 'function') popEffect(effect);
+    __releaseB();
+    callback(effect);
+    return;
+  }
   addBattleLog('system','【效果将要执行前时点】'+effect.description+'，双方可连锁');
+  addBattleLog('system','【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : 'AI') + '·' +
+    (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')) + '（等待双方连锁）');
   if (typeof renderChainBar === 'function') renderChainBar(effect);
   function finish(){
     resolveChainStack(effect, function(){
@@ -11404,11 +11464,18 @@ function activateKasumiPassive() {
     updateBattleUI();
   }
   function choosePermanent(handReturned) {
-    if (p.permanent.length >= 1) {
-      showCardPickerMulti(p.permanent.slice(), '【整肃】选1张永续区卡放回（可少选=不放回）', function(sel) {
+    // 候选里排除"正在结算的 C1 卡"（它按口径摆在永续区，但正在结算的卡不该被别的效果搬走）
+    var __permIdx = [];
+    (p.permanent || []).forEach(function (c, i) { if (c && !c._chainC1) __permIdx.push(i); });
+    if (__permIdx.length >= 1) {
+      showCardPickerMulti(__permIdx.map(function (i) { return p.permanent[i]; }), '【整肃】选1张永续区卡放回（可少选=不放回）', function(sel) {
         var arr = Array.isArray(sel) ? sel : (sel === null || sel === undefined ? [] : [sel]);
         var cnt = 0;
-        arr.slice().sort(function(a,b){return b-a;}).forEach(function(pi) { var rc = p.permanent.splice(pi,1)[0]; p.deck.push(rc); cnt++; addBattleLog('p1', '【霞被动·整肃】永续【' + rc.name + '】放回牌组'); });
+        arr.slice().sort(function(a,b){return b-a;}).forEach(function(k) {
+          var pi = __permIdx[k]; if (pi === undefined) return;
+          var rc = p.permanent.splice(pi, 1)[0]; if (!rc) return;
+          p.deck.push(rc); cnt++; addBattleLog('p1', '【霞被动·整肃】永续【' + rc.name + '】放回牌组');
+        });
         finalize(handReturned + cnt);
       }, 1, true);
     } else finalize(handReturned);
@@ -12276,7 +12343,8 @@ function renderZoneSlots(pl) {
   var P = battleState[pl];
   var mine = (pl === 'p1');
   var list = [];
-  (P.permanent || []).forEach(function (c, i) { if (c) list.push({ card: c, type: 'permanent', index: i }); });
+  // 自己的 3 格只放"常驻"的永续卡与盖伏卡；正在结算的 C1 卡单独一格追加显示（作者口径：占格）
+  (P.permanent || []).forEach(function (c, i) { if (c && !c._chainC1) list.push({ card: c, type: 'permanent', index: i }); });
   (P.faceDownCards || []).forEach(function (c, i) { if (c) list.push({ card: c, type: 'facedown', index: i }); });
   var html = '';
   for (var i = 0; i < 3; i++) {
@@ -12304,6 +12372,13 @@ function renderZoneSlots(pl) {
         (mine ? (permCanAct ? '(点击发动)' : '(不可主动发动)') : '（对手）') + '</div></div>';
     }
   }
+  // 连锁 C1 结算位：正在使用/结算中的卡就摆在效果处理区里（作者口径："放在永续区内变为 c1"）
+  (P.permanent || []).forEach(function (c, i) {
+    if (!c || !c._chainC1) return;
+    html += '<div class="permanent-slot permanent-card chain-c1" title="连锁 C1（结算中）：' + (c.name || '') + ' — 结算完毕后按种类送墓">' +
+      (c.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + c.image_url + '" class="slot-img" alt="' + c.name + '">' : '') +
+      '<div class="slot-name">' + (c.name || '') + '</div><div class="slot-type">C1 结算中</div></div>';
+  });
   box.innerHTML = html;
 }
 
@@ -13930,6 +14005,7 @@ function collectZoneCards(who, zones, tags, cats, exclude) {
   var me = battleState[who], out = [];
   var __tn = []; try { __tn = ((deckConfig[who] && deckConfig[who].chars) || []).filter(Boolean).map(function (c) { return c.name; }); } catch (e) {}
   (zones || ['hand']).forEach(function (z) { (me[z] || []).forEach(function (c, i) {
+    if (c && c._chainC1) return;   // 正在结算的 C1 卡不参与"检索/选取"（它只是按口径摆在永续区里）
     if ((c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __tn.length && !cardBelongsToTeam(c, __tn)) return; // 非本队角色卡不可被检索/选取
     if (matchCardQuery(c, tags, cats, exclude)) out.push({ card: c, zone: z, index: i });
   }); });
@@ -14489,7 +14565,12 @@ function computeDamageValue(user, target, opt) {
   // 括号外③：理智伤害+
   if (kind === 'sanity' && ap._intellectBonus) { final += ap._intellectBonus; logs.push('理智伤害+' + ap._intellectBonus); }
   var perm = ap.permanent || [];
-  function hasPerm(k) { return perm.some(function (c) { return c.name && c.name.indexOf(k) >= 0; }); }
+  /* 常驻光环只认"已经落定在效果处理区"的卡：正在结算的 C1 卡虽然按口径摆在永续区里（占 1 格），
+     但它自己的"存在于区域内→最终伤害+N"光环不应在**它自己结算的过程中**就生效
+     —— 否则实测【风纪委员臂章】自己那张的 3 点理智伤害会变成 5 点（多吃了自己 1 点光环），
+     属于口径落地时"顺手改掉卡牌数值"的副作用。改回：光环只看非 C1 的常驻卡。 */
+  var __permSettled = perm.filter(function (c) { return c && !c._chainC1; });
+  function hasPerm(k) { return __permSettled.some(function (c) { return c.name && c.name.indexOf(k) >= 0; }); }
   var tags = (typeof __cardTags === 'function' && sc) ? __cardTags(sc) : ((sc && sc.tags) || []), cat = sc && sc._category;
   var isAtk = cat === 'attack_cards', isSkill = cat === 'skill_cards', isItem = cat && /item/.test(cat);
   // 括号外④：各类“最终伤害+N”
@@ -16379,6 +16460,7 @@ function useEventCardFor(player, index, name, done) {
       __applyEventEffect();
     }
     // 事件卡使用后放入公共墓地（不洗牌）；连锁发动的事件卡已在连锁支付时入公共墓地，此处跳过避免重复
+    __chainC1Exit(player, card);   // 作者口径：结算完毕先撤掉 C1 占位，再按种类送墓（事件卡→公共墓地）
     if (!card._alreadyInPublicGrave) {
       publicGraveyard.event_cards.push(card);
       addBattleLog(player, '【' + card.name + '】已放入公共墓地（公共墓地现有' + publicGraveyard.event_cards.length + '张事件卡）');
@@ -16500,6 +16582,7 @@ function useMusicCardFor(player, index, name, done) {
   }
 
   function __finishMusic() {
+    __chainC1Exit(player, card);   // 作者口径：结算完毕先撤掉 C1 占位，再按种类送墓（乐谱卡→公共墓地）
     publicGraveyard.music_cards.push(card);
     addBattleLog(player, '【' + card.name + '】已放入公共墓地（公共墓地现有' + publicGraveyard.music_cards.length + '张乐谱卡）');
     updateBattleUI(); checkBattleEnd();
@@ -16600,7 +16683,7 @@ var GRAVE_SP_DEFS = [
     run: function (card, zone, redraw) {
       var p = battleState.p1, cands = [];
       (p.hand || []).forEach(function (c) { cands.push({ card: c, zone: 'hand' }); });
-      (p.permanent || []).forEach(function (c) { cands.push({ card: c, zone: 'permanent' }); });
+      (p.permanent || []).forEach(function (c) { if (c && !c._chainC1) cands.push({ card: c, zone: 'permanent' }); });   // C1 结算中的卡不可被选
       if (!cands.length) return;
       showCardPickerMulti(cands.map(function (x) { return x.card; }), '一刀两断：选一张卡送入墓地（墓地的此卡加入手卡）', function (ix) {
         // need=1 时回调为单个索引（数字），多选才是数组——统一归一化
@@ -19275,6 +19358,9 @@ function __revertBlueprintCopy(card) {
 
 function placeAfterUse(user, card, isPerm) {
   var p = battleState[user];
+  // 作者口径：结算完毕才按种类送墓 —— 先把"连锁 C1 占位"从效果处理区撤掉（这张卡自己那格），
+  // 再走原有的落点判定（永续留场 / 回收回牌组 / 直接销毁 / 送入自己墓地）
+  if (card) __chainC1Exit(user, card);
   // 技能卡用后必离场（进墓/回牌组）：清除实例级“本回合已用”标记，使其被回收回手后可再次发动（未回收则卡在墓地，自然无法一回合连发）
   if (card && card._category === 'skill_cards') delete card._skillUsedThisTurn;
   if (isPerm) {
