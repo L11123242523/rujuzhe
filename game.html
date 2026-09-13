@@ -8551,6 +8551,19 @@ function collectChainable(player, effect){
   function consider(c,from,index){
     if(!c) return;
     var __kd=(typeof RJEngine!=='undefined'&&RJEngine.classifyChainCard)?RJEngine.classifyChainCard(c):null;
+    /* 作者口径（2026-09-13）：**技能卡是全时点卡**，任何效果发动前都可以作为连锁响应发动 ——
+       不做 isChainOnlyCard / hasChainTarget / __matchStage 阶段过滤（那三道闸是给"连锁专用卡"用的），
+       只校验：角色在本队、费用够、本回合未用过、盖伏当回合不能翻。 */
+    if (c._category === 'skill_cards') {
+      if (from === 'event') return;                                   // 事件区里不会有技能卡
+      if (c._skillUsedThisTurn) return;                               // 每回合一次
+      if (typeof teamHasCardCharacter === 'function' && !teamHasCardCharacter(player, c)) return;
+      var __skCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
+      if ((parseInt(c.cost,10)||0) > (me.cost||0) + __skCap) return;
+      if (from === 'faceDown' && c._faceDownTurn === battleState.turn && c._faceDownPlayer === player) return;
+      out.push({card:c, from:from, index:index, isSkill:true});
+      return;
+    }
     if (from === 'event') {
       // 事件卡=最高时点/全时点：任意卡/效果将执行前均可连锁发动，不受连锁分类/对象/阶段过滤限制
     } else if(__kd==='negate_effect'){
@@ -8568,8 +8581,9 @@ function collectChainable(player, effect){
   }
   (me.hand||[]).forEach(function(c,i){
     // 对手回合：手牌连锁必须卡面写明“其他玩家回合也能从手卡发动”（如怪怪幽灵吊坠/遥控骰子）；
-    // 其余连锁卡（侦探放大镜/猎手爪链/颠倒骰子/Twice/幸运护符等）在对手回合必须盖伏后才能响应
-    if (!__myTurn) {
+    // 其余连锁卡（侦探放大镜/猎手爪链/颠倒骰子/Twice/幸运护符等）在对手回合必须盖伏后才能响应。
+    // 例外（作者口径 2026-09-13）：**技能卡是全时点卡**，不受这道限制。
+    if (!__myTurn && c._category !== 'skill_cards') {
       var __ht = (c.effect||'') + (c.sp||'') + (c.text||'');
       if (!canChainFromHandOnOppTurn(__ht)) return;
     }
@@ -8664,7 +8678,7 @@ function applyChainCard(player,pick,effect,done){
       effect._pendingGrave = effect._pendingGrave || [];
       effect._pendingGrave.push({ player: player, card: c, name: name });
       // 技能卡每回合一次记录在"发动"时即生效（卡已离手/离场）
-      if (typeof recordSkillUse === 'function') recordSkillUse(player, c);
+      if (typeof recordSkillUse === 'function') recordSkillUse(c, player);
     }
   }
   function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI();
@@ -8706,6 +8720,9 @@ function applyChainCard(player,pick,effect,done){
   } else if(pick.from==='event'){
     // 事件卡最高时点：连锁任意卡/效果发动，逆结算时执行其效果本体（大风在非移动窗口也走这里）
     payAndRemove(); effect._chain.push({kind:'event',by:player,name:name,card:c}); afterUse();
+  } else if(c._category === 'skill_cards'){
+    // 作者口径：技能卡是全时点卡 —— 连锁发动后，**逆结算时执行它的效果本体**（与事件卡同构，kind:'skill'）
+    payAndRemove(); effect._chain.push({kind:'skill',by:player,name:name,card:c}); afterUse();
   } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
     payAndRemove();
     function applyAdd(add){ effect._chain.push({kind:'add',by:player,name:name,from:__orig(),delta:add}); afterUse(); }
@@ -9121,6 +9138,14 @@ function resolveChainStack(effect, onDone) {
         if (__evP) { __evP.eventCards = __evP.eventCards || []; __evP.eventCards.push(__evCard); }
         try { useEventCardFor(e.by, __evP.eventCards.length - 1, __evCard.name, function () {}); } catch (err) { console.error('事件卡连锁结算异常', err); }
       }
+    } else if (e.kind === 'skill') {
+      /* 作者口径：技能卡是全时点卡 —— 作为连锁响应发动后，**逆结算到这一环时执行它的效果本体**。
+         与事件卡同构，但执行管线走"卡牌效果"（executeEffectSteps），并且"每回合一次"的标记
+         已经在 applyChainCard 的 payAndRemove 里通过 recordSkillUse 记下了。 */
+      __doneSet[i] = true;
+      var __skCard = e.card;
+      addBattleLog(e.by, '▸ 逆结算执行技能卡【' + (e.name || (__skCard && __skCard.name) || '') + '】');
+      try { __executeCardEffectBody(e.by, __skCard); } catch (err) { console.error('技能卡连锁结算异常', err); }
     } else if (e.kind === 'selfdouble') {
       // 位移增益（能量饮料）：发动时已即时把位移 x2（最多+6）写入待结算值，这里只做链上确认
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，位移增益随之无效'); }
@@ -9191,6 +9216,21 @@ function __chainC1WasTakenAway(owner, card) {
     var p = battleState[owner]; if (!p || !p.permanent) return true;
     return p.permanent.indexOf(card) < 0;
   } catch (e) { return false; }
+}
+
+/** 执行一张"效果本体"（供连锁逆结算里的技能卡等使用；与正常出牌走同一套管线） */
+function __executeCardEffectBody(player, card, done) {
+  try {
+    if (!card) { if (done) done(); return; }
+    var __raw = card.effect || card.text || '';
+    var text = (typeof getMainEffectText === 'function') ? getMainEffectText(__raw) : __raw;
+    if (!text) { if (done) done(); return; }
+    var steps = parseEffect(text);
+    executeEffectSteps(steps, { user: player, target: foeOf(player), card: card }, function () { if (done) done(); }, player === 'p1');
+  } catch (e) {
+    try { addBattleLog(player, '【连锁】效果本体结算异常：' + ((e && e.message) || e)); } catch (e2) {}
+    if (done) done();
+  }
 }
 
 /* ============================================================
@@ -12890,6 +12930,7 @@ function closeCardPicker(e) {
 }
 // 游戏内通用选卡弹窗（从给定卡牌数组中选一张）
 var _cardPickerMultiCallback = null;
+var _cardPickerStack = [];      // 待应答的选卡弹窗（栈）：每个弹窗**用自己的闭包**应答，槽只用来表示"当前在屏上的是哪一个"
 // 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
 function showCardPickerMulti(cards, title, callback, needCount, allowLess) {
   // 联机：本选择器只服务本机玩家(p1)决策——正常弹窗并在回答时广播；远端位选卡一律走 pickFromList('p2')/awaitAnswer
@@ -12919,12 +12960,23 @@ function showCardPickerMulti(cards, title, callback, needCount, allowLess) {
   var multi = need >= 2;
   var chosen = [];
   _cardPickerMultiCallback = callback;
+  _cardPickerStack.push(callback);
   grid.innerHTML = '';
   var oldBar = document.getElementById('cardPickerBtnBar'); if (oldBar) oldBar.remove();
+  var __pickerAnswered = false;
   function fire(payload) {
+    /* 关键修复（2026-09-13）：回调必须走**本次调用自己的闭包**，不能从 `_cardPickerMultiCallback` 单槽里取。
+       旧写法在"第二个选卡弹窗先于第一个被应答"时（弹窗排队/负载下很常见）会让第一个弹窗的按钮调到
+       第二个弹窗的回调 → 第一个操作永远收不到答复而卡住（表现成"效果结算不全面/某一步没执行"）。
+       同时把槽维护成**栈**：应答谁就移除谁，槽始终指向"最后打开的那个"，这样排队逻辑仍然能正确判断
+       "还有没有弹窗在等"（我第一版只清自己那一格，结果排队逻辑一直以为有弹窗 → 深度不释放）。 */
     picker.style.display = 'none';
-    var cb = _cardPickerMultiCallback; _cardPickerMultiCallback = null;
-    if (cb) cb(payload);
+    if (__pickerAnswered) return;
+    __pickerAnswered = true;
+    var __ix = _cardPickerStack.indexOf(callback);
+    if (__ix >= 0) _cardPickerStack.splice(__ix, 1);
+    _cardPickerMultiCallback = _cardPickerStack.length ? _cardPickerStack[_cardPickerStack.length - 1] : null;
+    try { callback(payload); } catch (e) { console.error('选卡回调异常', e); }
   }
   cards.forEach(function(card, idx) {
     var div = document.createElement('div');
@@ -19597,7 +19649,13 @@ function computeActualCost(card, user) {
 
 // 技能卡每回合一次记录（玩家/AI 共用，供合法性引擎判定）
 function recordSkillUse(card, user) {
-  if (card._category !== 'skill_cards') return;
+  // 兼容两种调用顺序：定义是 (card, user)，但连锁路径历史上写的是 (user, card) —— 那会让下面第一行
+  // （`card._category !== 'skill_cards'` 对字符串 'p1' 恒真）直接 return，**"每回合一次"从来没记上过**。
+  // 这里做一次自适应交换，并保留调用方原样（谁都不会再踩）。
+  if (typeof card === 'string' || (card && typeof card === 'object' && card._category === undefined && typeof user === 'object')) {
+    var __t = card; card = user; user = __t;
+  }
+  if (!card || card._category !== 'skill_cards') return;
   var p = battleState[user];
   if (!p.usedSkillsThisTurn) p.usedSkillsThisTurn = [];
   if (p.usedSkillsThisTurn.indexOf(card.name) < 0) p.usedSkillsThisTurn.push(card.name);
