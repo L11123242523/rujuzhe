@@ -12601,6 +12601,13 @@ function renderBuffBar(user) {
   el.innerHTML = html;
 }
 function updateBattleUI() {
+  /* C 阶段第一刀：渲染也走环境适配层。
+     浏览器里 ENV.render 就是下面这个 _render（逐字不变）；服务器环境下 ENV.render 是空操作，
+     改由"推快照/事件"把状态发给客户端 —— 同一个引擎因此能在两边都跑。 */
+  if (typeof ENV !== 'undefined' && ENV && ENV.kind !== 'browser') return ENV.render.apply(ENV, arguments);
+  return ENV._renderImpl ? ENV._renderImpl.apply(this, arguments) : __updateBattleUI_impl.apply(this, arguments);
+}
+function __updateBattleUI_impl() {
   if (!battleState) return;
   // 牌组堆模型：把"是否公开了牌组最上方那张卡"画出来（模型本身在 .deck-zone 里）
   try { if (typeof __renderDeckPile === 'function') __renderDeckPile(); } catch (e) {}
@@ -13255,6 +13262,46 @@ function __renderBattleLogFromState() {
     return added;
   } catch (e) { return 0; }
 }
+/* ============================================================
+ * C 阶段第一刀：**引擎环境适配层（ENV）**
+ * ------------------------------------------------------------
+ * 作者 2026-09-13 选定"把规则引擎搬进中继服务"（= 大师决斗 / 三国杀那套：服务器权威、双方都是客户端）。
+ * 搬家前必须先有一条**缝**：引擎现在虽然不直接摸 DOM，但它到处调用"表现函数"——
+ *   实测：addBattleLog 760 处、updateBattleUI 244 处、要问玩家的决策点 251 处。
+ * 只要这三个出口能换成"另一套实现"，同一个引擎就能跑在服务器里（那边：日志进事件流、渲染不发、
+ * 提问改成通过 socket 问某个座位）。**关键是不动那一千多个调用点**，只把这些函数的"身体"搬进 ENV：
+ *   ENV.log(rec)     —— 浏览器：写 battleLogs + DOM；服务器：只进事件流
+ *   ENV.render()     —— 浏览器：真的重绘；服务器：空操作（改为推快照/事件）
+ *   ENV.ask(seat, spec, cb) —— 浏览器：弹窗；服务器：发问题给那个座位并等回答
+ *   ENV.anim(name, payload) —— 浏览器：播动画；服务器：发 fx 消息，不等（或只等固定时间）
+ *   ENV.now() / ENV.rng()   —— 时间与随机数：服务器必须持有权威随机源
+ * 默认 ENV = 现有浏览器行为 → **行为零变化**（由现有套件守住）。
+ * ============================================================ */
+var ENV = {
+  kind: 'browser',
+  log: function (rec) {
+    try { battleLogs.push(rec); } catch (e) {}
+    try { if (battleState) { battleState._logs = battleState._logs || []; battleState._logs.push(rec); } } catch (e) {}
+    var log = null;
+    try { log = document.getElementById('battleLog'); } catch (e) { log = null; }
+    if (!log) { if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length; return; }
+    __appendLogEntry(rec);
+    if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length;
+    // 用户上翻阅读旧日志时不抢滚动；贴近底部才自动跟随
+    var __nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 70;
+    if (__nearBottom) log.scrollTop = log.scrollHeight;
+  },
+  // 渲染：浏览器里就是原来那套重绘（updateBattleUI 的实现挂在 _render 上，见下）
+  render: function () { return (typeof ENV._render === 'function') ? ENV._render.apply(this, arguments) : undefined; },
+  // 要问玩家：浏览器里走现成弹窗；服务器环境下会被替换成"问某个座位"
+  ask: function (seat, spec, cb) {
+    try { if (typeof showChoiceModal === 'function') return showChoiceModal((spec && spec.label) || '请选择', (spec && spec.cardName) || '', (spec && spec.effect) || '', (spec && spec.choices) || [], cb); } catch (e) {}
+    if (typeof cb === 'function') cb(null);
+  },
+  anim: function (name, payload) { try { if (typeof window !== 'undefined' && typeof window.playAnimByName === 'function') return window.playAnimByName(name, payload); } catch (e) {} return undefined; },
+  now: function () { return Date.now(); },
+  rng: function () { return (typeof GameRNG !== 'undefined' && GameRNG && typeof GameRNG.next === 'function') ? GameRNG.next() : Math.random(); }
+};
 function addBattleLog(type, msg, actor) {
   // 效果活动心跳：任何一条战斗日志都说明"效果还在推进"，看门狗据此判断锁是否真的僵住了
   if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;
@@ -13264,15 +13311,8 @@ function addBattleLog(type, msg, actor) {
   // actor（可选）：这条日志讲的是哪个座位。类型本身是座位的不用传；类型是 damage/system/phase
   // 而文案里又带"你/对手"的必须传，否则客人的视角换不过来（见 __logMsgForViewer）。
   if (actor) rec.actor = actor;
-  battleLogs.push(rec);
-  if (battleState) { battleState._logs = battleState._logs || []; battleState._logs.push(rec); }
-  var log = document.getElementById('battleLog');
-  if (!log) { if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length; return; }
-  __appendLogEntry(rec);
-  if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length;
-  // 用户上翻阅读旧日志时不抢滚动；贴近底部才自动跟随
-  var __nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 70;
-  if (__nearBottom) log.scrollTop = log.scrollHeight;
+  // ★ 唯一出口：交给环境。浏览器 ENV 的行为与改造前逐字相同；服务器 ENV 只把 rec 记进事件流。
+  return ENV.log(rec);
 }
 // 统一的数值变化日志：label 从 from→to，自动标增减
 function logDelta(type, label, fromV, toV, unit) {
