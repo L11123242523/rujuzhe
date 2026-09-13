@@ -5319,6 +5319,8 @@ var Online = {
         if (a.__deferCount > 40 || (a.__deferAt && Date.now() - a.__deferAt > 12000)) {
           try { addBattleLog('system', '【联机】对手的这条操作（' + (a.type || '?') + '）等了 ' + a.__deferCount + ' 次仍插不进当前结算，已放弃：' +
             ((typeof __eeWaitReason === 'function' && __eeWaitReason()) || '（结算锁未释放）')); } catch (e) {}
+          // 放弃也要把最新状态推回去：否则客人以为自己这条操作生效了，视图会一直停在不一致的状态上
+          try { if (typeof __onlineNudgeClient === 'function') __onlineNudgeClient('对手的操作被放弃'); } catch (e) {}
           this._intentBusy = false;
           this._drainIntents();
           return;
@@ -5962,7 +5964,11 @@ function onlineApplyIntent(a, done) {
       if (battleState.phase === 'roll' && !battleState._diceRolledThisPhase) {
         addBattleLog('p2', '【联机】对方投骰移动');
         rollDiceForPlayer('p2');
-      } else if (typeof addBattleLog === 'function') { addBattleLog('system', '【联机】忽略投骰意图（阶段不匹配）'); __onlineDiverge('对方投骰，但本机阶段/状态不匹配（phase=' + battleState.phase + '）'); }
+      } else {
+        // 状态对不上：把最新快照推给它（它多半是"看的状态旧了"），而不是只记一条日志然后干等
+        if (typeof addBattleLog === 'function') addBattleLog('system', '【联机】对方的投骰意图与本机状态不匹配（phase=' + battleState.phase + '）→ 已把最新状态推给它');
+        __onlineNudgeClient('投骰意图不匹配');
+      }
       __fin();
       return;
     case 'end':
@@ -6077,6 +6083,18 @@ function __replayPendingPhaseIntent() {
   if (typeof pa === 'function') { try { pa(); } catch (e) { console.error('重放阶段意图失败', e); } }
   else { try { onlineNextPhaseP2(null); } catch (e) { console.error('重放阶段意图失败', e); } }
 }
+/* 联机：远端意图"对不上本机状态"时的**自愈**（作者："本质上还是联机模式的问题"）。
+   以前只写一条日志就算了 —— 客人那边看到的状态因此可能一直停在旧阶段：
+   例如客人以为在主要阶段1（反复发"进入下阶段"），而房主已经在投骰阶段等它投骰 →
+   房主每次都"忽略"，客人永远不知道自己该投骰 → **两边互相干等**。
+   现在凡是"忽略对方的意图"，都**立刻补推一份权威快照**，让客人的视图纠正过来、自然发出下一条正确意图。 */
+function __onlineNudgeClient(why) {
+  try {
+    if (typeof Online === 'undefined' || !Online.active || Online.isGuest) return;
+    if (typeof Online._sendSnapshotNow === 'function') Online._sendSnapshotNow();
+    if (why && typeof addBattleLog === 'function') addBattleLog('system', '【联机】已把最新状态推给对手以纠正它刚才的操作（' + why + '）');
+  } catch (e) {}
+}
 // 远端位阶段推进：镜像 p1 的 nextPhase（含机场自由移动决策）
 function onlineNextPhaseP2(done) {
   var p = battleState.p2;
@@ -6115,7 +6133,12 @@ function onlineNextPhaseP2(done) {
       battleState.phase = 'main2';
       battleState._moveResolved = false;
       addBattleLog('phase', '进入主要阶段2（对方）');
-    } else if (typeof addBattleLog === 'function') addBattleLog('system', '【联机】对方在投骰阶段未投骰（忽略）');
+    } else {
+      /* 对方想离开投骰阶段、但本机还没投骰 → 不是"忽略"，而是它**看到的状态旧了**：
+         补推一份权威快照纠正它（否则双方互相干等：它一直发"进入下阶段"，我一直说"阶段不匹配"）。 */
+      if (typeof addBattleLog === 'function') addBattleLog('system', '【联机】对方在投骰阶段尚未投骰（它想进入下个阶段）→ 已把最新状态推给它');
+      __onlineNudgeClient('对方提前推进阶段');
+    }
   } else if (battleState.phase === 'main2') {
     battleState.phase = 'end';
     addBattleLog('phase', '进入结束阶段（对方）');
