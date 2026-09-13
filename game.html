@@ -6439,6 +6439,28 @@ function foeOf(me) { var o = othersOf(me); return o.length ? o[0] : me; }   // 1
 function nextPlayerOf(me) { var i = PLAYER_IDS.indexOf(me); return PLAYER_IDS[(i + 1) % PLAYER_IDS.length] || me; }
 function stateOf(p) { return (typeof battleState !== 'undefined' && battleState) ? battleState[p] : null; }
 function deckOf(p) { return (typeof deckConfig !== 'undefined' && deckConfig) ? deckConfig[p] : null; }
+/* ============================================================
+   A5 批次：**"这个座位由谁来打"** 的判定（作者 2026-09-13 选定先扫 A3–A5 再做 B）
+   ------------------------------------------------------------
+   口径：单机对战时本机玩家固定是 p1（多人 1v1v1 里也只有 p1 由人操作）；
+        联机时本机玩家同样是 p1（见 startBattle/_onGameStart 里的 mySide 口径）。
+   所以三件事要分开说清楚，代码里不能再写「是 p2 吗」：
+     · 本机人类座位  = p1
+     · AI 座位       = 单机状态下的非 p1 座位（1v1 只有 p2；1v1v1 还有 p3）
+     · 远端真人座位  = 联机状态下的非 p1 座位（客人）
+   1v1 下 `isAISeat('p2') === !Online.active`、`isRemoteSeat('p2') === Online.active`，
+   与旧的写死写法**逐字等价**（旧写法是 `player === 'p2' && !Online.active` 这类组合）。
+   ============================================================ */
+function isHumanSeat(p) { return p === 'p1'; }
+function isAISeat(p) {
+  if (!p) return false;
+  if (typeof Online !== 'undefined' && Online.active) return false;   // 联机里没有 AI 座位
+  return p !== 'p1';
+}
+function isRemoteSeat(p) {
+  if (!p) return false;
+  return (typeof Online !== 'undefined' && Online.active) && p !== 'p1';
+}
 /* 按座位**写**卡组配置：`deckOf(p)` 只能读（函数调用不能当左值），所以写路径统一走这里。
    A3 批次把源码里散落的「按座位赋值卡组」全部收敛到这一个函数（源码里已不再出现按座位名点取 deckConfig 的写法）。 */
 function setDeckOf(p, cfg) { if (typeof deckConfig === 'undefined' || !deckConfig) deckConfig = {}; deckConfig[p] = cfg; return deckConfig[p]; }
@@ -8618,11 +8640,12 @@ function startTurn() {
   // 霞被动：整肃改为通过"角色技能"按钮随时发动（高时点），不在回合开始时自动询问
   
   // 如果是AI，自动行动（联机时 p2 为远端真人，不由本地 AI 驱动，停留等待远端意图流驱动）
-  if (player === 'p2' && !(typeof Online!=='undefined' && Online.active)) {
+  // A5：原来写死 `player === 'p2'`，1v1v1 时 p3 会掉到最后的 else（被当成"人类回合"干等）→ 改判"AI 座位"
+  if (isAISeat(player)) {
     battleState.phase = 'main1';
     updateBattleUI();
     setTimeout(aiTurn, 600);
-  } else if (player === 'p2' && typeof Online!=='undefined' && Online.active) {
+  } else if (isRemoteSeat(player)) {
     // 联机远端位回合：由对方 p1 操作广播的意图流逐条驱动（onlineApplyIntent）
     battleState.phase = 'prepare';
     addBattleLog(player, '【联机】' + (Online.oppDisplayName() || '对手') + '回合中…');
@@ -9165,7 +9188,7 @@ function resolveSimultaneous(tp, candidates, allDone) {
       try { var __cg = (typeof globalThis !== 'undefined') ? globalThis : ((typeof window !== 'undefined') ? window : null); if (__cg && typeof __cg.__aiChainDecide === 'function') aiIdx = __cg.__aiChainDecide(who, pool, chain.slice()); } catch (e) { aiIdx = -1; }
       // 手牌/事件卡候选优先；若没有可用手牌连锁，尝试翻开盖伏卡（AI 盖伏机制）
       // 注意：resolveSimultaneous 内没有 effect 变量（本轮链在 chain 里），用最后入链的节点判断窗口类型
-      if (aiIdx < 0 && who === 'p2' && typeof aiActivateFaceDown === 'function') {
+      if (aiIdx < 0 && isAISeat(who) && typeof aiActivateFaceDown === 'function') {
         var __lastNode = chain.length ? chain[chain.length - 1] : null;
         var __fdIdx = aiPickFaceDownForWindow(__lastNode || {});
         if (__fdIdx >= 0) {
@@ -15852,7 +15875,7 @@ function __resolveOptionalParens(text, ctx, done) {
   var inner = m[1].trim();
   // 盖伏说明注"（可以将这张卡盖伏来在其他玩家回合使用）"是卡牌属性说明，不是可选效果：直接剥离、不弹询问
   if (/盖伏/.test(inner)) { applyText(false); return; }
-  var isAuto = (ctx && ctx.user === 'p2') || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
+  var isAuto = (ctx && isAISeat(ctx.user)) || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
   function applyText(doIt) {
     var rep = doIt ? (inner + '，') : '';
     var t2 = text.replace(re, rep);
@@ -15977,9 +16000,10 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
   var __prevLog = effectEngine.effectLog;
   var __prevAuto = effectEngine.autoResolve;
   effectEngine.effectLog = [];
-  // 发动者为 AI(p2) 时进入自动结算：所有选卡/目标弹窗自动决策，避免 AI 回合卡死；
-  // 联机时 p2 是远端真人：禁止自动结算，所有决策走联机答案流（双机同流）
-  effectEngine.autoResolve = !!(context && context.user === 'p2' && !(typeof Online !== 'undefined' && Online.active));
+  // 发动者为 AI 座位时进入自动结算：所有选卡/目标弹窗自动决策，避免 AI 回合卡死；
+  // 联机时远端位是真人：禁止自动结算，所有决策走联机答案流（双机同流）
+  // A5：原来写死 `context.user === 'p2'`，1v1v1 时 p3 不会被自动结算 → 会**干等一个永远不会来的玩家点击**（硬卡死）
+  effectEngine.autoResolve = !!(context && isAISeat(context.user));
   var currentStep = 0;
   
   function __finalize() {
@@ -16059,7 +16083,7 @@ function processSingleEffect(effectText, context, callback) {
   
   var target = context.target || 'p2';
   var user = context.user || 'p1';
-  var isAuto = (user === 'p2'); // AI 结算：选择类自动决策、不挂起等待点击
+  var isAuto = isAISeat(user); // AI 结算：选择类自动决策、不挂起等待点击（A5：原来写死 user === 'p2'）
   // 显式异步控制：需要玩家在效果中途选择时 hold() 暂停自动推进，选择回调里 finish() 继续
   var __finished = false, __autoTimer = null, __held = false;
   function finish() { if (__finished) return; __finished = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } callback(); }
@@ -16985,7 +17009,7 @@ function useEventCardFor(player, index, name, done) {
   
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制（如崩塌之乌托邦）
   runTiming(TIMING.ON_ACTIVATE, { player: player, card: card });
-  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: (player === 'p2' ? '对手' : '你') + '发动事件卡【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
+  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动事件卡【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
     if (!res) {
       addBattleLog(player, '【' + card.name + '】效果被连锁无效，不适用');
     } else {
@@ -17146,15 +17170,15 @@ function useMusicCardFor(player, index, name, done) {
           applyMove(player, moveAmount * dir);
           __finishMusic();
         }
-        if (__muOL && player === 'p2') onlineDecideModal('p2', '乐谱卡（对手）', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
-        else if (player === 'p2') __musicDir(0); // AI 自动选前进（离线不再误弹玩家弹窗）
+        if (__muOL && isRemoteSeat(player)) onlineDecideModal('p2', '乐谱卡（对手）', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
+        else if (isAISeat(player)) __musicDir(0); // AI 自动选前进（离线不再误弹玩家弹窗；A5：非 p1 座位都算 AI）
         else showChoiceModal('乐谱卡', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
       } else {
         opt.action(); __finishMusic();
       }
     }
-    if (__muOL && player === 'p2') onlineDecideModal('p2', '乐谱卡三选一（对手）', card.name, '请选择一项效果', __optLabels, __musicPick);
-    else if (player === 'p2') {
+    if (__muOL && isRemoteSeat(player)) onlineDecideModal('p2', '乐谱卡三选一（对手）', card.name, '请选择一项效果', __optLabels, __musicPick);
+    else if (isAISeat(player)) {
       // AI 选择逻辑：优先拿引导核心（升级收益最大），其次回费/移动
       var __aiOi = 0;
       for (var __mi = 0; __mi < options.length; __mi++) { if (/引导核心/.test(options[__mi].label)) { __aiOi = __mi; break; } }
@@ -17164,7 +17188,7 @@ function useMusicCardFor(player, index, name, done) {
   }
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制
   runTiming(TIMING.ON_ACTIVATE, { player: player, card: card });
-  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: (player === 'p2' ? '对手' : '你') + '发动乐谱卡【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
+  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动乐谱卡【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
     if (!res) { addBattleLog(player, '【' + card.name + '】效果被连锁无效，不适用'); __finishMusic(); return; }
     runTiming(TIMING.ON_APPLY, { player: player, card: card });
     __applyMusic();
@@ -20351,7 +20375,7 @@ function runSingleCardSteps(user, card, target, finalize) {
   var steps = parseEffect(card.effect || card.text || '');
   var ctx = { user: user, target: target, card: card };
   runTiming(TIMING.ON_ACTIVATE, { player: user, card: card });
-  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', description: (user === 'p2' ? '对手' : '你') + '发动【' + card.name + '】（效果将执行前，可连锁）', card: card }, function (res) {
+  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）', card: card }, function (res) {
     if (!res) { addBattleLog(user, '【' + card.name + '】发动被反制/无效，不处理其效果'); runTiming(TIMING.ON_EFFECT_DONE, { player: user, card: card, cancelled: true }); finalize(); return; }
     runTiming(TIMING.ON_APPLY, { player: user, card: card });
     executeEffectSteps(steps, ctx, function () {
@@ -20398,7 +20422,7 @@ function settleCardExecution(card, user, target, opts, done) {
   function run() {
     if (isPerm) {
       // AI 永续发动同样作为连锁1：双方连锁窗口结束才适用“发动时作为效果处理”
-      beforeEffectExecution({ player: user, _stage: 'effect_activate', description: (user === 'p2' ? '对手' : '你') + '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation' }, function (res) {
+      beforeEffectExecution({ player: user, _stage: 'effect_activate', description: playerDisplayName(user) + '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation' }, function (res) {
         if (!res) { moveCardToGrave(user, card, 'use'); addBattleLog(user, '【' + card.name + '】发动被连锁无效，不适用发动时效果，送入墓地'); updateBattleUI(); if (done) done(); return; }
         resolvePermanentOnPlay(card, user, finalize);
       });
@@ -20605,7 +20629,7 @@ function settleSpecialCard(card, handIndex, user, outerDone) {
   }
   // 效果将执行前连锁窗口（效果即将生效时点）：特殊卡同样可被“效果无效”类连锁反制
   runTiming(TIMING.ON_ACTIVATE, { player: user, card: card });
-  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: (user === 'p2' ? '对手' : '你') + '发动【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
+  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）' }, function (res) {
     if (!res) { addBattleLog(user, '【' + card.name + '】效果被连锁无效，不适用'); __finalizeSpecial(); return; }
     runTiming(TIMING.ON_APPLY, { player: user, card: card });
     h.play(card, user, __finalizeSpecial);
