@@ -5305,6 +5305,31 @@ var Online = {
     this._intentBusy=true;
     var a=this._intentQueue.shift();
     if(this._dbg) console.log('[联机] 应用意图', a);
+    /* ============================================================
+     * 架构修正（作者："本质上还是联机模式的问题"）：**对手的操作不能因为"我此刻正在结算"就丢掉**
+     * ------------------------------------------------------------
+     * 以前：客人在"房主正在结算"的那一瞬间点牌 → 意图到达房主 → 房主各入口用 evaluatePlayable 一判
+     *       （理由正是"效果/连锁结算中"）→ **直接忽略**。客人那边看到的是"点了没反应"或"整手牌变灰"。
+     * 现在：结算中到达的意图**留在队首、等结算结束再执行**（有上限、且会写一条可见日志）。
+     *       配合客人侧 __guestPlayVerdict（瞬时理由不当真），"对手在结算"不再让客人整手牌变灰。
+     * ============================================================ */
+    try {
+      if (typeof __eeLocked === 'function' && __eeLocked()) {
+        a.__deferCount = (a.__deferCount || 0) + 1;
+        if (a.__deferCount > 40 || (a.__deferAt && Date.now() - a.__deferAt > 12000)) {
+          try { addBattleLog('system', '【联机】对手的这条操作（' + (a.type || '?') + '）等了 ' + a.__deferCount + ' 次仍插不进当前结算，已放弃：' +
+            ((typeof __eeWaitReason === 'function' && __eeWaitReason()) || '（结算锁未释放）')); } catch (e) {}
+          this._intentBusy = false;
+          this._drainIntents();
+          return;
+        }
+        if (!a.__deferAt) { a.__deferAt = Date.now(); try { addBattleLog('system', '【联机】对手的操作（' + (a.type || '?') + '）到达时本机正在结算，已排队，结算一结束就执行'); } catch (e) {} }
+        this._intentQueue.unshift(a);
+        var __self2 = this;
+        setTimeout(function () { __self2._intentBusy = false; __self2._drainIntents(); }, 350);
+        return;
+      }
+    } catch (e) {}
     // 卡住可见化：远端位套用一条操作期间，后续操作只能排队。
     // 若长时间不结束（例如某个决策点等不到答案），玩家只会看到"点了没反应"——这里明确提示。
     var __t0=Date.now();
@@ -5679,6 +5704,36 @@ var Online = {
   playableOf:function(i){
     if(typeof NetSync!=='undefined') return NetSync.playableOf(i);
     return { ok:true, reason:'' };
+  },
+  /* ============================================================
+   * 客人侧"能不能出牌"的判定：**房主的理由要分两类**
+   * ------------------------------------------------------------
+   * 作者反复报的现象："联机里没用卡却提示因为某某卡的效果/连锁处理中，无法插入新的效果"。
+   * 根因（架构层面）：客人的手卡灰不灰，取决于**房主当时那一刻**算出来的 playable ——
+   *   而房主自己每出一张牌都要进结算（_resolveDepth>0），那段时间它给客人的判定就是
+   *   "效果/连锁结算中"。于是"对手在结算"会表现成"我这手牌全灰了、点都点不动"。
+   * 这一层把理由分成两类：
+   *   · **瞬时**理由（结算中/连锁…）→ 不当真：改用本机按**耐久规则**算（我的回合吗？阶段对吗？费够吗？）
+   *     —— 客人照样能点；真点下去如果房主确实插不进，房主会**排队等结算完再执行**（见 _drainIntents）。
+   *   · 其它理由（费用不足/攻击范围/冷却/卡面限制…）→ 这些是卡牌规则，房主比客人懂，照用。
+   * ============================================================ */
+  __guestVerdict:function(i, card){
+    var g = this.playableOf(i) || { ok:true, reason:'' };
+    var transient = /结算中|连锁结算|连锁处理中|效果结算|等待对手选择/.test(String(g.reason||''));
+    if (g.ok || !transient) return g;
+    // 房主给的是瞬时理由 → 本机按耐久规则复核
+    try {
+      var b = (typeof battleState!=='undefined') ? battleState : null; if (!b || !card) return g;
+      var mine = (b.currentPlayer === 'p1');
+      if (!mine) return g;                                             // 不是我的回合：确实是不可出（耐久）
+      if (b.phase !== 'main1' && b.phase !== 'main2') return g;        // 阶段不对：耐久
+      if (b._over) return g;
+      var cost = parseInt(card.cost,10) || 0;
+      var loan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p1') : 0;
+      if (cost > (b.p1.cost||0) + loan) return { ok:false, reason:'音韵值不足（需要 ' + cost + '，当前 ' + (b.p1.cost||0) + '）' };
+      // 只对"连锁响应类"保守一点：它们必须有对应窗口才有意义（但窗口是房主的事，这里放开让房主判）
+      return { ok:true, reason:'' };
+    } catch(e) { return g; }
   },
   /* 客人侧：把玩家的操作发给房主（客人自己绝不执行规则）。
      返回 true 表示"已接管"，调用方应立即 return。 */
@@ -6366,6 +6421,15 @@ function evaluatePlayable(card,player,opts){
         }
       }
     } catch (e) {}
+    /* 架构修正（作者："本质上还是联机模式的问题"）：
+       这一步的锁判定原来**排在最前面**，于是"对手正在结算"的那一瞬间，**每一张手卡**报出来的原因
+       都是"效果/连锁结算中"——哪怕它本来是因为"不是我的回合/阶段不对/费用不足/没有目标"才不能出。
+       玩家看到的就是"没用卡却提示因为某某卡的效果/连锁处理中"（作者反复报的就是这句）。
+       现在：先用 allowDuringResolve 跑一遍**耐久规则**；如果它本来就不可出，就把真正的原因报出来；
+       只有"耐久规则允许、单纯因为正在结算而插不进"时才报结算中。 */
+    var __durable = null;
+    try { __durable = evaluatePlayable(card, player, { allowDuringResolve: true }); } catch (e) { __durable = null; }
+    if (__durable && !__durable.ok) return __durable;
     return { ok:false, reason:'效果/连锁结算中，无法插入发动，请待当前处理完毕' + __waitTip };
   }
   // 1) 连锁响应类必须有作用对象（盖伏翻开同样需要对象，不能凭空）；双面卡自己回合主动发动豁免
@@ -12266,6 +12330,17 @@ function showChoiceModal(title, cardName, effect, choices, callback) {
   _showChoiceModalNow(title, cardName, effect, choices, callback);
 }
 // 联机·显式归属决策弹窗：side='p1' 本机弹窗（showChoiceModal 包装器负责登记+广播）；side='p2' 等待远端答案
+/* 客人侧"这张手牌能不能点"的统一入口（灰态与点击前拦截共用，避免两处判断漂移）。
+   逻辑在 Online.__guestVerdict 里：房主的判定若只是**瞬时**理由（结算中/连锁中），
+   就用本机按耐久规则复核 → 客人在"对手正在结算"时依然能正常点击，不再整手牌变灰。 */
+function __guestPlayVerdict(i, card) {
+  try {
+    if (typeof Online !== 'undefined' && Online && Online.active && Online.isGuest && typeof Online.__guestVerdict === 'function') {
+      return Online.__guestVerdict(i, card);
+    }
+  } catch (e) {}
+  return (typeof Online !== 'undefined' && Online && typeof Online.playableOf === 'function') ? Online.playableOf(i) : { ok: true, reason: '' };
+}
 function onlineDecideModal(side, title, cardName, effect, choices, callback) {
   var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
   // 本地决策，或客人侧（客人不跑规则，理论上到不了这里）：直接弹窗
@@ -12677,9 +12752,10 @@ function updateBattleUI() {
           }
           var handHtml = battleState.p1.hand.map(function(card, i) {
             // 可用性统一走 evaluatePlayable：灰态/禁用与点击后拦截同一套规则，杜绝割裂。
-            // 联机客人侧：客人不跑规则，改用房主（权威）在快照里给出的判定结果。
+            // 联机客人侧：客人不跑规则，改用房主（权威）在快照里给出的判定结果 —— 但要剔除**瞬时**理由，
+            // 见 __guestPlayVerdict 的说明。
             var pv = (typeof Online !== 'undefined' && Online.active && Online.isGuest)
-              ? Online.playableOf(i) : evaluatePlayable(card, 'p1');
+              ? __guestPlayVerdict(i, card) : evaluatePlayable(card, 'p1');
             var canClick = pv.ok;
             // 灰色卡点击时弹出具体不可用原因（便于诊断），可用卡正常使用
             var clickHandler = canClick ? 'useCard(' + i + ')' : 'showBlockedReason(this)';
