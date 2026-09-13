@@ -13312,7 +13312,23 @@ var ENV = {
       var kind = (spec && spec.kind) || 'choice';
       if (kind === 'choice') return __askChoiceLocal(spec, cb);
       if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
-      // 其余决策类型（pickList / targetPlayer / targetCards）还没接缝，先按老路走
+      if (kind === 'targetPlayer') return __askTargetPlayerLocal(spec && spec.card, spec && spec.effectText, cb);
+      if (kind === 'targetCards') return __askTargetCardsLocal(spec && spec.player, spec && spec.zone, spec && spec.label, spec && spec.selectable, cb);
+      /* 远端座位的选卡：浏览器环境＝把候选卡名随问题发给对端（房主问客人）；
+         服务器环境＝问那个座位并等回答。两者形式一致，只是通道不同。 */
+      if (kind === 'pickList') {
+        if (seat !== 'p1') {
+          if (typeof Online !== 'undefined' && Online.active && !Online.isGuest && typeof Online.askRemote === 'function') {
+            return Online.askRemote({ kind: 'prompt', label: (spec && spec.label) || '请选择', cards: (spec && spec.cards) || [],
+              need: (spec && spec.need) || 1, allowLess: !!(spec && spec.allowLess) }, cb);
+          }
+          if (typeof cb === 'function') cb(null);
+          return;
+        }
+        return __askPickCardsLocal({ kind: 'pickCards', cards: (spec && spec.cards) || [], label: (spec && spec.label),
+          need: (spec && spec.need) || 1, allowLess: !!(spec && spec.allowLess) }, cb);
+      }
+      // 其余决策类型还没接缝，先按老路走
       if (typeof cb === 'function') cb(null);
     } catch (e) {
       try { console.error('ENV.ask 异常', e); } catch (e2) {}
@@ -13887,6 +13903,10 @@ function __onlineTargetPrealloc(effectText) {
   return { seq: Online.registerLocalAnswer(), neutral: neutral };
 }
 function showTargetSelect(card, effectText, callback) {
+  // C 阶段·第 2 步收尾：目标选择也走决策出口（调用点不改）
+  return ENV.ask('p1', { kind: 'targetPlayer', card: card, effectText: effectText }, callback);
+}
+function __askTargetPlayerLocal(card, effectText, callback) {
   var pre = __onlineTargetPrealloc(effectText);
   if (_targetSelectOpen || effectEngine.pendingTargetCallback) {
     _targetSelectQueue.push({ card: card, effectText: effectText, callback: callback, pre: pre });
@@ -14839,7 +14859,9 @@ function pickFromList(user, list, title, need, cb, allowLess) {
     // 远端位(p2)选卡：把【候选卡名】随问题一起发给客人，让它在自己机器上点选。
     // 旧写法只发 label，客人侧既无选项也无卡名，只能退化成一个空白输入框 → 客机"检索/选卡没反应"。
     // 索引映射是安全的：列表由房主本机构造、原样发出，客人回传的就是这个列表的下标。
-    Online.awaitAnswer({
+    // C 阶段·第 2 步收尾：改走决策出口（浏览器环境＝问对端；服务器环境＝问那个座位）
+    ENV.ask(user, {
+      kind: 'pickList',
       label: title,
       cards: list.map(function (x) { return (x && x.card && x.card.name) || (x && x.name) || '（未知卡）'; }),
       need: need,
@@ -17629,6 +17651,10 @@ var pendingTargetCardCallback = null;
 
 // 显示目标方的手牌/永续区/墓地，支持选择卡牌
 function showTargetCards(player, zone, title, selectable, callback) {
+  // C 阶段·第 2 步收尾：同样走决策出口（选卡决策；纯查看时 selectable=false，实现里只画不选）
+  return ENV.ask('p1', { kind: 'targetCards', player: player, zone: zone, label: title, selectable: selectable }, callback);
+}
+function __askTargetCardsLocal(player, zone, title, selectable, callback) {
   if (!battleState) return;
   // 联机：现有调用点均为本机玩家(p1)决策——正常弹窗并在回答时广播所选索引（远端位经 awaitAnswer 映射同序卡）
   var __stcDecision = false;
