@@ -4472,7 +4472,7 @@ var Map3D = (function () {
     // 棋子待机浮动 + 当前行动方光环
     if (battleState) {
       var cur = battleState.currentPlayer;
-      ['p1', 'p2'].forEach(function (s, idx) {
+      playerIds().forEach(function (s, idx) {
         var p = pieces[s]; if (!p) return;
         var isCur = (s === cur);
         var baseY = p.userData.baseY || 0;
@@ -4629,7 +4629,7 @@ var Map3D = (function () {
   // 与战斗状态同步（updateBattleUI 会调用）
   function syncFromGame() {
     if (!ready || !battleState) return;
-    ['p1', 'p2'].forEach(function (s) {
+    playerIds().forEach(function (s) {
       var p = battleState[s];
       if (!p) return;
       if (lastSync[s] !== p.position) {
@@ -5411,7 +5411,7 @@ var Online = {
     var o=[b.turn,b.round,b.phase,b.currentPlayer,b._over?1:0,b._winner||'',b.pendingDamage||0,
            b.pendingDamageTarget||'',b.damageResponseWindow?1:0,b.effectChainActive?1:0,(b.log||[]).length,
            (typeof publicGraveyard!=='undefined'&&publicGraveyard)?(nm(publicGraveyard.event_cards)+'/'+nm(publicGraveyard.music_cards)):''];
-    ['p1','p2'].forEach(function(k){
+    playerIds().forEach(function(k){
       var p=b[k]; if(!p){ o.push('x'); return; }
       o.push(p.position,p.sync,p.maxSync,p.fascination,p.cost,p.maxCost,p.gold,p.level,p.motivation,
              p.defense,p.shield,p.passedStart,p.closedTile,p.attackBuff||0,p._sacrificeUsedThisTurn||0,
@@ -6343,7 +6343,7 @@ function __deckSlimAll() { return { p1: __deckSlimOf('p1'), p2: __deckSlimOf('p2
 function __applyDeckSlim(slim) {
   if (!slim || !allCards || !allCards.length) return false;
   var byName = {}; allCards.forEach(function (c) { byName[c.name] = c; });
-  ['p1', 'p2'].forEach(function (pl) {
+  playerIds().forEach(function (pl) {
     var s = slim[pl]; if (!s) return;
     function back(arr, n) {
       var out = (arr || []).map(function (n2) { return n2 ? (byName[n2] || null) : null; });
@@ -6432,7 +6432,7 @@ function tryLoadDeckConfig() {
       for (var i = 0; i < n; i++) { out.push(arr && arr[i] ? (byName[arr[i]] || null) : null); }
       return out;
     }
-    ['p1', 'p2'].forEach(function (pl) {
+    playerIds().forEach(function (pl) {
       if (!slim[pl]) return;
       deckConfig[pl].chars = restore(slim[pl].chars, 3);
       deckConfig[pl].items = restore(slim[pl].items, 8);
@@ -7163,7 +7163,7 @@ function startBattle() {
   // 单机对战使用「单机 vs AI 卡组」那一套（作者要求：与联机卡组分开）
   try { setDeckMode('pve', true); } catch (e) {}
   // 检查双方卡组是否完整
-  for (var player of ['p1', 'p2']) {
+  for (var player of playerIds()) {
     var config = deckConfig[player];
     var charCount = config.chars.filter(function(c) { return c !== null; }).length;
     var itemCount = config.items.filter(function(c) { return c !== null; }).length;
@@ -8046,7 +8046,7 @@ function initBattle() {
   }
   
   // 补全deckConfig中所有卡牌的_category
-  for (var player of ['p1', 'p2']) {
+  for (var player of playerIds()) {
     for (var ci = 0; ci < deckConfig[player].chars.length; ci++) {
       ensureCardCategory(deckConfig[player].chars[ci]);
     }
@@ -8272,7 +8272,7 @@ function revealDeckTopNow(who, reason) {
 function __renderDeckPile() {
   try {
     if (typeof document === 'undefined') return;
-    ['p1', 'p2'].forEach(function (who) {
+    playerIds().forEach(function (who) {
       var top = document.getElementById(who + 'DeckTop');
       if (!top) return;   // 对方牌组堆在某些布局下可能没有（例如窄屏隐藏），不是错误
       var img = document.getElementById(who + 'DeckTopImg');
@@ -9119,7 +9119,7 @@ function resolveChainStack(effect, onDone) {
       else {
         actionAlive = false; effect.cancelled = true; __doneSet[i] = true;
         battleState._stopAllMove = true;
-        ['p1', 'p2'].forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
+        playerIds().forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
         addBattleLog(e.by, '【' + e.name + '】终止所有移动动作，本次移动被阻止；双方下次执行的位移效果-2');
       }
     } else if (e.kind === 'event') {
@@ -9130,7 +9130,7 @@ function resolveChainStack(effect, onDone) {
       if (__evStop2 && (effect._stage === 'move' || effect.type === 'move' || effect._stage === 'dice_result')) { actionAlive = false; effect.cancelled = true; }
       if (__evStop2) {
         battleState._stopAllMove = true;
-        ['p1', 'p2'].forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
+        playerIds().forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
         addBattleLog(e.by, '【大风】终止所有移动动作；双方下次执行的位移效果-2');
       }
       if (typeof useEventCardFor === 'function' && __evCard && __evCard._alreadyInPublicGrave) {
@@ -10208,7 +10208,7 @@ function drawByCost() {
 // 手牌上限检查：回合内可临时超过，结束阶段修剪到5张（结束阶段的正式修剪另见 endTurn）
 function checkHandLimit(player) {
   if (!battleState) return;
-  var list = player ? [player] : ['p1', 'p2'];
+  var list = player ? [player] : playerIds();
   list.forEach(function(p) {
     if (!battleState[p]) return;
     var hand = battleState[p].hand || [];
@@ -10581,7 +10581,7 @@ function aiMaybeUseEvent(done) {
   // 大风：终止所有移动动作；双方下次位移-2（里绪/光太郎免疫）
   if (nm === '大风') {
     battleState._stopAllMove = true;
-    ['p1', 'p2'].forEach(function (w) {
+    playerIds().forEach(function (w) {
       var q = battleState[w]; if (!q) return;
       var __cap = (q.captain && q.captain.name) || '';
       if (__cap.indexOf('里绪') >= 0 || __cap.indexOf('光太郎') >= 0) return; // 免疫
@@ -11032,7 +11032,7 @@ function aiEndTurn() {
 // 游戏结束时：把尚未使用的蓝图复制卡全部还原为【魔法蓝图】卡面，防止对局结束后手牌/卡组残留“被复制的卡”导致bug
 function __revertAllBlueprintCopies() {
   if (!battleState || typeof __revertBlueprintCopy !== 'function') return;
-  ['p1', 'p2'].forEach(function (w) {
+  playerIds().forEach(function (w) {
     var wp = battleState[w]; if (!wp) return;
     ['hand', 'deck', 'grave', 'permanent', 'faceDownCards', 'removed', 'removedFromGame'].forEach(function (z) {
       (wp[z] || []).forEach(function (c) { if (c && c._blueprintCopy) __revertBlueprintCopy(c); });
@@ -14561,7 +14561,7 @@ function triggerYaodaoOnDamage(user, dmg, done) {
       p._yaodaoTriggered = true; __lose();
       if (i === 0) {
         var pool = [], side = [];
-        ['p1', 'p2'].forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
+        playerIds().forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
         if (!pool.length) { addBattleLog(user, '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
         Online.awaitAnswer({ label: '妖刀五月雨·破坏目标（对手）', cards: pool.map(function(c,i){ return c.name + '（' + (side[i]==='p1'?'房主':'自己') + '）'; }) }, function (v) {
           var ids = Array.isArray(v) ? v[0] : v;
@@ -14586,7 +14586,7 @@ function triggerYaodaoOnDamage(user, dmg, done) {
     p._yaodaoTriggered = true; __lose();
     if (i === 0) {
       var pool = [], side = [];
-      ['p1', 'p2'].forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
+      playerIds().forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
       if (!pool.length) { addBattleLog('p1', '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
       showCardPickerMulti(pool, '妖刀五月雨：选择场上1张卡破坏', function (idx) {
         var ids = Array.isArray(idx) ? idx[0] : idx;
@@ -14686,7 +14686,7 @@ function recoverCost(player, amount, source) {
    把绕过出口的回费补发一次时点（只补发时点，不改变数值，避免双重加费）。 */
 function __syncRecoverTiming() {
   if (!battleState) return;
-  ['p1', 'p2'].forEach(function (w) {
+  playerIds().forEach(function (w) {
     var p = battleState[w]; if (!p) return;
     var last = (typeof p._lastCostSnapshot === 'number') ? p._lastCostSnapshot : (p.cost || 0);
     var now = p.cost || 0;
@@ -14769,7 +14769,7 @@ function parseDomainBuff(text) {
 function getDomainBuff(player) {
   var agg = { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 };
   if (!battleState || !battleState[player]) return agg;
-  ['p1','p2'].forEach(function (w) {
+  playerIds().forEach(function (w) {
     var wp = battleState[w]; if (!wp) return;
     (wp.statuses || []).filter(function (st) { return st.type === 'domain'; }).forEach(function (d) {
       var myTeam = battleState[player].teamId, ally = (w === player) || (wp.teamId != null && myTeam != null && wp.teamId === myTeam);
@@ -14864,7 +14864,7 @@ function computeDamageValue(user, target, opt) {
   var pierce = false;
   if (ap._yuiSP && (isAtk || (isSkill && tags.indexOf('侵略') >= 0))) { final += 1; pierce = true; logs.push('结衣SP最终+1（无视1护盾）'); }
   if (ap._hinaSP && isItem && tags.indexOf('侵略') >= 0) { final += 1; logs.push('羽奈SP·[侵略]道具最终+1'); }
-  if ((tp.defense || 0) < 0 && ['p1','p2'].some(function (q) { return (battleState[q].grave || []).some(function (c) { return c.name && c.name.indexOf('杂鱼') >= 0; }); })) { final += 1; logs.push('杂鱼！杂鱼！·目标负防最终+1'); }
+  if ((tp.defense || 0) < 0 && playerIds().some(function (q) { return (battleState[q].grave || []).some(function (c) { return c.name && c.name.indexOf('杂鱼') >= 0; }); })) { final += 1; logs.push('杂鱼！杂鱼！·目标负防最终+1'); }
   if (opt.extraFinal) { final += opt.extraFinal; logs.push('交互追加最终+' + opt.extraFinal); }
   if (final < 0) final = 0;
   return { value: final, logs: logs, attr: attr, core: core, defense: def, atk: atk, base: base, kind: kind, tags: tags, isAtk: isAtk, isItem: isItem, isSkill: isSkill, pierce: pierce };
@@ -15156,7 +15156,7 @@ function runOneOp(op, ctx, next) {
       if (op.ifLevel && ((p.level || 1) < op.ifLevel)) { addBattleLog(user, '等级未到 Lv' + op.ifLevel + '，该追加抽牌不适用'); break; }
       function __doDraw(__dw) { var __drawn = []; for (var __di = 0; __di < op.n; __di++) { var __dc = drawCard(__dw); if (__dc) __drawn.push(__dc); } playDrawAnim(__dw, __drawn, next); }
       if (op.who === 'pick_player') { // 绿宝之杖①：统一弹一个选玩家框，列出所有在场玩家，点谁谁抽（不区分友敌/1v1/2v2）
-        var __pp = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'].filter(function (k) { return battleState[k]; });
+        var __pp = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : playerIds().filter(function (k) { return battleState[k]; });
         if (user === 'p1' && typeof showChoiceModal === 'function') {
           showChoiceModal('选择抽牌的玩家', '绿宝之杖·择', '选择一名玩家抽' + op.n + '张', __pp.map(playerDisplayName), function (oi) { if (oi == null || oi < 0 || !__pp[oi]) { next(); return; } __doDraw(__pp[oi]); });
           return;
@@ -15317,7 +15317,7 @@ function runOneOp(op, ctx, next) {
     case 'buff_double_move': p.moveBuff = p.moveBuff || {}; p.moveBuff.doubleMove = true; p.moveBuff.maxBonus = 6; break;
     case 'buff_bonus_move_after': p.moveBuff = p.moveBuff || {}; p.moveBuff.bonusMoveAfter = op.amount; break;
     case 'adjust_next_move': p._nextMoveAdjust = (p._nextMoveAdjust || 0) + op.delta; break;
-    case 'adjust_next_move_all': ['p1', 'p2'].forEach(function (w) { if (op.delta < 0 && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, w)) return; var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta; }); addBattleLog(user, '所有玩家下次位移' + (op.delta > 0 ? '+' : '') + op.delta + '格'); break;
+    case 'adjust_next_move_all': playerIds().forEach(function (w) { if (op.delta < 0 && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, w)) return; var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta; }); addBattleLog(user, '所有玩家下次位移' + (op.delta > 0 ? '+' : '') + op.delta + '格'); break;
     case 'fix_next_move': p._fixedNextMove = op.n; break;
     case 'change_direction': p._nextMoveReverse = true; break;
     case 'add_roll_phase': {
@@ -16528,7 +16528,7 @@ function useEventCardFor(player, index, name, done) {
       
     case '大风':
       // 终止移动，双方下次位移-2（里绪/光太郎免疫）
-      ['p1', 'p2'].forEach(function (pl) {
+      playerIds().forEach(function (pl) {
         var __im = false;
         try { __im = ((deckConfig[pl].chars || [])).some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); }); } catch (e) {}
         if (__im) { addBattleLog(player, '大风：【' + pl + '】编入里绪/光太郎，不受影响'); return; }
@@ -19205,7 +19205,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var OL2 = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2');
     function __lvPick(ci) {
       if (ci === 0) {
-        var __pp1 = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : ['p1', 'p2'];
+        var __pp1 = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : playerIds();
         function __lvDraw(wi) {
           if (wi == null || wi < 0) { updateBattleUI(); return; }
           var wd = __pp1[wi] || 'p1'; drawCard(wd);
