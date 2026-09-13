@@ -4673,7 +4673,7 @@ var Map3D = (function () {
       }
       if (i >= steps) clearInterval(iv);
     }, 22);
-    addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格');
+    addBattleLog('system', '镜头定位到' + (side === 'p1' ? '你' : '对手') + '所在的第' + t.id + '格', side);
   }
   function resetCamera() {
     camTarget = null; camDist = 10.5; camYaw = 0.28; camPitch = 0.86;
@@ -4859,7 +4859,7 @@ var Online = {
      _asks: 房主发出的问题 id -> {cb, spec, timer}
      SPEC_TIMEOUT_MS: 对手多久不选就按默认项继续（不再永久卡死） */
   role:'', isGuest:false,
-  _askSeq:0, _asks:{}, SPEC_TIMEOUT_MS:60000,
+  _askSeq:0, _asks:{}, SPEC_TIMEOUT_MS:20000,
   _snapTimer:null, _snapSeq:0, _lastSnapAt:0,
   /* 增量事件流（②）：房主留一份"上一次发出的编码快照"做基线，之后只发改动路径；
      客人留一份"上一次收到的编码快照"，把补丁打上去再走同一个 applySnapshot。 */
@@ -5069,6 +5069,8 @@ var Online = {
     this.mySide='p1';                    // 两种角色在各自引擎/视图里都是"自己占 p1"
     this.isHost=!this.isGuest;
     this.status('对局开始！'+(this.isGuest?'你是客人，等待房主同步状态…':'你是房主（先手），正在把状态同步给对手…'));
+    // 联机反馈③：开始盯着"结算锁"（房主解锁补推 / 客人卡在旧快照时自愈 / 等待对手回答可见化）
+    try{ this._startLockWatch(); }catch(e){}
     // 卡组交换：客人也要把自己的卡组发给房主（房主需要它来建立 p2）
     var cfg={chars:[],items:[],carries:[]};
     try{
@@ -5134,6 +5136,9 @@ var Online = {
       case 'ev':                        // 客人：收到增量补丁（打在上一份编码快照上）
         this._onSnapshotDelta(m);
         break;
+      case 'fx':                        // 客人：收到"纯视觉"指令（投骰动画等；不参与规则）
+        this._onFx(m.x);
+        break;
       case 'resyncReq':                 // 房主：客人说"增量序号对不上，给我一份整包"
         // 注意：客人是用 _relay({k:'resyncReq'}) 发的，属于**中继内层消息**，
         // 所以必须在这里处理；只写在顶层 _onServer 里的话请求到了也没人接（我踩过）。
@@ -5180,6 +5185,7 @@ var Online = {
        增量路径（_onSnapshotDelta）也会走到这里，那时 _remoteSnap 已经更新为打好补丁的版本。 */
     try{ this._remoteSnap=JSON.parse(JSON.stringify(s)); }catch(e){ this._remoteSnap=null; }
     this._lastSnapApplied=(s.n||0); this._snapRecv=(this._snapRecv||0)+1;
+    this._lastSnapAppliedAt=Date.now();     // 联机反馈③：客人自愈用它判断"多久没收到新状态"
     this._clearActPending();          // 乐观 UI 的"已提交"提示到此结束（自己出的牌已经有结果了）
     this.status('已与房主同步（快照 #'+(s.n||'?')+'）');
     if(!this._enteredBattle && battleState){
@@ -5192,6 +5198,91 @@ var Online = {
       this._wasOver=true;
       try{ __showSurrenderResult(); }catch(e){}
     }
+  },
+  /* ============================================================
+   * 联机反馈②：**客人也要能看到投骰**（作者 2026-09-13 报："联机中对手看不到自己投骰子"）
+   * ------------------------------------------------------------
+   * 根因：投骰由房主跑（权威），动画是**本地视觉**（`rollDiceForPlayer` 里那段骰子滚动、
+   *       以及补投用的 `playDiceRollAnim`），所以只有房主那台机器会动 —— 客人只从快照里
+   *       拿到一个数字（实测：客人 `_lastRolls=[2]`，但它的骰子区 display=undefined、动画函数一次没被调用）。
+   * 现在：房主播动画时顺手发一条 `{k:'fx', x:{kind:'dice', seat, val, sides, count}}`，
+   *       客人收到后把座位换成自己视角（房主 p1 = 客人的对手 p2）再本地播一遍。
+   *       这条通道**只做视觉**：客人播完不回调任何规则（cb 传 null），不会推进状态。
+   * ============================================================ */
+  _fxSend:function(x){
+    try{
+      if(!this.active || this.isGuest || !this.connected || !this.ws || this.ws.readyState!==1) return false;
+      if(!x || !x.kind) return false;
+      this._send({t:'relay', m:{k:'fx', x:x}});
+      return true;
+    }catch(e){ return false; }
+  },
+  _onFx:function(x){
+    if(!this.active || !this.isGuest || !x) return;
+    try{
+      if(x.kind==='dice'){
+        // 座位换算：房主的 p1（房主自己）在客人这边是"对手 p2"；房主的 p2（客人自己）在这里是 p1
+        var seat=(x.seat==='p1')?'p2':(x.seat==='p2'?'p1':x.seat);
+        if(typeof playDiceRollAnim==='function') playDiceRollAnim(seat, x.val, x.sides||6, x.count||1, null);
+      }
+    }catch(e){}
+  },
+  /* ============================================================
+   * 联机反馈③：**别让客人停在"结算中"的旧快照上**（作者 2026-09-13 报：
+   * "明明效果已经结算完成，还是卡在连锁结算中环节，导致无法使用卡牌"）
+   * ------------------------------------------------------------
+   * 机制（实测：房主一次出牌会推 2~6 份快照，其中**锁着时推的**占一半）：
+   *   客人的"这张手牌能不能出"是房主随快照下发的（NetSync.playableOf），
+   *   而那串判定是在房主**正在结算**（_resolveDepth>0）时算的 → 判定结果是"效果/连锁结算中"。
+   *   只要这之后房主没有新的状态变化，就不会再推快照 → 客人永远停在"结算中"，出不了牌。
+   * 现在两道保险：
+   *   ① 房主：结算锁**从有到无**的那一刻立刻补推一次权威快照（覆盖所有释放路径，不挑调用点）；
+   *   ② 客人：若自己的手卡**只有**因"结算中"被挡住、且已经 2.5 秒没收到新快照 → 主动要一份整包
+   *      （复用已有的 resyncReq 通道）。这样即使某一帧推送丢了，客人也能自愈。
+   * ============================================================ */
+  _startLockWatch:function(){
+    if(this._lockWatchOn) return;
+    this._lockWatchOn=true;
+    var self=this;
+    this._lockWatch=setInterval(function(){
+      try{
+        if(!self.active || !battleState) return;
+        var ee=(typeof effectEngine!=='undefined')?effectEngine:null;
+        if(!ee) return;
+        var locked=((ee._resolveDepth||0)>0)||!!ee._chainLock;
+        if(self.isGuest){
+          // ② 客人自愈：手卡只被"结算中"挡住、且久无新快照 → 要一份整包
+          var now=Date.now();
+          var pl=(typeof NetSync!=='undefined' && NetSync._lastPlayable)||[];
+          var blockedByLock=pl.length>0 && pl.every(function(x){ return !x || x.ok || /结算中|连锁结算/.test(String(x.reason||'')); }) &&
+                            pl.some(function(x){ return x && !x.ok && /结算中|连锁结算/.test(String(x.reason||'')); });
+          if(blockedByLock && (now-(self._lastSnapAppliedAt||0))>2500 && (now-(self._lockHealAt||0))>3000){
+            self._lockHealAt=now;
+            try{ addBattleLog('system','【联机】手卡仍显示"结算中"但已 2.5 秒没有新状态，正在向房主重新索取权威状态…'); }catch(e){}
+            self._relay({k:'resyncReq'});
+          }
+          return;
+        }
+        // ① 房主：锁由有到无 → 立刻补推一次（客人那边的 playable 才是解锁后的真相）
+        if(self._lockWasLocked && !locked){
+          try{ self._sendSnapshotNow(); }catch(e){}
+        }
+        // 仍在锁：若在等对手作答，每 5 秒把"还在等什么"写进日志，避免玩家以为卡死
+        if(locked){
+          var asks=self._asks||{}, keys=Object.keys(asks);
+          if(keys.length){
+            var oldest=null;
+            keys.forEach(function(k){ var r=asks[k]; if(r && (!oldest || (r.at||0)<(oldest.at||0))) oldest=r; });
+            var waited=oldest? Math.round((Date.now()-(oldest.at||Date.now()))/1000):0;
+            if(waited>=5 && waited%5===0 && self._lastWaitLog!==waited){
+              self._lastWaitLog=waited;
+              try{ addBattleLog('system','【联机】仍在等待对手选择「'+((oldest.spec&&oldest.spec.label)||'')+'」（已等 '+waited+' 秒）'); }catch(e){}
+            }
+          }
+        } else { self._lastWaitLog=0; }
+        self._lockWasLocked=locked;
+      }catch(e){}
+    }, 400);
   },
   _onOpponentLeft:function(){
     showToast('对手已离开，对局结束', 'warn');
@@ -5270,15 +5361,21 @@ var Online = {
       cb(null); return;
     }
     var id='q'+(++this._askSeq);
-    this._asks[id]={ cb:cb, spec:spec };
+    this._asks[id]={ cb:cb, spec:spec, at:Date.now() };
     this._send({t:'relay', m:{k:'ask', id:id, spec:spec}});
     this._showWaiting(true, spec.label||'等待对手选择');
+    /* 让"在等对手回答"这件事**看得见**（作者 2026-09-13 报："效果已经结算完却仍卡在连锁结算中"）：
+       等答案期间房主的结算深度是 >0 的，于是自己所有手卡都会提示"效果/连锁结算中"。
+       以前这里只弹一个转圈提示、不写战斗日志，玩家看不出"是在等我回答"还是"游戏卡了"。 */
+    try{ addBattleLog('system','【联机】等待对手选择：「'+(spec.label||'')+'」（最多 '+Math.round((this.SPEC_TIMEOUT_MS||20000)/1000)+' 秒，超时按默认项继续）'); }catch(e){}
     this._asks[id].timer=setTimeout(function(){
       if(!self._asks[id]) return;
       delete self._asks[id];
       try{ addBattleLog('system','【联机】对手超时未选择（'+(spec.label||'')+'），已按默认项继续'); }catch(e){}
       self._hideWaiting();
       cb(null);
+      // 超时后务必补推一次：客人那边可能停在"结算中"的旧快照上
+      try{ self._sendSnapshotNow(); }catch(e){}
     }, this.SPEC_TIMEOUT_MS);
   },
   _onAnswer:function(m){
@@ -6252,7 +6349,25 @@ function evaluatePlayable(card,player,opts){
   var isDualChain = (typeof isDualUseChainCard === 'function') && isDualUseChainCard(card) && !__isOppTurn0;
   // 0) 效果/连锁结算进行中：不得插入发动任何卡（连锁询问走独立连锁路径，不受此限；效果处理中也不能插技能）
   var __eeBusy = (typeof effectEngine!=='undefined' && effectEngine) && ((effectEngine._resolveDepth||0) > 0 || effectEngine._chainLock);
-  if (__eeBusy && !opts.allowDuringResolve) return { ok:false, reason:'效果/连锁结算中，无法插入发动，请待当前处理完毕' };
+  if (__eeBusy && !opts.allowDuringResolve) {
+    /* 联机（作者 2026-09-13 报："效果明明结算完了还卡在连锁结算中"）：
+       联机时"结算中"最常见的原因其实是**在等对手回答**（房主发问 → 等 ans 回包期间结算深度一直 >0）。
+       以前只说"效果/连锁结算中"，玩家根本判断不出是在等对手、还是游戏卡了。
+       这里把等待对象与已等秒数写进理由，UI/日志一看就懂（超时上限 20 秒，见 SPEC_TIMEOUT_MS）。 */
+    var __waitTip = '';
+    try {
+      if (typeof Online !== 'undefined' && Online && Online.active) {
+        var __asks2 = Online._asks || {};
+        var __firstAsk = null;
+        for (var __k in __asks2) { if (Object.prototype.hasOwnProperty.call(__asks2, __k) && __asks2[__k]) { __firstAsk = __asks2[__k]; break; } }
+        if (__firstAsk) {
+          var __secs = Math.max(0, Math.round((Date.now() - (__firstAsk.at || Date.now())) / 1000));
+          __waitTip = '——本机正在等待' + (Online.isGuest ? '房主' : '对手') + '选择「' + ((__firstAsk.spec && __firstAsk.spec.label) || '') + '」（已等 ' + __secs + ' 秒，超时会自动继续）';
+        }
+      }
+    } catch (e) {}
+    return { ok:false, reason:'效果/连锁结算中，无法插入发动，请待当前处理完毕' + __waitTip };
+  }
   // 1) 连锁响应类必须有作用对象（盖伏翻开同样需要对象，不能凭空）；双面卡自己回合主动发动豁免
   if(isChain && !hasChainTarget(card) && !isDualChain) return {ok:false,reason:chainBlockReason(name)};
   // 缴械：持续期间不可打出[侵略]标签卡
@@ -9374,19 +9489,20 @@ function beforeEffectExecution(effect, callback) {
   // 快速路径：双方都没有任何可连锁卡时静默放行，不刷日志/不弹连锁条，避免普通用卡被打扰
   // 作者口径：**不管有几个效果都要开连锁处理**。即使双方都没有可连锁卡，也组成"C1=这张卡"的连锁，
   // 然后双方连续 PASS 直接进入逆结算（不弹窗、不等待），并写明连锁组成 —— 旧实现这条快速路径是完全静默的。
+  var __c1actor = (effect && (effect.player || effect.user)) || __c1who;
   var __q1 = collectChainable('p1', effect), __q2 = collectChainable('p2', effect);
   if (!__q1.length && !__q2.length) {
     addBattleLog('system', '【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : 'AI') + '·' +
-      (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')));
+      (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')), __c1actor);
     addBattleLog('system', '【连锁】双方均无可用连锁卡 → 连续 PASS，直接逆结算');
     if (typeof popEffect === 'function') popEffect(effect);
     __releaseB();
     callback(effect);
     return;
   }
-  addBattleLog('system','【效果将要执行前时点】'+effect.description+'，双方可连锁');
+  addBattleLog('system','【效果将要执行前时点】'+effect.description+'，双方可连锁', __c1actor);
   addBattleLog('system','【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : 'AI') + '·' +
-    (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')) + '（等待双方连锁）');
+    (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')) + '（等待双方连锁）', __c1actor);
   if (typeof renderChainBar === 'function') renderChainBar(effect);
   function finish(){
     resolveChainStack(effect, function(){
@@ -9702,6 +9818,19 @@ function executeMoveEffect(effect) {
 /* 通用骰子滚动动画（纯本地视觉：刻意用 Math.random，不消耗 GameRNG，保证联机双机随机流一致）。
    玩家主投掷与 AI 投掷共用，避免 AI 回合"看不到骰子"（规则书第八章三-5 要求判定/投掷有过程反馈）。
    who：'p1' | 'p2'，仅用于文案前缀；结果值由调用方传入，动画不参与数值。 */
+/* 联机反馈②：房主播骰子动画时给客人发一条纯视觉指令。
+   同一座位 1.5 秒内只发一次：`rollDiceForPlayer` 与补投的 `playDiceRollAnim` 有时会被同一次投掷先后碰到，
+   不去重的话客人会看到骰子播两遍（数值相同，只是看着奇怪）。 */
+var __fxDiceSentAt = {};
+function __fxSendDice(seat, val, sides, count) {
+  try {
+    if (typeof Online === 'undefined' || !Online.active || Online.isGuest) return;
+    var now = Date.now();
+    if (__fxDiceSentAt[seat] && (now - __fxDiceSentAt[seat]) < 1500) return;
+    __fxDiceSentAt[seat] = now;
+    if (typeof Online._fxSend === 'function') Online._fxSend({ kind: 'dice', seat: seat, val: val, sides: sides || 6, count: count || 1 });
+  } catch (e) {}
+}
 function playDiceRollAnim(who, finalVal, sides, count, cb) {
   var area = document.getElementById('diceAnimationArea');
   var diceEl = document.getElementById('diceRolling');
@@ -9735,6 +9864,7 @@ function playDiceRollAnim(who, finalVal, sides, count, cb) {
       diceEl.style.transform = 'rotate(0deg) scale(1.2)';
       if (resEl) { resEl.textContent = finalVal + ' 点'; resEl.style.display = 'block'; }
       if (msgEl) msgEl.textContent = (who === 'p2' ? '【对手】' : '') + '投出 ' + finalVal + ' 点！';
+      __fxSendDice(who, finalVal, sides, count);      // 联机：让客人在自己机器上看到同一个骰子
       setTimeout(__finishAnim, 700);
     }
   }, 70);
@@ -9903,6 +10033,7 @@ function rollDiceForPlayer(player) {
       if (messageEl) {
         messageEl.textContent = '投出 ' + __rollText + ' 点！';
       }
+      __fxSendDice(player, finalDice, __sides, __cnt);   // 联机反馈②：客人的"自己投骰"动画靠这条指令
       
       // 设置连锁时点标志：骰子刚投出，遥控骰子/颠倒骰子等可连锁
       rwOpen('dice', { result: finalDice });
@@ -12895,16 +13026,43 @@ var LOG_META = {
   search:  { icon: '🔍', label: '检索' }
 };
 var battleLogs = []; // 结构化日志（可导出/回看）
-function addBattleLog(type, msg) {
-  // 效果活动心跳：任何一条战斗日志都说明"效果还在推进"，看门狗据此判断锁是否真的僵住了
-  if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;
-  var rec = { turn: (battleState && battleState.turn) || 0,
-              phase: (battleState && battleState.phase) || '',
-              type: type || 'system', msg: String(msg == null ? '' : msg), t: Date.now() };
-  battleLogs.push(rec);
-  if (battleState) { battleState._logs = battleState._logs || []; battleState._logs.push(rec); }
+/* ============================================================
+ * 联机反馈①：**客人也要能看到房主做了什么**（作者 2026-09-13 报：
+ * "我对对手使用卡牌造伤，对手只知道要受到多少伤害，不知道是什么卡造成的"）
+ * ------------------------------------------------------------
+ * 根因：日志面板只由 `addBattleLog()` 这一条路渲染，而客人**不跑规则**，
+ *       它本机几乎不调用 addBattleLog；房主的"用了什么卡/触发了什么效果"只存在于
+ *       随快照下发的 `battleState._logs` 里 —— 以前没有任何人把它画出来。
+ *       实测（_probe_online_feedback.js）：客人状态日志里 5 条提到那张卡，DOM 面板 0 条。
+ * 现在：`__renderBattleLogFromState()` 把权威日志按顺序补画进面板（幂等：按下标推进），
+ *       在 NetSync.applySnapshot 之后调用；房主侧计数天然同步，等于空操作。
+ * ============================================================ */
+var __logRenderedCount = 0;      // 已经画进面板的 _logs 条数（按数组下标推进）
+/** 同一条日志在"看的人"眼里的措辞。
+ *  日志文本是**写日志那一方**的视角（房主写"你发动【X】对对手造成2点"），客人看到时视角正好相反，
+ *  所以要把"你"与"对手/AI"整体对调。做法用占位符两步替换，避免"先把你换成对手、又把对手换成你"这种连环错。
+ *  主语从哪来：日志类型 p1/p2 本身就是座位；类型不是座位（damage/system/phase…）时靠 `rec.actor`，
+ *  没给 actor 就**原样不动**（宁可不改，也不要改错）。1v1 只有两个座位，整体对调必然正确。 */
+function __logMsgForViewer(rec) {
+  var msg = (rec && rec.msg) || '';
+  try {
+    if (typeof Online === 'undefined' || !Online.active || !Online.isGuest) return msg;
+    if (!msg) return msg;
+    var actor = rec.actor || ((rec.type === 'p1' || rec.type === 'p2') ? rec.type : null);
+    if (!actor) return msg;
+    var oppName = (typeof Online.oppDisplayName === 'function' && Online.oppDisplayName()) || '对手';
+    var SENT = '\u0001';
+    // 房主空间里：'你' = 房主自己，'AI'/'对手' = 客人。客人看的时候两者对调。
+    return msg.replace(/你们/g, SENT + '们')
+              .replace(/你/g, SENT)
+              .replace(/AI/g, '你')
+              .replace(/对手/g, '你')
+              .replace(new RegExp(SENT, 'g'), oppName);
+  } catch (e) { return msg; }
+}
+function __appendLogEntry(rec) {
   var log = document.getElementById('battleLog');
-  if (!log) return;
+  if (!log) return false;
   var entry = document.createElement('div');
   entry.className = 'log-entry log-' + rec.type;
   var meta = LOG_META[rec.type] || { icon: '•' };
@@ -12913,12 +13071,53 @@ function addBattleLog(type, msg) {
     meta = { icon: '🕹️', label: Online.oppDisplayName() };
   }
   var ico = document.createElement('span'); ico.className = 'log-ico'; ico.textContent = meta.icon || '';
-  var body = document.createElement('span'); body.className = 'log-msg'; body.textContent = rec.msg;
+  var body = document.createElement('span'); body.className = 'log-msg'; body.textContent = __logMsgForViewer(rec);
   entry.appendChild(ico); entry.appendChild(body);
   log.appendChild(entry);
   // 长局性能：DOM 条目上限，超出丢弃最旧（结构化 battleLogs 保留全量供复制导出）
   var __maxDom = 400;
   while (log.children.length > __maxDom) log.removeChild(log.firstChild);
+  return true;
+}
+/** 把 battleState._logs 里"还没画过"的条目补画出来；返回补画条数 */
+function __renderBattleLogFromState() {
+  try {
+    if (typeof battleState === 'undefined' || !battleState || !battleState._logs) return 0;
+    var all = battleState._logs;
+    var log = document.getElementById('battleLog');
+    if (!log) return 0;
+    // 本地新日志可能让计数超过权威长度（快照覆盖后）→ 重建，避免少画/错画
+    if (all.length < __logRenderedCount) { log.innerHTML = ''; __logRenderedCount = 0; }
+    if (all.length === __logRenderedCount) return 0;
+    var added = 0;
+    for (var i = __logRenderedCount; i < all.length; i++) {
+      var rec = all[i];
+      if (!rec) continue;
+      if (__appendLogEntry(rec)) added++;
+      // 客人的 battleLogs（导出/复制用）也要跟上，否则"复制日志"拿到的是空的
+      if (battleLogs[battleLogs.length - 1] !== rec) battleLogs.push(rec);
+    }
+    __logRenderedCount = all.length;
+    var __nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 70;
+    if (__nearBottom) log.scrollTop = log.scrollHeight;
+    return added;
+  } catch (e) { return 0; }
+}
+function addBattleLog(type, msg, actor) {
+  // 效果活动心跳：任何一条战斗日志都说明"效果还在推进"，看门狗据此判断锁是否真的僵住了
+  if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;
+  var rec = { turn: (battleState && battleState.turn) || 0,
+              phase: (battleState && battleState.phase) || '',
+              type: type || 'system', msg: String(msg == null ? '' : msg), t: Date.now() };
+  // actor（可选）：这条日志讲的是哪个座位。类型本身是座位的不用传；类型是 damage/system/phase
+  // 而文案里又带"你/对手"的必须传，否则客人的视角换不过来（见 __logMsgForViewer）。
+  if (actor) rec.actor = actor;
+  battleLogs.push(rec);
+  if (battleState) { battleState._logs = battleState._logs || []; battleState._logs.push(rec); }
+  var log = document.getElementById('battleLog');
+  if (!log) { if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length; return; }
+  __appendLogEntry(rec);
+  if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length;
   // 用户上翻阅读旧日志时不抢滚动；贴近底部才自动跟随
   var __nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 70;
   if (__nearBottom) log.scrollTop = log.scrollHeight;
@@ -12933,6 +13132,7 @@ function logDelta(type, label, fromV, toV, unit) {
 }
 function clearBattleLog() {
   battleLogs = [];
+  __logRenderedCount = 0;                 // 面板清空 → 已画计数一并归零（联机补画依赖它）
   if (battleState) battleState._logs = [];
   var log = document.getElementById('battleLog'); if (log) log.innerHTML = '';
 }
@@ -13233,7 +13433,22 @@ function __eeIdleWatchdog() {
     var waiting = false;
     try { if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) waiting = true; } catch (e) {}
     try { if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) waiting = true; } catch (e) {}
-    try { if (typeof Online !== 'undefined' && Online && Online.active && Object.keys(Online._asks || {}).length) waiting = true; } catch (e) {}
+    /* 联机等对手作答也算"有人在等"，但**不能无限期**：
+       问出去的题有自己的超时（SPEC_TIMEOUT_MS），超时后必然 cb(null) 继续。
+       若某条 ask 记录泄漏（谁都没删），旧写法会让看门狗永远不出手 → 这正是玩家看到的
+       "效果已经结算完却一直卡在连锁结算中"。所以只把"在超时窗口内"的提问算作在等。 */
+    try {
+      if (typeof Online !== 'undefined' && Online && Online.active) {
+        var __asks = Online._asks || {};
+        var __now2 = Date.now();
+        var __maxWait = (Online.SPEC_TIMEOUT_MS || 20000) + 5000;
+        for (var __ak in __asks) {
+          if (!Object.prototype.hasOwnProperty.call(__asks, __ak)) continue;
+          var __ar = __asks[__ak];
+          if (__ar && (!__ar.at || (__now2 - __ar.at) < __maxWait)) { waiting = true; break; }
+        }
+      }
+    } catch (e) {}
     try {
       var da = document.getElementById('diceAnimationArea');
       if (da && da.style && da.style.display && da.style.display !== 'none') waiting = true;
@@ -18346,7 +18561,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       runTiming(TIMING.BEFORE_DAMAGE, __jc); runTiming(TIMING.BEFORE_HURT, __jc);
       runTiming(TIMING.ON_DAMAGE, __jc); runTiming(TIMING.ON_HURT, __jc);
       p.sync = Math.max(0, p.sync - bd);
-      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + label + '伤害' + bd + '点，剩余同步值' + p.sync);
+      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + label + '伤害' + bd + '点，剩余同步值' + p.sync, target);
       if (typeof uiHit === 'function') uiHit(target);
       runTiming(TIMING.AFTER_DAMAGE, __jc); runTiming(TIMING.AFTER_HURT, __jc);
     }
@@ -18425,7 +18640,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     if (__ignore > 0) addBattleLog(target, '本次攻击无视' + __ignore + '点护盾');
     if (__effShield > 0) {
       if (__effShield >= actualDamage) { __effShield -= actualDamage; addBattleLog(target, '护盾抵消全部伤害'); actualDamage = 0; }
-      else { actualDamage -= __effShield; __effShield = 0; addBattleLog('damage', (target === 'p1' ? '你' : 'AI') + '的有效护盾被击穿'); }
+      else { actualDamage -= __effShield; __effShield = 0; addBattleLog('damage', (target === 'p1' ? '你' : 'AI') + '的有效护盾被击穿', target); }
     }
     p.shield = __ignore + __effShield; // 被无视的护盾保留 + 生效护盾抵消后的余量
     // “下一次攻击无视N护盾”为一次性增益，命中后消耗
@@ -18437,7 +18652,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       runTiming(TIMING.ON_DAMAGE, __dmgCtx);     // 造成伤害时（攻击者视角）
       runTiming(TIMING.ON_HURT, __dmgCtx);       // 受到伤害时（受击者视角）
       p.sync = Math.max(0, p.sync - actualDamage);
-      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + actualDamage + '点伤害，剩余同步值' + p.sync);
+      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + actualDamage + '点伤害，剩余同步值' + p.sync, target);
       if (typeof uiHit === 'function') uiHit(target);
       if ((p.permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) {
         recoverCost(target, 1, '血之佑戒');
@@ -20638,6 +20853,8 @@ var NetSync = {
       if (snap.grave && typeof publicGraveyard !== 'undefined') NetSync._overwrite(publicGraveyard, NetSync.decode(snap.grave));
     } catch (e) {}
     try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) { console.error('NetSync 重绘失败', e); }
+    // 联机反馈①：把权威战斗日志补画进面板（客人侧唯一能看到"对手干了什么"的通道）
+    try { if (typeof __renderBattleLogFromState === 'function') __renderBattleLogFromState(); } catch (e) {}
     try { if (typeof NetSync.onApplied === 'function') NetSync.onApplied(snap); } catch (e) {}
     return true;
   },
