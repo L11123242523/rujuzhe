@@ -12334,7 +12334,19 @@ var pendingChoiceCallback = null;
 var _choiceQueue = []; // 弹窗队列：结算中多个询问重叠时排队串行，防止单槽回调互相覆盖（时点修复）
 
 // 显示选择权弹窗
+/* C 阶段·第 2 步：**决策出口**（作者选定"引擎搬进中继服务"）
+   —— 调用点**一处都不用改**：只把"身体"搬到环境层。
+   浏览器 ENV.ask(seat='p1') → 本机弹窗（并像以前一样把本机玩家的答案广播出去）；
+   服务器 ENV.ask(seat) → 把问题发给那个座位并等回答（大师决斗/三国杀就是这么做的）。
+   下面的 __askChoiceLocal 就是原来的 showChoiceModal 身体，逐字保留。 */
 function showChoiceModal(title, cardName, effect, choices, callback) {
+  return ENV.ask('p1', { kind: 'choice', label: title, cardName: cardName, effect: effect, choices: choices }, callback);
+}
+function __askChoiceLocal(spec, callback) {
+  var title = (spec && spec.label) || '请选择';
+  var cardName = (spec && spec.cardName) || '';
+  var effect = (spec && spec.effect) || '';
+  var choices = (spec && spec.choices) || [];
   // 联机：本弹窗只服务本机玩家(p1)决策——正常弹窗并在回答时广播；远端位决策一律走 onlineDecideModal('p2')
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
     var __olSeq = Online.registerLocalAnswer();
@@ -13293,10 +13305,19 @@ var ENV = {
   },
   // 渲染：浏览器里就是原来那套重绘（updateBattleUI 的实现挂在 _render 上，见下）
   render: function () { return (typeof ENV._render === 'function') ? ENV._render.apply(this, arguments) : undefined; },
-  // 要问玩家：浏览器里走现成弹窗；服务器环境下会被替换成"问某个座位"
+  // 要问玩家：浏览器里走现成弹窗；服务器环境下会被替换成"问某个座位并等回答"
+  // （C 阶段第 2 步：showChoiceModal / showCardPickerMulti 已改走这里 —— 100 处调用点无需改动）
   ask: function (seat, spec, cb) {
-    try { if (typeof showChoiceModal === 'function') return showChoiceModal((spec && spec.label) || '请选择', (spec && spec.cardName) || '', (spec && spec.effect) || '', (spec && spec.choices) || [], cb); } catch (e) {}
-    if (typeof cb === 'function') cb(null);
+    try {
+      var kind = (spec && spec.kind) || 'choice';
+      if (kind === 'choice') return __askChoiceLocal(spec, cb);
+      if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
+      // 其余决策类型（pickList / targetPlayer / targetCards）还没接缝，先按老路走
+      if (typeof cb === 'function') cb(null);
+    } catch (e) {
+      try { console.error('ENV.ask 异常', e); } catch (e2) {}
+      if (typeof cb === 'function') cb(null);
+    }
   },
   anim: function (name, payload) { try { if (typeof window !== 'undefined' && typeof window.playAnimByName === 'function') return window.playAnimByName(name, payload); } catch (e) {} return undefined; },
   now: function () { return Date.now(); },
@@ -13359,7 +13380,15 @@ function closeCardPicker(e) {
 var _cardPickerMultiCallback = null;
 var _cardPickerStack = [];      // 待应答的选卡弹窗（栈）：每个弹窗**用自己的闭包**应答，槽只用来表示"当前在屏上的是哪一个"
 // 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
+// C 阶段·第 2 步：同 showChoiceModal —— 调用点不改，只把"身体"搬到环境层（浏览器=弹窗，服务器=问座位）
 function showCardPickerMulti(cards, title, callback, needCount, allowLess) {
+  return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess }, callback);
+}
+function __askPickCardsLocal(spec, callback) {
+  var cards = (spec && spec.cards) || [];
+  var title = (spec && spec.label) || '选择卡牌';
+  var needCount = (spec && spec.need) || 1;
+  var allowLess = !!(spec && spec.allowLess);
   // 联机：本选择器只服务本机玩家(p1)决策——正常弹窗并在回答时广播；远端位选卡一律走 pickFromList('p2')/awaitAnswer
   if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && !effectEngine.autoResolve) {
     var __cpSeq = Online.registerLocalAnswer();
