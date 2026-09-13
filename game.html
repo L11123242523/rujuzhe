@@ -5072,10 +5072,11 @@ var Online = {
     // 卡组交换：客人也要把自己的卡组发给房主（房主需要它来建立 p2）
     var cfg={chars:[],items:[],carries:[]};
     try{
-      if(deckConfig && deckConfig.p1){
-        cfg.chars=(deckConfig.p1.chars||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
-        cfg.items=(deckConfig.p1.items||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
-        cfg.carries=(deckConfig.p1.carries||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+      var __mine=deckOf('p1');                       // 本机视角里"自己"永远是 p1（见上面 mySide='p1'）
+      if(__mine){
+        cfg.chars=(__mine.chars||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+        cfg.items=(__mine.items||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+        cfg.carries=(__mine.carries||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
       }
     }catch(e){ console.error('联机卡组序列化失败',e); }
     this._relay({k:'deck', cfg:cfg, name:this.myName});
@@ -5100,14 +5101,16 @@ var Online = {
     switch(m.k){
       case 'deck':
         try{
+          // 收到的永远是"对手那一套"：本机自己是 p1，所以写到 foeOf('p1')（1v1 = p2）
+          var __foeSeat=foeOf('p1');
           if(!deckConfig) deckConfig={p1:{chars:[],items:[],carries:[]},p2:{chars:[],items:[],carries:[]}};
-          if(!deckConfig.p2) deckConfig.p2={chars:[],items:[],carries:[]};
-          deckConfig.p2.chars=(m.cfg&&m.cfg.chars)||[];
-          deckConfig.p2.items=(m.cfg&&m.cfg.items)||[];
-          deckConfig.p2.carries=(m.cfg&&m.cfg.carries)||[];
-          if(deckConfig.p2.chars.length){ // 对手队长=首位角色
-            var __cap=deckConfig.p2.chars.filter(Boolean)[0];
-            if(__cap) deckConfig.p2.captain=deckConfig.p2.captain||__cap;
+          if(!deckConfig[__foeSeat]) deckConfig[__foeSeat]={chars:[],items:[],carries:[]};
+          deckConfig[__foeSeat].chars=(m.cfg&&m.cfg.chars)||[];
+          deckConfig[__foeSeat].items=(m.cfg&&m.cfg.items)||[];
+          deckConfig[__foeSeat].carries=(m.cfg&&m.cfg.carries)||[];
+          if(deckConfig[__foeSeat].chars.length){ // 对手队长=首位角色
+            var __cap=deckConfig[__foeSeat].chars.filter(Boolean)[0];
+            if(__cap) deckConfig[__foeSeat].captain=deckConfig[__foeSeat].captain||__cap;
           }
         }catch(e){ console.error('对手卡组解析失败',e); }
         this.oppName=m.name||'对手';
@@ -6321,6 +6324,9 @@ function foeOf(me) { var o = othersOf(me); return o.length ? o[0] : me; }   // 1
 function nextPlayerOf(me) { var i = PLAYER_IDS.indexOf(me); return PLAYER_IDS[(i + 1) % PLAYER_IDS.length] || me; }
 function stateOf(p) { return (typeof battleState !== 'undefined' && battleState) ? battleState[p] : null; }
 function deckOf(p) { return (typeof deckConfig !== 'undefined' && deckConfig) ? deckConfig[p] : null; }
+/* 按座位**写**卡组配置：`deckOf(p)` 只能读（函数调用不能当左值），所以写路径统一走这里。
+   A3 批次把源码里散落的「按座位赋值卡组」全部收敛到这一个函数（源码里已不再出现按座位名点取 deckConfig 的写法）。 */
+function setDeckOf(p, cfg) { if (typeof deckConfig === 'undefined' || !deckConfig) deckConfig = {}; deckConfig[p] = cfg; return deckConfig[p]; }
 var pickerState = { player: '', type: '', index: 0 };
 
 /* ============================================================
@@ -7833,11 +7839,11 @@ function startRoguelikeBattle(node) {
   shuffleArray(fillCarries);
   while (p1Carries.length < 4) p1Carries.push(JSON.parse(JSON.stringify(fillCarries[p1Carries.length % fillCarries.length])));
   
-  deckConfig.p1 = {
+  setDeckOf('p1', {
     chars: roguelikeState.deck.chars.slice(),
     items: p1Items,
     carries: p1Carries
-  };
+  });
   
   // AI卡组：根据层数增强
   var aiChars = (window.cardData && window.cardData.characters) ? window.cardData.characters.slice() : [];
@@ -7856,11 +7862,11 @@ function startRoguelikeBattle(node) {
   var aiCarries = (window.cardData && window.cardData.attack_cards) ? window.cardData.attack_cards.concat(window.cardData.skill_cards || []).slice() : [];
   shuffleArray(aiCarries);
   
-  deckConfig.p2 = {
+  setDeckOf('p2', {
     chars: aiChars.slice(0, 3).map(function(c) { return JSON.parse(JSON.stringify(c)); }),
     items: aiItems.slice(0, 8).map(function(c) { return JSON.parse(JSON.stringify(c)); }),
     carries: aiCarries.slice(0, 4).map(function(c) { return JSON.parse(JSON.stringify(c)); })
-  };
+  });
   
   roguelikeState._currentNode = node;
   roguelikeState._isRoguelike = true;
@@ -8007,15 +8013,18 @@ function finishRoguelikeReward() {
 var battleState = null;
 
 function initBattle() {
-  // 计算双方同步值
+  // 计算各座位同步值（A3：按座位遍历，1v1 时结果与"只算 p1/p2"逐项相同）
   var p1Sync = 0, p2Sync = 0;
-  for (var i = 0; i < 3; i++) {
-    if (deckConfig.p1.chars[i]) p1Sync += (deckConfig.p1.chars[i].sync || 5);
-    if (deckConfig.p2.chars[i]) p2Sync += (deckConfig.p2.chars[i].sync || 5);
-  }
-  // 队伍同步值 = 三角色同步值之和 ×2.5，0.5 进一（向上取整）
-  p1Sync = Math.ceil(p1Sync * 2.5);
-  p2Sync = Math.ceil(p2Sync * 2.5);
+  var __syncOfSeat = {};
+  playerIds().forEach(function (pl) {
+    var __cs = (deckOf(pl) && deckOf(pl).chars) || [];
+    var __s = 0;
+    for (var i = 0; i < 3; i++) { if (__cs[i]) __s += (__cs[i].sync || 5); }
+    // 队伍同步值 = 三角色同步值之和 ×2.5，0.5 进一（向上取整）
+    __syncOfSeat[pl] = Math.ceil(__s * 2.5);
+  });
+  p1Sync = __syncOfSeat.p1 || 0;
+  p2Sync = __syncOfSeat.p2 || 0;
   
   // 补全所有卡牌的_category字段（确保攻击卡/技能卡/永续卡正确识别）
   function ensureCardCategory(card) {
@@ -8065,33 +8074,30 @@ function initBattle() {
     if (typeof cardBelongsToTeam === 'function' && tn.length && !cardBelongsToTeam(c, tn)) { addBattleLog(pl, '【组牌过滤】携带卡【' + c.name + '】不属于本队角色，已剔除'); return false; }
     return true;
   }
-  var p1Deck = [];
-  for (var i = 0; i < 8; i++) if (deckConfig.p1.items[i]) {
-    // 口径修正（用户确认）：小野葵被动里的"携带卡"指**整副牌组 12 张**（8道具 + 4角色携带卡），
-    // 8 张道具卡同样享受"首次使用费用-1"。以前只标了 4 张 carries，导致被动实际覆盖不全。
-    // 同时每局把 _aoiDiscountUsed 重置：卡对象是跨局复用的，不重置会导致第二局起被动直接失效。
-    deckConfig.p1.items[i]._fromDeck = true;
-    deckConfig.p1.items[i]._aoiDiscountUsed = false;
-    p1Deck.push(deckConfig.p1.items[i]);
-  }
-  for (var i = 0; i < 4; i++) if (deckConfig.p1.carries[i] && __teamCarryOk('p1', deckConfig.p1.carries[i])) {
-    deckConfig.p1.carries[i]._isCarry = true;
-    deckConfig.p1.carries[i]._fromDeck = true;
-    deckConfig.p1.carries[i]._aoiDiscountUsed = false;
-    p1Deck.push(deckConfig.p1.carries[i]);
-  }
-  var p2Deck = [];
-  for (var i = 0; i < 8; i++) if (deckConfig.p2.items[i]) {
-    deckConfig.p2.items[i]._fromDeck = true;
-    deckConfig.p2.items[i]._aoiDiscountUsed = false;
-    p2Deck.push(deckConfig.p2.items[i]);
-  }
-  for (var i = 0; i < 4; i++) if (deckConfig.p2.carries[i] && __teamCarryOk('p2', deckConfig.p2.carries[i])) {
-    deckConfig.p2.carries[i]._isCarry = true;
-    deckConfig.p2.carries[i]._fromDeck = true;
-    deckConfig.p2.carries[i]._aoiDiscountUsed = false;
-    p2Deck.push(deckConfig.p2.carries[i]);
-  }
+  var p1Deck = [], p2Deck = [];
+  // A3：牌库构筑按座位遍历（1v1 = p1→p2，副作用施加顺序与原来逐项相同）
+  var __seatDecks = {};
+  playerIds().forEach(function (pl) {
+    var cfg = deckOf(pl); if (!cfg) { __seatDecks[pl] = []; return; }
+    var d = [];
+    for (var i = 0; i < 8; i++) if ((cfg.items || [])[i]) {
+      // 口径修正（用户确认）：小野葵被动里的"携带卡"指**整副牌组 12 张**（8道具 + 4角色携带卡），
+      // 8 张道具卡同样享受"首次使用费用-1"。以前只标了 4 张 carries，导致被动实际覆盖不全。
+      // 同时每局把 _aoiDiscountUsed 重置：卡对象是跨局复用的，不重置会导致第二局起被动直接失效。
+      cfg.items[i]._fromDeck = true;
+      cfg.items[i]._aoiDiscountUsed = false;
+      d.push(cfg.items[i]);
+    }
+    for (var i = 0; i < 4; i++) if ((cfg.carries || [])[i] && __teamCarryOk(pl, cfg.carries[i])) {
+      cfg.carries[i]._isCarry = true;
+      cfg.carries[i]._fromDeck = true;
+      cfg.carries[i]._aoiDiscountUsed = false;
+      d.push(cfg.carries[i]);
+    }
+    __seatDecks[pl] = d;
+  });
+  p1Deck = __seatDecks.p1 || [];
+  p2Deck = __seatDecks.p2 || [];
   
   // 洗牌
   // 【联机锁步关键】洗牌和起手抽牌都在消耗同一条随机流，所以两台机器上
@@ -8101,18 +8107,37 @@ function initBattle() {
   // 于是 sendIntent 传的 {idx,name} 在对方那边找不到对应手卡 —— 表现就是「各打各的、
   // 出牌对方看不到、伤害只有自己视角可见」。下面被动结算已经用了同样的主机优先顺序。
   var __ordA = 'p1', __ordB = 'p2';
+  var __shuffleOrder;
   if (typeof Online !== 'undefined' && Online.active) {
     __ordA = Online.isHost ? 'p1' : 'p2';
     __ordB = Online.isHost ? 'p2' : 'p1';
+    __shuffleOrder = [__ordA, __ordB];
+  } else {
+    __shuffleOrder = playerIds();
   }
-  var __deckOf = { p1: p1Deck, p2: p2Deck };
-  shuffleArray(__deckOf[__ordA]);
-  shuffleArray(__deckOf[__ordB]);
+  var __deckOf = __seatDecks;   // A3：每个座位一副（p1Deck/p2Deck 就是这里的同一对象）
+  __shuffleOrder.forEach(function (w) { shuffleArray(__deckOf[w] || []); });
   
-  var __cap1 = (deckConfig && deckConfig.p1 && (deckConfig.p1.captain || (deckConfig.p1.chars||[]).filter(Boolean)[0])) || null;
-  var __cap2 = (deckConfig && deckConfig.p2 && (deckConfig.p2.captain || (deckConfig.p2.chars||[]).filter(Boolean)[0])) || null;
-  var __ta1 = (typeof __calcTeamAttribute==='function') ? __calcTeamAttribute(deckConfig && deckConfig.p1) : null;
-  var __ta2 = (typeof __calcTeamAttribute==='function') ? __calcTeamAttribute(deckConfig && deckConfig.p2) : null;
+  // A3：座位状态由工厂生成（1v1 时 p1/p2 的字段与原来逐个相同；多人时按座位自动补齐）
+  function __makeSeatState(cap, ta, sync, deck) {
+    return {
+      captain: cap, teamAttribute: ta, sync: sync, maxSync: sync, fascination: 6, cost: 0, maxCost: 12,
+      deck: deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1,
+      motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [],
+      attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [],
+      _eliminated: false   // 作者口径：同步值归零 = 出局（1v1 时出局即对局结束，语义不变）
+    };
+  }
+  var __capOfSeat = {}, __taOfSeat = {};
+  playerIds().forEach(function (pl) {
+    var __c = deckOf(pl);
+    __capOfSeat[pl] = (__c && (__c.captain || (__c.chars || []).filter(Boolean)[0])) || null;
+    __taOfSeat[pl] = (typeof __calcTeamAttribute === 'function') ? __calcTeamAttribute(__c || false) : null;
+  });
+  var __cap1 = __capOfSeat.p1 || null;
+  var __cap2 = __capOfSeat.p2 || null;
+  var __ta1 = __taOfSeat.p1 || null;
+  var __ta2 = __taOfSeat.p2 || null;
   battleState = {
     turn: 1,
     round: 1, // 一轮=所有玩家各行动一次；末位玩家结束回合时 +1
@@ -8121,8 +8146,8 @@ function initBattle() {
     effectStack: [],
     pendingEffect: null,
     effectChainActive: false,
-    p1: { captain: __cap1, teamAttribute: __ta1, sync: p1Sync, maxSync: p1Sync, fascination: 6, cost: 0, maxCost: 12, deck: p1Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
-    p2: { captain: __cap2, teamAttribute: __ta2, sync: p2Sync, maxSync: p2Sync, fascination: 6, cost: 0, maxCost: 12, deck: p2Deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1, motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [], attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [] },
+    p1: __makeSeatState(__cap1, __ta1, p1Sync, p1Deck),
+    p2: __makeSeatState(__cap2, __ta2, p2Sync, p2Deck),
     damageResponseWindow: false,
     pendingDamage: 0,
     pendingDamageTarget: '',
@@ -8131,26 +8156,27 @@ function initBattle() {
     _over: false, // 战斗结束闩锁：置位后所有异步链条停止推进
     _sessionId: ((battleState && battleState._sessionId) || 0) + 1 // 局 ID：旧局残留定时器据此失效
   };
+  // B 阶段预备：除 p1/p2 之外的座位（如 1v1v1 的 p3）在这里自动建状态（1v1 时本循环不执行）
+  playerIds().slice(2).forEach(function (pl) {
+    battleState[pl] = __makeSeatState(__capOfSeat[pl] || null, __taOfSeat[pl] || null, __syncOfSeat[pl] || 0, __seatDecks[pl] || []);
+  });
   publicGraveyard.event_cards = []; publicGraveyard.music_cards = []; // 公共墓地跨局重置
   clearBattleLog(); // 新战斗清空上一局日志
   
-  // 检查是否有宁雨清（被动：初始7选5）
-  var p1HasNing = false, p2HasNing = false;
-  for (var i = 0; i < 3; i++) {
-    if (deckConfig.p1.chars[i] && (deckConfig.p1.chars[i].name || '').indexOf('雨清') >= 0) p1HasNing = true;
-    if (deckConfig.p2.chars[i] && (deckConfig.p2.chars[i].name || '').indexOf('雨清') >= 0) p2HasNing = true;
-  }
+  // 检查是否有宁雨清（被动：初始7选5）——A3：按座位遍历
+  var __ningOf = {};
+  playerIds().forEach(function (pl) {
+    var __cs = (deckOf(pl) && deckOf(pl).chars) || [];
+    __ningOf[pl] = __cs.some(function (c) { return c && (c.name || '').indexOf('雨清') >= 0; });
+  });
   
-  // 初始抽牌：双方统一起手4张；先手多出的1张由其第一回合“准备阶段抽1”自然获得（先手=5）。
+  // 初始抽牌：各座位统一起手4张；先手多出的1张由其第一回合“准备阶段抽1”自然获得（先手=5）。
   // 有宁雨清的不在这里抽，由被动处理7选5
-  // 【联机锁步关键】抽牌顺序同样必须「先手→后手」（理由同上面的洗牌）
-  var __ningOf = { p1: p1HasNing, p2: p2HasNing };
-  if (!__ningOf[__ordA]) {
-    for (var i = 0; i < 4; i++) drawCard(__ordA);
-  }
-  if (!__ningOf[__ordB]) {
-    for (var i = 0; i < 4; i++) drawCard(__ordB);
-  }
+  // 【联机锁步关键】抽牌顺序必须「先手→后手」（理由同上面的洗牌）；单机多人按座位顺序
+  var __order = (typeof Online !== 'undefined' && Online.active) ? [__ordA, __ordB] : playerIds();
+  __order.forEach(function (w) {
+    if (!__ningOf[w]) { for (var i = 0; i < 4; i++) drawCard(w); }
+  });
   
   // ========== 角色被动和SP初始化处理 ==========
   // 联机：按【主机队伍优先】顺序结算（双机同序 => 决策序列号一致：主机队的选择在两台机器上都先登记）
@@ -8162,6 +8188,15 @@ function initBattle() {
       if (battleState[__oA]._kaedeSPPending) kaedeSPSelect(__oA);
       if (battleState[__oB]._kaedeSPPending) kaedeSPSelect(__oB);
     }, 500);
+  } else if (playerCount() > 2) {
+    // 多人（1v1v1 等）：逐座位处理，触发口径与 1v1 相同
+    playerIds().forEach(function (w) {
+      processCharacterPassives(w);
+      if (battleState[w]._kaedeSPPending) {
+        if (w === 'p1') setTimeout(function () { kaedeSPSelect(w); }, 500);
+        else kaedeSPSelect(w);
+      }
+    });
   } else {
     processCharacterPassives('p1');
     // 枫SP选择（游戏开始时从4项中选2项）：双方都要结算（修复 AI 队编入入间枫时 SP 永不结算）
@@ -8187,8 +8222,8 @@ function initBattle() {
     var __gd = drawCard(w);
     addBattleLog(w, '游戏开始：回复' + __greg + '点音韵并抽1张卡' + (__gd ? '【' + __gd.name + '】' : '（牌组为空）'));
   }
-  __gameStartRegenDraw('p1');
-  __gameStartRegenDraw('p2');
+  // 游戏开始：为每个座位结算首回合的自然回复音韵与抽卡（口径：首回合准备阶段不再回复/抽卡）
+  playerIds().forEach(function (w) { __gameStartRegenDraw(w); });
 
   // 联机：后手方的本机 p1 即真实的第二位玩家——先手(主机)先行动，这里直接进入远端位回合等待
   if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
@@ -10449,7 +10484,7 @@ function aiMaybeUseEvent(done) {
     if (typeof checkBattleEnd === 'function') checkBattleEnd();
     if (done) done();
   }
-  function hasChar(k) { try { return (deckConfig.p2.chars || []).some(function (c) { return c && c.name && c.name.indexOf(k) >= 0; }); } catch (e) { return false; } }
+  function hasChar(k) { try { var __aic = deckOf('p2'); return ((__aic && __aic.chars) || []).some(function (c) { return c && c.name && c.name.indexOf(k) >= 0; }); } catch (e) { return false; } }
   function __applyAiEvent() {
   // --- 独奏：20面骰，条件全部适用；回费/降自己入迷（越近0越接近破局胜利） ---
   if (nm === '独奏') {
@@ -17568,11 +17603,14 @@ function kaedeSPSelect(player) {
     return;
   }
   // AI 自动选择最通用的①回6音韵 + ②抽2张，不弹窗
-  if (player === 'p2') {
+  // A5 批次第 1 处（探针实测发现）：原来写死 `player === 'p2'`，1v1v1 时 p3 会掉进下面"给人类弹窗"那条路，
+  // 等于让本机玩家替 AI 座位选 SP；改成「不是本机人类座位（p1）的座位一律走 AI 自动选择」。
+  // 1v1 等价：那时能走到这里的非 p1 座位只有 p2，行为逐字不变。
+  if (player !== 'p1') {
     p.cost = Math.min(p.cost + 6, p.maxCost);
     for (var ai = 0; ai < 2; ai++) { var __tcAI = takeTopCard(player); if (__tcAI) p.hand.push(__tcAI); }
     p._kaedeSPPending = false;
-    addBattleLog('p2', '【入间枫SP·AI】自动选择①回复6音韵、②抽2张卡');
+    addBattleLog(player, '【入间枫SP·AI】自动选择①回复6音韵、②抽2张卡');
     return;
   }
   
