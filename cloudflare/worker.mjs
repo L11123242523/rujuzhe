@@ -203,7 +203,9 @@ export class RoomObject {
             const seat = me.isHost ? 'p1' : 'p2';
             me.seat = seat;
             try {
-              this._ensureEngineRoom().attach(seat, { name: me.name });
+              /* 用 sid 当"连接身份"：重连换来新连接时，旧连接的 close 会晚到，
+                 引擎房间据此忽略过期断开（否则会把刚回来的座位又标成离线）。 */
+              this._ensureEngineRoom().attach(seat, { name: me.name, conn: sid });
             } catch (e) {
               console.log('[engine] attach 失败：' + (e && e.message));
               this._send(server, { t: 'error', msg: '服务器权威引擎启动失败：' + (e && e.message) });
@@ -284,9 +286,10 @@ export class RoomObject {
       if (i >= 0) this.players.splice(i, 1);
       const role = me.isHost ? 'host' : 'guest';
       if (me.isHost && this.hostSid === sid) this.hostSid = '';
-      /* 批次 2：权威引擎路径下，断开只标记该座位离线（宽限期内可重连，权威状态留在服务器） */
+      /* 批次 2：权威引擎路径下，断开只标记该座位离线（宽限期内可重连，权威状态留在服务器）。
+         带 sid = 这条连接的"身份"：过期连接的 close 会被引擎房间忽略。 */
       if (this.engineRoom && me.seat) {
-        try { this.engineRoom.detach(me.seat); } catch (e) {}
+        try { this.engineRoom.detach(me.seat, sid); } catch (e) {}
       }
       if (!this.started) {
         // 还没开局：直接算离开

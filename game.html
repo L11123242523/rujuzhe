@@ -3022,6 +3022,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="ol-sub">线上联机：服务器栏<b>留空即可</b>（自动用中继域名 <code>relay.rujuzhe-b-a-gs.top</code>）。本地试玩：先运行 <code>node online_server.js</code>，用 <code>http://127.0.0.1:8080</code> 打开本页，留空会自动连 <code>ws://localhost:2567</code>。玩法：一人创建房间拿到 4 位房号 → 发给对手 → 对手输入房号加入 → 双方准备后开局。双方用同一颗权威种子双机推演。</div>
     <div class="ol-row"><label>服务器</label><input id="olServer" placeholder="留空=自动（线上 relay.rujuzhe-b-a-gs.top / 本地 ws://localhost:2567）"></div>
     <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
+    <div class="ol-row" style="align-items:center;"><label>模式</label>
+      <label style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="olEngineAuthority" style="cursor:pointer;">服务器权威（实验：双方对称，规则跑在服务器里）
+      </label>
+    </div>
     <div class="ol-row">
       <button class="ol-btn" onclick="Online.createRoom()">① 创建房间</button>
       <input id="olRoomId" placeholder="输入对方房号" style="max-width:130px;">
@@ -4965,6 +4970,21 @@ var Online = {
      _asks: 房主发出的问题 id -> {cb, spec, timer}
      SPEC_TIMEOUT_MS: 对手多久不选就按默认项继续（不再永久卡死） */
   role:'', isGuest:false,
+  /* ============================================================
+   * C 阶段第 4 步 · 批次 3：**服务器权威模式**（客户端瘦身）
+   * ------------------------------------------------------------
+   * authority:'host'   = 旧协议（默认，一字不变）：房主浏览器跑规则、客人只画。
+   * authority:'server' = 双方对称：**两台机器都只是客户端**，规则跑在中继的 Durable Object 里。
+   *   · 连接时带 ?engine=1、hello 里带 engine:true → 中继为这个房间建一份权威引擎；
+   *   · 双方都只发 {t:'engine', m:{k:'act', a, args}}；
+   *   · 双方都只收 {t:'engine', m:{k:'view'|'ev'|'ask'|...}}；
+   *   · mySeat = 服务器给的引擎槽位（'p1'|'p2'），只用来"把服务器槽位翻译成本机视角"（日志人称）。
+   * 开关由联机大厅的 #olEngineAuthority 勾选框控制；不勾 = 旧路径。
+   * ============================================================ */
+  authority:'host', mySeat:'',
+  _engineLogs:[],          // 服务器事件流里的日志镜像（服务器不写 battleState._logs，日志走事件流）
+  _engineViewSeq:0, _engineViews:0, _engineEvs:0, _engineAsks:0, _engineRejects:0,
+  _lastRollSig:{},
   _askSeq:0, _asks:{}, SPEC_TIMEOUT_MS:20000,
   _snapTimer:null, _snapSeq:0, _lastSnapAt:0,
   /* 增量事件流（②）：房主留一份"上一次发出的编码快照"做基线，之后只发改动路径；
@@ -5003,8 +5023,26 @@ var Online = {
     return v.replace(/\/+$/,'');
   },
   _httpOf:function(wsUrl){ return String(wsUrl||'').replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/+$/,''); },
-  _roomUrl:function(code){ return String(this.relayBase||this.endpoint||'').replace(/\/+$/,'')+'/?r='+encodeURIComponent(code); },
-  status:function(t){ var el=document.getElementById('olStatus'); if(el) el.textContent=t; },
+  /* C 阶段批次 3：服务器权威模式的两个小工具。
+     _engineOpt()：读大厅里的勾选框（勾了才走服务器权威，默认不勾＝旧路径）。
+     _roomUrl()  ：服务器权威模式下给 WS 地址带上 ?engine=1（中继的 /room 只认这个 + hello 里的 engine:true）。 */
+  _engineOpt:function(){
+    try{ var el=document.getElementById('olEngineAuthority'); return !!(el && el.checked); }catch(e){ return false; }
+  },
+  _isServerAuthority:function(){ return this.authority==='server'; },
+  _roomUrl:function(code){
+    var u=String(this.relayBase||this.endpoint||'').replace(/\/+$/,'')+'/?r='+encodeURIComponent(code);
+    return this._isServerAuthority() ? (u+'&engine=1') : u;
+  },
+  /* 状态栏：服务器权威模式下**前缀座位号**（玩家要知道自己是先手还是后手；
+     也避免"座位 p1"这类信息被后来的状态刷新冲掉）。 */
+  status:function(t){
+    var el=document.getElementById('olStatus');
+    if(!el) return;
+    var s=String(t==null?'':t);
+    if(this.authority==='server' && this.mySeat && s.indexOf('座位 '+this.mySeat)<0) s='[座位 '+this.mySeat+'] '+s;
+    el.textContent=s;
+  },
   refreshLobby:function(){
     this.status('服务器栏填中继主机即可（留空：本地调试连 ws://localhost:2567，线上自动用 '+this._defaultRelay+'）。\n创建房间会先向中继申请 4 位房号，再把房号发给对手加入。');
   },
@@ -5017,11 +5055,14 @@ var Online = {
   createRoom:function(){
     var self=this;
     this.role='host'; this.isGuest=false;      // 建房者 = 权威方（跑规则并把状态同步给对手）
+    /* C 阶段批次 3：勾了"服务器权威"就不再有人当权威 —— 建房者也只发意图（isGuest 由 _onGameStart 按模式置位） */
+    this.authority=this._engineOpt()?'server':'host';
+    this.mySeat='';
     this.relayBase=this._wsUrl(this._serverInput());
     this.endpoint=this.relayBase;
     this._rememberRelay((this._serverInput()||'').trim());
     var http=this._httpOf(this.relayBase);
-    this.status('正在向中继服务器申请房号…\n'+http+'/newroom');
+    this.status('正在向中继服务器申请房号…\n'+http+'/newroom'+(this._isServerAuthority()?'\n（服务器权威模式：规则跑在服务器里，双方都只是客户端）':''));
     fetch(http+'/newroom', { cache:'no-store' })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(j){
@@ -5029,7 +5070,7 @@ var Online = {
         if(!/^[A-Z0-9]{4}$/.test(code)) throw new Error('服务器未返回有效房号');
         self.roomId=code;
         self.status('已拿到房号 '+code+'，正在进入房间…');
-        self._connect(function(){ self._send({ t:'hello', role:'host', name:self._name() }); }, code);
+        self._connect(function(){ self._send(self._hello('host')); }, code);
       })
       .catch(function(e){
         var msg=(e&&e.message)||String(e);
@@ -5043,12 +5084,22 @@ var Online = {
     if(!/^[A-Z0-9]{4}$/.test(id)){ showToast('房号是 4 位字母或数字', 'warn'); return; }
     var self=this;
     this.role='guest'; this.isGuest=true;      // 加入者 = 客人（不跑规则，只按房主快照绘制）
+    this.authority=this._engineOpt()?'server':'host';
+    this.mySeat='';
     this.relayBase=this._wsUrl(this._serverInput());
     this.endpoint=this.relayBase;
     this._rememberRelay((this._serverInput()||'').trim());
     this.roomId=id;
-    this.status('正在进入房间 '+id+' …');
-    this._connect(function(){ self._send({ t:'hello', role:'guest', name:self._name() }); }, id);
+    this.status('正在进入房间 '+id+' …'+(this._isServerAuthority()?'\n（服务器权威模式）':''));
+    this._connect(function(){ self._send(self._hello('guest')); }, id);
+  },
+  /* 统一的 hello：服务器权威模式下必须带 engine:true。
+     注意（实测）：中继把 WS 请求转发给房间 DO 时只保留 ?r=，**?engine=1 会被丢掉** ——
+     所以真正让服务器建权威引擎的是这一条 engine:true（`worker.mjs` hello 分支里的 m.engine===true）。 */
+  _hello:function(role){
+    var h={ t:'hello', role:role, name:this._name() };
+    if(this._isServerAuthority()) h.engine=true;
+    return h;
   },
   _connect:function(onOpen, roomCode){
     var self=this;
@@ -5090,6 +5141,10 @@ var Online = {
       case 'room': {
         var names=(m.players||[]).map(function(p){ return p.name+(p.ready?'✓':'…'); });
         (m.players||[]).forEach(function(p){ if(p.sid!==self.mySession) self.oppSession=p.sid; });
+        /* 服务器权威模式下**不要**用旧协议的房间状态刷状态栏：对手掉线时中继也会推一份
+           "房间只剩你"的快照，会把"对手掉线了，正在等待重连"这句更有用的提示盖掉
+           （实测线上：玩家只看到"等待对手加入…"，看不出是掉线还是在等人）。 */
+        if(this.authority==='server') break;
         var extra='房号 '+this.roomId+'\n玩家：'+(names.length?names.join(' / '):'（等待加入）');
         this.status(extra+'\n'+((m.players||[]).length===2?'双方到齐，点准备开始':'等待对手加入…'));
         break;
@@ -5097,6 +5152,9 @@ var Online = {
       case 'start':
         this._gotStart=true;
         this._onGameStart(m);
+        break;
+      case 'engine':                    // 服务器权威模式：中继的权威引擎发来的下行消息
+        this._onEngine(m.m);
         break;
       case 'relay':
         this._onRelay(m.m);
@@ -5145,6 +5203,17 @@ var Online = {
       }
     }catch(e){ console.error('联机准备校验异常',e); }
     this.myName=this._name();
+    /* C 阶段批次 3：服务器权威模式 —— 本机把**自己的卡组**交给服务器（服务器是唯一真相），
+       然后由服务器决定开局。这里仍然发一条旧协议的 {t:'ready'}：
+       它的作用只是让中继把房间标成"对局中"（掉线 90 秒宽限、重连带 resume 能回原座位）。
+       中继因此会回一条 {t:'start'} —— 服务器权威模式下它被忽略（见 _onGameStart）。 */
+    if(this._isServerAuthority()){
+      this._sendEngine({k:'deck', cfg:this._myDeckCfg()});
+      this._sendEngine({k:'ready'});
+      this._send({t:'ready'});
+      this.status('已准备（服务器权威模式：座位在手，等服务器开局…）');
+      return;
+    }
     this._send({t:'ready'});
     this.status('已准备，等待对手…');
   },
@@ -5167,6 +5236,14 @@ var Online = {
        · 客人：**不建本地对局**，等房主的快照（收到第一份快照才切到战斗界面） */
   _onGameStart:function(m){
     var self=this;
+    /* C 阶段批次 3：服务器权威模式下**没有房主**，所以这条旧协议的 start 只当"中继已开局"的信号
+       （它让中继进入"对局中"状态：掉线走 90 秒宽限、重连带 resume 能回到原座位）。
+       真正的开局是服务器的 {t:'engine', m:{k:'start'}}，本机不建局、不推快照。 */
+    if(this._isServerAuthority()){
+      this._gotStart=true; this.active=true; this.seed=m.seed;
+      this.status('已开局（服务器权威模式），等待服务器的视图…');
+      return;
+    }
     this.seed=m.seed; this.active=true;
     this.isGuest=(this.role==='guest');
     this._asks={}; this._askSeq=0; this._enteredBattle=false; this._verWarned=false; this._snapSeq=0;
@@ -5178,16 +5255,7 @@ var Online = {
     // 联机反馈③：开始盯着"结算锁"（房主解锁补推 / 客人卡在旧快照时自愈 / 等待对手回答可见化）
     try{ this._startLockWatch(); }catch(e){}
     // 卡组交换：客人也要把自己的卡组发给房主（房主需要它来建立 p2）
-    var cfg={chars:[],items:[],carries:[]};
-    try{
-      var __mine=deckOf('p1');                       // 本机视角里"自己"永远是 p1（见上面 mySide='p1'）
-      if(__mine){
-        cfg.chars=(__mine.chars||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
-        cfg.items=(__mine.items||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
-        cfg.carries=(__mine.carries||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
-      }
-    }catch(e){ console.error('联机卡组序列化失败',e); }
-    this._relay({k:'deck', cfg:cfg, name:this.myName});
+    this._relay({k:'deck', cfg:this._myDeckCfg(), name:this.myName});
     this._deckSent=true;
     this._waitOppDeck(function(){
       if(self.isGuest){ self.status('已收到对手卡组，等待房主开始对局…'); return; }  // 客人等快照，不建局
@@ -5198,6 +5266,20 @@ var Online = {
       self._sendSnapshotNow({ full:true });   // 立刻把权威状态给客人（完整卡定义）
       self._ensureSurrenderBtn();
     });
+  },
+  /* 本机卡组（本机视角里"自己"永远是 p1）序列化成 deckConfig 形状 —— 旧协议与服务器权威两条路共用。
+     服务器权威模式下它是 {k:'deck'} 的载荷；旧协议下它是 {k:'deck'} 中继消息的载荷。 */
+  _myDeckCfg:function(){
+    var cfg={chars:[],items:[],carries:[]};
+    try{
+      var __mine=deckOf('p1');
+      if(__mine){
+        cfg.chars=(__mine.chars||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+        cfg.items=(__mine.items||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+        cfg.carries=(__mine.carries||[]).filter(Boolean).map(function(c){ return JSON.parse(JSON.stringify(c)); });
+      }
+    }catch(e){ console.error('联机卡组序列化失败',e); }
+    return cfg;
   },
   _waitOppDeck:function(cb){
     if(this._oppDeck){ cb(); return; }
@@ -5267,7 +5349,225 @@ var Online = {
         break;
     }
   },
-  /* 房主：套用客人提交的操作（复用已有的 online*P2 流程，客人选什么由 ask/ans 送来） */
+  /* ============================================================
+   * C 阶段第 4 步 · 批次 3：**服务器权威模式的下行消息**（客户端瘦身）
+   * ------------------------------------------------------------
+   * 服务器（`cloudflare/engine-room.js`）是唯一真相，它的下行消息是：
+   *   joined{seat,code,started,resumed,seed,selfCheck} waiting{reason}
+   *   start{seat,seed}  view{seat,snap}  ev{seat,events}  ask{id,seat,spec}
+   *   over{winner,loser,why}  peerLost{seat,grace|gaveUp}  peerBack{seat}  reject{a,reason}  error{reason}
+   * 客户端要做的只有三件事：
+   *   ① view → NetSync.applySnapshot（**复用客人侧那条已经验证过的路径**，不新写渲染）；
+   *   ② ev   → 日志/视觉（服务器不写 battleState._logs，日志走事件流）；
+   *   ③ ask  → 用现成弹窗画出来，把答案按 id 回传 {k:'ans'}。
+   * 双方都走这一套 —— 没有房主、没有客人。
+   * ============================================================ */
+  _onEngine:function(m){
+    if(!m || !m.k) return;
+    var self=this;
+    switch(m.k){
+      case 'joined':
+        this.mySeat=m.seat||'';
+        if(m.code) this.roomId=m.code;
+        this.connected=true; this._reconnectTry=0;
+        this.status('已接上服务器权威引擎（座位 '+this.mySeat+'）'+(m.started?'\n对局进行中'+(m.resumed?'（重连回到原座位）':''):'\n等待双方准备…'));
+        if(m.resumed){ this._enteredBattle=false; this._sendEngine({k:'resyncReq'}); }
+        var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=false;
+        break;
+      case 'waiting':
+        this.status('已准备，等待对手…'+(m.reason?('（'+m.reason+'）'):''));
+        break;
+      case 'start':
+        this._onEngineStart(m);
+        break;
+      case 'view':
+        this._onEngineView(m);
+        break;
+      case 'ev':
+        this._onEngineEvents(m);
+        break;
+      case 'ask':
+        this._onEngineAsk(m);
+        break;
+      case 'over':
+        this._engineOver=m;
+        /* 显示层收尾：服务器只判胜负、不改 battleState（它那边 `finished` 已经接手，后续动作一律被拒）。
+           本机把 _over/_winner 按"本机视角（我恒为 p1）"写进状态，让现成的结束提示能用。 */
+        try{
+          if(battleState){
+            battleState._over=true;
+            battleState._winner=(m.winner===this.mySeat)?'p1':'p2';
+            if(typeof updateBattleUI==='function') updateBattleUI();
+          }
+        }catch(e){}
+        try{ if(typeof __showSurrenderResult==='function') __showSurrenderResult(); }catch(e){}
+        this.status('对局结束：'+(m.winner===this.mySeat?'你获胜':'对手获胜')+'（'+(m.why==='surrender'?'投降':'判定')+'）');
+        try{ showToast('对局结束：'+(m.winner===this.mySeat?'🏆 你获胜！':'你已落败')+'（'+(m.why==='surrender'?'投降':'判定')+'）', m.winner===this.mySeat?'info':'warn'); }catch(e){}
+        break;
+      case 'peerLost':
+        this._peerLost=true;
+        if(m.gaveUp){ this.status('对手掉线超过宽限期'); }
+        else { this.status('⚠ 对手掉线了，正在等待重连（'+(m.grace||90)+' 秒）…'); try{ showToast('对手掉线了，等待其重连…（'+(m.grace||90)+' 秒内回来对局可继续）','warn'); }catch(e){} }
+        break;
+      case 'peerBack':
+        this._peerLost=false;
+        try{ showToast('对手已重连，对局继续','info'); }catch(e){}
+        this.status('对手已重连');
+        break;
+      case 'reject':
+        this._engineRejects++;
+        this._clearActPending();
+        this._hideWaiting();
+        /* 理由要留得住 4 秒：服务器随后会 flush 视图，而视图会把状态栏刷成"已与服务器同步"，
+           玩家就看不到"为什么这一下没生效"（实测：线上只看到"已同步"，提示被刷掉了）。 */
+        this._rejectHoldUntil=Date.now()+4000;
+        this._lastRejectReason=(m.reason||'');
+        try{ showToast('这一步服务器没有接受：'+(m.reason||''), 'warn'); }catch(e){}
+        try{ if(typeof addBattleLog==='function') addBattleLog('system','【联机】这一步没有被服务器接受（'+(m.a||'')+'）：'+(m.reason||'')); }catch(e){}
+        this.status('服务器未接受这个操作（'+(m.a||'')+'）：'+(m.reason||''));
+        break;
+      case 'error':
+        this.status('服务器：'+(m.reason||'未知错误'));
+        break;
+      default: break;
+    }
+  },
+  /* 服务器开局：**本机一行规则都不跑**（不 startBattle、不推快照、不等对手卡组） */
+  _onEngineStart:function(m){
+    this.seed=m.seed; this.active=true; this._gotStart=true;
+    this.isGuest=true;                 // 服务器权威模式下"双方都是客户端"：本机不跑规则
+    this.mySeat=m.seat||this.mySeat;
+    this._asks={}; this._askSeq=0; this._enteredBattle=false;
+    this._engineLogs=[]; this._lastRollSig={}; this._wasOver=false;
+    try{ clearBattleLog(); }catch(e){}                          // 新一局：日志面板清空（旧路径由 startBattle 负责）
+    if(typeof NetSync!=='undefined') NetSync.resetRegistry();   // 新一局：卡定义要重发
+    setGameSeed(m.seed);
+    this.mySide='p1';                  // 视图里恒为 p1=我
+    this.isHost=(this.role==='host');
+    this.status('对局开始（服务器权威：座位 '+this.mySeat+'），等待服务器的视图…');
+    try{ this._startLockWatch(); }catch(e){}
+    try{ this._ensureSurrenderBtn(); }catch(e){}
+  },
+  /* 收到一份**本座位专属**的权威视图：直接喂给现成的 applySnapshot（客人侧同一条路径） */
+  _onEngineView:function(m){
+    if(!this.active || !m || !m.snap) return;
+    var s=m.snap;
+    if(m.seat) this.mySeat=m.seat;
+    if(s.v!==undefined && typeof NetSync!=='undefined' && s.v!==NetSync.VERSION){
+      if(!this._verWarned){
+        this._verWarned=true;
+        __onlineDiverge('双方游戏版本不一致（服务器快照版本 '+s.v+' / 本机 '+NetSync.VERSION+'）——请双方都刷新页面');
+      }
+      return;
+    }
+    /* 服务器的 ENV.log 只进事件流、**不写 battleState._logs**（那是"搬上服务器"的意义），
+       所以这里把本机累积的事件流日志装回视图，让 __renderBattleLogFromState 那套增量补画继续可用。
+       顺序上也安全：一次 flush 里 ev 先于 view 到达，先累积、再随视图一起画，不会重复。 */
+    try{ if(s.state){ s.state._logs=this._engineLogs.slice(); } }catch(e){}
+    try{ if(typeof NetSync!=='undefined') NetSync.applySnapshot(s); }
+    catch(e){ console.error('套用服务器视图失败',e); return; }
+    /* 收尾态要"粘住"：服务器判定结束后仍会 flush 视图，而视图里的 battleState **没有** _over/_winner
+       （服务器只在 room.finished 里记着），照搬就会把本机刚写好的结束态覆盖掉 —— 实测线上表现成
+       "投降后界面没进结束态"。所以每份视图套用后，把服务器判过的胜负重新写回去。 */
+    try{
+      if(this._engineOver && battleState){
+        battleState._over=true;
+        battleState._winner=(this._engineOver.winner===this.mySeat)?'p1':'p2';
+      }
+    }catch(e){}
+    this._engineViews++; this._engineViewSeq=(s.seq||0);
+    this._lastSnapAppliedAt=Date.now();
+    this._clearActPending();
+    /* 状态栏有两件事要"留得住"：①被服务器拒绝的理由（下一帧视图马上会把状态刷成"已同步"，
+       玩家就看不到为什么点不动了）；②座位号（玩家要知道自己是先手还是后手）。 */
+    if(this._rejectHoldUntil && Date.now()<this._rejectHoldUntil){
+      /* 拒绝理由还在保质期内：不覆盖 */
+    } else {
+      this.status('已与服务器同步（视图 #'+(s.seq||'?')+'）');
+    }
+    if(!this._enteredBattle && battleState){
+      this._enteredBattle=true;
+      try{ showScreen('battleScreen'); }catch(e){}
+    }
+    try{ this._ensureSurrenderBtn(); }catch(e){}
+    this._syncDiceAnimFromView();      // 服务器不跑客户端那条 fx 通道 → 由视图里的骰子结果补本地动画
+  },
+  /* 服务器的事件流：日志（k:'log'）与纯视觉（k:'fx'）。
+     日志：进本机镜像（并同步 battleLogs/battleState._logs，保证"复制日志"与面板一致）；
+     fx  ：复用旧的"纯视觉"通道 _onFx（只播动画，不推进任何规则）。 */
+  _onEngineEvents:function(m){
+    var evs=(m && m.events) || [];
+    if(!evs.length) return;
+    this._engineEvs+=evs.length;
+    for(var i=0;i<evs.length;i++){
+      var e=evs[i]; if(!e) continue;
+      if(e.k==='log' && e.rec){
+        if(battleState){ battleState._logs=battleState._logs||[]; battleState._logs.push(e.rec); }
+        try{ battleLogs.push(e.rec); }catch(e3){}
+        this._engineLogs.push(e.rec);
+        if(this._engineLogs.length>600) this._engineLogs.splice(0,this._engineLogs.length-600);
+      } else if(e.k==='fx'){
+        // 服务器侧的 ENV.anim：形如 {name, payload}。这里只播视觉，回调传 null（不推进规则）。
+        try{
+          if(e.name==='dice' && e.payload){ this._onFx({kind:'dice', seat:this._seatToLocal(e.payload.seat), val:e.payload.val, sides:e.payload.sides, count:e.payload.count}); }
+        }catch(e2){}
+      }
+    }
+    /* 日志要在**这一帧**就可见（视图可能稍后才到）：先按镜像补画一次 */
+    try{ __renderBattleLogFromState(); }catch(e){}
+  },
+  /* 服务器槽位 → 本机视角槽位（视图里恒为 p1=我）。1v1 下就是"同号不变、异号互换"。 */
+  _seatToLocal:function(seat){
+    if(seat!=='p1' && seat!=='p2') return seat;
+    if(!this.mySeat) return seat;
+    return (seat===this.mySeat) ? 'p1' : 'p2';
+  },
+  /* 服务器侧的 __fxSendDice 在服务器上会直接 return（它要求 Online.active），
+     所以骰子动画在服务器权威模式下没有 fx 可收。退一步：从**视图里的权威骰子结果**补一次本地动画。
+     判据是 battleState[seat]._lastRolls（引擎把每次投掷结果写在那里，随视图下发）。
+     这是纯视觉：动画回调传 null，绝不推进规则；同一结果只播一次。 */
+  _syncDiceAnimFromView:function(){
+    try{
+      if(!battleState || typeof playDiceRollAnim!=='function') return;
+      var self=this;
+      ['p1','p2'].forEach(function(seat){
+        var p=battleState[seat]; if(!p || !p._lastRolls || !p._lastRolls.length) return;
+        var sig=p._lastRolls.join(',')+'@'+(p._nextDiceSides||6)+'@'+battleState.turn+'#'+battleState.round;
+        if(self._lastRollSig[seat]===sig) return;
+        var first=self._lastRollSig[seat]===undefined;
+        self._lastRollSig[seat]=sig;
+        if(first) return;                                   // 第一份视图只是建立基线，不补播
+        var val=p._lastRolls.reduce(function(a,b){ return (Number(a)||0)+(Number(b)||0); },0);
+        playDiceRollAnim(seat, val, p._nextDiceSides||6, p._lastRolls.length, null);
+      });
+    }catch(e){}
+  },
+  /* 服务器提问：用现成弹窗画出来，把答案按 id 回传（不是旧的序列号配对，服务器按 id 点对点匹配） */
+  _onEngineAsk:function(m){
+    var self=this;
+    if(!m || !m.id) return;
+    this._engineAsks++;
+    if(m.seat) this.mySeat=this.mySeat||m.seat;
+    var spec=this._normalizeAskSpec(m.spec);
+    this._renderAsk(spec, function(v){ self._sendEngine({k:'ans', id:m.id, v:v}); });
+  },
+  /* 服务器发来的 spec 与旧路径形状略有差别，统一归一化：
+     · publicSpec 把 cards 变成了对象 {name,cost,effect,_category} → 取名字；
+     · 顺带把"服务器槽位"的 player 字段翻译成本机视角（视图里 p1=我）。 */
+  _normalizeAskSpec:function(spec){
+    spec=spec||{};
+    var out={};
+    for(var k in spec) if(Object.prototype.hasOwnProperty.call(spec,k)) out[k]=spec[k];
+    if(Array.isArray(out.cards)) out.cards=out.cards.map(function(c){ return (typeof c==='string')?c:((c&&c.name)||'？？？'); });
+    if(Array.isArray(out.choices)) out.choices=out.choices.map(function(c){ return (typeof c==='string')?c:((c&&c.label)||String(c)); });
+    if(out.player && this._isServerAuthority()) out.player=this._seatToLocal(out.player);
+    if(out.card && out.card.name && !out.cardName) out.cardName=out.card.name;
+    if(!out.label) out.label=out.title||'请选择';
+    return out;
+  },
+
+  /* 房主：套用客人提交的操作（复用已有的 online*P2 流程，客人选什么由 ask/ans 送来）
+     服务器权威模式下**永远不该走到这里**（没有房主，动作由服务器套用）。 */
   _onGuestAct:function(a){
     if(!this.active || this.isGuest) return;
     if(!a || !a.type) return;
@@ -5364,8 +5664,9 @@ var Online = {
                             pl.some(function(x){ return x && !x.ok && /结算中|连锁结算/.test(String(x.reason||'')); });
           if(blockedByLock && (now-(self._lastSnapAppliedAt||0))>2500 && (now-(self._lockHealAt||0))>3000){
             self._lockHealAt=now;
-            try{ addBattleLog('system','【联机】手卡仍显示"结算中"但已 2.5 秒没有新状态，正在向房主重新索取权威状态…'); }catch(e){}
-            self._relay({k:'resyncReq'});
+            try{ addBattleLog('system','【联机】手卡仍显示"结算中"但已 2.5 秒没有新状态，正在向'+(self._isServerAuthority()?'服务器':'房主')+'重新索取权威状态…'); }catch(e){}
+            if(self._isServerAuthority()) self._sendEngine({k:'resyncReq'});   // 批次 3：向服务器要整包视图
+            else self._relay({k:'resyncReq'});
           }
           return;
         }
@@ -5396,13 +5697,59 @@ var Online = {
     this.leave();
     if(inBattle && typeof showScreen==='function') showScreen('mainMenu');
   },
-  /* ---------------- 操作传播 ----------------
-     权威式架构下这个函数**不再需要做任何事**：
-       · 房主：本地操作由它自己的引擎执行完毕，状态变化会自动触发快照推送（见 pushSnapshot 的接入点）
-       · 客人：各操作入口已改为走 guestSendAct 把操作发给房主，根本不会跑到本地执行
-     保留为空函数，是为了不再逐个改动那十几个调用点。 */
+  /* ---------------- 操作传播（三个入口收敛成一个出口） ----------------
+     C 阶段批次 3：**服务器权威模式**下，"提交一个操作"只有一件事可做：把意图发给服务器。
+        · 服务器权威：两台机器都一样 —— 发 {t:'engine', m:{k:'act', a, args}}，本机一行规则都不跑。
+        · 旧协议房主：本地操作由它自己的引擎执行（sendIntent 是空操作，pushSnapshot 会推状态）。
+        · 旧协议客人：发 {t:'relay', m:{k:'act', a}} 给房主（原样保留）。
+     这三个入口（客人拦截块 / 本机 UI 点击 / sendIntent）现在都走 sendAct，行为由模式决定。 */
   sendIntent:function(a){
+    /* 旧协议房主：本地已经执行完了，这里本来就是空操作。
+       服务器权威：必须真的发出去（少数没有经过拦截块的调用点会走到这里）。 */
+    if(this._isServerAuthority()) return this.sendAct(a);
     if(this._dbg) console.log('[联机] sendIntent（权威式下为空操作）', a);
+    return false;
+  },
+  /* 本机是否要"只发意图、不执行规则"：服务器权威 = 双方都要；旧协议 = 只有客人 */
+  interceptsAct:function(){
+    if(!this.active) return false;
+    return this._isServerAuthority() ? true : !!this.isGuest;
+  },
+  /* 旧动作对象 {type,idx,name} → 服务器协议 {k:'act', a, args} */
+  _engineActOf:function(a){
+    if(!a || !a.type) return null;
+    if(a.type==='surrender') return {k:'surrender'};
+    var m={k:'act', a:a.type};
+    var args={};
+    if(a.idx!==undefined && a.idx!==null) args.idx=a.idx;
+    if(a.name) args.name=a.name;
+    if(Object.keys(args).length) m.args=args;
+    return m;
+  },
+  /* 唯一的发送出口（旧协议客人 / 服务器权威双方都从这里走） */
+  sendAct:function(a){
+    if(!this.active || !a || !a.type) return false;
+    if(!this.connected || !this.ws || this.ws.readyState!==1){
+      showToast(this._isServerAuthority()?'与服务器的连接已断开，操作无法提交':'与房主的连接已断开，操作无法提交', 'warn');
+      return true;                                  // 已接管：调用方不要再往下跑本地规则
+    }
+    if(this._isServerAuthority()){
+      var m=this._engineActOf(a);
+      if(!m) return false;
+      this._send({t:'engine', m:m});
+    } else {
+      this._send({t:'relay', m:{k:'act', a:a}});
+    }
+    /* 乐观 UI：玩家这一下点击到看见结果要 ~200ms（一个网络单程 + 服务器结算）。
+       这段空白期以前什么都没有，玩家会以为"没点到"。立刻给一条不阻塞操作的提示，
+       收到视图/快照后自动消失；超过 1.2 秒还在等就显示已等秒数（让人知道不是卡死）。 */
+    this._markActPending(a);
+    return true;
+  },
+  /* 服务器权威模式下的内部消息（不看"谁是客人"—— 双方都能发） */
+  _sendEngine:function(m){
+    if(!this.connected || !this.ws || this.ws.readyState!==1) return false;
+    return this._send({t:'engine', m:m||{}});
   },
   _drainIntents:function(){
     var self=this;
@@ -5523,12 +5870,21 @@ var Online = {
     setTimeout(function(){ try{ self.pushSnapshot(); }catch(e){} }, 260);
   },
   sendAnswer:function(id, v){ this._send({t:'relay', m:{k:'ans', id:id, v:v}}); },
-  // 客人侧：收到房主的问题，用现成弹窗画出来再把选择回传
+  /* 客人侧：收到房主的问题，用现成弹窗画出来再把选择回传。
+     批次 3：渲染逻辑抽成 _renderAsk(spec, done)，旧协议与服务器权威共用同一份 ——
+     两边的问题形状本来就同源（都是 ENV.ask 的 spec），只是通道不同（relay/ans 与 engine/ans）。 */
   _onAsk:function(m){
-    var self=this, spec=m.spec||{};
-    var done=function(v){ self.sendAnswer(m.id, v); };
+    var self=this;
+    this._renderAsk(m.spec||{}, function(v){ self.sendAnswer(m.id, v); });
+  },
+  /* 用现成弹窗把一个问题画出来，把选择交给 done(v)。
+     支持：choices（单选）、cards（单选/多选 need/allowLess）、其余退化成 prompt。
+     形状不认识的类型（例如服务器发来的 targetPlayer —— publicSpec 没带效果文本）**明确写日志**再按默认继续，
+     绝不静默地把默认值当成"玩家的选择"。 */
+  _renderAsk:function(spec, done){
+    spec=spec||{};
     var label=spec.label||'请选择';
-    // 客人回传的是"房主那份列表的下标"：若房主给了 indices 映射就翻译，否则原样回传
+    // 回传的是"出题人那份列表的下标"：若给了 indices 映射就翻译，否则原样回传
     var toHost=function(idxs){ return idxs.map(function(i){ return (spec.indices&&spec.indices[i]!==undefined)?spec.indices[i]:i; }); };
     try{
       if(spec.choices && spec.choices.length){
@@ -5536,11 +5892,11 @@ var Online = {
         return;
       }
       if(spec.cards && spec.cards.length){
-        // 从区域里选卡：候选卡名由房主随问题送来（可能来自客人自己的手牌/牌库/墓地，客人能看）
+        // 从区域里选卡：候选卡名由出题方随问题送来（可能来自本机自己的手牌/牌库/墓地）
         var need=(spec.need|0)>0?(spec.need|0):1;
         if(need<=1){
           var opts=spec.cards.map(function(n,i){ return (i+1)+'. '+n; });
-          showChoiceModal(label, '', '请选择一项', opts, function(i){ done(spec.indices?spec.indices[i]:i); });
+          showChoiceModal(label, '', (spec.text||'请选择一项'), opts, function(i){ done(spec.indices?spec.indices[i]:i); });
           return;
         }
         // 需要选多张：一次只点得了一项，就逐张问，选满 need 或主动结束为止
@@ -5549,7 +5905,7 @@ var Online = {
           if(picked.length>=need || !avail.length){ done(toHost(picked)); return; }
           var opts2=avail.map(function(i){ return (i+1)+'. '+spec.cards[i]; });
           if(spec.allowLess) opts2=opts2.concat(['（不再选择，直接确定）']);
-          showChoiceModal(label+'（还需选'+(need-picked.length)+'张）', '', '请选择一项', opts2, function(k){
+          showChoiceModal(label+'（还需选'+(need-picked.length)+'张）', '', (spec.text||'请选择一项'), opts2, function(k){
             if(k==null || (spec.allowLess && k===avail.length)){ done(toHost(picked)); return; }
             var real=avail[k];
             if(real===undefined || real===null){ step(); return; }
@@ -5559,10 +5915,17 @@ var Online = {
         step();
         return;
       }
+      if(spec.kind && spec.kind!=='choice' && spec.kind!=='pickCards' && spec.kind!=='pickList'){
+        /* 没有可画的候选（出题方只发了类型）：写进战斗日志再按默认继续，
+           别让玩家以为"弹窗自己没了"（静默吞掉选择是最难查的一类问题）。 */
+        try{ addBattleLog('system','【联机】收到一个本机没有候选可画的选择「'+(spec.cardName||label)+'」（类型 '+(spec.kind||'?')+'），已按默认继续'); }catch(e){}
+        done(null);
+        return;
+      }
       var v=window.prompt(label, spec.defVal===undefined?'':spec.defVal);
       done(v===null?null:String(v));
     }catch(e){
-      __onlineDiverge('渲染房主的问题失败：'+(e&&e.message));
+      __onlineDiverge('渲染问题失败：'+(e&&e.message));
       done(null);
     }
   },
@@ -5629,6 +5992,7 @@ var Online = {
      客人收到后整包覆盖自己的 battleState 再重绘 —— 失步在结构上不可能发生。 */
   pushSnapshot:function(){
     if(!this.active || this.isGuest) return;
+    if(this._isServerAuthority()) return;             // 批次 3：服务器权威模式下没有房主，谁都不推快照
     var self=this;
     if(this._snapTimer) return;                       // 已有排队的推送
     // 去抖 30ms：实测这段去抖直接计入玩家感知的往返（90ms 版整轮 ~250ms）。
@@ -5662,6 +6026,7 @@ var Online = {
   _startConsistencyTick:function(){
     var self=this;
     if(this._tickOn) return;
+    if(this._isServerAuthority()) return;             // 批次 3：本机不是权威，巡检无意义
     this._tickOn=true;
     this._lastSig=this._stateSig();
     this._tickTimer=setInterval(function(){
@@ -5679,6 +6044,7 @@ var Online = {
   _sendSnapshotNow:function(opts){
     opts=opts||{};
     if(!this.active || this.isGuest) return;
+    if(this._isServerAuthority()) return;             // 批次 3：权威在服务器，本机不产出快照
     if(!this.connected || !this.ws || this.ws.readyState!==1) return;
     if(!battleState || typeof NetSync==='undefined') return;
     this._startConsistencyTick();                     // 首次推送时顺带开巡检
@@ -5844,19 +6210,13 @@ var Online = {
     } catch(e) { return g; }
   },
   /* 客人侧：把玩家的操作发给房主（客人自己绝不执行规则）。
-     返回 true 表示"已接管"，调用方应立即 return。 */
+     返回 true 表示"已接管"，调用方应立即 return。
+     批次 3：这个函数**收敛成 sendAct 的别名**（两者行为同一份实现，避免"发送出口有两套"）。
+     服务器权威模式下它同样能用 —— 那时发送对象是服务器而不是房主。 */
   guestSendAct:function(a){
-    if(!this.active || !this.isGuest) return false;
-    if(!this.connected || !this.ws || this.ws.readyState!==1){
-      showToast('与房主的连接已断开，操作无法提交', 'warn');
-      return true;
-    }
-    this._send({t:'relay', m:{k:'act', a:a}});
-    // 乐观 UI：客人这一下点击到看见结果，实测要 ~250ms（两个网络单程）。
-    // 这段空白期以前什么都没有，玩家会以为"没点到"。立刻给一条不阻塞操作的浮动提示，
-    // 收到快照后自动消失；超过 1.2 秒还在等就显示已等秒数（让人知道不是卡死）。
-    this._markActPending(a);
-    return true;
+    if(!this.active) return false;
+    if(!this.isGuest && !this._isServerAuthority()) return false;
+    return this.sendAct(a);
   },
   _actLabel:function(a){
     var m={card:'出牌',roll:'投骰移动',phase:'进入下个阶段',end:'结束回合',drawCost:'抽卡',
@@ -5917,6 +6277,22 @@ var Online = {
   // 自己重连成功后：按角色走不同的恢复路径
   _onRejoined:function(){
     this.status('已重连，正在恢复对局状态…');
+    /* 批次 3：服务器权威模式下"恢复"就是**跟服务器要一份全量视图**。
+       服务器接上座位时（hello 带 engine:true）自己也会 flush 一次全量，这里再去要一次是幂等的兜底。 */
+    if(this._isServerAuthority()){
+      var selfS=this;
+      this._enteredBattle=false;
+      this._sendEngine({k:'resyncReq'});
+      this._resyncTries=(this._resyncTries||0)+1;
+      if(this._resyncTries<=5){
+        setTimeout(function(){
+          if(typeof battleState==='undefined' || !battleState) selfS._sendEngine({k:'resyncReq'});
+        }, 2500*selfS._resyncTries);
+      } else {
+        this.status('服务器尚未恢复这一局（可能已超出宽限期）');
+      }
+      return;
+    }
     if(this.isGuest){
       /* 客人要的是【客人视角】的完整快照（已换位、已遮蔽），只有房主能生成。
          绝不能直接拿服务器那份 —— 那是房主视角且未遮蔽，发给客人既错位又泄漏手牌。 */
@@ -5957,6 +6333,7 @@ var Online = {
   // （早期版本节流 8 秒，实测导致房主重连后退回几秒前的战局，把对方的出牌也一起抹掉了。）
   _saveSnapshotSoon:function(force){
     if(!this.active || this.isGuest) return;
+    if(this._isServerAuthority()) return;             // 批次 3：权威状态由服务器自己存，本机不存
     var now=Date.now();
     if(!force && now-(this._savedAt||0)<700) return;
     this._savedAt=now;
@@ -5977,7 +6354,11 @@ var Online = {
       self._reconnectTimer=null;
       self.status('正在重连（第 '+self._reconnectTry+' 次）…');
       self._connect(function(){
-        self._send({ t:'hello', role:self.isGuest?'guest':'host', name:self.myName||'玩家', resume:true });
+        /* 批次 3：服务器权威模式下重连要**再声明一次 engine**（DO 可能已被回收重建，
+           它对新连接只看 hello 里的 engine:true）。role 仍按房间里的身份，resume 让中继认识这是老座位。 */
+        var h=self._hello(self.isGuest?'guest':'host');
+        h.resume=true; h.name=self.myName||'玩家';
+        self._send(h);
       }, self.roomId);
     }, wait);
   },
@@ -6546,7 +6927,7 @@ function evaluatePlayable(card,player,opts){
         for (var __k in __asks2) { if (Object.prototype.hasOwnProperty.call(__asks2, __k) && __asks2[__k]) { __firstAsk = __asks2[__k]; break; } }
         if (__firstAsk) {
           var __secs = Math.max(0, Math.round((Date.now() - (__firstAsk.at || Date.now())) / 1000));
-          __waitTip = '——本机正在等待' + (Online.isGuest ? '房主' : '对手') + '选择「' + ((__firstAsk.spec && __firstAsk.spec.label) || '') + '」（已等 ' + __secs + ' 秒，超时会自动继续）';
+          __waitTip = '——本机正在等待' + ((typeof Online._isServerAuthority === 'function' && Online._isServerAuthority()) ? '服务器/对手' : (Online.isGuest ? '房主' : '对手')) + '选择「' + ((__firstAsk.spec && __firstAsk.spec.label) || '') + '」（已等 ' + __secs + ' 秒，超时会自动继续）';
         }
       }
     } catch (e) {}
@@ -13331,7 +13712,16 @@ var __logRenderedCount = 0;      // 已经画进面板的 _logs 条数（按数�
 function __logMsgForViewer(rec) {
   var msg = (rec && rec.msg) || '';
   try {
-    if (typeof Online === 'undefined' || !Online.active || !Online.isGuest) return msg;
+    if (typeof Online === 'undefined' || !Online.active) return msg;
+    /* 视角翻转的判据（批次 3）：
+       · 旧协议：只有客人要翻（房主写日志时"你"= 房主自己）。
+       · 服务器权威：日志由服务器写，它的槽位里 "你"= 引擎 p1、"对手"= p2。
+         所以**坐在 p2 座位的那台机器**才要翻；坐在 p1 的照原样显示。
+         （两台机器在服务器权威模式下 isGuest 都是 true，不能再拿 isGuest 当判据。） */
+    var flip;
+    if (typeof Online._isServerAuthority === 'function' && Online._isServerAuthority()) flip = (Online.mySeat === 'p2');
+    else flip = !!Online.isGuest;
+    if (!flip) return msg;
     if (!msg) return msg;
     var actor = rec.actor || ((rec.type === 'p1' || rec.type === 'p2') ? rec.type : null);
     if (!actor) return msg;
@@ -21415,20 +21805,23 @@ var NetSync = {
       showCardPickerMulti(h.slice(), '选择要献祭的手卡（送入墓地并回复音韵值）', function (idx) {
         if (idx === null || idx === undefined || idx < 0) return;
         var c = h[idx];
-        Online.guestSendAct({ type: 'sacrifice', idx: idx, name: c ? (c.name || '') : '' });
+        Online.sendAct({ type: 'sacrifice', idx: idx, name: c ? (c.name || '') : '' });
       });
       return true;
     }
   };
+  /* C 阶段批次 3：判定"本机要不要只发意图"统一交给 Online.interceptsAct()：
+       · 服务器权威模式 → **双方都拦截**（没有房主，两台机器都只是客户端）；
+       · 旧协议         → 只有客人拦截（房主照旧本地执行，行为一字不变）。 */
   Object.keys(ACTS).forEach(function (fn) {
     var orig = window[fn];
     if (typeof orig !== 'function') return;
     var wrapped = function () {
       try {
-        if (typeof Online !== 'undefined' && Online.active && Online.isGuest) {
+        if (typeof Online !== 'undefined' && Online.active && Online.interceptsAct()) {
           if (LOCAL_PICK_ACTS[fn] && LOCAL_PICK_ACTS[fn].apply(null, arguments)) return;
           var a = ACTS[fn].apply(null, arguments);
-          if (a) { Online.guestSendAct(a); return; }
+          if (a) { Online.sendAct(a); return; }
         }
       } catch (e) {}
       return orig.apply(this, arguments);
@@ -21439,12 +21832,13 @@ var NetSync = {
   });
 })();
 
-/* 客人侧：不跑 startTurn（那是推进回合的引擎入口；客人只按快照绘制） */
+/* 不跑 startTurn（那是"推进回合"的引擎入口）：
+   旧协议只拦客人；服务器权威模式下**双方都不能跑**（回合推进是服务器的事）。 */
 (function () {
   if (typeof startTurn !== 'function') return;
   var __origStartTurn = startTurn;
   startTurn = function () {
-    if (typeof Online !== 'undefined' && Online.active && Online.isGuest) return;
+    if (typeof Online !== 'undefined' && Online.active && Online.interceptsAct()) return;
     return __origStartTurn.apply(this, arguments);
   };
 })();

@@ -54,7 +54,7 @@ export function createEngineRoom(opts) {
     p2: { joined: false, conn: false, ready: false, deck: null, name: '玩家2' }
   };
   let host = null, S = null, started = false, finished = null, seed = 0;
-  let dirty = false, lastFlushAt = 0, viewSeq = 0, askSeq = 0, evSeq = 0;
+  let dirty = false, lastFlushAt = 0, viewSeq = 0, askSeq = 0, evSeq = 0, connSeq = 0;
   const pendingAsks = new Map();     // askId -> { seat, cb, timer }
   const events = [];                 // 事件流（日志/fx）：断线重连可补齐
   const graceTimers = {};
@@ -267,6 +267,12 @@ export function createEngineRoom(opts) {
     if (finished) return { ok: false, reason: '对局已结束' };
     const winner = (seat === 'p1') ? 'p2' : 'p1';
     finished = { winner: winner, loser: seat, why: 'surrender' };
+    /* **把结束态写进权威状态**（不只是发一条 over）：随后 flush 的视图里带着 _over/_winner，
+       客户端照常套用视图就能进结束界面；否则客户端刚设的结束态会被下一份视图覆盖掉
+       （实测线上表现："投降后界面没进结束态"）。口径与旧路径 onlineSurrender 一致。 */
+    try {
+      if (S && S.battleState) { S.battleState._over = true; S.battleState._winner = winner; }
+    } catch (e) {}
     evSeq++;
     events.push({ i: evSeq, k: 'log', rec: { type: 'system', msg: '【联机】' + seat + ' 投降，' + winner + ' 获胜', t: clock() } });
     for (const s of ['p1', 'p2']) if (seats[s].conn) send(s, { k: 'over', winner: winner, loser: seat, why: 'surrender' });
@@ -282,7 +288,11 @@ export function createEngineRoom(opts) {
     const st = seats[seat];
     const wasOffline = st.joined && !st.conn;          // 之前掉线过 → 这次是"回来了"
     const resumed = !!(st.joined && started);
-    st.joined = true; st.conn = true;
+    /* **连接身份**：重连是"新连接 + 旧连接稍后才 close"，所以座位在线与否必须认令牌，
+       不能只看"有人断开就置离线" —— 否则旧连接的 close 会把刚接回来的座位又标成离线
+       （实测线上：重连方明明回来了，对手那边却收不到 peerBack、状态停在"等待对手加入"）。 */
+    st.conn = info.conn || ('c' + (++connSeq));
+    st.joined = true;
     if (info.name) st.name = String(info.name).slice(0, 16);
     if (graceTimers[seat]) { clearTimeout(graceTimers[seat]); graceTimers[seat] = null; }
     const other = (seat === 'p1') ? 'p2' : 'p1';
@@ -295,9 +305,14 @@ export function createEngineRoom(opts) {
     return { ok: true, seat: seat, resumed: resumed, started: started };
   }
 
-  function detach(seat) {
+  function detach(seat, token) {
     const st = seats[seat];
     if (!st.joined) return;
+    /* 过期连接的断开要**忽略**（重连时旧连接常常晚一步 close）；只有"当前这条连接"断了才算离线。 */
+    if (token && st.conn && st.conn !== token) {
+      log('忽略过期连接的断开（座位 ' + seat + ' 已换新连接）');
+      return;
+    }
     st.conn = false;
     const other = (seat === 'p1') ? 'p2' : 'p1';
     if (graceTimers[seat]) clearTimeout(graceTimers[seat]);
@@ -349,6 +364,16 @@ export function createEngineRoom(opts) {
       }
       case 'ans': return { ok: answerAsk(m.id, m.v) };
       case 'resyncReq': { dirty = true; flush({ force: true, full: true }); return { ok: true }; }
+      /* 排障命令：把房间自己怎么看这一局回给提问者（谁在线、是否开局、几个待答问题…）。
+         真机排障时最缺的就是"服务器此刻认为发生了什么" —— 有了它不用再靠猜（host 对象不发，含循环引用）。 */
+      case 'diag': {
+        const d = diag();
+        const safe = Object.assign({}, d);
+        delete safe.host;
+        if (m.want === 'events') safe.events = events.slice(-40);
+        send(seat, { k: 'diag', diag: safe });
+        return { ok: true, diag: safe };
+      }
       case 'surrender': return surrender(seat);
       case 'events': return { ok: true, events: takeEvents() };
       default: return { ok: false, reason: '未知消息 k=' + m.k };
@@ -383,8 +408,8 @@ export function createEngineRoom(opts) {
       engineReady: !!host, host: host,
       scopeNames: (host && host.scopeNames.length) || 0,
       selfCheck: host ? host.selfCheck : null,
-      seats: { p1: { joined: seats.p1.joined, conn: seats.p1.conn, ready: seats.p1.ready, deck: !!seats.p1.deck },
-               p2: { joined: seats.p2.joined, conn: seats.p2.conn, ready: seats.p2.ready, deck: !!seats.p2.deck } },
+      seats: { p1: { joined: seats.p1.joined, conn: !!seats.p1.conn, ready: seats.p1.ready, deck: !!seats.p1.deck },
+               p2: { joined: seats.p2.joined, conn: !!seats.p2.conn, ready: seats.p2.ready, deck: !!seats.p2.deck } },
       pendingAsks: pendingAsks.size,
       turn: st ? { turn: st.turn, phase: st.phase, currentPlayer: st.currentPlayer,
         p1Hand: (st.p1.hand || []).length, p2Hand: (st.p2.hand || []).length } : null
