@@ -3760,6 +3760,65 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 </script>
 <script src="vendor/three.min.js"></script>
 <script>
+/* ============================================================
+ * C 阶段·第 3 步：**引擎实例化**（作者选定"把规则引擎搬进中继服务"）
+ * ------------------------------------------------------------
+ * 为什么必须做：Durable Object 的**同一个 isolate 里可能同时跑多个房间**，而模块作用域是共享的。
+ *   现在 `battleState`（被引用 1,191 次）、`effectEngine`、`battleLogs`、`publicGraveyard` 都是
+ *   **模块级单例** —— 两个房间同时跑就会互相覆盖状态。
+ * 做法：把"每局都要重置的引擎状态"收进**引擎实例**，并把同名全局变量变成**指向"当前实例"的存取器**：
+ *     Object.defineProperty(globalThis, 'battleState', { get(){ return 当前实例().battleState }, set(v){...} })
+ *   浏览器里 `globalThis === window`，Worker/DO 里同样可用 → **同一份引擎代码两边都能跑**，
+ *   而 `battleState.xxx` 这一千多处写法**一个字都不用改**。
+ * 已核对（`_check_global_accessor_risks.js`）：这 4 个名字**没有任何函数内局部 var 遮蔽**；
+ *   13 处"可疑的 typeof 判断"其实都是 `(typeof X !== 'undefined') ? X : null` 形式 ——
+ *   改造前后 `typeof` 都返回 'object'（因为原来是 `var battleState = null`），语义不变。
+ * 本轮先收这 4 个"每局重置"的状态；`MAP_TILES / deckConfig / PLAYER_IDS / allCards` 是**加载期
+ *   由字面量初始化**的，要连字面量一起搬进工厂，留到下一步（`联机权威重构C.md` 第 3 步下半）。
+ * ============================================================ */
+var __ENGINE_INSTANCES = [];
+var __ENGINE = null;
+/** 造一个引擎实例：它**自带**这四份状态，互不干扰 */
+function createEngineInstance(name) {
+  var inst = {
+    name: name || ('engine#' + (__ENGINE_INSTANCES.length + 1)),
+    battleState: null,
+    battleLogs: [],
+    publicGraveyard: { event_cards: [], music_cards: [] },
+    effectEngine: {
+      pendingTargetCallback: null, pendingTimingCallback: null, effectLog: [], chainStack: [],
+      isProcessing: false, _resolveDepth: 0
+    }
+  };
+  __ENGINE_INSTANCES.push(inst);
+  if (!__ENGINE) __ENGINE = inst;
+  return inst;
+}
+/** 默认实例（浏览器里就是"本机这一局"）：懒创建，保证任何时刻读这些全局都有值 */
+function __engineInstance() { if (!__ENGINE) createEngineInstance('default'); return __ENGINE; }
+/** 切到某个实例（服务器上每个房间一个实例，处理事件前先切到本房间） */
+function activateEngine(inst) { if (inst) __ENGINE = inst; return __ENGINE; }
+function currentEngine() { return __engineInstance(); }
+function __defEngineState(name, initValue) {
+  try {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      enumerable: true,
+      get: function () { return __engineInstance()[name]; },
+      set: function (v) { __engineInstance()[name] = v; }
+    });
+  } catch (e) {
+    // 极端情况（某个环境不让重定义）：退回普通全局赋值，保证不崩、行为与改造前一致
+    try { globalThis[name] = initValue; } catch (e2) {}
+  }
+  __engineInstance()[name] = (__engineInstance()[name] === undefined) ? initValue : __engineInstance()[name];
+}
+__defEngineState('battleState', null);
+__defEngineState('battleLogs', []);
+__defEngineState('publicGraveyard', { event_cards: [], music_cards: [] });
+__defEngineState('effectEngine', { pendingTargetCallback: null, pendingTimingCallback: null, effectLog: [], chainStack: [], isProcessing: false, _resolveDepth: 0 });
+__engineInstance();
+
 // 全局数据
 var allCards = [];
 var currentFilter = 'all';
@@ -8234,7 +8293,8 @@ function finishRoguelikeReward() {
 }
 
 // 对战状态
-var battleState = null;
+// battleState 现在由"引擎实例"持有，同名全局是指向当前实例的存取器（见文件开头 C 阶段·第 3 步）
+
 
 function initBattle() {
   // 计算各座位同步值（A3：按座位遍历，1v1 时结果与"只算 p1/p2"逐项相同）
@@ -12466,7 +12526,8 @@ function performCalibration(player, difficulty, reduce, cb) {
 
 // 触发事件卡
 // 公共墓地系统（事件卡和乐谱卡打出后放入公共墓地，不洗牌）
-var publicGraveyard = { event_cards: [], music_cards: [] };
+// publicGraveyard 同样由"引擎实例"持有（见文件开头 C 阶段·第 3 步）
+
 
 function triggerEventCard(player) {
   if (!battleState) return;
@@ -13196,7 +13257,8 @@ var LOG_META = {
   phase:   { icon: '🚩', label: '阶段' },
   search:  { icon: '🔍', label: '检索' }
 };
-var battleLogs = []; // 结构化日志（可导出/回看）
+// battleLogs / publicGraveyard / effectEngine 同样由"引擎实例"持有（见文件开头 C 阶段·第 3 步）
+
 /* ============================================================
  * 联机反馈①：**客人也要能看到房主做了什么**（作者 2026-09-13 报：
  * "我对对手使用卡牌造伤，对手只知道要受到多少伤害，不知道是什么卡造成的"）
@@ -13627,14 +13689,9 @@ window.addEventListener('load', function() {
 // ============================================================
 
 // 全局状态
-var effectEngine = {
-  pendingTargetCallback: null,
-  pendingTimingCallback: null,
-  effectLog: [],
-  chainStack: [],
-  isProcessing: false,
-  _resolveDepth: 0 // 效果结算嵌套深度：>0 或连锁逆结算中，禁止手动插入发动
-};
+// effectEngine 同样由"引擎实例"持有（见文件开头 C 阶段·第 3 步）；这里的字段说明保留：
+/* pendingTargetCallback / pendingTimingCallback / effectLog / chainStack / isProcessing /
+   _resolveDepth：效果结算嵌套深度（>0 或连锁逆结算中，禁止手动插入发动） */
 
 /* ============================================================
  * 效果锁的"保质期"（作者 2026-09-13 第二次报同一类问题："联机还是会出现没用卡却提示
