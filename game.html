@@ -3782,6 +3782,7 @@ var __ENGINE = null;
 function createEngineInstance(name) {
   var inst = {
     name: name || ('engine#' + (__ENGINE_INSTANCES.length + 1)),
+    allCards: __cardListForNewInstance(),
     battleState: null,
     battleLogs: [],
     publicGraveyard: { event_cards: [], music_cards: [] },
@@ -3795,32 +3796,78 @@ function createEngineInstance(name) {
   return inst;
 }
 /** 默认实例（浏览器里就是"本机这一局"）：懒创建，保证任何时刻读这些全局都有值 */
-function __engineInstance() { if (!__ENGINE) createEngineInstance('default'); return __ENGINE; }
+function __engineInstance() {
+  if (__ENGINE_BUSY) return __ENGINE_BUSY;          // 事件处理期间钉住实例：别的房间切不走
+  if (!__ENGINE) createEngineInstance('default');
+  return __ENGINE;
+}
 /** 切到某个实例（服务器上每个房间一个实例，处理事件前先切到本房间） */
 function activateEngine(inst) { if (inst) __ENGINE = inst; return __ENGINE; }
 function currentEngine() { return __engineInstance(); }
+/** 服务器侧串行化守卫（C 阶段第 3 步下半）：一次事件处理期间把实例"钉住"。
+ *  为什么需要：DO 处理一个事件是异步的（要等玩家应答）。若处理途中别的房间调了 activateEngine，
+ *  之后每一次读（battleState / deckConfig / 弹窗回调槽…）都会落到**别的房间**的状态上 —— 这就是要防的串味。
+ *  约定：withEngine 只包**同步**的规则处理段，等应答的 await 放在它外面（DO 的 input gate 保证不交错）。 */
+var __ENGINE_BUSY = null;
+function withEngine(inst, fn) {
+  var prevBusy = __ENGINE_BUSY, prevActive = __ENGINE;
+  __ENGINE_BUSY = inst; __ENGINE = inst;
+  try { return fn(); }
+  finally { __ENGINE_BUSY = prevBusy; __ENGINE = prevActive || inst; }
+}
+function engineBusy() { return __ENGINE_BUSY; }
+/** 把某个"每局状态"名字接到当前实例上。
+ *  initValue 传**函数**＝按实例懒初始化（对象/数组类默认值必须走这条路，否则各实例会共享同一个对象）；
+ *  传普通值＝直接当默认值（与原 `var x = 字面量` 等价，undefined 也原样保留）。 */
 function __defEngineState(name, initValue) {
+  function seed(inst) {
+    if (inst[name] === undefined) {
+      inst[name] = (typeof initValue === 'function') ? initValue() : initValue;
+    }
+    return inst[name];
+  }
   try {
     Object.defineProperty(globalThis, name, {
       configurable: true,
       enumerable: true,
-      get: function () { return __engineInstance()[name]; },
+      get: function () { var inst = __engineInstance(); return seed(inst); },
       set: function (v) { __engineInstance()[name] = v; }
     });
   } catch (e) {
     // 极端情况（某个环境不让重定义）：退回普通全局赋值，保证不崩、行为与改造前一致
-    try { globalThis[name] = initValue; } catch (e2) {}
+    try { globalThis[name] = (typeof initValue === 'function') ? initValue() : initValue; } catch (e2) {}
   }
-  __engineInstance()[name] = (__engineInstance()[name] === undefined) ? initValue : __engineInstance()[name];
+  seed(__engineInstance());
 }
 __defEngineState('battleState', null);
-__defEngineState('battleLogs', []);
-__defEngineState('publicGraveyard', { event_cards: [], music_cards: [] });
-__defEngineState('effectEngine', { pendingTargetCallback: null, pendingTimingCallback: null, effectLog: [], chainStack: [], isProcessing: false, _resolveDepth: 0 });
+__defEngineState('battleLogs', function () { return []; });
+__defEngineState('publicGraveyard', function () { return { event_cards: [], music_cards: [] }; });
+__defEngineState('effectEngine', function () { return { pendingTargetCallback: null, pendingTimingCallback: null, effectLog: [], chainStack: [], isProcessing: false, _resolveDepth: 0 }; });
 __engineInstance();
 
 // 全局数据
-var allCards = [];
+// ── 卡牌定义库：**每个引擎实例一份私有深拷贝**（主数据只读）────────────────────
+// 实测（_probe_allcards_mutation.js）：组卡/出牌会把 _fromDeck / _isCarry / _aoiDiscountUsed
+//   这类每局标志**直接写在卡对象上**，对象来自 allCards ⇒ 共享一份定义就会被就地改写。
+//   DO 同一 isolate 跑多房间时必须各持一份，否则 A 房间组卡会改掉 B 房间手里那张卡。
+var __CARD_DEFS = null;
+function __deepCopyCards(list) {
+  try { return JSON.parse(JSON.stringify(list || [])); } catch (e) { return (list || []).slice(); }
+}
+/** 主数据（懒建立：以"当前实例已经初始化好的卡库"为准，建好后与实例不再共享） */
+function __cardMaster() {
+  if (!__CARD_DEFS) {
+    var cur = (__ENGINE && __ENGINE.allCards) || [];
+    if (cur.length) __CARD_DEFS = __deepCopyCards(cur);
+  }
+  return __CARD_DEFS;
+}
+/** 载入期显式冻一次主数据：这样主数据取的是**刚解析完的干净定义**（不受之后组卡写的每局标志影响），
+ *  且**不动**默认实例那份（默认实例的 allCards 仍与 window.cardData 共享对象，浏览器行为一字不变）。 */
+function __captureCardDefs() { return __cardMaster(); }
+/** 新实例的卡库：有主数据就深拷贝一份，否则与旧的 `var allCards = []` 一致（空数组） */
+function __cardListForNewInstance() { var m = __cardMaster(); return m ? __deepCopyCards(m) : []; }
+__defEngineState('allCards', function () { var m = __cardMaster(); return m ? __deepCopyCards(m) : []; });
 var currentFilter = 'all';
 
 // 真实地图数据（42格环形地图）
@@ -4879,7 +4926,7 @@ function rwMirror(type){
 
 // ===== 统一卡牌发动合法性引擎 =====
 // ===== 阶段0：全局可注入随机源（默认时间种子=不可预测；联机由服务器下发种子/reseed，保证双方一致）=====
-var GameRNG = (typeof RJEngine!=='undefined' && RJEngine.createRNG) ? RJEngine.createRNG() : (function(){
+__defEngineState('GameRNG', function () { return (typeof RJEngine!=='undefined' && RJEngine.createRNG) ? RJEngine.createRNG() : (function(){
   function R(){}
   R.prototype.int=function(n){return Math.floor(Math.random()*n);};
   R.prototype.dice=function(s){return 1+Math.floor(Math.random()*(s||6));};
@@ -4888,7 +4935,7 @@ var GameRNG = (typeof RJEngine!=='undefined' && RJEngine.createRNG) ? RJEngine.c
   R.prototype.shuffleInPlace=function(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}return a;};
   R.prototype.reseed=function(){return this;};
   return new R();
-})();
+})(); });
 function setGameSeed(seed){ if(GameRNG&&GameRNG.reseed) GameRNG.reseed(seed); return GameRNG; }
 
 /* ============================================================
@@ -6559,10 +6606,12 @@ function evaluatePlayable(card,player,opts){
   return {ok:true,reason:''};
 }
 
-var deckConfig = {
+__defEngineState('deckConfig', function () {
+  return {
   p1: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) },
   p2: { chars: [null, null, null], items: Array(8).fill(null), carries: Array(4).fill(null) }
-};
+  };
+});
 /* ============================================================
    A 阶段地基 · 玩家集合抽象（为 1v1v1 / 2v2 准备；作者 2026-09-13 选定 A+B 方案）
    ------------------------------------------------------------
@@ -6571,7 +6620,7 @@ var deckConfig = {
    多人模式只需在开局时 setPlayerIds(['p1','p2','p3']) 即可让"其他玩家"自动变多。
    ⚠ 任何新代码都不要手写"某人是 p1 就取 p2"这种硬编码，一律用这里的函数。
    ============================================================ */
-var PLAYER_IDS = ['p1', 'p2'];                  // 当前对局的座位（多人模式开局时扩展）
+__defEngineState('PLAYER_IDS', function () { return ['p1', 'p2']; });                  // 当前对局的座位（多人模式开局时扩展）
 function playerCount() { return PLAYER_IDS.length; }
 function playerIds() { return PLAYER_IDS.slice(); }
 function setPlayerIds(ids) { PLAYER_IDS = (ids && ids.length) ? ids.slice() : ['p1', 'p2']; }
@@ -6610,7 +6659,7 @@ function isRemoteSeat(p) {
 /* 按座位**写**卡组配置：`deckOf(p)` 只能读（函数调用不能当左值），所以写路径统一走这里。
    A3 批次把源码里散落的「按座位赋值卡组」全部收敛到这一个函数（源码里已不再出现按座位名点取 deckConfig 的写法）。 */
 function setDeckOf(p, cfg) { if (typeof deckConfig === 'undefined' || !deckConfig) deckConfig = {}; deckConfig[p] = cfg; return deckConfig[p]; }
-var pickerState = { player: '', type: '', index: 0 };
+__defEngineState('pickerState', function () { return { player: '', type: '', index: 0 }; });
 
 /* ============================================================
    两套卡组（作者要求 2026-09-13）
@@ -6930,11 +6979,14 @@ function sendEmote(idx, fromRemote) {
 // 初始化卡牌数据
 function initCards() {
   try {
-    var script = document.getElementById('cardData');
-    if (script) {
-      var data = JSON.parse(script.textContent);
+    // C 阶段：卡数据来源抽成口子 —— 浏览器仍是页内 <script id="cardData">，服务器侧走 ENV.cardData()
+    var __raw = null;
+    try { if (typeof ENV !== 'undefined' && ENV && typeof ENV.cardData === 'function') __raw = ENV.cardData(); } catch (e0) {}
+    if (!__raw) { var script = document.getElementById('cardData'); if (script) __raw = script.textContent; }
+    if (__raw) {
+      var data = JSON.parse(__raw);
       // 保存到全局，供所有函数使用
-      window.cardData = data;
+      try { window.cardData = data; } catch (e1) { globalThis.cardData = data; }
       allCards = [];
       // 规范化：主效果(effect)与SP段严格分离。effect 内若内嵌“SP：…”则剥离，
       // SP 文本单独存入 card.sp（主动SP只由玩家手动发动，被动SP只由触发点处理，主效果结算绝不自动执行SP）
@@ -8566,7 +8618,7 @@ function takeTopCard(player) {
      两张牌组（p1/p2）都支持，p2 没有可视槽位时只记状态并写日志（联机/隐藏信息不受影响：
      公开到牌组最上方按卡面就是给双方看的，所以这里不做隐藏处理）。
    ============================================================ */
-var deckTopReveal = { p1: null, p2: null };
+__defEngineState('deckTopReveal', function () { return { p1: null, p2: null }; });
 function setDeckTopCard(who, card, reason) {
   if (!deckTopReveal) deckTopReveal = { p1: null, p2: null };
   deckTopReveal[who] = card || null;
@@ -9085,7 +9137,7 @@ function applyChainCard(player,pick,effect,done){
        人类回合里 AI 也要应战，此时行动者不是 currentPlayer → **必须由调用方把座位传进来**
    兜底：都没给时取 foeOf('p1')（1v1 里就是 p2，与旧行为逐字一致）。
    ============================================================ */
-var __aiSeat = 'p2';
+__defEngineState('__aiSeat', 'p2');
 function __setAiSeat(s) {
   try {
     if (s && battleState && battleState[s]) { __aiSeat = s; return __aiSeat; }
@@ -10391,7 +10443,7 @@ function rollDiceForPlayer(player) {
 // getTileEffect函数已移除，使用MAP_TILES获取格子信息
 
 // 全局变量：保存当前待使用的卡牌索引
-var pendingCardIndex = -1;
+__defEngineState('pendingCardIndex', -1);
 var pendingCardData = null;
 
 function useCard(handIndex) {
@@ -10508,7 +10560,7 @@ function selectTarget(target) {
 }
 
 // 永续卡放置确认
-var pendingFaceDown = false;
+__defEngineState('pendingFaceDown', false);
 function confirmPermanentUse(faceDown) {
   pendingFaceDown = faceDown;
   confirmCardUse();
@@ -12390,8 +12442,8 @@ function drawOmikuji(player, opt) {
 
 
 // 全局变量：保存待选择的回调
-var pendingChoiceCallback = null;
-var _choiceQueue = []; // 弹窗队列：结算中多个询问重叠时排队串行，防止单槽回调互相覆盖（时点修复）
+__defEngineState('pendingChoiceCallback', null);
+__defEngineState('_choiceQueue', function () { return []; }); // 弹窗队列：结算中多个询问重叠时排队串行，防止单槽回调互相覆盖（时点修复）
 
 // 显示选择权弹窗
 /* C 阶段·第 2 步：**决策出口**（作者选定"引擎搬进中继服务"）
@@ -13455,8 +13507,8 @@ function closeCardPicker(e) {
   }
 }
 // 游戏内通用选卡弹窗（从给定卡牌数组中选一张）
-var _cardPickerMultiCallback = null;
-var _cardPickerStack = [];      // 待应答的选卡弹窗（栈）：每个弹窗**用自己的闭包**应答，槽只用来表示"当前在屏上的是哪一个"
+__defEngineState('_cardPickerMultiCallback', null);
+__defEngineState('_cardPickerStack', function () { return []; });      // 待应答的选卡弹窗（栈）：每个弹窗**用自己的闭包**应答，槽只用来表示"当前在屏上的是哪一个"
 // 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
 // C 阶段·第 2 步：同 showChoiceModal —— 调用点不改，只把"身体"搬到环境层（浏览器=弹窗，服务器=问座位）
 function showCardPickerMulti(cards, title, callback, needCount, allowLess) {
@@ -13640,6 +13692,7 @@ function initRules() {
 // 页面加载完成后初始化
 window.addEventListener('load', function() {
   initCards();
+  __captureCardDefs();          // 载入期冻下"干净的"卡牌定义主数据（新实例各持一份深拷贝）
   tryLoadDeckConfig();
   initRules();
   console.log('游戏加载完成，共 ' + allCards.length + ' 张卡牌');
@@ -13708,7 +13761,7 @@ window.addEventListener('load', function() {
  *      避免一个陈旧的弹窗句柄把兜底一起废掉（上一轮我踩过：`pendingChoiceCallback` 非空会让看门狗永不出手）；
  *   ③ 放行时**明确写日志**（含最后一次上锁位置），既不静默，也便于回传定位真正的泄漏点。
  * ============================================================ */
-var __eeWaitState = { reason: '', since: 0 };
+__defEngineState('__eeWaitState', function () { return { reason: '', since: 0 }; });
 /** 原始等待原因（不做时间衰减）：'' = 没人在等 */
 function __eeRawWaitReason() {
   try {
@@ -13946,8 +13999,8 @@ function parseTargetType(effectText) {
 
 // ========== 目标选择器 ==========
 // 单槽 + 队列（与 choice 弹窗同款）：两个目标选择询问重叠时排队串行，防止 pendingTargetCallback 被覆盖导致流程卡死
-var _targetSelectOpen = false;
-var _targetSelectQueue = [];
+__defEngineState('_targetSelectOpen', false);
+__defEngineState('_targetSelectQueue', function () { return []; });
 // 联机·目标选择的序列号【必须在调用点预分配】。
 // 原因：本机这次目标选择可能因为已有弹窗而进入排队（showTargetSelect 的 _targetSelectQueue），
 // 而远端 chooseTargetPlayer 的 p2 分支是【立刻】awaitAnswer 的。
@@ -14250,7 +14303,7 @@ function compileClauses(subs, permanent) {
   }
   return all;
 }
-var __CTX_FORCE_REMOVED = false; // 本次编译是否“破坏并移出游戏”（跨句路由）
+__defEngineState('__CTX_FORCE_REMOVED', false); // 本次编译是否“破坏并移出游戏”（跨句路由）
 function __withRoll(core, ops) {
   if (!ops || !ops.length) return ops;
   var hasJ = ops.some(function (o) { return o && (o.op === 'judge_branch' || o.op === 'roll_dice'); });
@@ -15263,7 +15316,7 @@ function lapseDefenseDown(who) {
   if (q._defDowns.length !== before) addBattleLog(who, '降低防御的效果持续时间到期，防御值恢复');
   recalcDefense(who);
 }
-var __timingHooks = {};
+__defEngineState('__timingHooks', function () { return {}; });
 function onTiming(point, fn) { if (!point || typeof fn !== 'function') return; (__timingHooks[point] = __timingHooks[point] || []).push(fn); }
 function runTiming(point, ctx, cb) {
   var hs = __timingHooks[point] || []; var i = 0;
