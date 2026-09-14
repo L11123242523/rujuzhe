@@ -7797,10 +7797,28 @@ function buildSmartDeck(arch) {
   while (sel.length < 4 && ri < rest.length) { if (sel.indexOf(rest[ri]) < 0) sel.push(rest[ri]); ri++; }
   return { chars: team, items: items, carries: sel, arch: arch, captain: captain };
 }
+/* ============================================================
+ * 卡对象身份（2026-09-15 修）：**每一份卡必须是自己那份对象**
+ * ------------------------------------------------------------
+ * 实测（`_relaytest/_probe_card_identity.js`）：`buildSmartDeck` 返回的对象 **12/12 直接就是
+ * `window.cardData` 本体**，而 `applySmartDeck` 把它们**按引用**存进 `deckConfig` —— 于是
+ *   · 两个座位可以共用同一张卡对象（写在上面的每局标志 `_aoiDiscountUsed` / `_fromDeck` /
+ *     `_isCarry` / `_usedThisTurn` 会跨座位串味）；
+ *   · 那些标志还会写回**全局卡表**（`window.cardData` / `allCards`）。
+ * 修法：所有"把卡放进 deckConfig / 牌库"的地方都克隆。见《共用卡对象缺陷与修复方案.md》，
+ *   回归由 `_relaytest/card_identity_test.js` 守住。
+ * ============================================================ */
+function __cloneDeckCard(c) { return c ? JSON.parse(JSON.stringify(c)) : null; }
+/** 按槽位克隆成定长数组（保留中间空位、只补尾部 —— 与原来的 concat(fill(null)) 语义一致） */
+function __cloneDeckSlots(arr, n) {
+  var out = (arr || []).slice(0, n).map(__cloneDeckCard);
+  while (out.length < n) out.push(null);
+  return out;
+}
 function applySmartDeck(player, d, showMsg) {
-  deckConfig[player].chars = d.chars.concat(Array(Math.max(0, 3 - d.chars.length)).fill(null));
-  deckConfig[player].items = d.items.concat(Array(Math.max(0, 8 - d.items.length)).fill(null));
-  deckConfig[player].carries = d.carries.concat(Array(Math.max(0, 4 - d.carries.length)).fill(null));
+  deckConfig[player].chars = __cloneDeckSlots(d.chars, 3);
+  deckConfig[player].items = __cloneDeckSlots(d.items, 8);
+  deckConfig[player].carries = __cloneDeckSlots(d.carries, 4);
   renderDeckSide(player);
   if (showMsg) {
     var msg = '已智能构筑【' + d.arch + '】\n队长（核心）：' + d.captain.name + '\n队员：' + d.chars.slice(1).map(function(c){return c.name;}).join('、') +
@@ -8800,16 +8818,22 @@ function initBattle() {
     for (var i = 0; i < 8; i++) if ((cfg.items || [])[i]) {
       // 口径修正（用户确认）：小野葵被动里的"携带卡"指**整副牌组 12 张**（8道具 + 4角色携带卡），
       // 8 张道具卡同样享受"首次使用费用-1"。以前只标了 4 张 carries，导致被动实际覆盖不全。
-      // 同时每局把 _aoiDiscountUsed 重置：卡对象是跨局复用的，不重置会导致第二局起被动直接失效。
-      cfg.items[i]._fromDeck = true;
-      cfg.items[i]._aoiDiscountUsed = false;
-      d.push(cfg.items[i]);
+      // 同时每局把 _aoiDiscountUsed 重置：卡对象是跨局复用的是旧修法，**新修法**是按座位克隆（见下）。
+      // 【卡对象身份修复】牌库里放的是**本座位自己的副本**：以前直接 push cfg.items[i]，
+      //   而那份对象既在 deckConfig 里、又可能是 window.cardData 本体 → 两个座位会共用同一张卡，
+      //   下面的 _fromDeck/_aoiDiscountUsed 等每局标志还会写回全局卡表（实测证据见
+      //   _relaytest/card_identity_test.js 与《共用卡对象缺陷与修复方案.md》）。
+      var c = __cloneDeckCard(cfg.items[i]);
+      c._fromDeck = true;
+      c._aoiDiscountUsed = false;
+      d.push(c);
     }
     for (var i = 0; i < 4; i++) if ((cfg.carries || [])[i] && __teamCarryOk(pl, cfg.carries[i])) {
-      cfg.carries[i]._isCarry = true;
-      cfg.carries[i]._fromDeck = true;
-      cfg.carries[i]._aoiDiscountUsed = false;
-      d.push(cfg.carries[i]);
+      var ck = __cloneDeckCard(cfg.carries[i]);
+      ck._isCarry = true;
+      ck._fromDeck = true;
+      ck._aoiDiscountUsed = false;
+      d.push(ck);
     }
     __seatDecks[pl] = d;
   });
