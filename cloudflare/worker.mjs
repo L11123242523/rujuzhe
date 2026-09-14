@@ -14,6 +14,20 @@
  * ===================================================================== */
 
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混 0/O 1/I
+
+/* =====================================================================
+ * C 阶段第 4 步 · 批次 2：**权威引擎搬进 Durable Object**（可选路径）
+ * ---------------------------------------------------------------------
+ * 默认仍然是那套"房主浏览器跑规则、中继只转发"的旧协议 —— 旧客户端行为一个字节都不变。
+ * 只有当客户端明确要求时（WS 连接带 `?engine=1`，或 hello 里带 `engine:true`），本房间才额外
+ * 创建一份**服务器权威引擎**（`engine-room.js`）：两个座位都只是客户端，只发意图、只收自己该看的视图；
+ * 隐藏信息在客户端里根本不存在（对手手牌只发张数）。
+ * 新路径可独立验证、随时撤回，线上旧路径不受影响。
+ * ===================================================================== */
+import { createEngineRoom } from './engine-room.js';
+import { CARD_DATA_JSON } from './card-data.js';
+
+const ENGINE_PERSIST_MS = 1500;   // 权威自存快照的落盘节流（重连/DO 回收后恢复用）
 function genCode() {
   let s = '';
   for (let i = 0; i < 4; i++) s += ROOM_CHARS[Math.floor(Math.random() * ROOM_CHARS.length)];
@@ -53,12 +67,49 @@ export class RoomObject {
     this.defs = {};
     this.lost = { host: false, guest: false };
     this.lostTok = { host: 0, guest: 0 };
+    /* 服务器权威引擎（批次 2，可选路径）：只在客户端要求时才建，省掉不用的房间的冷启动开销 */
+    this.engineRoom = null;
+    this.engineWanted = false;
+    this.engineSnap = null;
+    this.engineSavedAt = 0;
     this.ready = state.blockConcurrencyWhile(async () => {
       try {
         this.lastSnap = (await state.storage.get('snap')) || null;
         if (this.lastSnap && this.lastSnap.cards) this.defs = this.lastSnap.cards;
       } catch (e) { this.lastSnap = null; }
+      try { this.engineSnap = (await state.storage.get('engineSnap')) || null; } catch (e) { this.engineSnap = null; }
     });
+  }
+
+  /* ---------------- 服务器权威引擎（批次 2） ----------------
+     每房间一份引擎运行时；两个座位都只是客户端。传输与规则分开：
+     engine-room.js 只管房间与规则，这里只负责"把消息送到那个座位的连接上"。 */
+  _seatOf(p) { return p && p.isHost ? 'p1' : 'p2'; }
+  _wsOfSeat(seat) {
+    for (const p of this.players) if (p.greeted && this._seatOf(p) === seat) return p.ws;
+    return null;
+  }
+  _ensureEngineRoom() {
+    if (this.engineRoom) return this.engineRoom;
+    this.engineRoom = createEngineRoom({
+      code: this.code || '',
+      cardDataJson: CARD_DATA_JSON,
+      send: (seat, msg) => { this._send(this._wsOfSeat(seat), { t: 'engine', m: msg }); },
+      now: () => Date.now(),
+      onLog: (s) => { try { console.log(`[room ${this.code}][engine] ${s}`); } catch (e) {} },
+      persist: (snap) => {
+        /* 节流落盘：权威状态在内存里，落盘是为了 DO 被回收/两端都断开后还能恢复这一局 */
+        const t = Date.now();
+        if (t - this.engineSavedAt < ENGINE_PERSIST_MS) return;
+        this.engineSavedAt = t;
+        this.engineSnap = snap;
+        try { this.state.storage.put('engineSnap', snap); } catch (e) {}
+      }
+    });
+    if (this.engineSnap) {
+      try { this.engineRoom.restore(this.engineSnap); } catch (e) { console.log('[engine] restore 失败：' + e.message); }
+    }
+    return this.engineRoom;
   }
 
   _markBack(role) {
@@ -97,12 +148,13 @@ export class RoomObject {
     }
     if (url.pathname !== '/room') return new Response('not found', { status: 404 });
     this.code = url.searchParams.get('r') || this.code || '';
+    const wantEngine = url.searchParams.get('engine') === '1';   // 批次 2：明确要求才启用服务器权威引擎
 
     const pair = new WebSocketPair();
     const server = pair[1];
     server.accept();
     const sid = 's' + (++this.seq) + '_' + Math.random().toString(36).slice(2, 7);
-    const me = { ws: server, sid, name: '玩家', ready: false, isHost: false, greeted: false };
+    const me = { ws: server, sid, name: '玩家', ready: false, isHost: false, greeted: false, engine: wantEngine, seat: '' };
     this.players.push(me);
 
     server.addEventListener('message', async (ev) => {
@@ -144,12 +196,44 @@ export class RoomObject {
           // 先把快照推给房里其他人，再单独发给刚进来的这位（避免他收到两遍）
           this._broadcast(this._snapshot(), server);
           this._send(server, this._snapshot());
+          /* 批次 2：要求了服务器权威引擎的客户端，这一条连接就接上对应座位。
+             注意这里**不影响**上面那套旧协议 —— 旧客户端（没带 ?engine=1）走的还是原路。 */
+          if (this.engineWanted || me.engine || m.engine === true) {
+            this.engineWanted = true;
+            const seat = me.isHost ? 'p1' : 'p2';
+            me.seat = seat;
+            try {
+              this._ensureEngineRoom().attach(seat, { name: me.name });
+            } catch (e) {
+              console.log('[engine] attach 失败：' + (e && e.message));
+              this._send(server, { t: 'error', msg: '服务器权威引擎启动失败：' + (e && e.message) });
+            }
+          }
           break;
         }
         case 'ready': {
           me.ready = true;
           this._broadcast(this._snapshot());
           this._tryStart();
+          break;
+        }
+        /* 批次 2：服务器权威引擎的入站消息（意图 / 回答 / 准备 / 卡组 / 投降 / 重连要视图）。
+           与旧协议并列存在，互不干扰；旧客户端永远不会发 t:'engine'。 */
+        case 'engine': {
+          if (!this.engineWanted) {
+            this._send(server, { t: 'error', msg: '本房间没有启用服务器权威引擎（连接时请带 ?engine=1）' });
+            break;
+          }
+          const seat = me.seat || (me.isHost ? 'p1' : 'p2');
+          me.seat = seat;
+          const room = this._ensureEngineRoom();
+          try {
+            room.handle(seat, m.m || {});
+            room.flush();
+          } catch (e) {
+            console.log('[engine] handle 失败：' + (e && e.message));
+            this._send(server, { t: 'engine', m: { k: 'error', reason: '服务器处理失败：' + (e && e.message) } });
+          }
           break;
         }
         case 'relay': {
@@ -200,6 +284,10 @@ export class RoomObject {
       if (i >= 0) this.players.splice(i, 1);
       const role = me.isHost ? 'host' : 'guest';
       if (me.isHost && this.hostSid === sid) this.hostSid = '';
+      /* 批次 2：权威引擎路径下，断开只标记该座位离线（宽限期内可重连，权威状态留在服务器） */
+      if (this.engineRoom && me.seat) {
+        try { this.engineRoom.detach(me.seat); } catch (e) {}
+      }
       if (!this.started) {
         // 还没开局：直接算离开
         this._broadcast({ t: 'oppLeft' });
