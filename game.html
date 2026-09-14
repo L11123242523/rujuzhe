@@ -21097,8 +21097,9 @@ useCard = useCardComplete;
  * ============================================================ */
 var NetSync = {
   VERSION: 1,
-  _defs: {},      // 房主侧记账：uid -> 已发送过定义（不重复发）
-  _cache: {},     // 客人侧缓存：uid -> 本地卡对象（必须复用同一实例，引擎靠引用比较）
+  _defs: {},        // 当前正在编码时用的那份"已发送"记账（见 _defsByView）
+  _defsByView: {},  // 每个收件人各自一份：'view:p1' / 'view:p2' / 'self'
+  _cache: {},       // 客人侧缓存：uid -> 本地卡对象（必须复用同一实例，引擎靠引用比较）
   _uidSeq: 0,
 
   // 对手视角下必须遮蔽的区域（只发张数）
@@ -21111,6 +21112,7 @@ var NetSync = {
      客人侧缓存会把卡解析成完全不同的另一张（实测踩过：墓地里的卡变成了别的卡）。 */
   resetRegistry: function () {
     NetSync._defs = {};       // 只清"已发送"记账，让下一份快照重发全部定义
+    NetSync._defsByView = {}; // 每个收件人各自那份记账也一起清（否则重连后某些座位会缺定义）
     NetSync._pending = null;
     NetSync._lastPlayable = [];
     // _cache 也不清：uid 稳定，缓存依然有效
@@ -21185,25 +21187,39 @@ var NetSync = {
   },
 
   /* ---------- 房主侧：构建快照 ----------
-     opts.mode: 'guest'（默认）给客人看 —— 整体换位（客人占 p1）+ 遮蔽对手隐藏区域
-                'self'          权威自存 —— 不换位、不遮蔽、完整，供重连恢复用
-     opts.full: 强制带上全部卡定义（客人/房主重连时本地缓存已丢，必须重发） */
+     opts.mode:   'guest'（默认）给某个座位看 —— 隐藏区域遮蔽 + 必要时换位
+                  'self'          权威自存 —— 不换位、不遮蔽、完整，供重连恢复用
+     opts.viewer: 这份快照给**引擎槽位**里的哪个座位看，默认 'p2'（＝原来的"给客人看"）。
+                  'p2'：客人占引擎槽 p2，所以整体换位，让它在视图里变成 p1（沿用客人现有 UI）；
+                  'p1'：不换位（它在视图里本来就是 p1）。
+                  两种情形产物形状**完全一致**：视图里永远是 p1=我、p2=对手。
+                  （C 阶段第 4 步批次 2：权威搬进 Durable Object 后，服务器要**同时**给两个座位
+                    各出一份视图，所以这里必须按座位参数化，而不是写死"给客人"。）
+     opts.full:   强制带上全部卡定义（客人/房主重连时本地缓存已丢，必须重发） */
   buildSnapshot: function (opts) {
     if (!battleState) return null;
     opts = opts || {};
     var mode = opts.mode || 'guest';
+    var viewer = opts.viewer || 'p2';                       // 引擎槽位名
+    var foe = (viewer === 'p2') ? 'p1' : 'p2';              // 对手的引擎槽位名
     var out = { v: NetSync.VERSION, cards: {}, t: Date.now() };
+    /* 每个"收件人"各自一份"已发送定义"记账。
+       为什么不能共用一份：视图是按座位遮蔽的 —— 一个座位收到过的定义，另一个座位未必该收到；
+       共用会让"该收的没收到"或者"把某人的隐藏卡定义发给了别人"。 */
+    var viewKey = (mode === 'guest') ? ('view:' + viewer) : 'self';
+    if (!NetSync._defsByView[viewKey]) NetSync._defsByView[viewKey] = {};
     var savedDefs = NetSync._defs;
-    if (opts.full) NetSync._defs = {};
+    NetSync._defs = opts.full ? {} : NetSync._defsByView[viewKey];
     var raw;
     try {
       raw = NetSync.encode(battleState, out);
     } finally {
-      if (opts.full) { for (var kd in NetSync._defs) { if (Object.prototype.hasOwnProperty.call(NetSync._defs, kd)) savedDefs[kd] = true; } NetSync._defs = savedDefs; }
+      NetSync._defsByView[viewKey] = NetSync._defs;
+      NetSync._defs = savedDefs;
     }
-    var snap = (mode === 'guest') ? NetSync.swapSeats(raw) : raw;
+    var snap = (mode === 'guest' && viewer !== 'p1') ? NetSync.swapSeats(raw) : raw;
     if (mode === 'guest') {
-      // 现在 snap.p1 = 客人自己（完整），snap.p2 = 房主（要遮蔽）
+      // 视图里 p1 恒为"我"、p2 恒为对手，所以要遮蔽的永远是 snap.p2
       var opp = snap.p2;
       if (opp && typeof opp === 'object') {
         for (var i = 0; i < NetSync.HIDDEN_ZONES.length; i++) {
@@ -21211,22 +21227,51 @@ var NetSync = {
           if (Array.isArray(opp[z])) opp[z] = { __hidden: true, n: opp[z].length };
         }
       }
-      // 客人自己手牌的"能不能出"由房主（权威）判定，客人不必也不该自己跑规则
+      // "我"手牌的"能不能出"由权威判定（引擎槽位是 viewer），玩家侧不跑规则
       out.playable = [];
       try {
-        var myHand = (battleState.p2 && battleState.p2.hand) || [];
+        var myHand = (battleState[viewer] && battleState[viewer].hand) || [];
         for (var h = 0; h < myHand.length; h++) {
-          var pv = (typeof evaluatePlayable === 'function') ? evaluatePlayable(myHand[h], 'p2') : { ok: true };
+          var pv = (typeof evaluatePlayable === 'function') ? evaluatePlayable(myHand[h], viewer) : { ok: true };
           out.playable.push({ ok: !!pv.ok, reason: pv.reason || '' });
         }
       } catch (e) { out.playable = []; }
     }
+    out.viewer = viewer;      // 让接收端能自证"这份视图是给我的"（服务端每座位一份时必须可断言）
     out.state = snap;
     out.grave = (typeof publicGraveyard !== 'undefined' && publicGraveyard) ? NetSync.encode(publicGraveyard, out) : null;
     try {
       var dc = (typeof deckConfig !== 'undefined') ? deckConfig : null;
-      out.oppChars = (dc && dc.p1 && dc.p1.chars) ? dc.p1.chars.filter(Boolean).map(function (c) { return NetSync.encode(c, out); }) : [];
+      out.oppChars = (dc && dc[foe] && dc[foe].chars) ? dc[foe].chars.filter(Boolean).map(function (c) { return NetSync.encode(c, out); }) : [];
     } catch (e) { out.oppChars = []; }
+    /* 遮蔽之后**再剪一次卡定义**：只留"这份视图真的引用到"的定义。
+       不剪的后果（2026-09-15 实测抓到的真缺陷）：房主手牌的完整定义（名字/费用/效果）会随
+       out.cards 一起发给客人 —— 客人的 battleState 里明明只有占位卡，字典里却躺着"对手手牌是什么"，
+       等于把隐藏信息明码送过去（信息不公平）。实测：一份 20,320 字节的客人快照里，
+       25 条定义中有 11 条是客人视图根本没引用的（正是房主那 5 张手牌那类）。
+       剪掉的 uid 必须**从该收件人的"已发送"里撤回**，否则它以后变公开时不会再发 → 客人显示"未知卡"。 */
+    if (mode === 'guest') {
+      var keepDefs = {};
+      var collectUids = function (v) {
+        if (!v || typeof v !== 'object') return;
+        if (Array.isArray(v)) { for (var i2 = 0; i2 < v.length; i2++) collectUids(v[i2]); return; }
+        if (v.__u) { keepDefs[v.__u] = 1; return; }
+        for (var k3 in v) if (Object.prototype.hasOwnProperty.call(v, k3)) collectUids(v[k3]);
+      };
+      collectUids(snap);
+      collectUids(out.grave);
+      collectUids(out.oppChars);
+      var pruned = 0;
+      for (var u2 in out.cards) {
+        if (!Object.prototype.hasOwnProperty.call(out.cards, u2)) continue;
+        if (!keepDefs[u2]) {
+          delete out.cards[u2];
+          delete NetSync._defsByView[viewKey][u2];     // 撤回记账：将来公开时会重新发
+          pruned++;
+        }
+      }
+      out._pruned = pruned;                            // 自检用：这份快照剪掉了几条"不该给"的定义
+    }
     return out;
   },
 
