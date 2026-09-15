@@ -3024,7 +3024,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
     <div class="ol-row" style="align-items:center;"><label>模式</label>
       <label style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="olEngineAuthority" checked style="cursor:pointer;">服务器权威（**默认**：双方对称，规则跑在服务器里）<span style="color:#94a3b8;">｜取消勾选＝旧协议（房主跑规则）</span>
+        <input type="checkbox" id="olEngineAuthority" style="cursor:pointer;">服务器权威（调试中：勾上＝规则跑在服务器里；当前**默认走旧协议**，更稳）
       </label>
     </div>
     <div class="ol-row">
@@ -5037,7 +5037,7 @@ var Online = {
       if (/[?&]engine=1(&|$)/.test(q)) return true;
       var el = document.getElementById('olEngineAuthority');
       if (el && typeof el.checked === 'boolean') return !!el.checked;
-      return true;
+      return false;        // 拿不到勾选框时按旧协议（稳）——与"勾选框默认不勾"一致
     }catch(e){ return true; }
   },
   _isServerAuthority:function(){ return this.authority==='server'; },
