@@ -96,12 +96,29 @@ export function createEngineRoom(opts) {
     return host;
   }
 
+  /** 权威引擎此刻"在不在结算、在等谁" —— 随视图下发给客户端（客户端自己算不出来）。 */
+  function busyOf() {
+    try {
+      const ee = S && S.effectEngine;
+      return {
+        depth: (ee && ee._resolveDepth) || 0,
+        lock: !!(ee && ee._chainLock),
+        wait: (S && typeof S.__eeWaitReason === 'function') ? String(S.__eeWaitReason() || '') : '',
+        chain: (ee && ee.chainStack && ee.chainStack.length) || 0,
+        at: clock()
+      };
+    } catch (e) { return { depth: 0, lock: false, wait: '', chain: 0, at: clock() }; }
+  }
+
   /* ---------------- 出视图 ---------------- */
   /** 某个座位该看到的视图（隐藏信息只发张数、卡只发身份；视图里恒为 p1=我） */
   function viewFor(seat, o) {
     o = o || {};
     if (!S || !S.battleState || !S.NetSync) return null;
+    busyOf();      // 见下：把权威引擎的"在不在结算/在等谁"算出来，随视图下发
     const snap = S.NetSync.buildSnapshot({ mode: 'guest', viewer: seat, full: !!o.full });
+    /* 客户端只画不跑 ⇒ 它没有任何本地依据解释"为什么这张牌不能出"。把权威引擎的忙碌状态一起发过去。 */
+    if (snap) snap.busy = busyOf();
     return snap;
   }
   function selfSnapshot() {

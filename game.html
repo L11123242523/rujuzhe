@@ -5475,6 +5475,9 @@ var Online = {
        所以这里把本机累积的事件流日志装回视图，让 __renderBattleLogFromState 那套增量补画继续可用。
        顺序上也安全：一次 flush 里 ev 先于 view 到达，先累积、再随视图一起画，不会重复。 */
     try{ if(s.state){ s.state._logs=this._engineLogs.slice(); } }catch(e){}
+    /* 服务器权威：本机不跑规则 ⇒ 本地的 effectEngine/等待原因恒为空。把服务器下发的"忙碌真相"存下来，
+       这样"结算中"这类提示有据可查（状态栏、排障、双浏览器核验工具都读它）。 */
+    try{ this._srvBusy = s && s.busy ? s.busy : null; }catch(e){}
     try{ if(typeof NetSync!=='undefined') NetSync.applySnapshot(s); }
     catch(e){ console.error('套用服务器视图失败',e); return; }
     /* 收尾态要"粘住"：服务器判定结束后仍会 flush 视图，而视图里的 battleState **没有** _over/_winner
