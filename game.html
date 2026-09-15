@@ -2985,7 +2985,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <div class="menu-buttons">
     <button class="menu-btn btn-pve" onclick="startBattle()">⚔️ 单机对战</button>
     <button class="menu-btn" style="background:linear-gradient(135deg,#e67e22,#f1c40f);" onclick="openDeckBuilder('pve')">🎛 单机卡组（你 + AI）</button>
-    <button class="menu-btn" style="background:linear-gradient(135deg,#2563eb,#0ea5e9);" onclick="showScreen('onlineLobby');Online.refreshLobby();">🌐 联机对战(PvP)</button>
+    <button class="menu-btn" style="background:linear-gradient(135deg,#2563eb,#0ea5e9);" onclick="openOnlineLobby()">🌐 联机对战(PvP)</button>
     <button class="menu-btn btn-pve" onclick="showToast('🚧 肉鸽模式开发中\n专属卡牌设计完成后开放', 'info')" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);opacity:0.6;cursor:not-allowed;">🚧 肉鸽模式（开发中）</button>
     <button class="menu-btn btn-deck" onclick="openDeckBuilder('online')">🃏 卡组配置（联机）</button>
     <button class="menu-btn btn-cards" onclick="showScreen('cardViewer')">📖 卡牌图鉴</button>
@@ -5058,6 +5058,8 @@ var Online = {
   _relay:function(m){ this._send({t:'relay', m:m}); },
   createRoom:function(){
     var self=this;
+    /* 进联机必须先切到"联机那套卡组"（否则会用上一次编辑的单机卡组） */
+    try{ if(typeof enterOnlineDeckMode==='function') enterOnlineDeckMode(); }catch(e){}
     this.role='host'; this.isGuest=false;      // 建房者 = 权威方（跑规则并把状态同步给对手）
     /* C 阶段批次 3：勾了"服务器权威"就不再有人当权威 —— 建房者也只发意图（isGuest 由 _onGameStart 按模式置位） */
     this.authority=this._engineOpt()?'server':'host';
@@ -5087,6 +5089,8 @@ var Online = {
     if(!id){ showToast('请输入对方房号', 'warn'); return; }
     if(!/^[A-Z0-9]{4}$/.test(id)){ showToast('房号是 4 位字母或数字', 'warn'); return; }
     var self=this;
+    /* 进联机必须先切到"联机那套卡组"（否则会把单机卡组带进联机对局） */
+    try{ if(typeof enterOnlineDeckMode==='function') enterOnlineDeckMode(); }catch(e){}
     this.role='guest'; this.isGuest=true;      // 加入者 = 客人（不跑规则，只按房主快照绘制）
     this.authority=this._engineOpt()?'server':'host';
     this.mySeat='';
@@ -6413,6 +6417,39 @@ var Online = {
        刷新页面时引擎本来就是新的，但**重连不一定刷新**（例如断网后又接上）——
        那种情况下旧的结算锁/队列会带进恢复后的局面，不清就会又变成"点了没反应"。 */
     try{ if(typeof __eeForceUnlock==='function') __eeForceUnlock('重连恢复时复位结算状态', 0); }catch(e){}
+    /* ============================================================
+     * 2026-09-16 收口·第 2 步补：**恢复局面必须"和解"待结算的标记**
+     * ------------------------------------------------------------
+     * 线上实测的两个症状，根因是同一个：
+     *   · "没有移动却凭空触发了所在格子的效果"（实测：触发易物格）
+     *   · "对手队伍有枫，却全程没弹出 SP 选项框"
+     * 它们的共同点是：`battleState` 上那些"待结算/待选"的标记**会被快照原样带回来**，
+     * 但**驱动它们的调用栈与计时器在重连时已经不存在了**。于是：
+     *   · 残留的结算窗口 / 挂起的阶段意图会被重放逻辑再执行一次 → 重复触发格子效果；
+     *   · 残留的 `_kaedeSPPending` 则没有任何人会再发起询问 → 那个选择永远不结算。
+     * 所以：**先清掉无法接续的结算窗口**（并明确写日志，让玩家知道丢了什么），
+     * **再重放那些"只差一个询问"的待决项**。
+     * （预防一侧见 `__eeIdleForSnapshot`：那类"在飞行中"的局面从此不会被当成检查点。）
+     * ============================================================ */
+    try{
+      var __dropped = __clearTransientBattleState('重连恢复');
+      if(__dropped && __dropped.length){
+        try{ addBattleLog('system','【联机】恢复对局：已丢弃无法接续的结算状态（' + __dropped.join('、') +
+          '）—— 它们是断线那一刻的半成品，留着会被重放、导致重复触发，所以只清不重放。'); }catch(e){}
+      }
+    }catch(e){}
+    /* 重放"只差一个询问"的开局待决项（枫SP 3选2）：没有人再问它，它就永远不会结算。 */
+    try{
+      if(!this.isGuest && typeof kaedeSPSelect==='function' && typeof battleState!=='undefined' && battleState){
+        playerIds().forEach(function(w){
+          var __p = battleState[w];
+          if(__p && __p._kaedeSPPending){
+            try{ addBattleLog('system','【联机】恢复对局：补发起「' + w + '」的入间枫SP选择（断线时这份选择还没结算）'); }catch(e){}
+            setTimeout(function(){ try{ kaedeSPSelect(w); }catch(e){} }, 400);
+          }
+        });
+      }
+    }catch(e){}
     this._enteredBattle=true;
     try{ showScreen('battleScreen'); }catch(e){}
     var safe=!!(m&&m.safe);
@@ -7213,6 +7250,28 @@ function openDeckBuilder(mode) {
   showScreen('deckBuilder');
   __deckModeUI();
 }
+/** ============================================================
+ * 进联机就必须用"联机那套卡组"（2026-09-16 作者实测反馈）
+ * ------------------------------------------------------------
+ * 卡组分两套存：`deckSets.online`（联机，只有你自己的 12 张）与 `deckSets.pve`（单机，你+AI）。
+ * 单机入口 `startBattle()` 里有 `setDeckMode('pve', true)`，**联机入口却没有对应的切换** ——
+ * 于是你打完单机再进联机，用的就是"上一次编辑的那套单机卡组"。
+ * 这里补上：进联机大厅/建房/加入房间前，先切回 online 那套。
+ * `setDeckMode(mode, silent)` 内部会先 saveDeckConfig() 保住当前那套的改动，
+ * 没有 online 存档时则沿用当前配置并新建槽（首次玩联机的人不会拿到空卡组）。
+ * ============================================================ */
+function enterOnlineDeckMode() {
+  try {
+    if (deckSetMode === 'online') return;      // 已经是联机那套，不用动
+    setDeckMode('online', true);
+  } catch (e) {}
+}
+/** 主菜单 → 联机对战：切卡组 → 进大厅 → 刷新状态栏（三件事以前只做了后两件） */
+function openOnlineLobby() {
+  enterOnlineDeckMode();
+  try { showScreen('onlineLobby'); } catch (e) {}
+  try { Online.refreshLobby(); } catch (e) {}
+}
 /** 一键清空某一方（作者要求：现在只能一张张换） */
 function clearDeckSide(player) {
   if (player !== 'p1' && player !== 'p2') return;
@@ -7284,6 +7343,48 @@ var cardCategories = [
 ];
 
 // 界面切换
+/** ============================================================
+ * 清掉"战斗中的临时状态与残留 UI"（2026-09-16）
+ * ------------------------------------------------------------
+ * 三处都要用它：①从服务器快照恢复对局 ②离开战斗界面回主菜单 ③（预留）对局收尾。
+ * 为什么必须收成一处：这些残留原本散在多个分支里各清一半，
+ * 线上实测到的两个症状就是漏清/漏和解的结果 ——
+ *   · "屏幕上一堆效果框、结算框，结束回主界面还挂着"（本函数负责的那半）；
+ *   · "没有移动却凭空触发所在格子的效果"（残留的挂起意图/结算窗口被重放）。
+ * 返回被丢弃的项名数组，调用方可据此写可见日志。
+ * ============================================================ */
+function __clearTransientBattleState(why) {
+  var dropped = [];
+  try {
+    var b = (typeof battleState !== 'undefined') ? battleState : null;
+    if (b) {
+      if (b._phaseIntentPending) { b._phaseIntentPending = null; dropped.push('挂起的阶段意图'); }
+      if (b.resp) {
+        var open = []; for (var k in b.resp) if (b.resp[k]) open.push(k);
+        if (open.length) {
+          try { rwClose(); } catch (e) { b.resp = { dice: null, move: null, damage: null, rand: null }; }
+          dropped.push('未关闭的结算窗口(' + open.join('/') + ')');
+        }
+      }
+      if (b.damageResponseWindow || b.pendingDamage) { b.damageResponseWindow = false; b.pendingDamage = 0; b._pendingDamage = 0; b.pendingDamageTarget = ''; dropped.push('造伤响应窗口'); }
+      if (b._moveInProgress) { b._moveInProgress = false; b._pendingMove = undefined; b._moveResolved = true; dropped.push('未结算的移动'); }
+      if (b._diceJustRolled) { b._diceJustRolled = false; b._pendingDiceResult = undefined; dropped.push('未结算的投骰'); }
+    }
+  } catch (e) {}
+  /* 队列与弹窗：不清的话，下次开局会先弹出上一次遗留下来的询问 */
+  try { if (typeof _choiceQueue !== 'undefined' && _choiceQueue) _choiceQueue.length = 0; } catch (e) {}
+  try { if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack) _cardPickerStack.length = 0; } catch (e) {}
+  try { if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue) _targetSelectQueue.length = 0; } catch (e) {}
+  try { if (typeof _targetSelectOpen !== 'undefined') _targetSelectOpen = false; } catch (e) {}
+  try { if (typeof pendingChoiceCallback !== 'undefined') pendingChoiceCallback = null; } catch (e) {}
+  try { if (typeof closeChoiceModal === 'function') closeChoiceModal(); } catch (e) {}
+  /* 残留浮层：骰子动画区、抽卡浮层、"等待对手"提示 */
+  try { var da = document.getElementById('diceAnimationArea'); if (da) da.style.display = 'none'; } catch (e) {}
+  try { var dr = document.getElementById('drawAnimOverlay'); if (dr) { dr.innerHTML = ''; dr.style.display = 'none'; } } catch (e) {}
+  try { if (typeof Online !== 'undefined' && Online && Online._hideWaiting) Online._hideWaiting(); } catch (e) {}
+  try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock(why || '清理临时战斗状态', 0); } catch (e) {}
+  return dropped;
+}
 function showScreen(id) {
   var screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) {
@@ -7295,6 +7396,13 @@ function showScreen(id) {
   }
   if (id === 'cardViewer') renderCardGrid();
   if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) {} }
+  /* 回到主菜单/联机大厅 = 明确已经不在战斗里了 → 把战斗残留的浮层与临时状态清干净。
+     （线上实测：对局结束后回主界面，效果框/结算框还挂在上面。）
+     刻意**只在这两个界面**清：查卡器（cardViewer）等界面可能在对局中打开，那时清掉
+     正在结算的窗口反而会把结算弄坏。 */
+  if (id === 'mainMenu' || id === 'onlineLobby') {
+    try { __clearTransientBattleState('离开战斗界面'); } catch (e) {}
+  }
   // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
   if (id === 'battleScreen' && typeof Map3D !== 'undefined') {
     setTimeout(function () {
@@ -14348,6 +14456,26 @@ function __eeIdleForSnapshot() {
     if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return '待应答选卡弹窗（' + _cardPickerStack.length + '）';
     if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue && _targetSelectQueue.length) return '待应答选目标（' + _targetSelectQueue.length + '）';
     if (typeof _targetSelectOpen !== 'undefined' && _targetSelectOpen) return '选目标窗口开着';
+    /* ==== 2026-09-16 补（线上实测两个症状的共同根因）====
+       上面这些判据只看"锁"和"弹窗队列"，**没看"动作是否还在飞行中"** ——
+       于是"移动待结算/阶段意图挂起"的局面也会被当成空闲检查点。
+       而 battleState 上的这些标记会随快照一起被恢复，驱动它们的调用栈却不会：
+       恢复之后重放逻辑会把它们再执行一次（线上实测：没有移动却凭空触发了所在格子的效果）。
+       所以这些"在飞行中"的标记必须一律算作**不空闲**。 */
+    if (typeof battleState !== 'undefined' && battleState) {
+      var b = battleState;
+      if (b._phaseIntentPending) return '有挂起的阶段意图（上一步操作还没结算完）';
+      if (b.resp) {
+        var __open = [];
+        for (var __wk in b.resp) if (b.resp[__wk]) __open.push(__wk);
+        if (__open.length) return '还有未关闭的结算窗口（' + __open.join('/') + '）';
+      }
+      if (b._moveInProgress || b._pendingMove !== undefined) return '移动尚未结算完';
+      if (b._diceJustRolled || b._pendingDiceResult !== undefined) return '投骰结果还没结算完';
+      if (b.damageResponseWindow || b.pendingDamage) return '造伤响应窗口还开着';
+      if (b._diceRolledThisPhase && !b._moveResolved) return '本阶段已投骰但移动还没结算';
+      if (b.effectStack && b.effectStack.length) return '效果栈还有 ' + b.effectStack.length + ' 项';
+    }
     var w = (typeof __eeWaitReason === 'function') ? __eeWaitReason() : '';
     if (w) return w;
     return '';

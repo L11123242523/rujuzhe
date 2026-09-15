@@ -56,9 +56,16 @@ export class RoomObject {
        结算中途；而 `effectEngine._resolveDepth` / `_chainLock` / 各种待应答队列**不进快照**
        （里面的回调是闭包，存不进去）。用"结算中途"的快照恢复房主，就会恢复出一个
        "结算到一半但没人知道"的局面 —— 这就是"重连后卡死"这一族。
-       所以：客户端在每份快照上标 `idle`，这里只把 idle 的那份留作 safeSnap，恢复时优先用它。 */
-    this.safeSnap = null;
+       ==== 2026-09-16 修正（线上实测反馈）====
+       上面这条**不能**做成"优先用较老的空闲检查点"：那等于让房主**退回几秒前的战局**，
+       而客人那边可能已经走到更新的状态 —— 线上实测到的"我与对手视角里我的位置不同"就是这一族，
+       项目文档里也记过同类事故（"节流 8 秒导致房主重连后退回几秒前的战局，把对方的出牌也一起抹掉了"）。
+       所以现在的口径是：**永远恢复最新那一份**（绝不回退时间），
+       并把"这份是不是在空闲时刻拍的"如实告诉房主（`safe` / `idleWhy`）；
+       由客户端在恢复时做**和解**（清掉无法接续的半成品并写日志、补发起待询问的选择）。 */
     this.defs = {};
+    /* 当前"占着座位"的连接 sid：用来识别"已被顶替的旧连接"（它的 close 晚到时不能把座位标成掉线） */
+    this.guestSid = '';
     this.lost = { host: false, guest: false };
     this.lostTok = { host: 0, guest: 0 };
     this.ready = state.blockConcurrencyWhile(async () => {
@@ -66,7 +73,6 @@ export class RoomObject {
         this.lastSnap = (await state.storage.get('snap')) || null;
         if (this.lastSnap && this.lastSnap.cards) this.defs = this.lastSnap.cards;
       } catch (e) { this.lastSnap = null; }
-      try { this.safeSnap = (await state.storage.get('safeSnap')) || null; } catch (e) { this.safeSnap = null; }
     });
   }
 
@@ -122,15 +128,33 @@ export class RoomObject {
           me.greeted = true;
           me.name = String(m.name || '玩家').slice(0, 16);
           if (m.role === 'host') {
-            if (this.hostSid) { // 极端房号碰撞：该房已有房主
-              this._send(server, { t: 'error', code: 'ROOM_TAKEN', msg: '房间号已被占用，请重新创建' });
-              try { server.close(); } catch (e) {}
-              return;
+            const resumedH = !!(this.started && m.resume);
+            /* ==== 2026-09-16 修（线上"频繁掉线 / 客机一直显示房主掉线 / 房主获胜不结束"的真凶）====
+               房主重连的那一刻，旧连接的 close 往往还没被处理（刷新、断网重连几乎总是这样）。
+               以前这里一律判"房间号已被占用"并把**新连接关掉** ⇒ 房主永远回不来：
+                 · 客户端反复重试 → 表现为"频繁掉线"；
+                 · 客人一直看着"⚠ 房主掉线了"（房间里的房主席位空着，却没人能接管）；
+                 · 收尾快照送不出去 → "房主获胜却不会立即结束"。
+               现在：**带 resume 的老座位恢复允许接管** —— 先把那条旧连接踢掉，让新连接上位。
+               （不带 resume 的第三方仍然按原来的"房间号已被占用"拒绝，防房号碰撞。） */
+            if (this.hostSid) {
+              const old = this.players.find((p) => p.isHost && p.sid === this.hostSid);
+              if (resumedH && old && old.ws !== server) {
+                try { old.ws.close(); } catch (e) {}
+                const oi = this.players.indexOf(old);
+                if (oi >= 0) this.players.splice(oi, 1);
+              } else if (!resumedH) {
+                this._send(server, { t: 'error', code: 'ROOM_TAKEN', msg: '房间号已被占用，请重新创建' });
+                try { server.close(); } catch (e) {}
+                return;
+              }
+              // resumedH 且 old 已不在 players 里（close 已处理过）→ 正好接管这个空位
             }
             me.isHost = true; this.hostSid = sid;
-            const resumedH = !!(this.started && m.resume);
             this._send(server, { t: 'joined', id: this.code, sid, isHost: true, resumed: resumedH });
-            if (resumedH) this._markBack('host');
+            /* 强制把该座位标成"掉线中"，这样 _markBack 一定会广播 peerBack ——
+               不管旧连接的 close 有没有被处理过，对方都必须收到"对手已回来"。 */
+            if (resumedH) { this.lost.host = true; this._markBack('host'); }
           } else {
             // 与 Node 版 online_server.js 行为保持一致：没有房主的房间视为「不存在」。
             // DO 是按房号按需创建的，不这样挡的话，房号打错一位就会静默建出一个没有房主的
@@ -142,13 +166,25 @@ export class RoomObject {
             }
             // 对局已开始时：只接受"原客人自动重连"（带 resume），不接受新人插入空位
             if (this.started && !m.resume) { this._send(server, { t: 'error', msg: '对局已经开始，无法加入' }); try { server.close(); } catch (e) {} return; }
+            const resumedG = !!(this.started && m.resume);
+            /* 老客人连接可能还在（close 没到）→ 同样允许接管，
+               否则重连的人会被下面那条"房间已满（2 人）"挡在门外，
+               而房主会永远停在"对手掉线"上（线上实测的 peerBack 收不到就是这个时序）。 */
+            if (resumedG && this.guestSid) {
+              const oldG = this.players.find((p) => p.greeted && !p.isHost && p.sid === this.guestSid);
+              if (oldG && oldG.ws !== server) {
+                try { oldG.ws.close(); } catch (e) {}
+                const gi = this.players.indexOf(oldG);
+                if (gi >= 0) this.players.splice(gi, 1);
+              }
+            }
             // 只数「别人」：me.greeted 在上面已经置 true，直接数全部会把正常加入的第 2 人误挡。
             if (this.players.filter((p) => p.greeted && p !== me).length >= MAX) {
               this._send(server, { t: 'error', msg: '房间已满（2 人）' }); try { server.close(); } catch (e) {} return;
             }
-            const resumedG = !!(this.started && m.resume);
+            me.isHost = false; this.guestSid = sid;
             this._send(server, { t: 'joined', id: this.code, sid, isHost: false, resumed: resumedG });
-            if (resumedG) this._markBack('guest');
+            if (resumedG) { this.lost.guest = true; this._markBack('guest'); }
           }
           // 先把快照推给房里其他人，再单独发给刚进来的这位（避免他收到两遍）
           this._broadcast(this._snapshot(), server);
@@ -183,12 +219,9 @@ export class RoomObject {
               }
               this.lastSnap = stored;
               try { this.state.storage.put('snap', stored); } catch (e) {}
-              /* 只把"引擎空闲时刻"的那一份留作安全恢复点（收口·第 2 步）。
-                 注意**不能**用后一份非空闲快照覆盖它 —— 否则一次长结算就会把仅有的检查点冲掉。 */
-              if (s.idle) {
-                this.safeSnap = stored;
-                try { this.state.storage.put('safeSnap', stored); } catch (e) {}
-              }
+              /* 只存一份（最新）。以前这里还额外落一份 safeSnap，两个后果：
+                 ① 恢复时优先用它 ⇒ 房主退回几秒前的战局（线上实测的双方视角位置不一致）；
+                 ② Durable Object 的存储写入翻倍。两件事都已纠正。 */
             }
             break;
           }
@@ -197,11 +230,12 @@ export class RoomObject {
         }
         case 'resync': {
           /* 重连方索要最近一份权威快照（房主专用：客人走 resyncReq 让房主现生成客人视角视图）。
-             收口·第 2 步：**优先给引擎空闲检查点**；没有检查点时才退回最近一份，
-             并用 safe:false + idleWhy 明确告诉房主"这次恢复取自结算中途"，由它提示玩家。 */
-          let s = this.safeSnap || this.lastSnap;
-          if (!s) { try { s = (await this.state.storage.get('safeSnap')) || (await this.state.storage.get('snap')) || null; } catch (e) {} }
-          this._send(server, { t: 'resync', s: s || null, safe: !!this.safeSnap, idleWhy: (this.safeSnap ? '' : (s && s.idleWhy) || '') });
+             口径（2026-09-16 修正）：**永远给最新那一份，绝不回退时间**；
+             `safe` = 这份快照是不是在引擎空闲时刻拍的，`idleWhy` 是不空闲的原因 ——
+             房主据此提示玩家，并在恢复时做"和解"（清掉半成品 + 补发起待询问的选择）。 */
+          let s = this.lastSnap;
+          if (!s) { try { s = (await this.state.storage.get('snap')) || null; } catch (e) {} }
+          this._send(server, { t: 'resync', s: s || null, safe: !!(s && s.idle), idleWhy: (s && s.idleWhy) || '' });
           break;
         }
         case 'leave': {
@@ -216,7 +250,15 @@ export class RoomObject {
       const i = this.players.indexOf(me);
       if (i >= 0) this.players.splice(i, 1);
       const role = me.isHost ? 'host' : 'guest';
+      /* ==== 2026-09-16 修（线上"频繁掉线 / 客机一直显示房主掉线"的真凶之一）====
+         这条连接可能已经被"同一座位的新连接"顶替了 —— 刷新/断网重连的常见时序就是
+         **新 hello 先到、旧 close 后到**。这时如果照旧把该座位标成掉线，
+         刚回来的对手会被立刻又标成掉线，客户端的 `_peerLost` 就永远清不掉。
+         所以：只有"当前仍是这个座位的主人"的那条连接断开，才算真的掉线。 */
+      const curSid = me.isHost ? this.hostSid : this.guestSid;
+      if (curSid && curSid !== sid) return;                  // 已被顶替的旧连接：忽略
       if (me.isHost && this.hostSid === sid) this.hostSid = '';
+      if (!me.isHost && this.guestSid === sid) this.guestSid = '';
       if (!this.started) {
         // 还没开局：直接算离开
         this._broadcast({ t: 'oppLeft' });
