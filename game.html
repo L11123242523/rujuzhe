@@ -5654,7 +5654,16 @@ var Online = {
     // 房主判定投降后，客人会在快照里看到 _over（且 _winner 已随之换位）
     if(battleState && battleState._over && !this._wasOver){
       this._wasOver=true;
-      try{ __showSurrenderResult(); }catch(e){}
+      /* 2026-09-16 修（线上实测"房主获胜后客机仍在游戏中"）：
+         原来这里只弹一个 toast，客人界面上还是"局内"的样子。改成与房主一样**打开结果面板** ——
+         结果面板是浮层，双方各自按自己的视角看到胜负（客人视图里"自己"永远占 p1）。 */
+      try{
+        var __iWin = (battleState._winner === 'p1');
+        if (typeof showBattleResult === 'function') {
+          showBattleResult(__iWin, __iWin ? '你获胜了！' : '对局结束：你已落败',
+            __iWin ? '对手的同步值 / 入迷值归零。' : '你的同步值 / 入迷值归零。', null);
+        } else { __showSurrenderResult(); }
+      }catch(e){ try{ __showSurrenderResult(); }catch(e2){} }
     }
   },
   /* ============================================================
@@ -7378,9 +7387,10 @@ function __clearTransientBattleState(why) {
   try { if (typeof _targetSelectOpen !== 'undefined') _targetSelectOpen = false; } catch (e) {}
   try { if (typeof pendingChoiceCallback !== 'undefined') pendingChoiceCallback = null; } catch (e) {}
   try { if (typeof closeChoiceModal === 'function') closeChoiceModal(); } catch (e) {}
-  /* 残留浮层：骰子动画区、抽卡浮层、"等待对手"提示 */
+  /* 残留浮层：骰子动画区、抽卡浮层、"等待对手"提示、对局结果面板 */
   try { var da = document.getElementById('diceAnimationArea'); if (da) da.style.display = 'none'; } catch (e) {}
   try { var dr = document.getElementById('drawAnimOverlay'); if (dr) { dr.innerHTML = ''; dr.style.display = 'none'; } } catch (e) {}
+  try { var ov = document.getElementById('resultOverlay'); if (ov && ov.classList) ov.classList.remove('active'); } catch (e) {}
   try { if (typeof Online !== 'undefined' && Online && Online._hideWaiting) Online._hideWaiting(); } catch (e) {}
   try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock(why || '清理临时战斗状态', 0); } catch (e) {}
   return dropped;
@@ -12091,21 +12101,40 @@ function checkBattleEnd() {
     ];
   };
   function __olEnd() { if (__ol) { try { Online.leave(); } catch (e) {} } }
+  /* ============================================================
+   * 对局收尾（2026-09-16 修：线上实测"房主获胜不会立即结束游戏，客机仍在游戏中且显示房主掉线"）
+   * ------------------------------------------------------------
+   * 原来四处判定都写成 `showBattleResult(...); showScreen('mainMenu'); __olEnd();` ——
+   * 那是**单机**的收尾方式。联机里这样做有两个后果：
+   *   ① 房主立刻回主菜单，而结果面板是浮层 ⇒ "结束后效果框/结算框显示在主界面"；
+   *   ② `__olEnd()` → `Online.leave()` **把连接关掉** ⇒ 客人看到"房主掉线"，
+   *      而带 `_over/_winner` 的最终快照永远送不过去（客人还以为在局内）。
+   * 联机正确姿势：房主先把最终局面推给客人，双方都停在战斗界面看结果面板，
+   * 想退出时玩家自己点返回（那时才 leave）。
+   * ============================================================ */
+  function __finishBattle(win, title, desc) {
+    try { showBattleResult(win, title, desc, __endStats()); } catch (e) {}
+    if (__ol) {
+      try { if (Online.active && !Online.isGuest && Online._sendSnapshotNow) Online._sendSnapshotNow({ full: true }); } catch (e) {}
+      try { if (Online.status) Online.status('对局已结束：' + title); } catch (e) {}
+      return;
+    }
+    try { showScreen('mainMenu'); } catch (e) {}
+    __olEnd();
+  }
   // 同步值归零判定（常规获胜）
   if (battleState.p1.sync <= 0) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(false); return true; }
-    showBattleResult(false, __oppNm + ' 获胜', '你的同步值归零，败北了。再挑战一次吧！', __endStats());
-    showScreen('mainMenu'); __olEnd();
+    __finishBattle(false, __oppNm + ' 获胜', '你的同步值归零，败北了。再挑战一次吧！');
     return true;
   }
   if (battleState.p2.sync <= 0) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
-    showBattleResult(true, '你获胜了！', __oppNm + ' 的同步值归零。漂亮的胜利！', __endStats());
-    showScreen('mainMenu'); __olEnd();
+    __finishBattle(true, '你获胜了！', __oppNm + ' 的同步值归零。漂亮的胜利！');
     return true;
   }
   // 入迷值归零判定（破局获胜）
@@ -12113,16 +12142,14 @@ function checkBattleEnd() {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(false); return true; }
-    showBattleResult(false, __oppNm + ' 破局获胜', '你的入迷值归零。破局失败……', __endStats());
-    showScreen('mainMenu'); __olEnd();
+    __finishBattle(false, __oppNm + ' 破局获胜', '你的入迷值归零。破局失败……');
     return true;
   }
   if (battleState.p2.fascination <= 0) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
-    showBattleResult(true, '破局获胜！', __oppNm + ' 的入迷值归零。你以破局方式赢下了对局！', __endStats());
-    showScreen('mainMenu'); __olEnd();
+    __finishBattle(true, '破局获胜！', __oppNm + ' 的入迷值归零。你以破局方式赢下了对局！');
     return true;
   }
   return false;
