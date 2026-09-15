@@ -1,33 +1,31 @@
 /* =====================================================================
  * worker.mjs —— 入局者联机中继服（Cloudflare Workers + Durable Objects）
  * ---------------------------------------------------------------------
- * 永久免费额度、无需信用卡。一个 4 位房号 = 一个 Durable Object 实例，
- * DO 单线程天然持有该房间全部连接与状态，只做房间/种子/转发，不做规则结算。
+ * 一个 4 位房号 = 一个 Durable Object 实例，DO 单线程天然持有该房间全部连接与状态，
+ * 只做房间 / 权威种子 / 转发 / 快照暂存。**不做任何规则结算** —— 规则只跑在房主浏览器里。
  *
- * 对前端呈现的协议（与 Node 版 online_server.js 完全一致的“单跳”版）：
+ * 2026-09-16 收口：**服务器权威引擎（方案 C）已整条删除**。
+ *   原因：cloudflare/engine-runtime.js 是 game.html 的生成副本，但已双向漂移
+ *   （game.html 有 106 行不在副本里、副本有 25 行不在 game.html 里），
+ *   例如 __cloneDeckCard/__cloneDeckSlots 在副本里 0 命中 —— 服务端跑的是旧规则；
+ *   而所有离线测试读的是 game.html 本体（lib/harness.js:364），
+ *   于是长期处于"测试全绿、线上跑另一份代码"的状态。
+ *   已删除：engine-room.js / engine-runtime.js / engine-dom.js / engine-host.js / card-data.js，
+ *   以及客户端进入该路径的唯一入口（?engine=1 已不再生效）。
+ *   详见仓库根目录《收口记录.md》。
+ *
+ * 对前端呈现的协议（与 Node 版 online_server.js 一致的“单跳”版）：
  *   HTTP  GET /health           -> {ok:true}
  *   HTTP  GET /newroom          -> {code:"ABCD"}
  *   WS    /?r=CODE              建立后首条发 {t:'hello',role:'host'|'guest',name}
  *     server -> joined{id,sid,isHost} / room{players:[{sid,name,ready}]}
- *               start{seed,first:hostSid} / relay{m} / oppLeft / error{msg,code}
- *     client -> ready / relay{m} / leave
+ *               start{seed,first:hostSid} / relay{m} / oppLeft / peerLost / peerBack
+ *               resync{s} / error{msg,code}
+ *     client -> hello / ready / relay{m} / resync / leave
  * ===================================================================== */
 
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混 0/O 1/I
 
-/* =====================================================================
- * C 阶段第 4 步 · 批次 2：**权威引擎搬进 Durable Object**（可选路径）
- * ---------------------------------------------------------------------
- * 默认仍然是那套"房主浏览器跑规则、中继只转发"的旧协议 —— 旧客户端行为一个字节都不变。
- * 只有当客户端明确要求时（WS 连接带 `?engine=1`，或 hello 里带 `engine:true`），本房间才额外
- * 创建一份**服务器权威引擎**（`engine-room.js`）：两个座位都只是客户端，只发意图、只收自己该看的视图；
- * 隐藏信息在客户端里根本不存在（对手手牌只发张数）。
- * 新路径可独立验证、随时撤回，线上旧路径不受影响。
- * ===================================================================== */
-import { createEngineRoom } from './engine-room.js';
-import { CARD_DATA_JSON } from './card-data.js';
-
-const ENGINE_PERSIST_MS = 1500;   // 权威自存快照的落盘节流（重连/DO 回收后恢复用）
 function genCode() {
   let s = '';
   for (let i = 0; i < 4; i++) s += ROOM_CHARS[Math.floor(Math.random() * ROOM_CHARS.length)];
@@ -41,17 +39,6 @@ function u32seed() {
 const MAX = 2;
 const GRACE_MS = 90000;   // 掉线宽限期：期间只通知"对手掉线"，超时才算真的离开
 
-/* 收集快照 state 里引用到的所有卡 uid。
-   服务器累积卡定义时会用它做剪枝：只保留"当前还在局中"的卡定义，
-   避免一局下来定义字典无限膨胀（Durable Object 单个存储值上限 128KB）。 */
-function collectUids(v, out) {
-  if (!v || typeof v !== 'object') return out;
-  if (Array.isArray(v)) { for (const x of v) collectUids(x, out); return out; }
-  if (v.__u) { out[v.__u] = 1; return out; }
-  for (const k in v) collectUids(v[k], out);
-  return out;
-}
-
 export class RoomObject {
   constructor(state, env) {
     this.state = state;
@@ -60,56 +47,27 @@ export class RoomObject {
     this.hostSid = '';
     this.started = false;
     this.seq = 0;
-    /* 权威式联机：这里存一份"权威自存快照"，供任意一方重连时恢复。
+    /* 房主权威式联机：这里存一份"权威自存快照"，供任意一方重连时恢复。
        放进 DO storage 是为了即使两端都断开、DO 被回收后再拉起，快照依然在。
        this.defs 是累积的卡定义字典（房主每份快照只带新增定义）。 */
     this.lastSnap = null;
+    /* 收口·第 2 步：**引擎空闲时刻的检查点**。
+       为什么单独留一份：房主的快照是"每 30ms 去抖 + 每 1.5 秒巡检"推的，很可能正好拍在一次
+       结算中途；而 `effectEngine._resolveDepth` / `_chainLock` / 各种待应答队列**不进快照**
+       （里面的回调是闭包，存不进去）。用"结算中途"的快照恢复房主，就会恢复出一个
+       "结算到一半但没人知道"的局面 —— 这就是"重连后卡死"这一族。
+       所以：客户端在每份快照上标 `idle`，这里只把 idle 的那份留作 safeSnap，恢复时优先用它。 */
+    this.safeSnap = null;
     this.defs = {};
     this.lost = { host: false, guest: false };
     this.lostTok = { host: 0, guest: 0 };
-    /* 服务器权威引擎（批次 2，可选路径）：只在客户端要求时才建，省掉不用的房间的冷启动开销 */
-    this.engineRoom = null;
-    this.engineWanted = false;
-    this.engineSnap = null;
-    this.engineSavedAt = 0;
     this.ready = state.blockConcurrencyWhile(async () => {
       try {
         this.lastSnap = (await state.storage.get('snap')) || null;
         if (this.lastSnap && this.lastSnap.cards) this.defs = this.lastSnap.cards;
       } catch (e) { this.lastSnap = null; }
-      try { this.engineSnap = (await state.storage.get('engineSnap')) || null; } catch (e) { this.engineSnap = null; }
+      try { this.safeSnap = (await state.storage.get('safeSnap')) || null; } catch (e) { this.safeSnap = null; }
     });
-  }
-
-  /* ---------------- 服务器权威引擎（批次 2） ----------------
-     每房间一份引擎运行时；两个座位都只是客户端。传输与规则分开：
-     engine-room.js 只管房间与规则，这里只负责"把消息送到那个座位的连接上"。 */
-  _seatOf(p) { return p && p.isHost ? 'p1' : 'p2'; }
-  _wsOfSeat(seat) {
-    for (const p of this.players) if (p.greeted && this._seatOf(p) === seat) return p.ws;
-    return null;
-  }
-  _ensureEngineRoom() {
-    if (this.engineRoom) return this.engineRoom;
-    this.engineRoom = createEngineRoom({
-      code: this.code || '',
-      cardDataJson: CARD_DATA_JSON,
-      send: (seat, msg) => { this._send(this._wsOfSeat(seat), { t: 'engine', m: msg }); },
-      now: () => Date.now(),
-      onLog: (s) => { try { console.log(`[room ${this.code}][engine] ${s}`); } catch (e) {} },
-      persist: (snap) => {
-        /* 节流落盘：权威状态在内存里，落盘是为了 DO 被回收/两端都断开后还能恢复这一局 */
-        const t = Date.now();
-        if (t - this.engineSavedAt < ENGINE_PERSIST_MS) return;
-        this.engineSavedAt = t;
-        this.engineSnap = snap;
-        try { this.state.storage.put('engineSnap', snap); } catch (e) {}
-      }
-    });
-    if (this.engineSnap) {
-      try { this.engineRoom.restore(this.engineSnap); } catch (e) { console.log('[engine] restore 失败：' + e.message); }
-    }
-    return this.engineRoom;
   }
 
   _markBack(role) {
@@ -148,13 +106,12 @@ export class RoomObject {
     }
     if (url.pathname !== '/room') return new Response('not found', { status: 404 });
     this.code = url.searchParams.get('r') || this.code || '';
-    const wantEngine = url.searchParams.get('engine') === '1';   // 批次 2：明确要求才启用服务器权威引擎
 
     const pair = new WebSocketPair();
     const server = pair[1];
     server.accept();
     const sid = 's' + (++this.seq) + '_' + Math.random().toString(36).slice(2, 7);
-    const me = { ws: server, sid, name: '玩家', ready: false, isHost: false, greeted: false, engine: wantEngine, seat: '' };
+    const me = { ws: server, sid, name: '玩家', ready: false, isHost: false, greeted: false };
     this.players.push(me);
 
     server.addEventListener('message', async (ev) => {
@@ -196,46 +153,12 @@ export class RoomObject {
           // 先把快照推给房里其他人，再单独发给刚进来的这位（避免他收到两遍）
           this._broadcast(this._snapshot(), server);
           this._send(server, this._snapshot());
-          /* 批次 2：要求了服务器权威引擎的客户端，这一条连接就接上对应座位。
-             注意这里**不影响**上面那套旧协议 —— 旧客户端（没带 ?engine=1）走的还是原路。 */
-          if (this.engineWanted || me.engine || m.engine === true) {
-            this.engineWanted = true;
-            const seat = me.isHost ? 'p1' : 'p2';
-            me.seat = seat;
-            try {
-              /* 用 sid 当"连接身份"：重连换来新连接时，旧连接的 close 会晚到，
-                 引擎房间据此忽略过期断开（否则会把刚回来的座位又标成离线）。 */
-              this._ensureEngineRoom().attach(seat, { name: me.name, conn: sid, delta: m.delta === 1 });
-            } catch (e) {
-              console.log('[engine] attach 失败：' + (e && e.message));
-              this._send(server, { t: 'error', msg: '服务器权威引擎启动失败：' + (e && e.message) });
-            }
-          }
           break;
         }
         case 'ready': {
           me.ready = true;
           this._broadcast(this._snapshot());
           this._tryStart();
-          break;
-        }
-        /* 批次 2：服务器权威引擎的入站消息（意图 / 回答 / 准备 / 卡组 / 投降 / 重连要视图）。
-           与旧协议并列存在，互不干扰；旧客户端永远不会发 t:'engine'。 */
-        case 'engine': {
-          if (!this.engineWanted) {
-            this._send(server, { t: 'error', msg: '本房间没有启用服务器权威引擎（连接时请带 ?engine=1）' });
-            break;
-          }
-          const seat = me.seat || (me.isHost ? 'p1' : 'p2');
-          me.seat = seat;
-          const room = this._ensureEngineRoom();
-          try {
-            room.handle(seat, m.m || {});
-            room.flush();
-          } catch (e) {
-            console.log('[engine] handle 失败：' + (e && e.message));
-            this._send(server, { t: 'engine', m: { k: 'error', reason: '服务器处理失败：' + (e && e.message) } });
-          }
           break;
         }
         case 'relay': {
@@ -260,6 +183,12 @@ export class RoomObject {
               }
               this.lastSnap = stored;
               try { this.state.storage.put('snap', stored); } catch (e) {}
+              /* 只把"引擎空闲时刻"的那一份留作安全恢复点（收口·第 2 步）。
+                 注意**不能**用后一份非空闲快照覆盖它 —— 否则一次长结算就会把仅有的检查点冲掉。 */
+              if (s.idle) {
+                this.safeSnap = stored;
+                try { this.state.storage.put('safeSnap', stored); } catch (e) {}
+              }
             }
             break;
           }
@@ -267,10 +196,12 @@ export class RoomObject {
           break;
         }
         case 'resync': {
-          // 重连方索要最近一份权威快照
-          let s = this.lastSnap;
-          if (!s) { try { s = (await this.state.storage.get('snap')) || null; } catch (e) {} }
-          this._send(server, { t: 'resync', s: s || null });
+          /* 重连方索要最近一份权威快照（房主专用：客人走 resyncReq 让房主现生成客人视角视图）。
+             收口·第 2 步：**优先给引擎空闲检查点**；没有检查点时才退回最近一份，
+             并用 safe:false + idleWhy 明确告诉房主"这次恢复取自结算中途"，由它提示玩家。 */
+          let s = this.safeSnap || this.lastSnap;
+          if (!s) { try { s = (await this.state.storage.get('safeSnap')) || (await this.state.storage.get('snap')) || null; } catch (e) {} }
+          this._send(server, { t: 'resync', s: s || null, safe: !!this.safeSnap, idleWhy: (this.safeSnap ? '' : (s && s.idleWhy) || '') });
           break;
         }
         case 'leave': {
@@ -286,11 +217,6 @@ export class RoomObject {
       if (i >= 0) this.players.splice(i, 1);
       const role = me.isHost ? 'host' : 'guest';
       if (me.isHost && this.hostSid === sid) this.hostSid = '';
-      /* 批次 2：权威引擎路径下，断开只标记该座位离线（宽限期内可重连，权威状态留在服务器）。
-         带 sid = 这条连接的"身份"：过期连接的 close 会被引擎房间忽略。 */
-      if (this.engineRoom && me.seat) {
-        try { this.engineRoom.detach(me.seat, sid); } catch (e) {}
-      }
       if (!this.started) {
         // 还没开局：直接算离开
         this._broadcast({ t: 'oppLeft' });
@@ -314,6 +240,15 @@ export class RoomObject {
   }
 }
 
+/* 收集快照 state 里引用到的所有卡 uid（仅用于上面那次"紧急剪枝"）。 */
+function collectUids(v, out) {
+  if (!v || typeof v !== 'object') return out;
+  if (Array.isArray(v)) { for (const x of v) collectUids(x, out); return out; }
+  if (v.__u) { out[v.__u] = 1; return out; }
+  for (const k in v) collectUids(v[k], out);
+  return out;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -325,7 +260,7 @@ export default {
     };
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ ok: true, ts: Date.now() }), { headers: CORS });
+      return new Response(JSON.stringify({ ok: true, ts: Date.now(), authority: 'host' }), { headers: CORS });
     }
     if (url.pathname === '/newroom') {
       return new Response(JSON.stringify({ code: genCode() }), { headers: CORS });

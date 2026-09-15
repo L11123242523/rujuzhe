@@ -3022,11 +3022,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="ol-sub">线上联机：服务器栏<b>留空即可</b>（自动用中继域名 <code>relay.rujuzhe-b-a-gs.top</code>）。本地试玩：先运行 <code>node online_server.js</code>，用 <code>http://127.0.0.1:8080</code> 打开本页，留空会自动连 <code>ws://localhost:2567</code>。玩法：一人创建房间拿到 4 位房号 → 发给对手 → 对手输入房号加入 → 双方准备后开局。双方用同一颗权威种子双机推演。</div>
     <div class="ol-row"><label>服务器</label><input id="olServer" placeholder="留空=自动（线上 relay.rujuzhe-b-a-gs.top / 本地 ws://localhost:2567）"></div>
     <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
-    <div class="ol-row" style="align-items:center;"><label>模式</label>
-      <label style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="olEngineAuthority" style="cursor:pointer;">服务器权威（调试中：勾上＝规则跑在服务器里；当前**默认走旧协议**，更稳）
-      </label>
-    </div>
+    <!-- 2026-09-16 收口：已删除「服务器权威」勾选框。联机只保留房主权威一条路，
+         不再给玩家一个"换个模式"的开关（它曾让线上到底跑哪条路无人能确定）。 -->
     <div class="ol-row">
       <button class="ol-btn" onclick="Online.createRoom()">① 创建房间</button>
       <input id="olRoomId" placeholder="输入对方房号" style="max-width:130px;">
@@ -4971,16 +4968,19 @@ var Online = {
      SPEC_TIMEOUT_MS: 对手多久不选就按默认项继续（不再永久卡死） */
   role:'', isGuest:false,
   /* ============================================================
-   * C 阶段第 4 步 · 批次 3：**服务器权威模式**（客户端瘦身）
+   * 2026-09-16 收口：联机**只保留房主权威一条路**
    * ------------------------------------------------------------
-   * authority:'host'   = 旧协议（**退路**）：房主浏览器跑规则、客人只画。
-   * authority:'server' = 双方对称：**两台机器都只是客户端**，规则跑在中继的 Durable Object 里。
-   *   · 连接时带 ?engine=1、hello 里带 engine:true → 中继为这个房间建一份权威引擎；
-   *   · 双方都只发 {t:'engine', m:{k:'act', a, args}}；
-   *   · 双方都只收 {t:'engine', m:{k:'view'|'ev'|'ask'|...}}；
-   *   · mySeat = 服务器给的引擎槽位（'p1'|'p2'），只用来"把服务器槽位翻译成本机视角"（日志人称）。
-   * 开关由联机大厅的 #olEngineAuthority 勾选框控制：**默认勾上**（服务器权威）；取消勾选 = 旧路径。
-   * 另可用 URL 覆盖：?engine=0 强制旧协议、?engine=1 强制服务器权威。
+   * 权威路径：authority === 'host'（唯一发版路径）
+   *   房主浏览器跑规则并推快照；客人只画不跑，只发 {k:'act'} 意图。
+   *
+   * 已退役：authority === 'server'（方案 C：规则跑在中继的 Durable Object 里）
+   *   退役原因（实测证据，见 收口记录）：cloudflare/engine-runtime.js 是 game.html 的
+   *   生成副本，但**已经双向漂移**（game.html 有 106 行不在副本里、副本有 25 行不在
+   *   game.html 里），例如 __cloneDeckCard/__cloneDeckSlots 在副本里 0 命中 ——
+   *   服务端跑的是旧规则；而所有离线测试读的是 game.html 本体（harness.js:364），
+   *   于是"测试全绿、线上服务器跑另一份代码"。
+   *   现在它只剩一个显式入口：URL 带 ?engine=1。仅用于跑 engine_* / do_engine_* 测试，
+   *   待服务端路径与那几套测试一并删除后，本节整体移除。
    * ============================================================ */
   authority:'host', mySeat:'',
   _engineLogs:[],          // 服务器事件流里的日志镜像（服务器不写 battleState._logs，日志走事件流）
@@ -5024,22 +5024,15 @@ var Online = {
     return v.replace(/\/+$/,'');
   },
   _httpOf:function(wsUrl){ return String(wsUrl||'').replace(/^wss:/,'https:').replace(/^ws:/,'http:').replace(/\/+$/,''); },
-  /* C 阶段批次 3：服务器权威模式的两个小工具。
-     _engineOpt()：读大厅里的勾选框（勾了才走服务器权威，默认不勾＝旧路径）。
-     _roomUrl()  ：服务器权威模式下给 WS 地址带上 ?engine=1（中继的 /room 只认这个 + hello 里的 engine:true）。 */
-  _engineOpt:function(){
-    /* 2026-09-15 起**默认服务器权威**（方案 C 的收尾）：勾选框默认勾上，显式取消才回旧协议。
-       URL 覆盖优先：?engine=0 强制旧协议（排障/回归），?engine=1 强制服务器权威（自动化）。
-       拿不到勾选框时（服务器式环境/无 DOM）也走新架构 —— 旧协议只是退路，不再是默认。 */
-    try{
-      var q = String((typeof location !== 'undefined' && location && location.search) || '');
-      if (/[?&]engine=0(&|$)/.test(q)) return false;
-      if (/[?&]engine=1(&|$)/.test(q)) return true;
-      var el = document.getElementById('olEngineAuthority');
-      if (el && typeof el.checked === 'boolean') return !!el.checked;
-      return false;        // 拿不到勾选框时按旧协议（稳）——与"勾选框默认不勾"一致
-    }catch(e){ return true; }
-  },
+  /* 2026-09-16 收口（第二刀）：服务器权威（方案 C）**已整条删除**，这里只留一个恒假判据，
+     让引擎里那些 authority==='server' 的分支彻底不可达（死代码的清理见《收口记录.md》待办）。
+     历史坑（原样保留，这是"三种说法并存"的现场，别删）：
+       这里曾读 #olEngineAuthority 勾选框（该元素已从大厅删除），
+       UI 文案写"当前默认走旧协议"、本注释写"2026-09-15 起默认服务器权威：勾选框默认勾上"、
+       文档里又写"9/15 晚默认已翻转为服务器权威" —— 三种说法并存，
+       结果是没人能确定线上到底跑哪条路。
+     现在：默认房主权威，且没有第二种可能（?engine=1 也已失效）。 */
+  _engineOpt:function(){ return false; },
   _isServerAuthority:function(){ return this.authority==='server'; },
   _roomUrl:function(code){
     var u=String(this.relayBase||this.endpoint||'').replace(/\/+$/,'')+'/?r='+encodeURIComponent(code);
@@ -5551,7 +5544,12 @@ var Online = {
     try{
       if(!battleState || typeof playDiceRollAnim!=='function') return;
       var self=this;
-      ['p1','p2'].forEach(function(seat){
+      /* 2026-09-16 收口修复：这里原本用"两个座位的字面数组 + forEach"硬写（而不是 playerIds()），
+         违反了 A2 阶段"全部玩家的字面数组一律换成 playerIds()"的约定
+         （multiplayer_foundation_test 守这条），也是 3 人座位走到这里会漏掉第三席的原因。
+         注：本注释刻意不写出那个被扫描的字面串 —— 该套件是**扫源码文本**的，
+         注释里写出来会被自己算成违规（我刚踩过一次）。 */
+      playerIds().forEach(function(seat){
         var p=battleState[seat]; if(!p) return;
         var rolls=p._lastRolls||[];
         var sig=rolls.join(',')+'@'+(p._nextDiceSides||6)+'@'+battleState.turn+'#'+battleState.round;
@@ -6051,23 +6049,61 @@ var Online = {
   },
   /* 权威状态指纹：只读 battleState，**不能**用 buildSnapshot 来算 ——
      buildSnapshot 里有 `t: Date.now()`（每次都不同，指纹永远不等），而且 encode 会把卡定义
-     标记成"已发送"；如果拿它做探测再丢弃快照，客人以后就会收到未知卡。 */
+     标记成"已发送"；如果拿它做探测再丢弃快照，客人以后就会收到未知卡。
+
+     === 2026-09-16 收口 · 第 2 步：改成**通用遍历**，不再逐字段枚举 ===
+     旧实现手写了 20 来个字段。实测在真实牌局上：**295 个标量状态字段里有 220 个不在指纹里**，
+     包括 p._kaedeSPPending / p._megumiSacBonusThisTurn / p._firstRegenSkipped / p._eliminated
+     （连"出局"标记都不在）以及卡上的 81 个每局标记。它们变化时一致性巡检不会补推快照，
+     客人就停在旧快照上——历史记录里"两端可见状态一致、某一方音韵值差 1"属于这一族。
+     现在任何字段（含以后新增的）变化都会改指纹，**不需要有人记得回来改这个函数**。
+     自证测试：_relaytest/state_sig_coverage_test.js —— 机械枚举所有标量字段与数组长度逐个改一下比指纹，
+     漏掉任何一个都会让它变红。 */
+  /* ==== 2026-09-16 收口（第 2 步·修正）：SIG_SKIP 清空 ====
+     第一版按键名剔除了 20 多个"传输簿记"名字（_lastRolls / _snapSeq / _asks / _defs …），
+     结果是一把**全局剪刀**：`p._lastRolls`（玩家座位上真实的投骰记录，属于状态）被同名误伤，
+     变化不再进指纹（由状态字段清单第 2.3 节定位）。
+     但遍历的起点是 battleState / publicGraveyard —— Online、NetSync 上的那些簿记
+     **根本不会被走到**，所以这份清单本来就没有存在必要；而它一旦存在，就会误伤同名字段。
+     现在清空：**只要能从 battleState 走到的，就是状态，就必须进指纹**。
+     （数组类的 log / _logs 仍只取条数，见 SIG_LEN_KEYS —— 那是刻意压缩，不是跳过。） */
+  SIG_SKIP: {},
+  /* 这几个键是数组，但只需要"条数"进指纹（省掉整段文本） */
+  SIG_LEN_KEYS: { log: 1, _logs: 1 },
+  _sigOf:function(v, seen, depth){
+    if(v===null) return 'n';
+    if(v===undefined) return 'u';
+    var t=typeof v;
+    if(t==='function'||t==='symbol'||t==='bigint') return '';
+    if(t!=='object') return String(v);
+    if(seen.indexOf(v)>=0) return '<cyc>';
+    if(depth>8) return '<deep>';
+    seen.push(v);
+    var s;
+    if(Array.isArray(v)){
+      var a=[]; for(var i=0;i<v.length;i++) a.push(Online._sigOf(v[i],seen,depth+1));
+      s='['+a.join(',')+']';
+    }else{
+      var ks=Object.keys(v).sort(), parts=[];
+      for(var j=0;j<ks.length;j++){
+        var k=ks[j];
+        if(Online.SIG_SKIP[k]) continue;
+        if(Online.SIG_LEN_KEYS[k]&&Array.isArray(v[k])){ parts.push(k+':'+v[k].length); continue; }
+        parts.push(k+'='+Online._sigOf(v[k],seen,depth+1));
+      }
+      s='{'+parts.join(',')+'}';
+    }
+    seen.pop();
+    return s;
+  },
   _stateSig:function(){
-    var b=battleState; if(!b) return '';
-    var nm=function(a){ return (a||[]).map(function(c){ return (c&&(c.name||'?'))||'?'; }).join(','); };
-    var o=[b.turn,b.round,b.phase,b.currentPlayer,b._over?1:0,b._winner||'',b.pendingDamage||0,
-           b.pendingDamageTarget||'',b.damageResponseWindow?1:0,b.effectChainActive?1:0,(b.log||[]).length,
-           (typeof publicGraveyard!=='undefined'&&publicGraveyard)?(nm(publicGraveyard.event_cards)+'/'+nm(publicGraveyard.music_cards)):''];
-    playerIds().forEach(function(k){
-      var p=b[k]; if(!p){ o.push('x'); return; }
-      o.push(p.position,p.sync,p.maxSync,p.fascination,p.cost,p.maxCost,p.gold,p.level,p.motivation,
-             p.defense,p.shield,p.passedStart,p.closedTile,p.attackBuff||0,p._sacrificeUsedThisTurn||0,
-             p._diceControlBonus||0,(p.captain&&p.captain.name)||'',p.teamAttribute||'',
-             (p.negativeEffects||[]).length);
-      o.push(nm(p.hand),nm(p.grave),nm(p.permanent),nm(p.faceDownCards),nm(p.eventCards),nm(p.musicCards));
-      o.push((p.deck||[]).length,(p.removed||[]).length);
-    });
-    return o.join('~');
+    if(!battleState) return '';
+    var out=[];
+    try{ out.push('B'+Online._sigOf(battleState,[],0)); }catch(e){ out.push('B<err:'+e.message+'>'); }
+    try{
+      if(typeof publicGraveyard!=='undefined'&&publicGraveyard) out.push('G'+Online._sigOf(publicGraveyard,[],0));
+    }catch(e){}
+    return out.join('#');
   },
   /* 一致性巡检：快照推送原本只挂在 updateBattleUI 上（90ms 去抖）。
      但有些状态变化发生在别的代码路径里（远端意图的后续异步结算、决策答案之后的推进……），
@@ -6373,9 +6409,24 @@ var Online = {
         NetSync.applySnapshot(s);
       }
     }catch(e){ console.error('恢复对局失败',e); }
+    /* 收口·第 2 步：恢复后把"结算进行中"的残留状态清掉。
+       刷新页面时引擎本来就是新的，但**重连不一定刷新**（例如断网后又接上）——
+       那种情况下旧的结算锁/队列会带进恢复后的局面，不清就会又变成"点了没反应"。 */
+    try{ if(typeof __eeForceUnlock==='function') __eeForceUnlock('重连恢复时复位结算状态', 0); }catch(e){}
     this._enteredBattle=true;
     try{ showScreen('battleScreen'); }catch(e){}
-    try{ addBattleLog('system','已从服务器快照恢复对局状态'); }catch(e){}
+    var safe=!!(m&&m.safe);
+    try{ addBattleLog('system','已从服务器快照恢复对局状态' + (safe?'（引擎空闲检查点）':'（**非**空闲检查点）')); }catch(e){}
+    /* 没有"引擎空闲时刻"的检查点可用时，**明确说出来** ——
+       宁可让玩家看到"这次恢复可能不完整"，也不要静默恢复一个撕裂局面而事后无从判断。 */
+    if(!safe){
+      var why=(m&&m.idleWhy)?('（当时的忙碌原因：'+m.idleWhy+'）'):'';
+      try{
+        addBattleLog('system','【联机】注意：服务器上还没有"引擎空闲时刻"的检查点，本次恢复取自一次结算中途'+why+
+          '，局面可能有偏差；若出现卡住或数值异常，请重开房间。');
+      }catch(e){}
+      try{ showToast('注意：恢复的快照取自一次结算中途，局面可能有偏差', 'warn'); }catch(e){}
+    }
     if(!this.isGuest) this._sendSnapshotNow({ full:true });   // 房主恢复后立刻把状态补给客人
   },
   // 房主把"权威自存"快照存到服务器（供任意一方重连恢复）。
@@ -6391,7 +6442,14 @@ var Online = {
       if(typeof NetSync==='undefined') return;
       var needFull=!this._savedOnce;                  // 本局第一次必须带全部定义，服务器才有底
       var s=NetSync.buildSnapshot({ mode:'self', full:needFull });
-      if(s){ this._savedOnce=true; this._send({ t:'relay', m:{ k:'snapSave', s:s } }); }
+      if(s){
+        /* 收口·第 2 步：给快照打上"这是不是一个**引擎空闲时刻**的检查点"。
+           服务器据此把"最近一次空闲快照"单独留一份，房主重连时优先用它恢复 ——
+           这样就不会把"结算到一半"的局面恢复出来（细节见 __eeIdleForSnapshot 的注释）。 */
+        var busy=(typeof __eeIdleForSnapshot==='function')?__eeIdleForSnapshot():'（判据不可用）';
+        s.idle=!busy; s.idleWhy=busy||'';
+        this._savedOnce=true; this._send({ t:'relay', m:{ k:'snapSave', s:s } });
+      }
     }catch(e){}
   },
   _scheduleReconnect:function(){
@@ -14261,6 +14319,40 @@ function __eeWaitReason() {
 }
 /** 空闲多久算"没有任何效果活动"（任何战斗日志/效果入栈出栈都会重置 _stuckSince） */
 var __EE_STALE_MS = 6000;
+/* ============================================================
+ * 快照检查点判据（2026-09-16 收口 · 第 2 步）
+ * ------------------------------------------------------------
+ * 用来回答一个问题：**现在拍下来的快照，是不是一个"可以安全恢复的局面"？**
+ *
+ * 为什么需要它（证据见 状态字段清单.md 第 2.1 节 A 类）：
+ *   `effectEngine._resolveDepth` / `_chainLock` / `_choiceQueue` / `_cardPickerStack` /
+ *   `_targetSelectQueue` / `_pendingTriggers` 这些"结算正在进行中"的状态挂在引擎实例上，
+ *   而 `buildSnapshot` 只编码 `battleState`、`applySnapshot` 只覆盖 `battleState` ——
+ *   也就是说**它们根本不进快照**。这一点无法靠"把它们也存进去"解决：那些队列里装的是
+ *   **每个弹窗自己的闭包**，闭包存不进 JSON，存进去恢复出来也接不回原来的流程。
+ *   而房主的快照是"每 30ms 去抖 + 每 1.5 秒巡检"推的 —— **很可能正好拍在一次结算中途**。
+ *   于是房主重连（刷新页面后从服务器那份快照恢复）就可能恢复出一个"结算到一半、
+ *   但没人知道"的局面 —— 这正是"重连后卡死/点了没反应"这一族。
+ *
+ * 所以做法不是"存进去"，而是：**只在引擎空闲时刻打检查点**，恢复时优先用检查点；
+ * 没有检查点可用时，明确告诉玩家（而不是静默恢复一个撕裂局面）。
+ * 返回 '' = 空闲（可作检查点）；非空 = 不空闲的原因（会写进快照与日志，便于事后定位）。
+ * ============================================================ */
+function __eeIdleForSnapshot() {
+  try {
+    var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    if (ee && (ee._resolveDepth || 0) > 0) return '效果结算中（深度' + ee._resolveDepth + '）';
+    if (ee && ee._chainLock) return '连锁锁未释放';
+    if (ee && ee._pendingTriggers && ee._pendingTriggers.length) return '待触发时点队列（' + ee._pendingTriggers.length + '）';
+    if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) return '弹窗排队中（' + _choiceQueue.length + '）';
+    if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return '待应答选卡弹窗（' + _cardPickerStack.length + '）';
+    if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue && _targetSelectQueue.length) return '待应答选目标（' + _targetSelectQueue.length + '）';
+    if (typeof _targetSelectOpen !== 'undefined' && _targetSelectOpen) return '选目标窗口开着';
+    var w = (typeof __eeWaitReason === 'function') ? __eeWaitReason() : '';
+    if (w) return w;
+    return '';
+  } catch (e) { return '判据异常：' + (e && e.message); }
+}
 /** 真正把过期锁放掉（放行判定与看门狗共用，避免两处行为漂移）；返回是否真的放了 */
 function __eeForceUnlock(whyTag, idleMs) {
   try {
