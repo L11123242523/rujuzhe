@@ -5109,7 +5109,7 @@ var Online = {
      所以真正让服务器建权威引擎的是这一条 engine:true（`worker.mjs` hello 分支里的 m.engine===true）。 */
   _hello:function(role){
     var h={ t:'hello', role:role, name:this._name() };
-    if(this._isServerAuthority()) h.engine=true;
+    if(this._isServerAuthority()) { h.engine=true; h.delta=1; }   // delta=1：声明"我能吃增量视图"（批次 4 安全闸）
     return h;
   },
   _connect:function(onOpen, roomCode){
@@ -5394,6 +5394,9 @@ var Online = {
       case 'view':
         this._onEngineView(m);
         break;
+      case 'vp':                       // 批次 4：服务器发的**增量视图**（补丁）
+        this._onEnginePatch(m);
+        break;
       case 'ev':
         this._onEngineEvents(m);
         break;
@@ -5480,6 +5483,7 @@ var Online = {
     try{ this._srvBusy = s && s.busy ? s.busy : null; }catch(e){}
     try{ if(typeof NetSync!=='undefined') NetSync.applySnapshot(s); }
     catch(e){ console.error('套用服务器视图失败',e); return; }
+    try{ this._remoteSnap = s; this._lastAppliedSeq = s.seq || 0; }catch(e){}
     /* 收尾态要"粘住"：服务器判定结束后仍会 flush 视图，而视图里的 battleState **没有** _over/_winner
        （服务器只在 room.finished 里记着），照搬就会把本机刚写好的结束态覆盖掉 —— 实测线上表现成
        "投降后界面没进结束态"。所以每份视图套用后，把服务器判过的胜负重新写回去。 */
@@ -5560,6 +5564,33 @@ var Online = {
         playDiceRollAnim(seat, val, p._nextDiceSides||6, rolls.length, null);
       });
     }catch(e){}
+  },
+  /* 批次 4：服务器发的**增量视图**。
+     与房主侧同一套语义：「base」必须等于本地已应用序号，否则说明中间丢了帧 —— **不要"硬套"**，
+     直接向服务器要整包（resyncReq）。这是"补丁错了会分叉"的唯一防线：宁可多要一帧整包。 */
+  _onEnginePatch:function(m){
+    if(!this.active || !m || !m.ops) return;
+    if(!this._remoteSnap || m.base !== this._lastAppliedSeq){
+      this._deltaHealAt = this._deltaHealAt || 0;
+      var now = Date.now();
+      if (now - this._deltaHealAt > 800) {
+        this._deltaHealAt = now;
+        try{ addBattleLog('system','【联机】增量视图序号不连续（base='+(m.base===undefined?'?':m.base)+' 本地='+this._lastAppliedSeq+'），已向服务器索取整包'); }catch(e){}
+        this._sendEngine({k:'resyncReq'});
+      }
+      return;
+    }
+    var target = this._remoteSnap;
+    try{ this._applySnapOps(target, m.ops); }
+    catch(e){ try{ addBattleLog('system','【联机】增量视图应用失败，已索取整包'); }catch(e2){} this._sendEngine({k:'resyncReq'}); return; }
+    this._lastAppliedSeq = m.n;
+    if (m.busy) this._srvBusy = m.busy;
+    try{ if(target.state){ target.state._logs=this._engineLogs.slice(); } }catch(e){}
+    try{ if(typeof NetSync!=='undefined') NetSync.applySnapshot(target); }
+    catch(e){ this._sendEngine({k:'resyncReq'}); return; }
+    try{ if(this._engineOver && battleState){ battleState._over=true; battleState._winner=(this._engineOver.winner===this.mySeat)?'p1':'p2'; } }catch(e){}
+    try{ __renderBattleLogFromState(); }catch(e){}
+    try{ this._syncDiceAnimFromView(); }catch(e){}
   },
   /* 服务器提问：用现成弹窗画出来，把答案按 id 回传（不是旧的序列号配对，服务器按 id 点对点匹配） */
   _onEngineAsk:function(m){

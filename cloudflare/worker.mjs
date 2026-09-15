@@ -205,7 +205,7 @@ export class RoomObject {
             try {
               /* 用 sid 当"连接身份"：重连换来新连接时，旧连接的 close 会晚到，
                  引擎房间据此忽略过期断开（否则会把刚回来的座位又标成离线）。 */
-              this._ensureEngineRoom().attach(seat, { name: me.name, conn: sid });
+              this._ensureEngineRoom().attach(seat, { name: me.name, conn: sid, delta: m.delta === 1 });
             } catch (e) {
               console.log('[engine] attach 失败：' + (e && e.message));
               this._send(server, { t: 'error', msg: '服务器权威引擎启动失败：' + (e && e.message) });

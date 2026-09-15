@@ -55,6 +55,12 @@ export function createEngineRoom(opts) {
   };
   let host = null, S = null, started = false, finished = null, seed = 0;
   let dirty = false, lastFlushAt = 0, viewSeq = 0, askSeq = 0, evSeq = 0, connSeq = 0;
+  /* 批次 4：每个座位最近一次发出去的视图（补丁基线）。座位重连/换人时清空 ⇒ 一定先给整包。 */
+  let lastSent = { p1: null, p2: null };
+  /* 批次 4 安全闸：客户端在 hello 里声明 delta:1 才给它发补丁（否则整包），
+     这样"新旧部署错位"期间最坏也只是多发整包，不会出现"补丁没人认 → 客户端停帧"。 */
+  const deltaCap = { p1: false, p2: false };
+  let viewBytesFull = 0, evBytesDelta = 0;        // 排障：整包总量 vs 补丁总量
   const pendingAsks = new Map();     // askId -> { seat, cb, timer }
   const events = [];                 // 事件流（日志/fx）：断线重连可补齐
   const graceTimers = {};
@@ -145,7 +151,27 @@ export function createEngineRoom(opts) {
       if (evs.length) send(seat, { k: 'ev', seat: seat, events: evs });
       if (dirty || o.force || o.full) {
         const v = viewFor(seat, { full: !!o.full });
-        if (v) { v.seq = ++viewSeq; send(seat, { k: 'view', seat: seat, snap: v }); n++; }
+        if (v) {
+          v.seq = ++viewSeq;
+          const prev = lastSent[seat];
+          let ops = null;
+          if (deltaCap[seat] && !o.full && prev && prev.snap && S.Online && typeof S.Online._snapDiff === 'function') {
+            try { ops = S.Online._snapDiff(prev.snap, v); } catch (e) { ops = null; }
+          }
+          let opsSize = 0, fullSize = 0;
+          try { opsSize = ops ? JSON.stringify(ops).length : 0; fullSize = JSON.stringify(v).length; } catch (e) { opsSize = 0; }
+          /* 与房主侧同一套阈值：补丁为空 / ≥整包 60% / >2048B 就重发整包（省流量，但别把延迟堆上去）。 */
+          const needFull = !ops || !ops.length || opsSize >= fullSize * 0.6 || opsSize > 2048;
+          lastSent[seat] = { snap: v, seq: v.seq };
+          if (needFull) {
+            send(seat, { k: 'view', seat: seat, snap: v });
+          } else {
+            send(seat, { k: 'vp', seat: seat, n: v.seq, base: prev.seq, ops: ops, busy: v.busy || null });
+            evBytesDelta += opsSize;
+          }
+          viewBytesFull += fullSize;
+          n++;
+        }
       }
     }
     dirty = false;
@@ -300,6 +326,11 @@ export function createEngineRoom(opts) {
 
   /* ---------------- 连接/断线 ---------------- */
   function attach(seat, info) {
+    /* 批次 4 安全闸：这个座位在 hello 里声明了 delta:1 才给它发增量视图（否则整包）——
+       站点与中继是分开部署的，新旧错位期间这样最坏也只是多发整包，不会"补丁发出去没人认"。 */
+    if (seat === 'p1' || seat === 'p2') deltaCap[seat] = !!(info && info.delta);
+    /* 批次 4：新接入/重连的座位一律先给整包（清掉补丁基线） */
+    if (seat === 'p1' || seat === 'p2') { lastSent[seat] = null; }
     info = info || {};
     ensureEngine();
     const st = seats[seat];
