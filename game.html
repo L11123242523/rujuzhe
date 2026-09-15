@@ -3024,7 +3024,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     <div class="ol-row"><label>昵称</label><input id="olName" placeholder="你的昵称" maxlength="12"></div>
     <div class="ol-row" style="align-items:center;"><label>模式</label>
       <label style="font-size:13px;color:#cbd5e1;display:flex;align-items:center;gap:6px;cursor:pointer;">
-        <input type="checkbox" id="olEngineAuthority" style="cursor:pointer;">服务器权威（实验：双方对称，规则跑在服务器里）
+        <input type="checkbox" id="olEngineAuthority" checked style="cursor:pointer;">服务器权威（**默认**：双方对称，规则跑在服务器里）<span style="color:#94a3b8;">｜取消勾选＝旧协议（房主跑规则）</span>
       </label>
     </div>
     <div class="ol-row">
@@ -4973,13 +4973,14 @@ var Online = {
   /* ============================================================
    * C 阶段第 4 步 · 批次 3：**服务器权威模式**（客户端瘦身）
    * ------------------------------------------------------------
-   * authority:'host'   = 旧协议（默认，一字不变）：房主浏览器跑规则、客人只画。
+   * authority:'host'   = 旧协议（**退路**）：房主浏览器跑规则、客人只画。
    * authority:'server' = 双方对称：**两台机器都只是客户端**，规则跑在中继的 Durable Object 里。
    *   · 连接时带 ?engine=1、hello 里带 engine:true → 中继为这个房间建一份权威引擎；
    *   · 双方都只发 {t:'engine', m:{k:'act', a, args}}；
    *   · 双方都只收 {t:'engine', m:{k:'view'|'ev'|'ask'|...}}；
    *   · mySeat = 服务器给的引擎槽位（'p1'|'p2'），只用来"把服务器槽位翻译成本机视角"（日志人称）。
-   * 开关由联机大厅的 #olEngineAuthority 勾选框控制；不勾 = 旧路径。
+   * 开关由联机大厅的 #olEngineAuthority 勾选框控制：**默认勾上**（服务器权威）；取消勾选 = 旧路径。
+   * 另可用 URL 覆盖：?engine=0 强制旧协议、?engine=1 强制服务器权威。
    * ============================================================ */
   authority:'host', mySeat:'',
   _engineLogs:[],          // 服务器事件流里的日志镜像（服务器不写 battleState._logs，日志走事件流）
@@ -5027,7 +5028,17 @@ var Online = {
      _engineOpt()：读大厅里的勾选框（勾了才走服务器权威，默认不勾＝旧路径）。
      _roomUrl()  ：服务器权威模式下给 WS 地址带上 ?engine=1（中继的 /room 只认这个 + hello 里的 engine:true）。 */
   _engineOpt:function(){
-    try{ var el=document.getElementById('olEngineAuthority'); return !!(el && el.checked); }catch(e){ return false; }
+    /* 2026-09-15 起**默认服务器权威**（方案 C 的收尾）：勾选框默认勾上，显式取消才回旧协议。
+       URL 覆盖优先：?engine=0 强制旧协议（排障/回归），?engine=1 强制服务器权威（自动化）。
+       拿不到勾选框时（服务器式环境/无 DOM）也走新架构 —— 旧协议只是退路，不再是默认。 */
+    try{
+      var q = String((typeof location !== 'undefined' && location && location.search) || '');
+      if (/[?&]engine=0(&|$)/.test(q)) return false;
+      if (/[?&]engine=1(&|$)/.test(q)) return true;
+      var el = document.getElementById('olEngineAuthority');
+      if (el && typeof el.checked === 'boolean') return !!el.checked;
+      return true;
+    }catch(e){ return true; }
   },
   _isServerAuthority:function(){ return this.authority==='server'; },
   _roomUrl:function(code){
@@ -5525,20 +5536,25 @@ var Online = {
   /* 服务器侧的 __fxSendDice 在服务器上会直接 return（它要求 Online.active），
      所以骰子动画在服务器权威模式下没有 fx 可收。退一步：从**视图里的权威骰子结果**补一次本地动画。
      判据是 battleState[seat]._lastRolls（引擎把每次投掷结果写在那里，随视图下发）。
-     这是纯视觉：动画回调传 null，绝不推进规则；同一结果只播一次。 */
+     这是纯视觉：动画回调传 null，绝不推进规则；同一结果只播一次。
+     —— 2026-09-15 修：原来"没有投掷记录就直接 return"会把**基线**也一起跳过，
+     于是"本局第一次投骰"永远落到 `first=true` 分支被吃掉（双浏览器真机实测：两边都不出骰子）。
+     现在改成"每次都算签名并记基线、只有签名真的变了才播"，首次拿到的空记录也算一次基线。 */
   _syncDiceAnimFromView:function(){
     try{
       if(!battleState || typeof playDiceRollAnim!=='function') return;
       var self=this;
       ['p1','p2'].forEach(function(seat){
-        var p=battleState[seat]; if(!p || !p._lastRolls || !p._lastRolls.length) return;
-        var sig=p._lastRolls.join(',')+'@'+(p._nextDiceSides||6)+'@'+battleState.turn+'#'+battleState.round;
-        if(self._lastRollSig[seat]===sig) return;
-        var first=self._lastRollSig[seat]===undefined;
+        var p=battleState[seat]; if(!p) return;
+        var rolls=p._lastRolls||[];
+        var sig=rolls.join(',')+'@'+(p._nextDiceSides||6)+'@'+battleState.turn+'#'+battleState.round;
+        var prev=self._lastRollSig[seat];
         self._lastRollSig[seat]=sig;
-        if(first) return;                                   // 第一份视图只是建立基线，不补播
-        var val=p._lastRolls.reduce(function(a,b){ return (Number(a)||0)+(Number(b)||0); },0);
-        playDiceRollAnim(seat, val, p._nextDiceSides||6, p._lastRolls.length, null);
+        if(prev===undefined) return;                        // 第一次见到这个座位：只建基线
+        if(prev===sig) return;                              // 结果没变：不重复播
+        if(!rolls.length) return;                           // 变成"没有投掷记录"（换回合）：不播
+        var val=rolls.reduce(function(a,b){ return (Number(a)||0)+(Number(b)||0); },0);
+        playDiceRollAnim(seat, val, p._nextDiceSides||6, rolls.length, null);
       });
     }catch(e){}
   },
