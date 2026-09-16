@@ -5268,7 +5268,10 @@ var Online = {
     this._waitOppDeck(function(){
       if(self.isGuest){ self.status('已收到对手卡组，等待房主开始对局…'); return; }  // 客人等快照，不建局
       self.status('双方卡组已同步，对局建立中…');
+      // 标记"这次 startBattle 是联机开局"，startBattle 据此**不切单机卡组**（作者报的：联机用的是单机卡组）
+      self._startingOnlineBattle = true;
       try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
+      self._startingOnlineBattle = false;
       self._enteredBattle=true;
       self._savedAt=0; self._savedOnce=false;
       self._sendSnapshotNow({ full:true });   // 立刻把权威状态给客人（完整卡定义）
@@ -6846,6 +6849,13 @@ function onlineUseSkillP2(done) {
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({ name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+1 / γ回4同步+抽1馈赠 / δ献祭次数+1并造3理智', run: function (n) { onlineMegumiP2(n); } });
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({ name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', run: function (n) { onlineKoharuP2(n); } });
   if (p._lilySP && p._lilySPTurn !== T) options.push({ name: '莉莉·回收', desc: '墓地最下方1卡回牌组最下方，单次且新最下方非单次时视为使用并回1音韵', run: function (n) { onlineLilyP2(n); } });
+  // 琉璃(万圣祭)·回收 与 羽奈(往昔)·置顶：与 p1 的 useCharacterPassive 同表同序（联机按同一选项表问答）
+  if (p._liuliHWPassive && (p.permanent || []).some(function (c) { return c && c._category === 'item_permanent'; }) && (p.sync || 0) >= 3) {
+    options.push({ name: '琉璃(万圣祭)·回收', desc: '支付3点同步值，把自己效果处理区的一张永续卡收回手卡（当前同步' + (p.sync || 0) + '，可反复发动）', run: function (n) { onlineLiuliHWP2(n); } });
+  }
+  if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
+    options.push({ name: '羽奈(往昔)·置顶', desc: '把自己墓地最下方一张卡以正面朝上的形式放到牌组最上方（每回合一次）', run: function (n) { onlineYunaiPastP2(n); } });
+  }
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({ name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p2') + '）', run: function (n) { onlineEdwardP2(n); } });
   if ((p._guideCore || 0) > 0) options.push({ name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', run: function (n) { useGuideCore('p2'); n(); } });
   if (!options.length) { if (done) done(); return; }
@@ -6853,6 +6863,36 @@ function onlineUseSkillP2(done) {
     if (i == null || i === undefined || i < 0 || i >= options.length) { if (done) done(); return; }
     options[i].run(done);
   });
+}
+/* ---- 琉璃(万圣祭)·回收（主动发动；远端位 p2 侧镜像）---- */
+function onlineLiuliHWP2(done) {
+  var p = battleState.p2;
+  var perms = (p.permanent || []).filter(function (c) { return c && c._category === 'item_permanent'; });
+  if (!perms.length || (p.sync || 0) < 3) { if (done) done(); return; }
+  Online.awaitAnswer({ label: '琉璃(万圣祭)·回收永续卡（对手）', cards: perms.map(function (c) { return c.name; }), need: 1, allowLess: true }, function (v) {
+    var arr = Array.isArray(v) ? v : (v === null || v === undefined ? [] : [v]);
+    if (!arr.length) { addBattleLog('p2', '【琉璃(万圣祭)被动·来点喜欢的】取消了这次的回收'); updateBattleUI(); if (done) done(); return; }
+    var card = perms[arr[0]];
+    if (!card || (p.sync || 0) < 3) { if (done) done(); return; }
+    p.sync -= 3;
+    var ix = p.permanent.indexOf(card); if (ix >= 0) p.permanent.splice(ix, 1);
+    p.hand.push(card); card._addedByEffect = true;
+    if (typeof __emitAddHand === 'function') __emitAddHand('p2', card, 'permanent');
+    addBattleLog('p2', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
+    updateBattleUI();
+    if (done) done();
+  });
+}
+/* ---- 羽奈(往昔)②（主动发动；远端位 p2 侧镜像）---- */
+function onlineYunaiPastP2(done) {
+  var p = battleState.p2;
+  if (!(p.grave || []).length || p._yunaiPastTopTurn === battleState.turn) { if (done) done(); return; }
+  onlineDecideModal('p2', '羽奈(往昔)被动·憧憬的正义（对手）', '每个自己回合可以发动一次',
+    '将墓地最下方【' + p.grave[p.grave.length - 1].name + '】以正面朝上的形式放置在牌组最上方',
+    ['发动', '不发动'], function (o) {
+      if (o === 0) __yunaiPastTopApply('p2', function () { if (done) done(); });
+      else { if (done) done(); }
+    });
 }
 function onlineKasumiP2(done) {
   var p = battleState.p2;
@@ -7362,6 +7402,46 @@ var cardCategories = [
  *   · "没有移动却凭空触发所在格子的效果"（残留的挂起意图/结算窗口被重放）。
  * 返回被丢弃的项名数组，调用方可据此写可见日志。
  * ============================================================ */
+/** ============================================================
+ * 清掉战斗中的**浮层**（作者 2026-09-16 报："对战打完了效果框和各种框还在"）
+ * ------------------------------------------------------------
+ * 现象与成因：联机对局结束时房主/客人**都停在战斗界面**看结果面板（这是对的，见 __finishBattle 的说明），
+ * 但"结果面板"是浮层，底下那些战斗浮层从没被关掉 —— 结算流程框、连锁条、时点窗、选卡器……
+ * 于是打完以后它们还堆在结果面板后面（单机会 showScreen('mainMenu') 才顺带清掉，所以单机不明显）。
+ * 这里把"战斗浮层"收成一份清单统一关掉；对局结束时先清、再弹结果面板。
+ * ============================================================ */
+var __BATTLE_OVERLAY_IDS = ['choiceModal', 'cardModal', 'targetSelectModal', 'cardDetailModal', 'timingModal',
+  'effectLogModal', 'cardListModal', 'cardPicker', 'chainBar', 'onlineChainBar', 'resolveTimeline',
+  'turnBanner', 'emotePanel', 'handCardMenu'];
+function __clearBattleOverlays(reason) {
+  var cleared = [];
+  try {
+    __BATTLE_OVERLAY_IDS.forEach(function (id) {
+      try {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var on = !!(el.classList && (el.classList.contains('active') || el.classList.contains('show') || el.classList.contains('open')));
+        if (el.classList) { el.classList.remove('active'); el.classList.remove('show'); el.classList.remove('open'); }
+        if (on) cleared.push(id);
+      } catch (e) {}
+    });
+    // 骰子/抽卡动画区：这两处是 style.display 控制，不是 class
+    try { var da = document.getElementById('diceAnimationArea'); if (da) { if (da.style.display && da.style.display !== 'none') cleared.push('diceAnimationArea'); da.style.display = 'none'; } } catch (e) {}
+    try { var dr = document.getElementById('drawAnimOverlay'); if (dr) { if (dr.children && dr.children.length) cleared.push('drawAnimOverlay'); dr.innerHTML = ''; dr.style.display = 'none'; } } catch (e) {}
+    try { if (typeof hideResolveTimeline === 'function') hideResolveTimeline(); } catch (e) {}
+    try { if (typeof hideChainBar === 'function') hideChainBar(); } catch (e) {}
+    try { if (typeof Online !== 'undefined' && Online && Online._hideWaiting) Online._hideWaiting(); } catch (e) {}
+    // 弹窗句柄与队列（不清的话下一次开局会先弹上一次遗留的询问）
+    try { if (typeof pendingChoiceCallback !== 'undefined') pendingChoiceCallback = null; } catch (e) {}
+    try { if (typeof _choiceQueue !== 'undefined' && _choiceQueue) _choiceQueue.length = 0; } catch (e) {}
+    try { if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack) _cardPickerStack.length = 0; } catch (e) {}
+    try { if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue) _targetSelectQueue.length = 0; } catch (e) {}
+    try { if (typeof _targetSelectOpen !== 'undefined') _targetSelectOpen = false; } catch (e) {}
+  } catch (e) {}
+  if (cleared.length) { try { console.log('[UI] 清理战斗浮层（' + (reason || '') + '）：' + cleared.join('、')); } catch (e) {} }
+  return cleared;
+}
+
 function __clearTransientBattleState(why) {
   var dropped = [];
   try {
@@ -7387,9 +7467,8 @@ function __clearTransientBattleState(why) {
   try { if (typeof _targetSelectOpen !== 'undefined') _targetSelectOpen = false; } catch (e) {}
   try { if (typeof pendingChoiceCallback !== 'undefined') pendingChoiceCallback = null; } catch (e) {}
   try { if (typeof closeChoiceModal === 'function') closeChoiceModal(); } catch (e) {}
-  /* 残留浮层：骰子动画区、抽卡浮层、"等待对手"提示、对局结果面板 */
-  try { var da = document.getElementById('diceAnimationArea'); if (da) da.style.display = 'none'; } catch (e) {}
-  try { var dr = document.getElementById('drawAnimOverlay'); if (dr) { dr.innerHTML = ''; dr.style.display = 'none'; } } catch (e) {}
+  /* 残留浮层：骰子动画区、抽卡浮层、"等待对手"提示、结算流程框、连锁条、各种弹窗 */
+  try { if (typeof __clearBattleOverlays === 'function') __clearBattleOverlays(why || '清理临时战斗状态'); } catch (e) {}
   try { var ov = document.getElementById('resultOverlay'); if (ov && ov.classList) ov.classList.remove('active'); } catch (e) {}
   try { if (typeof Online !== 'undefined' && Online && Online._hideWaiting) Online._hideWaiting(); } catch (e) {}
   try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock(why || '清理临时战斗状态', 0); } catch (e) {}
@@ -8126,8 +8205,14 @@ function importDeckCode(player) {
 
 // ========== 对战 ==========
 function startBattle() {
-  // 单机对战使用「单机 vs AI 卡组」那一套（作者要求：与联机卡组分开）
-  try { setDeckMode('pve', true); } catch (e) {}
+  /* ⚠ 这里**必须**区分单机与联机（作者 2026-09-16 报："联机对战使用的卡组还是单机对战的卡组"）：
+     联机房主开局走的也是 startBattle()（见 Online._onGameStart 里的 startBattle() 调用），
+     而本函数第一行就会 setDeckMode('pve') 把卡组切到"单机 vs AI"那一套 ——
+     于是联机对局里房主用的是自己上一次编辑的单机卡组（客人不受影响：客人不发牌组、等快照）。
+     修法：只有**不在联机对局中**时才切单机卡组。 */
+  var __inOnlineMatch = false;
+  try { __inOnlineMatch = !!(typeof Online !== 'undefined' && Online && Online.active && Online._startingOnlineBattle); } catch (e) {}
+  if (!__inOnlineMatch) { try { setDeckMode('pve', true); } catch (e) {} }
   // 检查双方卡组是否完整
   for (var player of playerIds()) {
     var config = deckConfig[player];
@@ -9371,9 +9456,8 @@ function startTurn() {
 
   var player = battleState.currentPlayer;
 
-  // 自己回合开始阶段：新卡角色可选能力（羽奈(往昔)墓地置顶 / 琉璃(万圣祭)付同步回收永续卡）。
-  // 用 setTimeout 延后到本回合开始栈退出后，避免弹窗打断 startTurn 的准备/回复流程。
-  if (typeof __newCharTurnStartOffers === 'function') __newCharTurnStartOffers(player);
+  // 注（2026-09-16）：这里曾放"新卡角色可选能力（羽奈(往昔)置顶 / 琉璃(万圣祭)回收）"的回合开始弹窗 ——
+  // 那张卡面写的是"可以发动"，属于**自己回合内主动发动**，已改挂「角色技能」菜单，故此处不再弹窗。
 
   // 自己回合开始：流逝上一行动周期的“按行动计数”持续效果（状态/延迟移出/过载）
   advanceActionLapse(player);
@@ -10117,7 +10201,7 @@ function resolveChainStack(effect, onDone) {
       }
     }
   }
-  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} }
+  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -10369,7 +10453,7 @@ function beforeEffectExecution(effect, callback) {
   var __c1who = (effect && (effect.player || effect.user)) || 'p1';
   if (__c1card) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
-  function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
+  function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
@@ -10591,7 +10675,7 @@ function executeMoveEffect(effect) {
   __eeMarkInc('executeMoveEffect·移动投掷结算');
   if(__eeM)__eeM._resolveDepth=(__eeM._resolveDepth||0)+1;
   var __releasedM=false;
-  function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
+  function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   // 异常安全：移动落地/踩格级联中任何抛出都要释放结算锁，否则深度残留会锁死全场操作
   try {
   runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
@@ -12153,13 +12237,20 @@ function checkBattleEnd() {
    * 想退出时玩家自己点返回（那时才 leave）。
    * ============================================================ */
   function __finishBattle(win, title, desc) {
-    try { showBattleResult(win, title, desc, __endStats()); } catch (e) {}
+    /* 顺序（作者 2026-09-16 报："对战打完了效果框和各种框还在"）：
+       必须先**清战斗浮层 + 切界面**，最后才弹结果面板 —— 因为 `showScreen('mainMenu')`
+       会走 __clearTransientBattleState（其中包含"关掉结果面板"这一条），
+       反过来先弹面板就会被那一步顺手关掉；而联机分支不切界面，浮层原本根本没人清。
+       所以两个分支统一成：清浮层 → （单机）回主菜单 → 弹结果面板。 */
+    try { if (typeof __clearBattleOverlays === 'function') __clearBattleOverlays('对局结束'); } catch (e) {}
     if (__ol) {
+      try { showBattleResult(win, title, desc, __endStats()); } catch (e) {}
       try { if (Online.active && !Online.isGuest && Online._sendSnapshotNow) Online._sendSnapshotNow({ full: true }); } catch (e) {}
       try { if (Online.status) Online.status('对局已结束：' + title); } catch (e) {}
       return;
     }
     try { showScreen('mainMenu'); } catch (e) {}
+    try { showBattleResult(win, title, desc, __endStats()); } catch (e) {}
     __olEnd();
   }
   // 同步值归零判定（常规获胜）
@@ -12555,6 +12646,16 @@ function useCharacterPassive() {
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+1 / γ回4同步+抽1馈赠 / δ献祭次数+1并造3理智', action: activateMegumiSP});
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
   if (p._lilySP && p._lilySPTurn !== T) options.push({name: '莉莉·回收', desc: '墓地最下方1卡回牌组最下方，单次且新最下方非单次时视为使用并回1音韵', action: activateLilySP});
+  /* 琉璃(万圣祭)·回收 —— 作者 2026-09-16 纠正：卡面"可以支付3点同步值来回收自己效果处理区的永续种类的卡"
+     是**自己回合内可以主动发动**的效果，不是回合开始自动弹窗。挂进这张"角色技能"菜单（与莉莉·回收同款）。
+     卡面未写次数限制 ⇒ 不做每回合限制（由 3 点同步值的成本自然限流，可反复发动）。 */
+  if (p._liuliHWPassive && (p.permanent || []).some(function (c) { return c && c._category === 'item_permanent'; }) && (p.sync || 0) >= 3) {
+    options.push({name: '琉璃(万圣祭)·回收', desc: '支付3点同步值，把自己效果处理区的一张永续卡收回手卡（当前同步' + (p.sync || 0) + '，可反复发动）', action: activateLiuliHWRecycle});
+  }
+  /* 羽奈(往昔)②：卡面"每个自己回合可以发动一次"同样是主动发动 → 也挂进本菜单（不在回合开始自动弹窗） */
+  if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
+    options.push({name: '羽奈(往昔)·置顶', desc: '把自己墓地最下方一张卡以正面朝上的形式放到牌组最上方（每回合一次）', action: activateYunaiPastTop});
+  }
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p1') + '）', action: activateEdwardSP});
   if ((p._guideCore || 0) > 0) options.push({name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', action: function(){ useGuideCore('p1'); }});
   if (options.length === 0) { showToast('当前没有可发动的角色技能', 'warn'); return; }
@@ -12638,6 +12739,53 @@ function activateEdwardSP() {
   });
 }
 // AI 主动型 SP 决策（玩家由 useCharacterPassive 手动发动；AI 自动按收益发动，每回合一次门控一致）
+// ===== 琉璃(万圣祭)·回收（主动发动；p1 侧）=====
+// 卡面：「此外，琉璃可以支付3点同步值来回收自己效果处理区的永续种类的卡。」
+// 口径：无次数限制（由同步值成本限流）；"回收"=加入手卡（与结构化指令层"加入手卡|回收"同义）。
+function activateLiuliHWRecycle() {
+  if (__resolveLocked()) return;
+  var p = battleState.p1;
+  var perms = (p.permanent || []).filter(function (c) { return c && c._category === 'item_permanent'; });
+  if (!perms.length) { showToast('效果处理区没有永续卡可回收', 'warn'); return; }
+  if ((p.sync || 0) < 3) { showToast('同步值不足3点，无法回收', 'warn'); return; }
+  showCardPickerMulti(perms, '琉璃(万圣祭)·回收：选一张永续卡收回手卡（支付3点同步值，可反复发动）', function (sel) {
+    var arr = Array.isArray(sel) ? sel : (sel === null || sel === undefined ? [] : [sel]);
+    if (!arr.length) { addBattleLog('p1', '【琉璃(万圣祭)被动·来点喜欢的】取消了这次的回收'); updateBattleUI(); return; }
+    var card = perms[arr[0]];
+    if (!card || (p.sync || 0) < 3) return;
+    p.sync -= 3;
+    var ix = p.permanent.indexOf(card); if (ix >= 0) p.permanent.splice(ix, 1);
+    p.hand.push(card); card._addedByEffect = true;
+    if (typeof __emitAddHand === 'function') __emitAddHand('p1', card, 'permanent');
+    addBattleLog('p1', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
+    updateBattleUI();
+  }, 1, true);
+}
+// ===== 羽奈(往昔)②（主动发动，每回合一次；p1 侧）=====
+function __yunaiPastTopApply(player, done) {
+  done = done || function () {};
+  var p = battleState && battleState[player];
+  if (!p) { done(); return false; }
+  var top = (p.grave || [])[p.grave.length - 1];
+  if (!top) { done(); return false; }
+  p._yunaiPastTopTurn = battleState.turn;
+  var ix = p.grave.indexOf(top); if (ix >= 0) p.grave.splice(ix, 1);
+  p.deck.unshift(top);          // 牌组最上方 = deck[0]（takeTopCard 走 shift）
+  top._faceUp = true;           // 正面朝上 → 计入本角色SP的"公开的卡"
+  if (typeof setDeckTopCard === 'function') setDeckTopCard(player, top, '羽奈(往昔)被动·憧憬的正义');
+  addBattleLog(player, '【羽奈(往昔)被动·憧憬的正义】墓地最下方【' + top.name + '】以正面朝上放到牌组最上方（公开的卡' + __publicCardCount(p) + '张）');
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+  done();
+  return true;
+}
+function activateYunaiPastTop() {
+  if (__resolveLocked()) return;
+  var p = battleState.p1;
+  if (!(p.grave || []).length) { showToast('墓地没有卡', 'warn'); return; }
+  // 每回合一次的兜底（菜单项本身已经按这个条件过滤；这里再挡一次，避免被别的入口直呼）
+  if (p._yunaiPastTopTurn === battleState.turn) { showToast('羽奈(往昔)·置顶本回合已经发动过了', 'warn'); return; }
+  __yunaiPastTopApply('p1', function () {});
+}
 function aiUseActiveSP(player, done) {
   __setAiSeat(player);
   var p = battleState[player], T = battleState.turn, foe = foeOf(player);
@@ -12684,6 +12832,25 @@ function aiUseActiveSP(player, done) {
       var __ok2 = lc._category === 'item_single' && (!__nb2 || __nb2._category !== 'item_single');
       if (__ok2) { recoverCost(player, 1, '莉莉SP[AI]'); if (lc.effect && typeof dispatchStep === 'function') { dispatchStep(lc.effect || lc.text || '', { user: player, target: foe, card: lc }, function () { setTimeout(next, 250); }); return; } }
       setTimeout(next, 250); return;
+    }
+    // 琉璃(万圣祭)·回收（主动）：同步值充裕（≥6，留出3点成本后仍有富余）时回收效果处理区的永续卡。
+    // 一次行动只回收1张（避免 AI 把同步值一口气打空）
+    if (p._liuliHWPassive && (p.sync || 0) >= 6) {
+      var __lp = (p.permanent || []).filter(function (c) { return c && c._category === 'item_permanent'; });
+      if (__lp.length) {
+        var __lc = __lp[0];
+        p.sync -= 3;
+        var __lix = p.permanent.indexOf(__lc); if (__lix >= 0) p.permanent.splice(__lix, 1);
+        p.hand.push(__lc); __lc._addedByEffect = true;
+        if (typeof __emitAddHand === 'function') __emitAddHand(player, __lc, 'permanent');
+        L('AI【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值回收【' + __lc.name + '】加入手卡（同步' + p.sync + '）');
+        setTimeout(next, 250); return;
+      }
+    }
+    // 羽奈(往昔)②（主动，每回合一次）：墓地最下方一张卡正面朝上放牌组最上方（AI 视为纯收益，直接发动）
+    if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
+      __yunaiPastTopApply(player, function () { setTimeout(next, 250); });
+      return;
     }
     // 露璐缇雅·破坏：破坏者≥3 时破坏对手区域1张，然后其回4音韵
     if (p._edwardSP && p._edwardSPTurn !== T && typeof __breakerCount === 'function' && __breakerCount(player) >= 3) {
@@ -13588,8 +13755,13 @@ function __updateBattleUI_impl() {
           (battleState.p1.eventCards || []).map(function(c) { return c.name + '#' + ((c._isMusic || c._category === 'music_cards') ? 'M' : 'E'); }).join(',');
         if (__handSig !== window.__lastHandSig) {
           window.__lastHandSig = __handSig;
-          // 诊断：主要阶段内手牌全部不可用时，把各卡原因写入战斗日志（玩家可复制反馈）
-          if (isPlayerTurn && isActionPhase && battleState.p1.hand.length > 0 &&
+          // 诊断：主要阶段内手牌全部不可用时，把各卡原因写入战斗日志（玩家可复制反馈）。
+          // 注意（2026-09-16）：**结算进行中不写这条**。收尾路径是"先渲染、后释放锁"，渲染时整副手牌
+          // 都因为"效果/连锁结算中"而不可用 —— 这时写进日志的提示会永久留在日志里，
+          // 玩家回传后看起来就像"卡死了"，而实际上那一瞬间是正常的（作者反复报的正是这条）。
+          // 真正的"全部不可用"（耐久理由）才值得记账。
+          var __eeBusyNow = (typeof __eeLocked === 'function') ? __eeLocked() : false;
+          if (isPlayerTurn && isActionPhase && !__eeBusyNow && battleState.p1.hand.length > 0 &&
               battleState.p1.hand.every(function (c) { return !evaluatePlayable(c, 'p1').ok; })) {
             addBattleLog('system', '【提示】当前阶段手牌全部不可用：' + battleState.p1.hand.map(function (c) { var __pv2 = evaluatePlayable(c, 'p1'); return c.name + '（' + (__pv2.reason || '未知') + '）'; }).join('；') + '。也可点击灰色卡查看具体原因。');
           }
@@ -14548,6 +14720,39 @@ function __eeIdleForSnapshot() {
     return '';
   } catch (e) { return '判据异常：' + (e && e.message); }
 }
+/** 锁释放后**补一次手牌重渲染**（这是修复，不是可选优化）
+ * ------------------------------------------------------------
+ * 作者报："手牌全灰，但实际卡牌效果早就全部结算好了"——确定性复现（lock_release_refresh_test.js）：
+ *   收尾路径的写法是 `function __tail(){ updateBattleUI(); checkBattleEnd(); __relD(); … }`，
+ *   也就是**先渲染、后释放**：那次渲染看到的还是"锁着"的状态，于是把整副手牌画成
+ *   `opacity:0.4 grayscale` 并把 data-block-reason 写成"效果/连锁结算中"；
+ *   紧接着 `__relD()` 把锁放掉，**却没有任何一次重渲染** → 手牌 DOM 永久停在灰色快照上，
+ *   玩家点灰卡弹出的还是那条旧理由（引擎内部其实已经完全空闲）。
+ *   别处偶尔会补一次 updateBattleUI，所以现象是"经常"而不是"每次"。
+ * 这里统一在"锁真的归零"时补一次刷新（去抖，且只在确实不锁时刷，避免刷成灰的）。
+ * 调用点：所有把 _resolveDepth/_chainLock 归零的收尾函数（见 __relD / __releaseB / __relM /
+ * runOps 收尾 / processSingleEffect 收尾 / __endChain）。 */
+function __eeAfterRelease() {
+  try {
+    var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    if (!ee) return;
+    if ((ee._resolveDepth || 0) > 0 || ee._chainLock) return;   // 还锁着：现在刷只会刷成灰的
+    if (ee._uiRefreshSoon) return;
+    ee._uiRefreshSoon = true;
+    setTimeout(function () {
+      ee._uiRefreshSoon = false;
+      try {
+        if ((ee._resolveDepth || 0) > 0 || ee._chainLock) return;
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+        /* 联机：客人能不能出手是**房主随快照下发的**（Online.playableOf）。房主这边手牌刷新了，
+           客人那边还停在"锁着"的那份判定上 —— 所以放锁时必须补推一份快照。
+           （与 __eeForceUnlock 同款动作；去抖标记保证不会连推。） */
+        if (typeof Online !== 'undefined' && Online && Online.active && !Online.isGuest &&
+            typeof Online._sendSnapshotNow === 'function') Online._sendSnapshotNow();
+      } catch (e) {}
+    }, 0);
+  } catch (e) {}
+}
 /** 真正把过期锁放掉（放行判定与看门狗共用，避免两处行为漂移）；返回是否真的放了 */
 function __eeForceUnlock(whyTag, idleMs) {
   try {
@@ -14639,7 +14844,7 @@ function __resolveLocked() {
   // 自愈：没有活动连锁却残留深度，说明某条链异常退出，累计到阈值直接复位，避免整局锁死
   if ((effectEngine._resolveDepth || 0) > 0 && !effectEngine._chainLock && !effectEngine._activeChain) {
     effectEngine._stuckCount = (effectEngine._stuckCount || 0) + 1;
-    if (effectEngine._stuckCount > 40) { console.warn('检测到残留结算深度，已复位'); effectEngine._resolveDepth = 0; effectEngine._stuckCount = 0; }
+    if (effectEngine._stuckCount > 40) { console.warn('检测到残留结算深度，已复位'); effectEngine._resolveDepth = 0; effectEngine._stuckCount = 0; try { __eeAfterRelease(); } catch (e) {} }
   } else { effectEngine._stuckCount = 0; }
   // 统一走 __eeLocked()：过期锁（空闲 4 秒且没人在等）不再拦人，并把原因写清楚
   if (typeof __eeLocked === 'function' ? __eeLocked() : ((effectEngine._resolveDepth > 0) || effectEngine._chainLock)) {
@@ -16341,78 +16546,10 @@ onTiming(TIMING.ON_RECOVER_COST, function (ctx, next) {
 // 远端人类座（Online.active 且 player==='p2'）走 onlineDecideModal 由主机权威结算；AI 座自动决策。
 // ============================================================
 
-// 羽奈(往昔)被动②（每个自己回合一次）：将自己墓地最下方的一张卡以正面朝上的形式放置在牌组最上方
-function __yunaiPastTopOffer(player, done) {
-  done = done || function () {};
-  var p = battleState && battleState[player];
-  if (!p || !p._yunaiPastPassive || !(p.grave || []).length || p._yunaiPastTopTurn === battleState.turn) { done(); return; }
-  var top = p.grave[p.grave.length - 1];
-  if (!top) { done(); return; }
-  var __use = function () {
-    p._yunaiPastTopTurn = battleState.turn;
-    var ix = p.grave.indexOf(top);
-    if (ix >= 0) p.grave.splice(ix, 1);
-    p.deck.unshift(top);           // 牌组最上方 = deck[0]（takeTopCard 走 shift）
-    top._faceUp = true;            // 正面朝上 → 计入"公开的卡"（本角色SP取数）
-    if (typeof setDeckTopCard === 'function') setDeckTopCard(player, top, '羽奈(往昔)被动·憧憬的正义');
-    addBattleLog(player, '【羽奈(往昔)被动·憧憬的正义】墓地最下方【' + top.name + '】以正面朝上放在牌组最上方（公开的卡' + __publicCardCount(p) + '张）');
-    if (typeof updateBattleUI === 'function') updateBattleUI();
-    done();
-  };
-  var __opts = ['发动', '不发动'];
-  var __desc = '将墓地最下方【' + top.name + '】以正面朝上的形式放置在牌组最上方';
-  if (player === 'p1' && typeof showChoiceModal === 'function') {
-    showChoiceModal('羽奈(往昔)被动·憧憬的正义', '每个自己回合可以发动一次', __desc, __opts, function (o) { if (o === 0) __use(); else done(); });
-    return;
-  }
-  if (typeof Online !== 'undefined' && Online.active && player === 'p2' && typeof onlineDecideModal === 'function') {
-    onlineDecideModal('p2', '羽奈(往昔)被动·憧憬的正义（对手）', '每个自己回合可以发动一次', __desc, __opts, function (o) { if (o === 0) __use(); else done(); });
-    return;
-  }
-  __use();   // AI 自动发动（纯收益：公开的卡会强化本角色SP）
-}
-
-// 琉璃(万圣祭)被动③：可以支付3点同步值来回收自己效果处理区的永续种类的卡（收回手卡）。
-// 卡面未写次数限制 ⇒ 不做每回合限制，由同步值成本自然限流；在自己回合开始阶段提供发动窗口，可连续发动直到不满足条件。
-function __liuliHWRecycleOffer(player, done) {
-  done = done || function () {};
-  var p = battleState && battleState[player];
-  if (!p || !p._liuliHWPassive) { done(); return; }
-  var __perms = (p.permanent || []).filter(function (c) { return c && c._category === 'item_permanent'; });
-  if (!__perms.length || (p.sync || 0) < 3) { done(); return; }
-  var __again = false;
-  var __after = function () { if (__again) __liuliHWRecycleOffer(player, done); else done(); };
-  var __use = function (pickIdx) {
-    var card = __perms[pickIdx] || __perms[0];
-    if (!card || (p.sync || 0) < 3) { __after(); return; }
-    p.sync -= 3;
-    var ix = p.permanent.indexOf(card);
-    if (ix >= 0) p.permanent.splice(ix, 1);
-    p.hand.push(card);
-    card._addedByEffect = true;
-    if (typeof __emitAddHand === 'function') __emitAddHand(player, card, 'permanent');
-    addBattleLog(player, '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
-    __again = true;
-    if (typeof updateBattleUI === 'function') updateBattleUI();
-    __after();
-  };
-  var __labels = __perms.map(function (c) { return '回收【' + c.name + '】'; });
-  __labels.push('不发动');
-  var __pick = function (i) {
-    if (i === undefined || i === null || i >= __perms.length) { __again = false; done(); return; }
-    __use(i);
-  };
-  if (player === 'p1' && typeof showChoiceModal === 'function') {
-    showChoiceModal('琉璃(万圣祭)被动·来点喜欢的', '支付3点同步值回收自己效果处理区的永续卡（当前同步' + p.sync + '）', '选择要回收的卡（可反复发动）', __labels, __pick);
-    return;
-  }
-  if (typeof Online !== 'undefined' && Online.active && player === 'p2' && typeof onlineDecideModal === 'function') {
-    onlineDecideModal('p2', '琉璃(万圣祭)被动·来点喜欢的（对手）', '支付3点同步值回收自己效果处理区的永续卡（当前同步' + p.sync + '）', '选择要回收的卡（可反复发动）', __labels, __pick);
-    return;
-  }
-  // AI：同步值充裕（≥6）时回收第一张，避免把同步值打空
-  if ((p.sync || 0) >= 6) __use(0); else done();
-}
+// 注：羽奈(往昔)② 与 琉璃(万圣祭)③ 原先各有一份"回合开始自动弹窗"的实现（__yunaiPastTopOffer /
+// __liuliHWRecycleOffer）—— 那是错的口径（卡面写"可以发动"＝自己回合内主动发动），已删除，
+// 统一改挂「角色技能」菜单：p1 = activateYunaiPastTop / activateLiuliHWRecycle，
+// p2 = onlineYunaiPastP2 / onlineLiuliHWP2，AI = aiUseActiveSP 内的分支，效果本体 = __yunaiPastTopApply。
 
 // XHZD SP：队伍可以在每名玩家的回合结束阶段支付音律值来回复等同于支付数值2倍的同步值
 function __xhzdEndPhaseOffer(player, done) {
@@ -16448,17 +16585,9 @@ function __xhzdEndPhaseOffer(player, done) {
   if ((p.sync || 0) * 2 < (p.maxSync || 10)) __use(1); else done();
 }
 
-// 回合开始阶段：新卡角色的可选能力统一入口（延迟到当前回合开始栈退出后再弹窗，避免干扰 startTurn 流程）
-function __newCharTurnStartOffers(player) {
-  if (!battleState || !battleState[player]) return;
-  setTimeout(function () {
-    try {
-      __yunaiPastTopOffer(player, function () {
-        __liuliHWRecycleOffer(player, function () {});
-      });
-    } catch (e) { console.error('turn start newchar offers', e); }
-  }, 0);
-}
+/* 说明（作者 2026-09-16 纠正）：琉璃(万圣祭)的"回收"与羽奈(往昔)②的"置顶"都是**自己回合内主动发动**的效果，
+   原先我给它们做成了"回合开始自动弹窗"——那是错的。现在两条都挂进「角色技能」菜单
+   （useCharacterPassive / onlineUseSkillP2 / aiUseActiveSP 三侧同表），这里不再有任何回合开始的自动弹窗。 */
 
 // 极夜君王之冕（道具/永续）：每回合首次造成判定伤害后可以选择一项发动
 //  ①随机将自己的一张手卡移出游戏，然后再造成一次"同等数值"的判定伤害（同等数值=上一次判定伤害的结算值）
@@ -16601,12 +16730,22 @@ function computeDamageValue(user, target, opt) {
   // 规则：判定伤害不吃属性克制增伤（含克制伤害+N、领域克制强化），故 opt.judge 时整段跳过
   // 口径补充（2026-09-16）：自己对自己造成的伤害（opt.selfInflicted）不产生属性克制关系 —— 自己不是自己的克制对象
   // 口径补充：XHZD被动指定的"那张攻击卡"造成伤害时不适用属性克制关系（按卡名标记，联机下判定在主机侧，标记随卡实例即可）
+  // 琉璃(万圣祭)被动【来点喜欢的】的**同一个条件**管两件事（作者 2026-09-16 纠正）：
+  //   "琉璃使用费用小于等于3的卡造成的最终伤害+1，**如果产生属性克制关系则那次属性克制伤害+1**"
+  //   → 克制那一份 +1 也必须**限定在费用≤3的卡**上；旧实现把它写成全局 _attrBonus+=1，
+  //     于是任何费用的卡打出克制都白拿 +1（明显的条件错误）。
+  var __lhwOk = false;
+  if (ap._liuliHWPassive && sc) {
+    var __lhwCost = (typeof computeActualCost === 'function') ? computeActualCost(sc, user) : Number(sc.cost);
+    __lhwOk = !isNaN(__lhwCost) && __lhwCost <= 3;
+  }
   if (!opt.judge && !opt.selfInflicted && sc && (ap._xhzdNoCounterNames || []).indexOf(sc.name) >= 0) { /* 该卡不适用属性克制：跳过下面整段 */ }
   else if (!opt.judge && !opt.selfInflicted && __bAttr && defAttr && typeof __attrBeats === 'function' && __attrBeats(__bAttr, defAttr)) {
     var __cadd = 1;
     if (__dom.counterAdd && (!__dom.counterAttr || __normAttr(__bAttr) === __normAttr(__dom.counterAttr))) { __cadd += __dom.counterAdd; logs.push('领域克制强化（' + __normAttr(__dom.counterAttr) + '）克制部分+' + __dom.counterAdd); }
     final += __cadd; logs.push('属性克制（' + __normAttr(__bAttr) + '克' + __normAttr(defAttr) + '）最终+' + __cadd);
     if (ap._attrBonus) { final += ap._attrBonus; logs.push('克制伤害+' + ap._attrBonus); }
+    if (__lhwOk) { final += 1; logs.push('琉璃(万圣祭)被动·该卡费用≤3且产生克制→克制伤害+1'); }
   }
   // 括号外②：判定伤害+
   var __jb = (ap._judgeDamageBonus || 0) + (opt.judge ? (__dom.judgeBonus || 0) : 0);
@@ -16629,12 +16768,8 @@ function computeDamageValue(user, target, opt) {
   if (isAtk && hasPerm('善意面具')) { final += 1; logs.push('善意面具·攻击卡最终+1'); }
   if ((kind === 'fervor' || /热忱/.test(__bAttr || '')) && (ap._nextFervorFinalUp || 0) > 0) { var __ffu = ap._nextFervorFinalUp; final += __ffu; ap._nextFervorFinalUp = 0; logs.push('琉璃(水着)被动·下次热忱最终伤害+' + __ffu + '（已消耗）'); }
   // ===== 新卡伤害侧钩子（2026-09-16 加入的 7 张卡）=====
-  // 琉璃(万圣祭)被动·来点喜欢的：费用≤3的卡造成的最终伤害+1
-  // 口径：按"实际支付费用"（computeActualCost，含减费类被动）判定；卡面无判定伤害排除语，故判定伤害同样适用
-  if (ap._liuliHWPassive && sc) {
-    var __lhwCost = (typeof computeActualCost === 'function') ? computeActualCost(sc, user) : Number(sc.cost);
-    if (!isNaN(__lhwCost) && __lhwCost <= 3) { final += 1; logs.push('琉璃(万圣祭)被动·费用≤3最终+1'); }
-  }
+  // 琉璃(万圣祭)被动·来点喜欢的：费用≤3的卡造成的最终伤害+1（条件与上面克制那一份共用 __lhwOk）
+  if (__lhwOk) { final += 1; logs.push('琉璃(万圣祭)被动·费用≤3最终+1'); }
   // XHZD被动·"这是我的招式"：自己使用的攻击卡最终伤害+1
   if (ap._xhzdPassive && isAtk) { final += 1; logs.push('XHZD被动·攻击卡最终+1'); }
   // 羽奈(往昔)SP：自己每有一张公开的卡，全队造成的最终伤害+1（公开的卡=正面朝上留在牌组顶/墓地/效果处理区的卡）
@@ -17391,7 +17526,7 @@ function runOps(ops, ctx, done) {
   if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
   var i = 0;
   (function step() {
-    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} return; }
+    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
@@ -17539,6 +17674,7 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
   
   function __finalize() {
     if(__ee2)__ee2._resolveDepth=Math.max(0,(__ee2._resolveDepth||1)-1);
+    try { __eeAfterRelease(); } catch (e) {}
     // 所有步骤执行完成
     if (showLog !== false) showEffectLog();
     effectEngine.effectLog = __prevLog;
@@ -18836,7 +18972,7 @@ function activateGraveSP(zone, idx) {
   if (zone !== 'grave') { showToast('该效果需在这张卡位于墓地时发动（把自身从墓地移出游戏）；它已在移出游戏区，不能再次发动', 'warn'); return; }
   if (typeof effectEngine!=='undefined' && effectEngine) {
     if (effectEngine._chainLock && (typeof __eeWaitReason !== 'function' || __eeWaitReason() || (Date.now() - (effectEngine._stuckSince || 0)) < __EE_STALE_MS)) { showToast('连锁逆结算中，不能插入发动', 'warn'); return; }
-    if (effectEngine._resolveDepth>0) { console.warn('墓地SP：检测到残留结算深度，已自动复位'); effectEngine._resolveDepth=0; }
+    if (effectEngine._resolveDepth>0) { console.warn('墓地SP：检测到残留结算深度，已自动复位'); effectEngine._resolveDepth=0; try { __eeAfterRelease(); } catch (e) {} }
   }
   if (!__graveSPAllowed()) { showToast('墓地SP只能在自己的主要阶段发动', 'warn'); return; }
   var def = __graveSPDef(card); if (!def) return;
@@ -19245,8 +19381,9 @@ function processCharacterPassives(player) {
       // ③可支付3点同步值回收自己效果处理区的永续种类的卡 —— 无次数限制（卡面未写），由同步值成本自然限流；在自己回合开始阶段提供发动窗口
       if (charName.indexOf('琉璃') >= 0 && charName.indexOf('万圣祭') >= 0) {
         p._liuliHWPassive = true;
-        p._attrBonus = (p._attrBonus || 0) + 1;
-        addBattleLog(player, '【琉璃(万圣祭)被动·来点喜欢的】费用≤3的卡最终伤害+1；属性克制伤害+1；可付3点同步值回收效果处理区永续卡');
+        // 注意：**不要**在这里给 _attrBonus 加 1 —— 那会把"费用≤3才有的克制+1"变成全局克制+1。
+        // 克制那一份由伤害出口的 __lhwOk（费用≤3判定）与费用加伤共用同一个条件。
+        addBattleLog(player, '【琉璃(万圣祭)被动·来点喜欢的】自己费用≤3的卡最终伤害+1、且该卡产生属性克制时那次克制伤害+1；可在自己回合主动支付3点同步值回收效果处理区的永续卡');
       }
 
       // ===== 羽奈(往昔)被动【憧憬的正义】（仅队长）=====
@@ -20051,7 +20188,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
   var __releasedD=false;
-  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} }
+  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   try {
   var p = battleState[target];
   if (p) p._lastHitTaken = 0; // C16 “命中且造成N点以上伤害后可以打落”类条件：每次伤害结算前先清零本次实际伤害记录
