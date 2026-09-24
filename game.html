@@ -10238,6 +10238,15 @@ var TW = {
       }
       var aiIdx = -1;
       try { var __cg = (typeof globalThis !== 'undefined') ? globalThis : ((typeof window !== 'undefined') ? window : null); if (__cg && typeof __cg.__aiChainDecide === 'function') aiIdx = __cg.__aiChainDecide(who, pool, win.chain.slice()); } catch (e) { aiIdx = -1; }
+      /* AI 决策：没有外部钩子时回落到引擎自己的 aiDecideChain（判定窗口历来用它）。
+         它返回的是 collectChainable 的 pick 对象，所以按 pick 身份映射回候选下标。 */
+      if (aiIdx < 0 && typeof aiDecideChain === 'function') {
+        try {
+          var __picks = pool.map(function (c) { return c.pick; }).filter(Boolean);
+          var __chosen = aiDecideChain(__picks, win.effect || {}, who);
+          if (__chosen) { for (var __zi = 0; __zi < pool.length; __zi++) { if (pool[__zi].pick === __chosen) { aiIdx = __zi; break; } } }
+        } catch (e) { aiIdx = -1; }
+      }
       if (aiIdx < 0 && isAISeat(who) && typeof aiActivateFaceDown === 'function') {
         var lastNode = win.chain.length ? win.chain[win.chain.length - 1] : null;
         var fdIdx = aiPickFaceDownForWindow(lastNode || {}, who);
@@ -10261,6 +10270,8 @@ var TW = {
       onlineDecideModal('p1', __title, __body, __hint, opts, pickP1);
       return;
     }
+    /* 部分窗口（判定结果确定前）历来用 showChoiceModal 而非连锁专用弹窗 —— 由调用方声明，保持 UX 不变 */
+    if (win.useChoiceModal && typeof showChoiceModal === 'function') { showChoiceModal(__title, __body, __hint, opts, pickP1); return; }
     showChainChoice(__title, __body, __hint + '（超时自动放弃）', opts, pickP1);
   },
   /** settle：从最大 C 逆序结算；每节点做 alive 校验；异常只跳当前节点 */
@@ -10741,12 +10752,23 @@ function runResponseWindow(opts) {
   var effect = opts.effect || {};
   var initiator = opts.initiator || effect.player || effect.user || 'p1';
   var firstSide = opts.firstSide || (othersOf(initiator)[0] || foeOf(initiator));
+  /* 发动函数可注入：效果将要执行前用 applyChainCard（付费+移出+入 effect._chain）；
+     判定结果确定前用的是 applyJudgeChain（改点/重判，改的是 je.val/_reverseDir）。
+     不注入则默认 applyChainCard —— 这样"循环只有一份，发动语义按窗口给"。 */
+  var activateFn = (typeof opts.activate === 'function') ? opts.activate
+    : function (side, pick, eff, done) { applyChainCard(side, pick, eff, done); };
+  var useChoiceModal = !!opts.p1Modal && opts.p1Modal === 'choice';   // 该窗口的 p1 弹窗沿用 showChoiceModal
   TW.open({
     type: opts.type || 'response',
     tp: firstSide,
     candidates: [],
+    effect: effect,
+    useChoiceModal: useChoiceModal,
     scan: function () {
       var out = [];
+      /* 动作/判定已被连锁无效（negate）⇒ 不再提供候选：双方随即连续 PASS 关窗，
+         与旧循环里"proceed() 发现 cancelled 就立刻收尾"语义一致（保真，不是新规则）。 */
+      if (effect.cancelled) return out;
       playerIds().forEach(function (side) {
         var list = [];
         try { list = collectChainable(side, effect) || []; } catch (e) { list = []; }
@@ -10757,9 +10779,9 @@ function runResponseWindow(opts) {
             mandatory: false,
             pick: pick,
             alive: function () { return true; },
-            /* 入链那一刻就发动（付费+移出原区域+把修改节点 push 进 effect._chain）——
+            /* 入链那一刻就发动（付费+移出原区域+把修改节点 push 进 effect._chain / 改 je.val）——
                域内逆结算由 resolveChainStack 负责，所以 fire 什么都不做。 */
-            onAdd: function (done) { applyChainCard(side, pick, effect, function () { done(); }); },
+            onAdd: function (done) { activateFn(side, pick, effect, function () { done(); }); },
             fire: function (next) { next(); }
           });
         });
@@ -20370,45 +20392,23 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
   if (!__q1.length && !__q2.length) { __close(); return; } // 快速路径：双方都无可连锁卡，不打扰
   addBattleLog('system', '【判定结果确定前】' + (spec.label || '判定') + '结果=' + initVal + '，双方可连锁（改点/重判）');
   if (typeof renderChainBar === 'function') renderChainBar(je);
-  var order = othersOf(user).concat([user]), sideIdx = 0, passStreak = 0;
-  function __chained() { passStreak = 0; __proceed(); }
-  function __pass() { passStreak++; __proceed(); }
-  function __ask(side) {
-    var list = collectChainable(side, je);
-    if (!list.length) { __pass(); return; }
-    var __online = (typeof Online !== 'undefined' && Online.active);
-    if (side === 'p2') {
-      if (__online) {
-        var __p2c = list.map(function (x) { return '🔗 ' + x.card.name + '（' + (x.card.cost || 0) + '费）' + (x.from === 'faceDown' ? '[盖伏]' : ''); });
-        __p2c.push('■ 不连锁');
-        onlineDecideModal('p2', '判定确定前 · 连锁（对手）', je.description, '选择要连锁的卡（最后一项=放弃）', __p2c, function (i) {
-          if (i == null || i === undefined || i >= list.length) { __pass(); return; }
-          applyJudgeChain('p2', list[i], je, __chained);
-        });
-        return;
-      }
-      var pick = aiDecideChain(list, je, 'p2'); if (!pick) { __pass(); return; } applyJudgeChain('p2', pick, je, __chained); return;
-    }
-    var choices = list.map(function (x) { return '🔗 ' + x.card.name + '（' + (x.card.cost || 0) + '费）' + (x.from === 'faceDown' ? '[盖伏]' : ''); });
-    choices.push('■ 不连锁');
-    if (__online) {
-      onlineDecideModal('p1', '判定确定前 · 连锁', je.description, '选择要连锁的卡（最后一项=放弃）', choices, function (i) {
-        if (i == null || i === undefined || i >= list.length) { __pass(); return; }
-        applyJudgeChain('p1', list[i], je, __chained);
-      });
-      return;
-    }
-    showChoiceModal('判定确定前 · 连锁', je.description, '选择要连锁的卡（最后一项=放弃）', choices, function (i) {
-      if (i >= list.length) { __pass(); return; }
-      applyJudgeChain('p1', list[i], je, __chained);
-    });
-  }
-  function __proceed() {
-    if (je.cancelled) { if (typeof hideChainBar === 'function') hideChainBar(); __close(); return; }
-    if (passStreak >= 2) { if (typeof hideChainBar === 'function') hideChainBar(); __close(); return; }
-    var side = order[sideIdx % 2]; sideIdx++; __ask(side);
-  }
-  __proceed();
+  /* 连锁重构 S1b：本窗口原先自写了一套优先权循环（第三份重复），现统一交给唯一的响应窗口驱动器。
+     与"效果将要执行前"窗口的区别只有两点，都由驱动器参数表达：
+       · 发动口是 applyJudgeChain（改点/重判 je.val），不是 applyChainCard；
+       · p1 弹窗沿用 showChoiceModal（既有 UX），不是连锁专用弹窗。 */
+  runResponseWindow({
+    effect: je, initiator: user, type: 'rand_result', p1Modal: 'choice',
+    activate: function (side, pick, eff, done) { applyJudgeChain(side, pick, eff, done); },
+    titleOf: function (who) { return who === 'p1' ? '判定确定前 · 连锁' : '判定确定前 · 连锁（对手）'; },
+    bodyOf: function () { return je.description; },
+    hintOf: function () { return '选择要连锁的卡（最后一项=放弃）'; },
+    labelOf: function (node) {
+      var pick = node.pick || {}, card = pick.card || {};
+      return '🔗 ' + (card.name || '?') + '（' + (card.cost || 0) + '费）' + (pick.from === 'faceDown' ? '[盖伏]' : '');
+    },
+    passLabelOf: function () { return '■ 不连锁'; },
+    onClosed: function (eff, finishWindow) { __close(); finishWindow(); }
+  });
 }
 // 统一判定入口：先掷骰/动画得到初始结果，再走“确定前连锁窗”，最终把（可能被改点/重判后的）结果交给 applyFn
 /* 小沙香琉璃SP：造成判定伤害且"适用最大伤害"后抽1卡回2音韵。
