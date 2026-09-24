@@ -10081,7 +10081,18 @@ var TW = {
       candidates: (opts.candidates || []).filter(Boolean),
       effect: opts.effect || null,
       meta: opts.meta || null,
-      done: (typeof opts.done === 'function') ? opts.done : function () {}
+      done: (typeof opts.done === 'function') ? opts.done : function () {},
+      /* onClose：窗口收尾交给域内逻辑（S1b）。响应卡窗口的"结算"不是把候选环逐个 fire，
+         而是 `effect._chain` 的逆结算（resolveChainStack）——所以这里让调用方接管收尾，
+         收尾完成后再调 finishWindow() 让状态机把窗口真正标记为 done（这样 TW.active 在域内结算期间保持为真，
+         快照空闲判据就不会在"域内逆结算中途"放行检查点）。 */
+      onClose: (typeof opts.onClose === 'function') ? opts.onClose : null,
+      /* 文案可注入（S1b）：同一套循环要服务不同窗口，但**弹窗措辞属于既有 UX 契约**
+         （测试按标题匹配、玩家也习惯了），所以让调用方覆盖标题/正文/选项文案，而不是把措辞写死进状态机。 */
+      titleOf: (typeof opts.titleOf === 'function') ? opts.titleOf : null,
+      bodyOf: (typeof opts.bodyOf === 'function') ? opts.bodyOf : null,
+      labelOf: (typeof opts.labelOf === 'function') ? opts.labelOf : null,
+      passLabelOf: (typeof opts.passLabelOf === 'function') ? opts.passLabelOf : null
     };
     this.active = win;
     if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
@@ -10106,7 +10117,24 @@ var TW = {
   _chainText: function (win) {
     return win.chain.length ? win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + TW._whoName(c.owner) + '·' + c.label; }).join('、') : '（暂无）';
   },
-  _addChain: function (win, c) { win.chain.push(c); if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c); },
+  /* 入链。`onAdd(done)` 是**入链那一刻**要执行的域内动作（响应卡：付费+移出原区域+把修改节点 push 进 effect._chain），
+     与 `fire(next)`（逆结算时执行）严格区分：
+       · 同时触发（resolveSimultaneous）的候选：只有 fire，没有 onAdd（入链只是排位）；
+       · 响应卡的候选：有 onAdd（发动即生效于 effect._chain），fire 为空（域内逆结算由 resolveChainStack 做）。
+     这个区分是 S1b 的关键 —— 一开始把 applyChainCard 放进 fire，结果响应窗口（走 onClose、不跑 TW.settle）
+     永远不会发动那张卡，链是空的（现象：卡"打了但没有任何生效日志"）。 */
+  _addChain: function (win, c, done) {
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
+    win.chain.push(c);
+    var fin = (typeof done === 'function') ? done : function () {};
+    if (typeof c.onAdd === 'function') {
+      try { return c.onAdd(fin); }
+      catch (e) {
+        try { addBattleLog('system', '【连锁】入链动作异常（已跳过该环）：' + ((e && e.message) || e)); } catch (e2) {}
+      }
+    }
+    fin();
+  },
   /** arrange：必发按「回合方 → 对方」入链；同一方多个必发由该方点选，顺序即链序 */
   arrange: function (win, after) {
     win.state = 'arrange';
@@ -10149,12 +10177,26 @@ var TW = {
     }
     side(win.tp, function () { side(win.foe, function () { after(); }); });
   },
+  /** resolve：关窗后的收尾。默认＝逆结算本窗口的链；`onClose` 存在时交给域内逻辑（收尾完再调 finishWindow） */
+  resolve: function (win) {
+    if (typeof win.onClose === 'function') {
+      win.state = 'closed';
+      var self = this;
+      try { win.onClose(function () { self.close(win); }); }
+      catch (e) {
+        try { addBattleLog('system', '【时点窗口】收尾异常，强制关窗：' + ((e && e.message) || e)); } catch (e2) {}
+        this.close(win);
+      }
+      return;
+    }
+    if (!win.chain.length) { this.close(win); return; }
+    this.settle(win);
+  },
   /** priority：优先权轮转；每次发动后重扫候选（新必发必须补入），双方连续 PASS 才关窗 */
   priorityStep: function (win) {
     var self = this;
     win.state = 'priority';
-    if (!win.chain.length && win.passStreak >= 2) { this.close(win); return; }
-    if (win.passStreak >= 2) { this.settle(win); return; }
+    if (win.passStreak >= 2) { this.resolve(win); return; }
     var who = win.priority;
     // 新满足的必发：无论优先权在谁，先入链（规格第 3 条）
     var newMand = this._avail(win, who).filter(function (c) { return c.mandatory; });
@@ -10166,6 +10208,13 @@ var TW = {
       return;
     }
     var pool = this._avail(win, who).filter(function (c) { return !c.mandatory; });
+    /* 文案：默认是状态机的通用措辞；响应窗口等调用方可用 labelOf/passLabelOf/titleOf/bodyOf 覆盖成既有 UX 文案
+       （同一套循环服务不同窗口，但"措辞"属于既有契约，不写死进状态机） */
+    var __title = (typeof win.titleOf === 'function') ? win.titleOf(who, win) : ('连锁窗口 · ' + (who === 'p1' ? '你的优先权' : '对手优先权') + '（当前 ' + this._whoName(who) + '）');
+    var __body = (typeof win.bodyOf === 'function') ? win.bodyOf(who, win) : ('当前连锁：' + this._chainText(win));
+    var __labelOf = function (c) { return (typeof win.labelOf === 'function') ? win.labelOf(c, who) : ('↧ 连锁发动：' + c.label); };
+    var __passLabel = (typeof win.passLabelOf === 'function') ? win.passLabelOf(who, win) : ('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
+    var __hint = (typeof win.hintOf === 'function') ? win.hintOf(who, win) : '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算';
     function pass() { win.passStreak++; win.priority = (win.priority === 'p1' ? 'p2' : 'p1'); self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); }); }
     function fire(label) {
       win.passStreak = 0;
@@ -10173,15 +10222,17 @@ var TW = {
       addBattleLog(who, '【连锁】' + (who === 'p1' ? '你' : '对方') + '发动【' + label + '】成为 C' + win.chain.length);
       self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); });
     }
+    /** 激活一个候选：入链（含 onAdd 域内动作，例如响应卡的付费+上链）→ 然后继续优先权流程 */
+    function activate(node) { self._addChain(win, node, function () { fire(node.label); }); }
     if (!pool.length) { pass(); return; }
     if (who !== 'p1') {
       if (typeof Online !== 'undefined' && Online.active) {
-        var fp2 = pool.map(function (c) { return '↧ 连锁发动：' + c.label; });
-        fp2.push('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
-        onlineDecideModal('p2', '连锁窗口 · 对手优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
-          '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算', fp2, function (idx) {
+        var fp2 = pool.map(__labelOf);
+        fp2.push(__passLabel);
+        onlineDecideModal('p2', __title, __body,
+          __hint, fp2, function (idx) {
             if (idx === null || idx === undefined || idx >= pool.length) pass();
-            else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
+            else { activate(pool[idx]); }
           });
         return;
       }
@@ -10196,23 +10247,21 @@ var TW = {
           return;
         }
       }
-      if (aiIdx >= 0 && pool[aiIdx]) { this._addChain(win, pool[aiIdx]); fire(pool[aiIdx].label); }
+      if (aiIdx >= 0 && pool[aiIdx]) { activate(pool[aiIdx]); }
       else pass();
       return;
     }
-    var opts = pool.map(function (c) { return '↧ 连锁发动：' + c.label; });
-    opts.push('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
+    var opts = pool.map(__labelOf);
+    opts.push(__passLabel);
     var pickP1 = function (idx) {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
       else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
     };
     if (typeof Online !== 'undefined' && Online.active) {
-      onlineDecideModal('p1', '连锁窗口 · 你的优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
-        '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算', opts, pickP1);
+      onlineDecideModal('p1', __title, __body, __hint, opts, pickP1);
       return;
     }
-    showChainChoice('连锁窗口 · 你的优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
-      '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算（超时自动放弃）', opts, pickP1);
+    showChainChoice(__title, __body, __hint + '（超时自动放弃）', opts, pickP1);
   },
   /** settle：从最大 C 逆序结算；每节点做 alive 校验；异常只跳当前节点 */
   settle: function (win) {
@@ -10675,6 +10724,68 @@ function __tryDrainTriggers() {
     }
   } catch (e) { try { effectEngine._inNewChain = false; } catch (e2) {} }
 }
+/* ============================================================
+ * 唯一的「响应窗口驱动器」（连锁重构 S1b，2026-09-24）
+ * ------------------------------------------------------------
+ * 背景：`beforeEffectExecution`（效果将要执行前）与伤害窗口（另有一份复制）各自写了一套
+ * 「优先权轮转 + 连续 PASS 判定 + 盖卡/手牌候选收集」的循环 —— 同一时点行为随窗口而异，
+ * 这正是规格第一节说的"多轨并存"。本驱动器是这些时点的**唯一**实现：
+ *   · 候选：每轮用 `collectChainable(side, effect)` 重扫（发动过的卡已被移出手牌/盖伏区，天然不会重复出现）
+ *   · 发动一张 = `applyChainCard(side, pick, effect, next)`（付费、移出原区域、把修改节点 push 进 effect._chain）
+ *   · 优先权：从 `firstSide` 开始轮转，双方连续 PASS 才关窗（沿用既有口径：先问非发动方）
+ *   · 收尾：`onClosed(effect, finishWindow)` —— 域内逆结算（resolveChainStack）完成后调 finishWindow()
+ * 调用点：`beforeEffectExecution`。伤害窗口与其它时点在 S2 逐步改用它（见《连锁重构实施计划.md》）。
+ * ============================================================ */
+function runResponseWindow(opts) {
+  opts = opts || {};
+  var effect = opts.effect || {};
+  var initiator = opts.initiator || effect.player || effect.user || 'p1';
+  var firstSide = opts.firstSide || (othersOf(initiator)[0] || foeOf(initiator));
+  TW.open({
+    type: opts.type || 'response',
+    tp: firstSide,
+    candidates: [],
+    scan: function () {
+      var out = [];
+      playerIds().forEach(function (side) {
+        var list = [];
+        try { list = collectChainable(side, effect) || []; } catch (e) { list = []; }
+        list.forEach(function (pick) {
+          out.push({
+            owner: side,
+            label: ((pick && pick.card && pick.card.name) || '?') + (pick.from === 'faceDown' ? '（盖伏）' : ''),
+            mandatory: false,
+            pick: pick,
+            alive: function () { return true; },
+            /* 入链那一刻就发动（付费+移出原区域+把修改节点 push 进 effect._chain）——
+               域内逆结算由 resolveChainStack 负责，所以 fire 什么都不做。 */
+            onAdd: function (done) { applyChainCard(side, pick, effect, function () { done(); }); },
+            fire: function (next) { next(); }
+          });
+        });
+      });
+      return out;
+    },
+    onClose: function (finishWindow) {
+      if (typeof opts.onClosed === 'function') opts.onClosed(effect, finishWindow);
+      else finishWindow();
+    },
+    /* 文案沿用"效果执行前 · 连锁"这套既有 UX（玩家习惯了、测试也按它匹配） */
+    titleOf: function (who) { return (who === 'p1') ? '效果执行前 · 连锁' : '效果执行前 · 连锁（对手）'; },
+    bodyOf: function () { return effect.description || ''; },
+    labelOf: function (node, who) {
+      var pick = node.pick || {};
+      var card = pick.card || {};
+      if (who !== 'p1') return '🔗 ' + (card.name || '?');
+      return (pick.selfBuff ? '⚡ 使用 ' : '🔗 ') + (card.name || '?') + '（' + (card.cost || 0) + '费）' +
+        (pick.selfBuff ? ' · 本次位移x2' : '') + (pick.from === 'faceDown' ? '[盖伏]' : '');
+    },
+    passLabelOf: function () { return '■ 不连锁'; },
+    hintOf: function (who) { return who === 'p1' ? '选择要连锁发动的卡（最后一项=放弃连锁；超时自动放弃）' : '选择要连锁发动的卡（最后一项=放弃连锁）'; },
+    done: function () {}
+  });
+}
+
 function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
@@ -10711,60 +10822,23 @@ function beforeEffectExecution(effect, callback) {
   addBattleLog('system','【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : 'AI') + '·' +
     (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')) + '（等待双方连锁）', __c1actor);
   if (typeof renderChainBar === 'function') renderChainBar(effect);
-  function finish(){
+  function finish(finishWindow){
     resolveChainStack(effect, function(){
       __releaseB();
+      if (typeof finishWindow === 'function') finishWindow();
       if(effect.cancelled){ addBattleLog('system','本次效果被连锁打断，不执行'); callback(null); return; }
       callback(effect);
     });
   }
-  var initiator=effect.player||'p1';
-  var order=othersOf(initiator).concat([initiator]);
-  var sideIdx=0, passStreak=0;
-  function chained(){ passStreak=0; proceed(); }
-  function pass(){ passStreak++; proceed(); }
-  function askP1(){
-    var list=collectChainable('p1',effect);
-    if(!list.length){ pass(); return; }
-    var choices=list.map(function(x){return (x.selfBuff?'⚡ 使用 ':'🔗 ')+x.card.name+'（'+(x.card.cost||0)+'费）'+(x.selfBuff?' · 本次位移x2':'')+(x.from==='faceDown'?'[盖伏]':'');});
-    choices.push('■ 不连锁');
-    // 联机：p1 的连锁选择显式按 p1 归属弹窗并广播（远端位流程内同样如此）
-    if (typeof Online!=='undefined' && Online.active) {
-      onlineDecideModal('p1', '效果执行前 · 连锁', effect.description||'', '选择要连锁发动的卡（最后一项=放弃连锁）', choices, function(i){
-        if (i == null || i === undefined || i >= list.length) { pass(); return; }
-        applyChainCard('p1',list[i],effect,chained);
-      });
-      return;
-    }
-    showChainChoice('效果执行前 · 连锁', effect.description||'', '选择要连锁发动的卡（最后一项=放弃连锁；超时自动放弃）', choices, function(i){
-      if(i>=list.length){ pass(); return; }
-      applyChainCard('p1',list[i],effect,chained);
-    });
-  }
-  function askP2(){
-    var list=collectChainable('p2',effect);
-    if(!list.length){ pass(); return; }
-    // 联机：p2 连锁选择等待远端答案（选项=list 顺序 + 末位放弃，与对方 p1 弹窗选项同序映射）
-    if (typeof Online!=='undefined' && Online.active) {
-      var __p2Choices = list.map(function(x){return '🔗 '+x.card.name;});
-      __p2Choices.push('■ 不连锁');
-      onlineDecideModal('p2', '效果执行前 · 连锁（对手）', effect.description||'', '选择要连锁发动的卡（最后一项=放弃连锁）', __p2Choices, function(i){
-        if (i == null || i === undefined || i >= list.length) { pass(); return; }
-        applyChainCard('p2', list[i], effect, chained);
-      });
-      return;
-    }
-    var pick=aiDecideChain(list,effect,'p2');
-    if(!pick){ pass(); return; }
-    applyChainCard('p2',pick,effect,chained);
-  }
-  function proceed(){
-    if(effect.cancelled){ finish(); return; }
-    if(passStreak>=2){ finish(); return; }
-    var side=order[sideIdx%2]; sideIdx++;
-    if(side==='p1') askP1(); else askP2();
-  }
-  proceed();
+  /* 连锁重构 S1b：优先权轮转 / PASS 判定 / 候选收集**不再在这里自写一份**，
+     统一交给唯一的响应窗口驱动器（TW 派生；候选每轮重扫 collectChainable，新出现的合法连锁卡会被看到）。
+     口径沿用旧实现：先问非发动方，连续两方 PASS 才关窗；关窗后走 resolveChainStack 逆结算 effect._chain。 */
+  runResponseWindow({
+    effect: effect,
+    initiator: effect.player || effect.user || __c1who,
+    type: 'response',
+    onClosed: function (eff, finishWindow) { finish(finishWindow); }
+  });
   } catch (e) {
     console.error('beforeEffectExecution error', e);
     __releaseB();
@@ -14920,6 +14994,13 @@ var __EE_STALE_MS = 6000;
 function __eeIdleForSnapshot() {
   try {
     var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    /* 连锁重构 S1b 前置（2026-09-24）：时点窗口开着时**不许打检查点**。
+       窗口里装的是每环自己的闭包（fire/alive/回调），存不进 JSON；若在窗口中途拍快照，
+       重连恢复出来就是"组链到一半、没人知道"的局面 —— 这正是"重连后卡死"那一族的根因。
+       所以把窗口状态纳入空闲判据（与 _resolveDepth/_chainLock 同级）。 */
+    if (typeof TW !== 'undefined' && TW && TW.active) {
+      return '连锁窗口进行中（' + TW.active.type + '／' + TW.active.state + '，已 ' + (TW.active.chain || []).length + ' 环）';
+    }
     if (ee && (ee._resolveDepth || 0) > 0) return '效果结算中（深度' + ee._resolveDepth + '）';
     if (ee && ee._chainLock) return '连锁锁未释放';
     if (ee && ee._pendingTriggers && ee._pendingTriggers.length) return '待触发时点队列（' + ee._pendingTriggers.length + '）';
