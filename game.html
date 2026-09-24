@@ -10274,6 +10274,24 @@ var TW = {
     if (win.useChoiceModal && typeof showChoiceModal === 'function') { showChoiceModal(__title, __body, __hint, opts, pickP1); return; }
     showChainChoice(__title, __body, __hint + '（超时自动放弃）', opts, pickP1);
   },
+  /** settlePrebuilt：直接结算一条**已排好序**的链（响应卡的 `effect._chain` 就是这种：
+   *  顺序在发动那一刻就定死了，不需要再组链/轮优先权）。
+   *  S1d 用它让"逆结算"也只有一条路径：逆序、逐环异常隔离、动画收尾统一由 TW.settle 负责。 */
+  settlePrebuilt: function (nodes, opts) {
+    opts = opts || {};
+    var win = {
+      id: ++this.seq, type: opts.type || 'prebuilt', state: 'settling',
+      tp: opts.tp || ((typeof battleState !== 'undefined' && battleState && battleState.currentPlayer) || 'p1'),
+      foe: null, chain: (nodes || []).slice(), priority: null, passStreak: 0, parent: null,
+      scan: null, candidates: [], effect: opts.effect || null, meta: opts.meta || null,
+      done: (typeof opts.done === 'function') ? opts.done : function () {},
+      titleOf: null, bodyOf: null, labelOf: null, passLabelOf: null, onClose: null
+    };
+    this.active = win;
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
+    this.settle(win);
+    return win;
+  },
   /** settle：从最大 C 逆序结算；每节点做 alive 校验；异常只跳当前节点 */
   settle: function (win) {
     var self = this;
@@ -10289,11 +10307,18 @@ var TW = {
       }
       var idx = i, node = win.chain[i--];
       var fired = false;
-      function next() { if (fired) return; fired = true; if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); setTimeout(step, 170); }
+      /* 动画层**不承重**：ChainAnim.* 抛错绝不能打断推进（否则 step 不再被调度、整链停摆） */
+      function next() {
+        if (fired) return; fired = true;
+        try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); }
+        catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
+        setTimeout(step, 170);
+      }
       try {
-        if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label);
+        try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
+        catch (e) { try { console.error('ChainAnim.resolving 异常（不影响结算）', e); } catch (e2) {} }
         if (typeof node.alive === 'function' && !node.alive()) {
-          if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label);
+          try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
           setTimeout(step, 170); return;
         }
@@ -10310,7 +10335,8 @@ var TW = {
   /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
   close: function (win) {
     win.state = 'done';
-    if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end();
+    try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
+    catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
     if (this.active === win) this.active = null;
     addBattleLog('system', '【时点窗口】关闭（' + win.type + '，共 ' + win.chain.length + ' 环）');
     try { win.done(); } catch (e) { console.error('TimingWindow done 回调异常', e); }
@@ -10500,16 +10526,11 @@ function resolveChainStack(effect, onDone) {
   var actionAlive = !effect.cancelled;
   var __doneSet = {}, __lostSet = {};
   addBattleLog('system', '═══ 连锁逆结算（共' + stack.length + '张）═══');
-  var __ci = stack.length - 1;
   function __paint(extra) { if (typeof renderChainBar === 'function') renderChainBar(effect, Object.assign({ done: __doneSet, lost: __lostSet }, extra || {})); }
-  function __step() {
-    if (__ci < 0) {
-      if (hasNum) { effect._newDiceResult = cur; effect.moveAmount = cur; }
-      __paint();
-      addBattleLog('system', '═══ 连锁结算完毕' + (hasNum ? '，最终点数/位移=' + cur : '') + (effect.cancelled ? '，动作被取消' : '') + ' ═══');
-      __endChain(); return;
-    }
-    var i = __ci--, e = stack[i];
+  /* S1d：逐环的**域内语义**（改点数/位移/方向/打断/无效/重判/事件卡/技能卡…）收成一个函数，
+     由 TW.settle 逐节点调用 —— 逆序、丢失目标校验、逐环异常隔离、动画收尾都归状态机。
+     旧的 __step/__ci 自写逆序循环已删除：逆结算现在也只有一条路径。 */
+  function __applyNode(i, e) {
     __paint({ resolving: i });
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('逆结算 C' + (i + 1) + ' · ' + e.name, 'flash-resolve');
     if (e.kind === 'set' || e.kind === 'add') {
@@ -10570,19 +10591,28 @@ function resolveChainStack(effect, onDone) {
     }
     __flushGrave(); // 本链环已逆结算完成：其用卡此刻进墓并触发送墓时点
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('C' + (i + 1) + (__lostSet[i] ? ' 失去对象' : ' 结算完成'), __lostSet[i] ? 'flash-lost' : 'flash-ok');
-    setTimeout(__stepSafe, 340);
   }
-  // 异常安全：__step 内任何抛出都必须继续推进（或收尾），绝不能让逆结算循环断掉——
-  // 断掉会使 _chainLock 永久为 true，全场手卡都会被判为"效果/连锁结算中"而无法发动。
-  function __stepSafe() {
-    try { __step(); }
-    catch (e) {
-      try { console.error('resolveChainStack 逆结算异常（已强制收尾，释放连锁锁）', e); } catch (e2) {}
-      try { addBattleLog('system', '【连锁】逆结算异常，已强制收尾并释放结算锁：' + ((e && e.message) || e)); } catch (e3) {}
-      try { __ci = -1; __endChain(); } catch (e4) { try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; } catch (e5) {} }
+  /* S1d：逆结算交给唯一路径 TW.settle —— 节点顺序在发动时就已确定（effect._chain），
+     不需要再组链，所以用 settlePrebuilt 直接结算这条已排好的链；逆序 / 逐环异常隔离 / 动画收尾由状态机负责
+     （旧的自写逆序循环与 __stepSafe 兜底已删除）。 */
+  TW.settlePrebuilt(stack.map(function (e, i) {
+    return {
+      owner: e.by, label: e.name || '', alive: function () { return true; },
+      fire: function (next) { __applyNode(i, e); next(); }
+    };
+  }), {
+    type: 'cardActivationSettle', effect: effect, tp: effect.player || (battleState && battleState.currentPlayer) || 'p1',
+    done: function () {
+      /* 动画/日志抛错绝不能挡住 __endChain（它负责送墓 + 释放 _chainLock + 回调调用方）——
+         否则一次动画异常就会让全场手卡被判"结算中"（effect_lock 用例钉的就是这条）。 */
+      try {
+        if (hasNum) { effect._newDiceResult = cur; effect.moveAmount = cur; }
+        __paint();
+        addBattleLog('system', '═══ 连锁结算完毕' + (hasNum ? '，最终点数/位移=' + cur : '') + (effect.cancelled ? '，动作被取消' : '') + ' ═══');
+      } catch (e) { try { console.error('连锁收尾的动画/日志异常（不影响收尾）', e); } catch (e2) {} }
+      try { __endChain(); } catch (e) { try { console.error('__endChain 异常', e); } catch (e2) {} }
     }
-  }
-  __stepSafe();
+  });
 }
 /* ============================================================
    连锁 C1 占位（作者口径，2026-09-13 确认"占用上限"）
