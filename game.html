@@ -10040,7 +10040,239 @@ var ChainAnim = {
   done: function (i, lost, label) { var d = this._nodes[i]; if (d) { d.classList.remove('csa-resolving'); d.classList.add(lost ? 'csa-lost' : 'csa-done'); } this.flash('C' + (i + 1) + (lost ? ' 失去对象' : ' 结算完成'), lost ? 'flash-lost' : 'flash-ok'); },
   end: function () { var self = this, b = this._el(); if (!b) return; b.classList.add('csa-ending'); setTimeout(function () { b.classList.remove('show'); b.classList.remove('csa-ending'); b.innerHTML = ''; self._nodes = []; }, 620); }
 };
+/* ============================================================
+ * 时点窗口状态机 TimingWindow（TW）—— 连锁重构 S1（2026-09-24）
+ * ------------------------------------------------------------
+ * 为什么要有它（作者规格《给DSH的连锁机制重构规格.md》第一节，已在代码核实）：
+ *   · 旧 `resolveSimultaneous(tp, candidates, …)` 的候选池是**调用方一次性传入并固定在闭包里的**，
+ *     组链过程中不重扫 ⇒ 链长被初始候选数封顶（表现为"只能到 C2"）；
+ *   · `resolveChainStack` / `useCard` 是另外两套组链路径，规则不同源、行为随卡而异；
+ *   · 节点结算中新触发的必发被拖到整链结束（`__tryDrainTriggers`）或直接丢。
+ * 本状态机是**唯一组链路径**：collect（收候选）→ arrange（必发按方排列）→ priority（优先权轮转，
+ * 每次发动后**重新收集**，新必发必须补入）→ closed → settling（逐节点逆结算，节点异常只跳当前节点）→ done。
+ * 每个状态唯一出口；异常不破坏状态机。
+ *
+ * S1 口径（先同源、再逐时点补扫描器）：
+ *   `resolveSimultaneous` 已改为本状态机的**薄适配器**（签名与调用点不变）；
+ *   `ctx.scan` 提供时，每一轮优先权都会用它重扫候选 ⇒ 链长不再封顶。
+ *   16 个时点的独立扫描器（S2）、盖卡付费时点（S3）、判定"结果出现未适用"（S4）、
+ *   以 TW.state 取代 _chainLock 承重（S5）见《连锁重构实施计划.md》。
+ * ============================================================ */
+var TW = {
+  active: null,
+  seq: 0,
+  _whoName: function (w) { return w === 'p1' ? '你' : 'AI'; },
+  /** 打开一个窗口。opts = { type, tp, candidates, scan, effect, done, meta } */
+  open: function (opts) {
+    opts = opts || {};
+    var self = this;
+    var tp = opts.tp || (battleState && battleState.currentPlayer) || 'p1';
+    var win = {
+      id: ++this.seq,
+      type: opts.type || 'simultaneous',
+      tp: tp,
+      foe: (typeof foeOf === 'function') ? foeOf(tp) : 'p2',
+      state: 'collect',
+      chain: [],
+      priority: tp,
+      passStreak: 0,
+      parent: opts.parent || null,
+      scan: (typeof opts.scan === 'function') ? opts.scan : null,
+      candidates: (opts.candidates || []).filter(Boolean),
+      effect: opts.effect || null,
+      meta: opts.meta || null,
+      done: (typeof opts.done === 'function') ? opts.done : function () {}
+    };
+    this.active = win;
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
+    addBattleLog('system', '【时点窗口】打开（' + win.type + '，回合方=' + this._whoName(tp) + '，初始候选 ' + win.candidates.length + '）');
+    this.collect(win, function () { self.arrange(win, function () { self.priorityStep(win); }); });
+  },
+  /** collect：重扫候选（有 scan 就用 scan，否则用初始候选） */
+  collect: function (win, cb) {
+    win.state = 'collect';
+    if (win.scan) {
+      try {
+        var fresh = win.scan(win) || [];
+        // 合并：保留已入链的（不能再入链，avail 会过滤），其余以重扫结果为准
+        win.candidates = fresh.filter(Boolean).concat(win.candidates.filter(function (c) { return fresh.indexOf(c) < 0; }));
+      } catch (e) { addBattleLog('system', '【时点窗口】候选重扫异常，沿用现有候选：' + ((e && e.message) || e)); }
+    }
+    cb();
+  },
+  _avail: function (win, who) {
+    return win.candidates.filter(function (c) { return c && c.owner === who && win.chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); });
+  },
+  _chainText: function (win) {
+    return win.chain.length ? win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + TW._whoName(c.owner) + '·' + c.label; }).join('、') : '（暂无）';
+  },
+  _addChain: function (win, c) { win.chain.push(c); if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c); },
+  /** arrange：必发按「回合方 → 对方」入链；同一方多个必发由该方点选，顺序即链序 */
+  arrange: function (win, after) {
+    win.state = 'arrange';
+    var self = this;
+    function side(who, then) {
+      function rest() { return self._avail(win, who).filter(function (c) { return c.mandatory; }); }
+      function go() {
+        var pool = rest();
+        if (!pool.length) { then(); return; }
+        if (pool.length === 1 && who !== 'p1') { self._addChain(win, pool[0]); go(); return; }
+        if (who !== 'p1') {
+          if (typeof Online !== 'undefined' && Online.active) {
+            var mp2 = pool.map(function (c) { return '置于下一连锁位：' + c.label; });
+            onlineDecideModal('p2', '多个必发效果同时触发 · 决定连锁顺序（对手）', '已排列：' + self._chainText(win),
+              '必发效果优先组成连锁，逐一点选排列（后排列的先结算）', mp2, function (idx) {
+                if (idx === null || idx === undefined) idx = 0;
+                if (!pool[idx]) { then(); return; }
+                self._addChain(win, pool[idx]); if (typeof updateBattleUI === 'function') updateBattleUI(); go();
+              });
+            return;
+          }
+          pool.forEach(function (c) { self._addChain(win, c); }); then(); return;   // AI 必发按候选序
+        }
+        if (pool.length === 1) { self._addChain(win, pool[0]); go(); return; }
+        var opts = pool.map(function (c) { return '置于下一连锁位：' + c.label; });
+        var pick = function (idx) {
+          if (idx === null || idx === undefined) idx = 0;
+          if (!pool[idx]) { then(); return; }
+          self._addChain(win, pool[idx]); if (typeof updateBattleUI === 'function') updateBattleUI(); go();
+        };
+        if (typeof Online !== 'undefined' && Online.active) {
+          onlineDecideModal('p1', '多个必发效果同时触发 · 决定连锁顺序', '已排列：' + self._chainText(win),
+            '必发效果优先组成连锁，按你点选的先后成为 C1、C2……，全部需排列（后排列的先结算）', opts, pick);
+          return;
+        }
+        showChoiceModal('多个必发效果同时触发 · 决定连锁顺序', '已排列：' + self._chainText(win),
+          '必发效果优先组成连锁，按你点选的先后成为 C1、C2……，全部需排列（后排列的先结算）', opts, pick);
+      }
+      go();
+    }
+    side(win.tp, function () { side(win.foe, function () { after(); }); });
+  },
+  /** priority：优先权轮转；每次发动后重扫候选（新必发必须补入），双方连续 PASS 才关窗 */
+  priorityStep: function (win) {
+    var self = this;
+    win.state = 'priority';
+    if (!win.chain.length && win.passStreak >= 2) { this.close(win); return; }
+    if (win.passStreak >= 2) { this.settle(win); return; }
+    var who = win.priority;
+    // 新满足的必发：无论优先权在谁，先入链（规格第 3 条）
+    var newMand = this._avail(win, who).filter(function (c) { return c.mandatory; });
+    if (newMand.length) {
+      this._addChain(win, newMand[0]);
+      win.passStreak = 0;
+      addBattleLog(who, '【连锁】新的必发效果【' + newMand[0].label + '】自动入链成为 C' + win.chain.length);
+      this.priorityStep(win);
+      return;
+    }
+    var pool = this._avail(win, who).filter(function (c) { return !c.mandatory; });
+    function pass() { win.passStreak++; win.priority = (win.priority === 'p1' ? 'p2' : 'p1'); self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); }); }
+    function fire(label) {
+      win.passStreak = 0;
+      win.priority = (who === 'p1' ? 'p2' : 'p1');
+      addBattleLog(who, '【连锁】' + (who === 'p1' ? '你' : '对方') + '发动【' + label + '】成为 C' + win.chain.length);
+      self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); });
+    }
+    if (!pool.length) { pass(); return; }
+    if (who !== 'p1') {
+      if (typeof Online !== 'undefined' && Online.active) {
+        var fp2 = pool.map(function (c) { return '↧ 连锁发动：' + c.label; });
+        fp2.push('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
+        onlineDecideModal('p2', '连锁窗口 · 对手优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
+          '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算', fp2, function (idx) {
+            if (idx === null || idx === undefined || idx >= pool.length) pass();
+            else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
+          });
+        return;
+      }
+      var aiIdx = -1;
+      try { var __cg = (typeof globalThis !== 'undefined') ? globalThis : ((typeof window !== 'undefined') ? window : null); if (__cg && typeof __cg.__aiChainDecide === 'function') aiIdx = __cg.__aiChainDecide(who, pool, win.chain.slice()); } catch (e) { aiIdx = -1; }
+      if (aiIdx < 0 && isAISeat(who) && typeof aiActivateFaceDown === 'function') {
+        var lastNode = win.chain.length ? win.chain[win.chain.length - 1] : null;
+        var fdIdx = aiPickFaceDownForWindow(lastNode || {}, who);
+        if (fdIdx >= 0) {
+          addBattleLog(who, '【连锁】AI 翻开盖伏卡响应');
+          aiActivateFaceDown(fdIdx, function () { win.priority = (who === 'p1' ? 'p2' : 'p1'); setTimeout(function () { self.priorityStep(win); }, 250); }, who);
+          return;
+        }
+      }
+      if (aiIdx >= 0 && pool[aiIdx]) { this._addChain(win, pool[aiIdx]); fire(pool[aiIdx].label); }
+      else pass();
+      return;
+    }
+    var opts = pool.map(function (c) { return '↧ 连锁发动：' + c.label; });
+    opts.push('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
+    var pickP1 = function (idx) {
+      if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
+      else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
+    };
+    if (typeof Online !== 'undefined' && Online.active) {
+      onlineDecideModal('p1', '连锁窗口 · 你的优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
+        '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算', opts, pickP1);
+      return;
+    }
+    showChainChoice('连锁窗口 · 你的优先权（当前 ' + this._whoName(who) + '）', '当前连锁：' + this._chainText(win),
+      '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算（超时自动放弃）', opts, pickP1);
+  },
+  /** settle：从最大 C 逆序结算；每节点做 alive 校验；异常只跳当前节点 */
+  settle: function (win) {
+    var self = this;
+    win.state = 'settling';
+    addBattleLog('system', '【连锁组成】' + win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + self._whoName(c.owner) + '·' + c.label; }).join('  →  '));
+    addBattleLog('system', '═══ 连锁逆结算（共' + win.chain.length + '个效果）═══');
+    var i = win.chain.length - 1;
+    function step() {
+      if (i < 0) {
+        addBattleLog('system', '═══ 连锁全部结算完成 ═══');
+        self.close(win);
+        return;
+      }
+      var idx = i, node = win.chain[i--];
+      var fired = false;
+      function next() { if (fired) return; fired = true; if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); setTimeout(step, 170); }
+      try {
+        if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label);
+        if (typeof node.alive === 'function' && !node.alive()) {
+          if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label);
+          addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
+          setTimeout(step, 170); return;
+        }
+        addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
+        if (typeof node.fire === 'function') node.fire(next); else next();
+      } catch (e) {
+        try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
+        try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
+        next();
+      }
+    }
+    step();
+  },
+  /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
+  close: function (win) {
+    win.state = 'done';
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end();
+    if (this.active === win) this.active = null;
+    addBattleLog('system', '【时点窗口】关闭（' + win.type + '，共 ' + win.chain.length + ' 环）');
+    try { win.done(); } catch (e) { console.error('TimingWindow done 回调异常', e); }
+  }
+};
+
 function resolveSimultaneous(tp, candidates, allDone) {
+  /* 连锁重构 S1：本函数已改为「时点窗口状态机」的薄适配器（签名与 3 个调用点不变）。
+     旧实现在闭包内固定候选池 ⇒ 链长被初始候选数封顶（"只能到 C2"）；现在组链由 TW.priorityStep
+     驱动，每次发动后都会重新收集候选，新必发自动补入，链长不设上限。
+     兼容：调用方若通过第 2 个参数之外的渠道提供重扫（candidates.scan），也会被采纳。 */
+  candidates = (candidates || []).filter(Boolean);
+  var scan = (candidates && typeof candidates.scan === 'function') ? candidates.scan : null;
+  if (!candidates.length && !scan) { if (typeof allDone === 'function') allDone(); return; }
+  TW.open({ type: 'simultaneous', tp: tp, candidates: candidates, scan: scan, done: allDone });
+}
+function __twLegacyResolveSimultaneous(tp, candidates, allDone) {
+  /* 【已废弃，S1b 将整段删除】这是旧的多套组链实现之一，仅作对照保留。
+     连锁现在只有一条路径：TW（时点窗口状态机）。任何调用都视为缺陷，直接转交适配器。 */
+  console.warn('[连锁] __twLegacyResolveSimultaneous 不应被调用（连锁只有 TW 一条路径）');
+  return resolveSimultaneous(tp, candidates, allDone);
+  /* ↓↓↓ 以下旧实现已不可达，待 S1b 删除 ↓↓↓ */
   candidates = (candidates || []).filter(Boolean);
   if (!candidates.length) { if (typeof allDone === 'function') allDone(); return; }
   var foe = foeOf(tp);
