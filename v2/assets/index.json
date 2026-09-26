@@ -1,0 +1,1384 @@
+{
+ "note": "由 tools/build-assets.mjs 生成：作者新卡面优先，其次老站图片；缩小到统一宽度",
+ "width": 300,
+ "count": 153,
+ "items": [
+  {
+   "id": "dongma",
+   "name": "闲暇时光",
+   "file": "dongma.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_iUyI2lzUe6.webp",
+   "bytes": 19328,
+   "sha256": "a1673a1ce279b73e"
+  },
+  {
+   "id": "feng",
+   "name": "得分！",
+   "file": "feng.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_lYL7RgQUOC.webp",
+   "bytes": 28982,
+   "sha256": "64f023661fd8179d"
+  },
+  {
+   "id": "feng_shuizhuo",
+   "name": "夏日泳圈攻击！",
+   "file": "feng_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_AzVyk90HGB.webp",
+   "bytes": 29618,
+   "sha256": "5e83f4e7fbc56a29"
+  },
+  {
+   "id": "guangtailang",
+   "name": "对弈",
+   "file": "guangtailang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_2b1PUt19RN.webp",
+   "bytes": 19396,
+   "sha256": "5e435fc861eba333"
+  },
+  {
+   "id": "hui",
+   "name": "放轻松些",
+   "file": "hui.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_fang_qingsongxie.webp",
+   "bytes": 26550,
+   "sha256": "990195e67aa8697c"
+  },
+  {
+   "id": "kui",
+   "name": "休息时间！",
+   "file": "kui.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_8j1QiILJvu.webp",
+   "bytes": 24820,
+   "sha256": "a3da45b240c6a91e"
+  },
+  {
+   "id": "lieriyasi",
+   "name": "最佳化",
+   "file": "lieriyasi.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_a_lieriyasi.webp",
+   "bytes": 29962,
+   "sha256": "e99f7482f6480929"
+  },
+  {
+   "id": "lili",
+   "name": "安静些",
+   "file": "lili.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_yDHF6JTmH5.webp",
+   "bytes": 28168,
+   "sha256": "f0bbf7654c27e0ca"
+  },
+  {
+   "id": "liuli",
+   "name": "人格修正拳！",
+   "file": "liuli.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_rytBHz0SiP.webp",
+   "bytes": 24488,
+   "sha256": "129aae837c754dd8"
+  },
+  {
+   "id": "liuli_shuizhuo",
+   "name": "夏日海滩踢击",
+   "file": "liuli_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_9FUfMuUIbJ.webp",
+   "bytes": 27498,
+   "sha256": "5779c2193fb9d6e3"
+  },
+  {
+   "id": "lixu",
+   "name": "钢筋铁肘",
+   "file": "lixu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_uVrQLrUbyb.webp",
+   "bytes": 22490,
+   "sha256": "c9e0bef051d2d8c3"
+  },
+  {
+   "id": "lixu_shuizhuo",
+   "name": "狩猎之少女",
+   "file": "lixu_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_76lHT2rq0d.webp",
+   "bytes": 32406,
+   "sha256": "96045d00e329ce9b"
+  },
+  {
+   "id": "lulutiya",
+   "name": "谢幕",
+   "file": "lulutiya.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_P9z9TVKULK.webp",
+   "bytes": 35320,
+   "sha256": "24dbb1de2e709b02"
+  },
+  {
+   "id": "ren",
+   "name": "横扫之刃",
+   "file": "ren.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_TCWVHjtq0i.webp",
+   "bytes": 15872,
+   "sha256": "ac246cb944176cd1"
+  },
+  {
+   "id": "xia",
+   "name": "该结束了！",
+   "file": "xia.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_rVfi2yisPj.webp",
+   "bytes": 23996,
+   "sha256": "6206f6d324a7a5e4"
+  },
+  {
+   "id": "xiaochun",
+   "name": "案件还原",
+   "file": "xiaochun.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_RhBCWqW0x2.webp",
+   "bytes": 26674,
+   "sha256": "1bb0aa01b15d4b50"
+  },
+  {
+   "id": "xingnai_shuizhuo",
+   "name": "清凉时间！",
+   "file": "xingnai_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_9YPerM1CwR.webp",
+   "bytes": 28428,
+   "sha256": "8ac660f49ce3cbe9"
+  },
+  {
+   "id": "yingzi",
+   "name": "杂鱼！杂鱼！",
+   "file": "yingzi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_c56HyLkQLO.webp",
+   "bytes": 22512,
+   "sha256": "eb8f5a6ed4c49e7b"
+  },
+  {
+   "id": "yizhi",
+   "name": "祛祟",
+   "file": "yizhi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_CEYwyNKafJ.webp",
+   "bytes": 21904,
+   "sha256": "ebcd92e198204341"
+  },
+  {
+   "id": "yujianyu",
+   "name": "秘技！摸头杀",
+   "file": "yujianyu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_5EzxBXInfH.webp",
+   "bytes": 21622,
+   "sha256": "f89909bea1a9d0a7"
+  },
+  {
+   "id": "yunai",
+   "name": "正义风纪委员飞踢",
+   "file": "yunai.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_6u1ljvBnvy.webp",
+   "bytes": 28748,
+   "sha256": "391ea151ad851ad4"
+  },
+  {
+   "id": "yuqing",
+   "name": "你呀你呀",
+   "file": "yuqing.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_e6yk5jnQa0.webp",
+   "bytes": 23262,
+   "sha256": "589cb41bce99559c"
+  },
+  {
+   "id": "yu_shuizhuo",
+   "name": "水枪攻击！",
+   "file": "yu_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_d3Z599tJ4l.webp",
+   "bytes": 31540,
+   "sha256": "a2e73a6c82a547c0"
+  },
+  {
+   "id": "dongma",
+   "name": "现实间冬马",
+   "file": "dongma.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_DOIdJt59Ud.webp",
+   "bytes": 19328,
+   "sha256": "a1673a1ce279b73e"
+  },
+  {
+   "id": "feng",
+   "name": "入间枫",
+   "file": "feng.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_oAjMFutXGf.webp",
+   "bytes": 28982,
+   "sha256": "64f023661fd8179d"
+  },
+  {
+   "id": "feng_shuizhuo",
+   "name": "枫(水着)",
+   "file": "feng_shuizhuo.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/枫（水着）.png",
+   "bytes": 29618,
+   "sha256": "5e83f4e7fbc56a29"
+  },
+  {
+   "id": "guangtailang",
+   "name": "木原光太郎",
+   "file": "guangtailang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_qLeSrXDAwN.webp",
+   "bytes": 19396,
+   "sha256": "5e435fc861eba333"
+  },
+  {
+   "id": "hui",
+   "name": "松山惠",
+   "file": "hui.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/惠.png",
+   "bytes": 26550,
+   "sha256": "990195e67aa8697c"
+  },
+  {
+   "id": "jieyi",
+   "name": "小野结衣",
+   "file": "jieyi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_Gyx7WO51lv.webp",
+   "bytes": 26942,
+   "sha256": "511b08bd134f6d3c"
+  },
+  {
+   "id": "kui",
+   "name": "小野葵",
+   "file": "kui.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/葵.png",
+   "bytes": 24820,
+   "sha256": "a3da45b240c6a91e"
+  },
+  {
+   "id": "lieriyasi",
+   "name": "里尔亚斯·斯塔芙莉娅斯特",
+   "file": "lieriyasi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_RTunmQRx7X.webp",
+   "bytes": 29962,
+   "sha256": "e99f7482f6480929"
+  },
+  {
+   "id": "lili",
+   "name": "莉莉·缇雅菲洛",
+   "file": "lili.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_vv28zwy3db.webp",
+   "bytes": 28168,
+   "sha256": "f0bbf7654c27e0ca"
+  },
+  {
+   "id": "liuli",
+   "name": "小沙香琉璃",
+   "file": "liuli.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_QOINVelwDg.webp",
+   "bytes": 24488,
+   "sha256": "129aae837c754dd8"
+  },
+  {
+   "id": "liuli_shuizhuo",
+   "name": "琉璃(水着)",
+   "file": "liuli_shuizhuo.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/琉璃（水着）.png",
+   "bytes": 27498,
+   "sha256": "5779c2193fb9d6e3"
+  },
+  {
+   "id": "liuli_wansheng",
+   "name": "琉璃(万圣祭)",
+   "file": "liuli_wansheng.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/琉璃(万圣祭）.png",
+   "bytes": 41356,
+   "sha256": "691a8d513753d052"
+  },
+  {
+   "id": "lixu",
+   "name": "现实间里绪",
+   "file": "lixu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_mxWESMi7kU.webp",
+   "bytes": 22490,
+   "sha256": "c9e0bef051d2d8c3"
+  },
+  {
+   "id": "lixu_shuizhuo",
+   "name": "里绪(水着)",
+   "file": "lixu_shuizhuo.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/里绪（水着）.png",
+   "bytes": 32406,
+   "sha256": "96045d00e329ce9b"
+  },
+  {
+   "id": "lulutiya",
+   "name": "露璐缇雅·爱德华",
+   "file": "lulutiya.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_IvJzfVxSP3.webp",
+   "bytes": 35320,
+   "sha256": "24dbb1de2e709b02"
+  },
+  {
+   "id": "shuangjin",
+   "name": "霜烬",
+   "file": "shuangjin.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_MXyCY33zoe.webp",
+   "bytes": 25416,
+   "sha256": "459b7f24e46c4937"
+  },
+  {
+   "id": "XHZD",
+   "name": "XHZD",
+   "file": "XHZD.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_xhzd.webp",
+   "bytes": 32756,
+   "sha256": "c00cecf8a68f6540"
+  },
+  {
+   "id": "xia",
+   "name": "小仓霞",
+   "file": "xia.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_4VvmbV3Vt4.webp",
+   "bytes": 23996,
+   "sha256": "6206f6d324a7a5e4"
+  },
+  {
+   "id": "xiaochun",
+   "name": "椎名小春",
+   "file": "xiaochun.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_qc47HgvVbP.webp",
+   "bytes": 26674,
+   "sha256": "1bb0aa01b15d4b50"
+  },
+  {
+   "id": "xingnai_shuizhuo",
+   "name": "星奈(水着)",
+   "file": "xingnai_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_xingnai_shuizhuo_v2.webp",
+   "bytes": 28428,
+   "sha256": "8ac660f49ce3cbe9"
+  },
+  {
+   "id": "yingzi",
+   "name": "宫樱子",
+   "file": "yingzi.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_yingzi.webp",
+   "bytes": 22512,
+   "sha256": "eb8f5a6ed4c49e7b"
+  },
+  {
+   "id": "yizhi",
+   "name": "小野伊织",
+   "file": "yizhi.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/伊织.png",
+   "bytes": 21904,
+   "sha256": "ebcd92e198204341"
+  },
+  {
+   "id": "yujianyu",
+   "name": "入间予",
+   "file": "yujianyu.webp",
+   "kind": "authorFace",
+   "source": "最终角色卡/予.png",
+   "bytes": 21622,
+   "sha256": "f89909bea1a9d0a7"
+  },
+  {
+   "id": "yunai",
+   "name": "雨宫羽奈",
+   "file": "yunai.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_WqKZD5V99F.webp",
+   "bytes": 28748,
+   "sha256": "391ea151ad851ad4"
+  },
+  {
+   "id": "yunai_wangxi",
+   "name": "羽奈(往昔)",
+   "file": "yunai_wangxi.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_yunai_wangxi.webp",
+   "bytes": 38566,
+   "sha256": "13acea36fb80ccf0"
+  },
+  {
+   "id": "yuqing",
+   "name": "宁雨清",
+   "file": "yuqing.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_KKuE94JDue.webp",
+   "bytes": 23262,
+   "sha256": "589cb41bce99559c"
+  },
+  {
+   "id": "yu_shuizhuo",
+   "name": "予(水着)",
+   "file": "yu_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_ynGbhERmQy.webp",
+   "bytes": 31540,
+   "sha256": "a2e73a6c82a547c0"
+  },
+  {
+   "id": "dafeng",
+   "name": "大风",
+   "file": "dafeng.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_vd2h3iGpbb.webp",
+   "bytes": 11924,
+   "sha256": "6d6bc34939718537"
+  },
+  {
+   "id": "dutu",
+   "name": "赌徒游戏",
+   "file": "dutu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_oflxrBF4j3.webp",
+   "bytes": 16766,
+   "sha256": "386de1ff694635a0"
+  },
+  {
+   "id": "duzou",
+   "name": "独奏",
+   "file": "duzou.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_dA4qry3waW.webp",
+   "bytes": 21228,
+   "sha256": "7431d360afc0728b"
+  },
+  {
+   "id": "jiaohu",
+   "name": "交互冲动",
+   "file": "jiaohu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_KlpWEtQ3do.webp",
+   "bytes": 22314,
+   "sha256": "e93239fd2d781d1d"
+  },
+  {
+   "id": "jixing",
+   "name": "即兴演出",
+   "file": "jixing.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_d96Q2Pq2Vu.webp",
+   "bytes": 17028,
+   "sha256": "2c915a54aaf2dab6"
+  },
+  {
+   "id": "mingyun",
+   "name": "命运之回声",
+   "file": "mingyun.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_GUKoeQAYIx.webp",
+   "bytes": 14826,
+   "sha256": "08ad593aa699c434"
+  },
+  {
+   "id": "wangju",
+   "name": "王车易位",
+   "file": "wangju.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_HiBI3ULlfv.webp",
+   "bytes": 8448,
+   "sha256": "0f759645013b8d7d"
+  },
+  {
+   "id": "xianting",
+   "name": "闲庭信步",
+   "file": "xianting.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_FRVcQa2fbd.webp",
+   "bytes": 11768,
+   "sha256": "856182dd6807988a"
+  },
+  {
+   "id": "yuanzhuo",
+   "name": "圆桌会议",
+   "file": "yuanzhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_8AnE4XfvvN.webp",
+   "bytes": 19944,
+   "sha256": "bf0021c4726cab22"
+  },
+  {
+   "id": "zaodong",
+   "name": "躁动之心",
+   "file": "zaodong.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_McCy379mIF.webp",
+   "bytes": 25182,
+   "sha256": "a33a8af95a5bf29d"
+  },
+  {
+   "id": "gift_cards-001",
+   "name": "200$",
+   "file": "gift_cards-001.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_gBJhY1CYEC.webp",
+   "bytes": 9022,
+   "sha256": "118754933d112d2f"
+  },
+  {
+   "id": "gift_cards-002",
+   "name": "500$",
+   "file": "gift_cards-002.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_RyIra6KCxm.webp",
+   "bytes": 7802,
+   "sha256": "5ca267848894dc03"
+  },
+  {
+   "id": "gift_cards-003",
+   "name": "Noise(>10)",
+   "file": "gift_cards-003.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_g9AH2dwzNl.webp",
+   "bytes": 11264,
+   "sha256": "661b26eff4207fda"
+  },
+  {
+   "id": "gift_cards-004",
+   "name": "Noise(≤10)",
+   "file": "gift_cards-004.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_tpECuBlVSb.webp",
+   "bytes": 11594,
+   "sha256": "d2b194ebec00006f"
+  },
+  {
+   "id": "gift_cards-005",
+   "name": "和声",
+   "file": "gift_cards-005.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_WaE5tlQ25w.webp",
+   "bytes": 13566,
+   "sha256": "c5ae4c850182db6c"
+  },
+  {
+   "id": "gift_cards-006",
+   "name": "1000$",
+   "file": "gift_cards-006.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_EUcoM94UDI.webp",
+   "bytes": 8566,
+   "sha256": "5951000e5826c85d"
+  },
+  {
+   "id": "bizhang",
+   "name": "风纪委员臂章",
+   "file": "bizhang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_WRw1FlKIMG.webp",
+   "bytes": 12982,
+   "sha256": "352f8c4f88ce57c1"
+  },
+  {
+   "id": "gangbi",
+   "name": "钢笔",
+   "file": "gangbi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_v3L1fg9il2.webp",
+   "bytes": 17454,
+   "sha256": "42ae7d54199a1500"
+  },
+  {
+   "id": "gongmingzhe",
+   "name": "共鸣者",
+   "file": "gongmingzhe.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_JFnk4AwmUZ.webp",
+   "bytes": 14614,
+   "sha256": "ede80cd4b56d3443"
+  },
+  {
+   "id": "hexin",
+   "name": "核心的供给者",
+   "file": "hexin.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_iTclHZs9kb.webp",
+   "bytes": 19842,
+   "sha256": "442285b3e4f61a7e"
+  },
+  {
+   "id": "item_permanent-002",
+   "name": "Huginn&Muninn",
+   "file": "item_permanent-002.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_d6WbOr2gL9.webp",
+   "bytes": 20124,
+   "sha256": "18aa68caf9f12024"
+  },
+  {
+   "id": "item_permanent-005",
+   "name": "黑色卡片",
+   "file": "item_permanent-005.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_uDJ22RFVA7.webp",
+   "bytes": 11356,
+   "sha256": "bf3d96b1af24e1df"
+  },
+  {
+   "id": "item_permanent-007",
+   "name": "蓝宝之杖·命",
+   "file": "item_permanent-007.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_aGVPDZCwUr.webp",
+   "bytes": 13918,
+   "sha256": "b566cd1a704ad290"
+  },
+  {
+   "id": "jiye",
+   "name": "极夜君王之冕",
+   "file": "jiye.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_jiye.webp",
+   "bytes": 19286,
+   "sha256": "cbb3037e3de9e0c5"
+  },
+  {
+   "id": "juanke",
+   "name": "镌刻的艺术",
+   "file": "juanke.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_VK0GAj3BqV.webp",
+   "bytes": 19322,
+   "sha256": "ebbaa761ec5c8410"
+  },
+  {
+   "id": "langya",
+   "name": "狼牙鹰爪",
+   "file": "langya.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_langya_yingzhua.webp",
+   "bytes": 18518,
+   "sha256": "b77ff153bee20e2d"
+  },
+  {
+   "id": "mianju",
+   "name": "善意面具",
+   "file": "mianju.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_m6djAaFjGZ.webp",
+   "bytes": 17182,
+   "sha256": "f80b0de9871deb93"
+  },
+  {
+   "id": "qiaojiang",
+   "name": "巧匠之手",
+   "file": "qiaojiang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_iYccn3axZ6.webp",
+   "bytes": 15972,
+   "sha256": "dba43079273b9126"
+  },
+  {
+   "id": "shouji",
+   "name": "智能手机",
+   "file": "shouji.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_1oUPlAbKu4.webp",
+   "bytes": 14552,
+   "sha256": "8b8a09e70d65bace"
+  },
+  {
+   "id": "xuejie",
+   "name": "血之佑戒·红泪拉克莎",
+   "file": "xuejie.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_xuejie.webp",
+   "bytes": 12574,
+   "sha256": "fd97c4e5097e95db"
+  },
+  {
+   "id": "yaodao",
+   "name": "妖刀五月雨",
+   "file": "yaodao.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_dCb0XRv5vc.webp",
+   "bytes": 18848,
+   "sha256": "79ac4beefef7e56b"
+  },
+  {
+   "id": "yongzou",
+   "name": "永奏进行曲",
+   "file": "yongzou.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_LPcsEHSUna.webp",
+   "bytes": 19898,
+   "sha256": "696104470f01b468"
+  },
+  {
+   "id": "zhichi",
+   "name": "设计师的直尺",
+   "file": "zhichi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_R5ZTbMb8Vi.webp",
+   "bytes": 15020,
+   "sha256": "3c2351d6d7879e54"
+  },
+  {
+   "id": "bengta",
+   "name": "崩塌之乌托邦",
+   "file": "bengta.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_rkxp2U3sUX.webp",
+   "bytes": 17566,
+   "sha256": "c295a8bef8af6802"
+  },
+  {
+   "id": "d20",
+   "name": "20面骰",
+   "file": "d20.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_fdt8Wq6uSJ.webp",
+   "bytes": 12452,
+   "sha256": "c3818375d570331b"
+  },
+  {
+   "id": "diandao",
+   "name": "颠倒骰子",
+   "file": "diandao.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_j1iLJkDcgD.webp",
+   "bytes": 15410,
+   "sha256": "d332164ba2ba3e02"
+  },
+  {
+   "id": "diaozhui",
+   "name": "怪怪幽灵吊坠",
+   "file": "diaozhui.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_A9zAXt2zav.webp",
+   "bytes": 13372,
+   "sha256": "b7ef5c91fd5527f4"
+  },
+  {
+   "id": "dipai",
+   "name": "底牌",
+   "file": "dipai.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_IgHm5zNViX.webp",
+   "bytes": 14536,
+   "sha256": "3e6321de9c63821c"
+  },
+  {
+   "id": "fajia",
+   "name": "四叶草发卡",
+   "file": "fajia.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_vGIf8rucmy.webp",
+   "bytes": 13846,
+   "sha256": "beb21173b98268a6"
+  },
+  {
+   "id": "fangdajing",
+   "name": "侦探放大镜",
+   "file": "fangdajing.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_MSJ42tn2pr.webp",
+   "bytes": 12376,
+   "sha256": "f018ba8920ba317b"
+  },
+  {
+   "id": "hezi",
+   "name": "来自地狱的盒子",
+   "file": "hezi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_ZXkWqiqmEt.webp",
+   "bytes": 14376,
+   "sha256": "22887f68278dfae6"
+  },
+  {
+   "id": "hufu",
+   "name": "幸运护符",
+   "file": "hufu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_ybMFzHObZj.webp",
+   "bytes": 14848,
+   "sha256": "94300e39b3857f4c"
+  },
+  {
+   "id": "item_single-009",
+   "name": "红宝之杖·运",
+   "file": "item_single-009.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_O8SSYi9PkE.webp",
+   "bytes": 14538,
+   "sha256": "f7c4ddfc4a11a871"
+  },
+  {
+   "id": "item_single-015",
+   "name": "绿宝之杖·择",
+   "file": "item_single-015.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_YH4uedK3SX.webp",
+   "bytes": 16854,
+   "sha256": "ed6fa7229d92e7f7"
+  },
+  {
+   "id": "item_single-017",
+   "name": "魔法清点名单",
+   "file": "item_single-017.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_HQjja6r4wF.webp",
+   "bytes": 15612,
+   "sha256": "94b420fb8e1f341d"
+  },
+  {
+   "id": "item_single-035",
+   "name": "先哲之\"馈赠\"",
+   "file": "item_single-035.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_Wk4wr3SIRr.webp",
+   "bytes": 16106,
+   "sha256": "a668d88ef2a779b1"
+  },
+  {
+   "id": "jingwen",
+   "name": "经文",
+   "file": "jingwen.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_VFLLB04nAP.webp",
+   "bytes": 13410,
+   "sha256": "bd63ddcfec733923"
+  },
+  {
+   "id": "lanluzhe",
+   "name": "拦路者",
+   "file": "lanluzhe.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_0ke1FyYmtn.webp",
+   "bytes": 17268,
+   "sha256": "26f9b405684ef16f"
+  },
+  {
+   "id": "lantu",
+   "name": "魔法蓝图",
+   "file": "lantu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_oPYSlc1pF5.webp",
+   "bytes": 17654,
+   "sha256": "1be018d1388a010f"
+  },
+  {
+   "id": "lihe",
+   "name": "惊吓礼盒",
+   "file": "lihe.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_qAx9XRp4iw.webp",
+   "bytes": 14710,
+   "sha256": "2af527ea1a091443"
+  },
+  {
+   "id": "ling",
+   "name": "神乐铃",
+   "file": "ling.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_oG0h5KxjBT.webp",
+   "bytes": 12980,
+   "sha256": "c66f98b1326671ae"
+  },
+  {
+   "id": "pengpengbingcha",
+   "name": "碰碰冰茶",
+   "file": "pengpengbingcha.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_vYloMrqWFL.webp",
+   "bytes": 12600,
+   "sha256": "faea98e541ebe44a"
+  },
+  {
+   "id": "posun",
+   "name": "破损电子设备",
+   "file": "posun.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_5oo6fhAIO6.webp",
+   "bytes": 14356,
+   "sha256": "69d189e394e3798a"
+  },
+  {
+   "id": "qiubang",
+   "name": "某女士爱用球棒",
+   "file": "qiubang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_KiBcNRVHYZ.webp",
+   "bytes": 13502,
+   "sha256": "619b5020f97ce045"
+  },
+  {
+   "id": "ren",
+   "name": "制裁之刃",
+   "file": "ren.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_o0uUfCC7h2.webp",
+   "bytes": 15872,
+   "sha256": "ac246cb944176cd1"
+  },
+  {
+   "id": "shengyin",
+   "name": "鸣奏之\"圣音\"",
+   "file": "shengyin.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_nxCZJc5gDO.webp",
+   "bytes": 13774,
+   "sha256": "c0633f54937780dc"
+  },
+  {
+   "id": "shoutao",
+   "name": "特制手套",
+   "file": "shoutao.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_IqtKa1PoPL.webp",
+   "bytes": 13434,
+   "sha256": "488a2fc9d92651ae"
+  },
+  {
+   "id": "souchaling",
+   "name": "搜查令",
+   "file": "souchaling.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_sxdAPzKsvO.webp",
+   "bytes": 13986,
+   "sha256": "ba7fcff10f4f4d6f"
+  },
+  {
+   "id": "suhu",
+   "name": "结晶碎弧",
+   "file": "suhu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_BDREHzsWvA.webp",
+   "bytes": 10892,
+   "sha256": "42b9156c21420da9"
+  },
+  {
+   "id": "tanyu",
+   "name": "贪欲者的烙印",
+   "file": "tanyu.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_tanyu_v2.webp",
+   "bytes": 21108,
+   "sha256": "c9c1c7ffdc3a422b"
+  },
+  {
+   "id": "twice",
+   "name": "Twice",
+   "file": "twice.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_QvvGQo3W4L.webp",
+   "bytes": 9652,
+   "sha256": "eadb9671a5a043c2"
+  },
+  {
+   "id": "yaokong",
+   "name": "遥控骰子",
+   "file": "yaokong.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_hVKZnAy85U.webp",
+   "bytes": 10772,
+   "sha256": "d8e9f4fac0a0ca8b"
+  },
+  {
+   "id": "yaopian",
+   "name": "镇定药片",
+   "file": "yaopian.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_i0K2c1ud3K.webp",
+   "bytes": 12652,
+   "sha256": "fe714446be8b1d04"
+  },
+  {
+   "id": "yinchai",
+   "name": "音叉",
+   "file": "yinchai.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_FqchbTcRFp.webp",
+   "bytes": 11278,
+   "sha256": "32dfdeaae3d14e0e"
+  },
+  {
+   "id": "yinliao",
+   "name": "能量饮料",
+   "file": "yinliao.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_veg0bIdJ43.webp",
+   "bytes": 15192,
+   "sha256": "2f72d75844553ad9"
+  },
+  {
+   "id": "zhaodaiqian",
+   "name": "再来一次招待券",
+   "file": "zhaodaiqian.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_1CBBfStonz.webp",
+   "bytes": 11160,
+   "sha256": "699db1fd09ce2d6b"
+  },
+  {
+   "id": "zhentou",
+   "name": "柔软枕头",
+   "file": "zhentou.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_UAmTOmSfVB.webp",
+   "bytes": 12638,
+   "sha256": "badb26b68b26821d"
+  },
+  {
+   "id": "zhiqin",
+   "name": "执勤证明",
+   "file": "zhiqin.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_xnIcNjn6LF.webp",
+   "bytes": 15104,
+   "sha256": "967061d2978290b4"
+  },
+  {
+   "id": "zhuailian",
+   "name": "猎手爪链",
+   "file": "zhuailian.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_MNhUyBOigo.webp",
+   "bytes": 13554,
+   "sha256": "cd931d38fd7b043b"
+  },
+  {
+   "id": "music_cards-001",
+   "name": "乐谱碎片·序幕",
+   "file": "music_cards-001.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_IdcxSaltiv.webp",
+   "bytes": 11924,
+   "sha256": "1a127ab9ae15ddd8"
+  },
+  {
+   "id": "music_cards-002",
+   "name": "乐谱碎片·渐起",
+   "file": "music_cards-002.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_VCzoMObTzi.webp",
+   "bytes": 11222,
+   "sha256": "69bf3f01e79a4725"
+  },
+  {
+   "id": "music_cards-003",
+   "name": "乐谱碎片·回响",
+   "file": "music_cards-003.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_qje6aeAIwP.webp",
+   "bytes": 11094,
+   "sha256": "2c0744b868cd6f86"
+  },
+  {
+   "id": "music_cards-004",
+   "name": "乐谱碎片·高涨",
+   "file": "music_cards-004.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_YbvDbFDiqJ.webp",
+   "bytes": 11236,
+   "sha256": "1a92342fede3ca8a"
+  },
+  {
+   "id": "music_cards-005",
+   "name": "乐谱碎片·尾声",
+   "file": "music_cards-005.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_TXaVuOWff7.webp",
+   "bytes": 11198,
+   "sha256": "604e371f91be769a"
+  },
+  {
+   "id": "music_cards-006",
+   "name": "乐谱碎片·谢幕",
+   "file": "music_cards-006.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_nnUdIaSfOk.webp",
+   "bytes": 12142,
+   "sha256": "ebfddb42b8654f87"
+  },
+  {
+   "id": "daji",
+   "name": "御神签·大吉",
+   "file": "daji.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_MRGVhU53ZN.webp",
+   "bytes": 12646,
+   "sha256": "2bc6bfe47cdd9c7e"
+  },
+  {
+   "id": "daxiong",
+   "name": "御神签·大凶",
+   "file": "daxiong.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_EVV6OYujed.webp",
+   "bytes": 14108,
+   "sha256": "6c35bdd3bc0a6fe1"
+  },
+  {
+   "id": "xiaoji",
+   "name": "御神签·小吉",
+   "file": "xiaoji.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_UZLHwKeLMk.webp",
+   "bytes": 9160,
+   "sha256": "8b16c64fb2936253"
+  },
+  {
+   "id": "xiong",
+   "name": "御神签·凶",
+   "file": "xiong.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_K8SVIsmytW.webp",
+   "bytes": 14104,
+   "sha256": "b157c00a506a0e12"
+  },
+  {
+   "id": "xuji",
+   "name": "御神签·绪吉",
+   "file": "xuji.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_Yg30GI2UTj.webp",
+   "bytes": 12766,
+   "sha256": "bb2ffe6360aba8e7"
+  },
+  {
+   "id": "dongma",
+   "name": "弱点分析",
+   "file": "dongma.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_OU0nirkKeu.webp",
+   "bytes": 19328,
+   "sha256": "a1673a1ce279b73e"
+  },
+  {
+   "id": "feng",
+   "name": "鼓舞",
+   "file": "feng.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_mUgBpdwDZR.webp",
+   "bytes": 28982,
+   "sha256": "64f023661fd8179d"
+  },
+  {
+   "id": "feng_shuizhuo",
+   "name": "一刀两断！打西瓜！",
+   "file": "feng_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_uZjl4gBK6Y.webp",
+   "bytes": 29618,
+   "sha256": "5e83f4e7fbc56a29"
+  },
+  {
+   "id": "guangtailang",
+   "name": "集中",
+   "file": "guangtailang.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_qhKTTGtFmB.webp",
+   "bytes": 19396,
+   "sha256": "5e435fc861eba333"
+  },
+  {
+   "id": "hui",
+   "name": "共鸣",
+   "file": "hui.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_81V0l2An2A.webp",
+   "bytes": 26550,
+   "sha256": "990195e67aa8697c"
+  },
+  {
+   "id": "jieyi",
+   "name": "祓禊",
+   "file": "jieyi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_SjMpZy96gh.webp",
+   "bytes": 26942,
+   "sha256": "511b08bd134f6d3c"
+  },
+  {
+   "id": "kui",
+   "name": "打起精神来！",
+   "file": "kui.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_DESkelBkoU.webp",
+   "bytes": 24820,
+   "sha256": "a3da45b240c6a91e"
+  },
+  {
+   "id": "lieriyasi",
+   "name": "超频",
+   "file": "lieriyasi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_MSmVvAVVOv.webp",
+   "bytes": 29962,
+   "sha256": "e99f7482f6480929"
+  },
+  {
+   "id": "lili",
+   "name": "狡黠之跃",
+   "file": "lili.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_VUvv4VTU9X.webp",
+   "bytes": 28168,
+   "sha256": "f0bbf7654c27e0ca"
+  },
+  {
+   "id": "liuli",
+   "name": "好孩子的奖励",
+   "file": "liuli.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_XLQKhlAY5H.webp",
+   "bytes": 24488,
+   "sha256": "129aae837c754dd8"
+  },
+  {
+   "id": "liuli_shuizhuo",
+   "name": "比翼恋理",
+   "file": "liuli_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_biyi_lianli.webp",
+   "bytes": 27498,
+   "sha256": "5779c2193fb9d6e3"
+  },
+  {
+   "id": "lixu",
+   "name": "认真起来了！",
+   "file": "lixu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_rJAMoFKD8h.webp",
+   "bytes": 22490,
+   "sha256": "c9e0bef051d2d8c3"
+  },
+  {
+   "id": "lixu_shuizhuo",
+   "name": "小试身手！堆沙堡",
+   "file": "lixu_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_sk_lixu_shuizhuo.webp",
+   "bytes": 32406,
+   "sha256": "96045d00e329ce9b"
+  },
+  {
+   "id": "lulutiya",
+   "name": "拿手好戏",
+   "file": "lulutiya.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_vfIGnYFOBC.webp",
+   "bytes": 35320,
+   "sha256": "24dbb1de2e709b02"
+  },
+  {
+   "id": "xia",
+   "name": "逃脱",
+   "file": "xia.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_rUvawLYCzy.webp",
+   "bytes": 23996,
+   "sha256": "6206f6d324a7a5e4"
+  },
+  {
+   "id": "xiaochun",
+   "name": "这不是逃跑！",
+   "file": "xiaochun.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_SmAkxElXYP.webp",
+   "bytes": 26674,
+   "sha256": "1bb0aa01b15d4b50"
+  },
+  {
+   "id": "xingnai_shuizhuo",
+   "name": "水枪攻击！爱之连携",
+   "file": "xingnai_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/card_sk_xingnai_shuizhuo.webp",
+   "bytes": 28428,
+   "sha256": "8ac660f49ce3cbe9"
+  },
+  {
+   "id": "yingzi",
+   "name": "交给我就好了",
+   "file": "yingzi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_fUm4ElXvzh.webp",
+   "bytes": 22512,
+   "sha256": "eb8f5a6ed4c49e7b"
+  },
+  {
+   "id": "yizhi",
+   "name": "掌握",
+   "file": "yizhi.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_dD5sVjOACw.webp",
+   "bytes": 21904,
+   "sha256": "ebcd92e198204341"
+  },
+  {
+   "id": "yujianyu",
+   "name": "剖析",
+   "file": "yujianyu.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_bqofyINGAU.webp",
+   "bytes": 21622,
+   "sha256": "f89909bea1a9d0a7"
+  },
+  {
+   "id": "yunai",
+   "name": "风纪委员的手段",
+   "file": "yunai.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_9dEk7BbeP3.webp",
+   "bytes": 28748,
+   "sha256": "391ea151ad851ad4"
+  },
+  {
+   "id": "yuqing",
+   "name": "查阅",
+   "file": "yuqing.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_PDuiTSUGUV.webp",
+   "bytes": 23262,
+   "sha256": "589cb41bce99559c"
+  },
+  {
+   "id": "yu_shuizhuo",
+   "name": "夏日畅饮时间！",
+   "file": "yu_shuizhuo.webp",
+   "kind": "legacy",
+   "source": "assets/images/img_8xf7XNWneb.webp",
+   "bytes": 31540,
+   "sha256": "a2e73a6c82a547c0"
+  }
+ ]
+}

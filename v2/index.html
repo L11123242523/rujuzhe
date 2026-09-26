@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>入局者 · v2（全新引擎）</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<header>
+  <h1>入局者 <small>v2 · 全新引擎（单机 vs AI）</small></h1>
+  <div id="toolbar">
+    <button id="btn-new">新开一局</button>
+    <button id="btn-phase">推进阶段</button>
+    <button id="btn-end">结束回合</button>
+    <span id="phase-label" class="pill">—</span>
+    <span id="turn-label" class="pill">—</span>
+  </div>
+</header>
+
+<main>
+  <section id="board">
+    <h2>地图（42 格）</h2>
+    <div id="ring"></div>
+    <div id="seats"></div>
+  </section>
+
+  <section id="side">
+    <h2>你的手牌 <small id="hand-hint"></small></h2>
+    <div id="hand"></div>
+    <h2>决策</h2>
+    <div id="decision" class="panel">（当前没有需要你决定的事）</div>
+    <h2>日志</h2>
+    <div id="log" class="panel"></div>
+  </section>
+</main>
+
+<footer>
+  <span>引擎：<code>packages/engine</code>（无 DOM、Node 可直跑） · AI：<code>packages/ai</code> · 本页只做渲染与输入</span>
+</footer>
+
+<script type="module" src="./ui.js"></script>
+</body>
+</html>
