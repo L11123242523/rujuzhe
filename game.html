@@ -9456,6 +9456,8 @@ function drawCard(player) {  var __p = battleState[player];
 
 function startTurn() {
   if (battleState && battleState._over) return; // 对局已结束：不再开始新回合
+  // S5：回合开始先清一次陈旧锁（规格用例8：不残留锁标志；清理会记日志，不静默）
+  if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('回合开始');
   // 重置每回合一次的永续卡标记（按回合归属者对称重置，修复原代码写死 p1 导致 p2 永不复位）
   var __rs = battleState.currentPlayer;
   if (battleState && battleState[__rs] && battleState[__rs].permanent) {
@@ -10092,6 +10094,24 @@ var ChainAnim = {
  *   16 个时点的独立扫描器（S2）、盖卡付费时点（S3）、判定"结果出现未适用"（S4）、
  *   以 TW.state 取代 _chainLock 承重（S5）见《连锁重构实施计划.md》。
  * ============================================================ */
+/* S5（2026-09-27）：陈旧锁清理 —— 规格用例8「不残留锁标志」。
+   判据：锁为真，但**既没有活动窗口、也没有结算深度、效果栈也为空** ⇒ 按定义不可能"正在结算"。
+   注意：这里是"清理 + 出声"，不是静默放锁；真正的兜底强解仍是 __eeForceUnlock（看门狗）。 */
+function __twClearStaleChainLock(tag) {
+  try {
+    if (typeof effectEngine === 'undefined' || !effectEngine) return false;
+    if (!effectEngine._chainLock) return false;
+    var twActive = (typeof TW !== 'undefined' && TW && TW.active);
+    var depth = (effectEngine._resolveDepth || 0) > 0;
+    var stackLen = (battleState && battleState.effectStack) ? battleState.effectStack.length : 0;
+    if (twActive || depth || stackLen) return false;      // 有窗口/有深度/有待结算动作 ⇒ 锁是合理的，不动
+    effectEngine._chainLock = false;
+    addBattleLog('system', '【效果锁·S5】清理陈旧 _chainLock（无窗口、无结算深度、无待结算动作）· 触发点：' + (tag || '未标注'));
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    return true;
+  } catch (e) { return false; }
+}
+
 var TW = {
   active: null,
   seq: 0,
@@ -10372,6 +10392,9 @@ var TW = {
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
     if (this.active === win) this.active = null;
+    // S5：关窗 = 没有窗口在跑 —— **顺序很重要**：必须先把 active 置空，
+    // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
+    try { if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('TW.close'); } catch (e) {}
     addBattleLog('system', '【时点窗口】关闭（' + win.type + '，共 ' + win.chain.length + ' 环）');
     try { win.done(); } catch (e) { console.error('TimingWindow done 回调异常', e); }
   }
@@ -10728,7 +10751,14 @@ function __executeCardEffectBody(player, card, done) {
 function __chainIsBusy() {
   try {
     if (!effectEngine) return false;
-    return (effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock || !!effectEngine._inNewChain;
+    if ((effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock || !!effectEngine._inNewChain) return true;
+    /* S2（2026-09-27）：**TW 正在结算也算"链中"**。
+       否则 TW 路径结算时产生的新效果会被判成"不忙"→ queueOrRunTrigger 直接 fire() **就地执行**，
+       而作者口径明确说这是错误的（应在本次连锁全部处理完毕后另开新连锁）。
+       用 TW 的显式状态做判据，也落实 S5 的"显式状态即真源"。 */
+    if (typeof TW !== 'undefined' && TW && TW.active &&
+        (TW.active.state === 'settling' || TW.active.state === 'closed')) return true;
+    return false;
   } catch (e) { return false; }
 }
 /** 结算中 → 入队；否则立即执行 */
