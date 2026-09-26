@@ -40,12 +40,13 @@ async function loadCards() {
     const artRes = await fetch('./assets/index.json');
     if (artRes.ok) {
       const idx = await artRes.json();
-      ART = new Map((idx.items || []).map((it) => [it.id, it.file]));
+      // 卡图索引的 key 是「分类/id」：不同分类会撞 id，只按 id 查会张冠李戴
+      ART = new Map((idx.items || []).map((it) => [it.key || (it.category + '/' + it.id), it.file]));
     }
   } catch (e) { /* 没图也能玩 */ }
   return cards;
 }
-const artUrl = (card) => (card && ART.has(card.id) ? './assets/cards/' + ART.get(card.id) : null);
+const artUrl = (card) => (card && ART.has(card.category + '/' + card.id) ? './assets/cards/' + ART.get(card.category + '/' + card.id) : null);
 
 /* ── 事件 → 人话（界面的日志 = 引擎内部日志 + 动作返回的事件）────────────── */
 function describeEvent(e) {
