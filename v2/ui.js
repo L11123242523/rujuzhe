@@ -24,11 +24,14 @@ import { LAYOUT } from './packages/engine/rules/map.js';
 import { RULES } from './packages/engine/rules/constants.js';
 import { createAI } from './packages/ai/index.js';
 import { createGame } from './packages/ai/game.js';
+import { createBoard } from './battle/board3d.js';
 
 const $ = (id) => document.getElementById(id);
 let G = null;                 // { state, api, ais, ai }
 let CARDS = [];               // 内容（由 build 阶段生成 app/cards.json）
 let ART = new Map();          // 卡 id → 图片文件名（由 tools/build-assets.mjs 生成）
+let MAP3D = null;             // 3D 棋盘数据（assets/map3d.json）
+let BOARD = null;             // 3D 棋盘实例（创建失败则回退 2D 文字环）
 
 /* ── 载入内容与卡图 ───────────────────────────────────────────────────── */
 async function loadCards() {
@@ -44,6 +47,10 @@ async function loadCards() {
       ART = new Map((idx.items || []).map((it) => [it.key || (it.category + '/' + it.id), it.file]));
     }
   } catch (e) { /* 没图也能玩 */ }
+  try {
+    const m = await fetch('./assets/map3d.json');
+    if (m.ok) MAP3D = await m.json();
+  } catch (e) { /* 没有 3D 数据就退回文字棋盘 */ }
   return cards;
 }
 const artUrl = (card) => (card && ART.has(card.category + '/' + card.id) ? './assets/cards/' + ART.get(card.category + '/' + card.id) : null);
@@ -99,6 +106,15 @@ function note(state, evs) {
 /* ── 渲染 ─────────────────────────────────────────────────────────────── */
 function renderRing() {
   const { state } = G;
+  // 有 3D 棋盘就画 3D；没有（无 WebGL / 缺数据）才回退到文字环 —— 不允许因为 3D 挂了就玩不了
+  if (BOARD && BOARD.ok) {
+    BOARD.setState(state);
+    if (!BOARD.__told) {
+      BOARD.__told = true;
+      state.log.push({ type: 'uiInfo', text: '3D 棋盘已就绪：拖动可旋转、滚轮缩放、点格子看信息' });
+    }
+    return;
+  }
   const ring = $('ring');
   ring.innerHTML = '';
   LAYOUT.forEach((tile, i) => {
@@ -298,6 +314,28 @@ async function newGame() {
     teams: [['现实间冬马', '入间予', '小野葵'], ['入间予', '枫(水着)', '小野伊织']],
   });
   G = { state, api, rng, ais, ai: ais[1] };
+  // 3D 棋盘（照老站做法）：建不起来就回退文字环，**不许因此玩不了**
+  const host = $('board3d');
+  if (host && MAP3D) {
+    try {
+      if (BOARD && BOARD.dispose) BOARD.dispose();
+      const b = createBoard(host, MAP3D, {
+        onTileClick: (id) => {
+          const t = LAYOUT[id];
+          if (t) state.log.push({ type: 'uiInfo', text: `【格子 #${id}】${t.name}（${t.type}）` });
+          renderLog();
+        },
+      });
+      BOARD = b.ok ? b : null;
+      if (!b.ok) state.log.push({ type: 'uiWarn', text: `3D 棋盘不可用（${b.reason}）—— 已回退文字棋盘` });
+    } catch (e) {
+      BOARD = null;
+      state.log.push({ type: 'uiWarn', text: '3D 棋盘初始化失败：' + e.message });
+    }
+    const ring = $('ring');
+    if (ring && ring.style) ring.style.display = BOARD ? 'none' : '';
+    if (!BOARD) renderRing();
+  }
   state.log.push({ type: 'uiInfo', text: `新开一局：你 vs AI（种子 20260926，引擎 ${(await import('./packages/engine/index.js')).ENGINE_VERSION}）` });
   note(state, startTurn(state));   // 第一回合的准备阶段（抽 1 张、自然回复）也要进日志
   step();
@@ -309,3 +347,6 @@ $('btn-end').onclick = onEndTurn;
 
 // 暴露给控制台，便于手工排查
 window.__RUJUZHE__ = { get game() { return G; }, newGame, step };
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', () => { if (BOARD && BOARD.ok) BOARD.resize(); });
+}

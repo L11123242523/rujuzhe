@@ -16,6 +16,11 @@ button.ghost { background: transparent; color: var(--dim); }
 main { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(360px, 520px); gap: 18px; padding: 18px; }
 section { min-width: 0; }
 #ring { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+/* 3D 棋盘（照老站做法：美术贴图 + 立起的格子 + 环绕相机） */
+#board3d { position: relative; width: 100%; height: 52vh; min-height: 340px; border: 1px solid #23304a;
+  border-radius: 10px; overflow: hidden; background: #0a0f18; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+#board3d .board3d-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#board3d .board3d-canvas:active { cursor: grabbing; }
 .tile { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 6px 18px; min-height: 54px; font-size: 11px; }
 .tile .idx { color: var(--dim); font-size: 10px; }
 .tile .nm { display: block; color: var(--fg); }
