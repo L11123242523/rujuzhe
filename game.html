@@ -6894,6 +6894,11 @@ function onlineLiuliHWP2(done) {
     p.hand.push(card); card._addedByEffect = true;
     if (typeof __emitAddHand === 'function') __emitAddHand('p2', card, 'permanent');
     addBattleLog('p2', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
+    /* 【作者 2026-09-27 报：回收永续区的卡不触发琉璃SP】—— 这属于"卡**不因使用**离开原本的区域"，
+       必须走统一离场入口（它按座位判 _liuliHWSP 与"本回合是否已用"，并弹窗询问是否发动；
+       对手回合满足条件同样会问）。原来这里只 splice 就走了 ⇒ 触发被漏掉。 */
+    try { if (typeof __noUseLeaveHooks === 'function') __noUseLeaveHooks('p2', card, 'remove', '被回收', function () {}); }
+    catch (e) { console.error('回收后的离场触发入口出错', e); }
     updateBattleUI();
     if (done) done();
   });
@@ -8221,7 +8226,7 @@ function importDeckCode(player) {
 // ========== 对战 ==========
 var __pendingSandbox = false;   // 【测试卡组·沙盒】由菜单按钮置位，startTurn 首次进入时落到 battleState._sandbox
 function startBattle(__sandbox) {
-  try { __pendingSandbox = !!__sandbox; } catch (e) {}
+  __pendingSandbox = !!__sandbox;   // 不包 try（审计：不得新增静默吞；这行也不可能抛）
   /* ⚠ 这里**必须**区分单机与联机（作者 2026-09-16 报："联机对战使用的卡组还是单机对战的卡组"）：
      联机房主开局走的也是 startBattle()（见 Online._onGameStart 里的 startBattle() 调用），
      而本函数第一行就会 setDeckMode('pve') 把卡组切到"单机 vs AI"那一套 ——
@@ -13242,6 +13247,9 @@ function activateLiuliHWRecycle() {
     p.hand.push(card); card._addedByEffect = true;
     if (typeof __emitAddHand === 'function') __emitAddHand('p1', card, 'permanent');
     addBattleLog('p1', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
+    /* 同上：回收 = 不因使用离开原本区域 ⇒ 必须走统一离场入口（触发琉璃SP，含对手回合的询问）。 */
+    try { if (typeof __noUseLeaveHooks === 'function') __noUseLeaveHooks('p1', card, 'remove', '被回收', function () {}); }
+    catch (e) { console.error('回收后的离场触发入口出错', e); }
     updateBattleUI();
   }, 1, true);
 }
@@ -20909,6 +20917,55 @@ function __leaveEventHasTrigger(player, card, reason) {
   } catch (e) { console.error('判断离场事件是否有触发出错', e); return true; }
 }
 
+/* 非结算中：构建"本事件真正会触发的"候选批（2026-09-27 抽出，避免 checkGraveTrigger 变成巨型函数）。
+   卡自身节点的 fire 需要闭包内的 __graveBody/skipYongzou，故由调用方以 ownFire 传入。 */
+function __buildLeaveBatch(player, card, reason, ownFire) {
+  var out = [];
+  try {
+    var how = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
+      out.push({
+        owner: player, card: card,
+        mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),
+        label: '【' + ((card && card.name) || '?') + '】' + how + '触发',
+        fire: ownFire
+      });
+    }
+    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
+      out.push({
+        owner: (battleState.currentPlayer || player), card: card, mandatory: true,
+        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
+        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+      });
+    }
+    playerIds().forEach(function (w) {
+      var q = battleState[w]; if (!q) return;
+      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
+        q._liuliHWQueuedFor = card;
+        out.push({
+          owner: w, card: card, mandatory: false,
+          label: '【琉璃(万圣祭)·SP】有卡不因使用' + how + '·自己抽1张',
+          fire: function () {
+            q._liuliHWSPTurn = battleState.turn;
+            addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
+            if (typeof drawCard === 'function') drawCard(w);
+            if (typeof updateBattleUI === 'function') updateBattleUI();
+          }
+        });
+      }
+      if (q._tomaSP && q._tomaQueuedFor !== card) {
+        q._tomaQueuedFor = card;
+        out.push({
+          owner: w, card: card, mandatory: false,
+          label: '【现实间冬马·SP】有卡不因使用' + how + '·造4点无序',
+          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, how); }
+        });
+      }
+    });
+  } catch (e) { console.error('非结算中触发批次构建出错', e); }
+  return out;
+}
+
 // 检查卡牌进入墓地时的触发效果
 function checkGraveTrigger(player, card, reason, skipYongzou) {
   // 作者口径：**连锁处理中产生的新效果，在本次连锁处理完成后另开一个新连锁**（不再就地结算）。
@@ -20994,55 +21051,13 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      所以不可能像上一版那样"排空 → fire → 再收集 → 再排空"地重入卡死。
      节点 fire 一律用**闭包内的 __graveBody/直调函数**，也不再回调 checkGraveTrigger（彻底断掉重入）。
      只有 1 条触发时（绝大多数情况）走下面的旧路径，行为一字不变。 */
-  var __nbBatch = [];
-  try {
-    /* 先判断"这一事件是否真的会触发什么"；全都不成立 ⇒ 直接走 body（不收集、不开窗，防"没送墓效果的卡也进连锁"）。 */
-    if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) {
-      __graveBody(); return;
-    }
-    var __nbHow = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
-    /* 逐节点判定：这张卡自己没有送墓触发就不排（只保留真正会触发的那几条） */
-    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
-    __nbBatch.push({
-      owner: player, card: card,
-      mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),   // 按卡面"可以/可选"判必发/选发
-      label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
-      fire: function () { skipYongzou = true; __graveBody(); }   // 进行曲已单独成节点，别在 body 里再跑一次
-    });
-    }
-    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
-      __nbBatch.push({
-        owner: (battleState.currentPlayer || player), card: card, mandatory: true,
-        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
-        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
-      });
-    }
-    playerIds().forEach(function (w) {
-      var q = battleState[w]; if (!q) return;
-      // 同一事件里每个座位只排一次（防重复入窗）
-      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
-        q._liuliHWQueuedFor = card;
-        __nbBatch.push({
-          owner: w, card: card, mandatory: false,
-          label: '【琉璃(万圣祭)·SP】有卡不因使用' + __nbHow + '·自己抽1张',
-          fire: function () {
-            q._liuliHWSPTurn = battleState.turn;
-            addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __nbHow + '（【' + ((card && card.name) || '') + '】），自己抽1张');
-            if (typeof drawCard === 'function') drawCard(w);
-            if (typeof updateBattleUI === 'function') updateBattleUI();
-          }
-        });
-      }
-      if (q._tomaSP && q._tomaQueuedFor !== card) {
-        q._tomaQueuedFor = card;
-        __nbBatch.push({
-          owner: w, card: card, mandatory: false,
-          label: '【现实间冬马·SP】有卡不因使用' + __nbHow + '·造4点无序',
-          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __nbHow); }
-        });
-      }
-    });
-  } catch (e) { console.error('非结算中触发批次构建出错', e); }
+  /* 先判断"这一事件是否真的会触发什么"；全都不成立 ⇒ 直接走 body（不收集、不开窗）。 */
+  if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) {
+    __graveBody(); return;
+  }
+  var __nbBatch = (typeof __buildLeaveBatch === 'function')
+    ? __buildLeaveBatch(player, card, reason, function () { skipYongzou = true; __graveBody(); })
+    : [];
   if (__nbBatch.length > 1 && typeof resolveSimultaneous === 'function') {
     battleState._leaveHooksBatchedFor = card;     // 让 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过琉璃/冬马（防重复）
     try { resolveSimultaneous(player, __nbBatch, function () {}); }
