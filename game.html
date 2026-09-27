@@ -21061,7 +21061,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   var __nbBatch = (typeof __buildLeaveBatch === 'function')
     ? __buildLeaveBatch(player, card, reason, function () { skipYongzou = true; __graveBody(); })
     : [];
-  if (__nbBatch.length > 1 && typeof resolveSimultaneous === 'function') {
+  /* 阈值 1：**只要本事件真的有触发，就走"窗口"这条路** —— 每次满足占一条链环（作者口径）。
+     原来写 >1 ⇒ 只有"进行曲"一条时落到就地执行，伤害就不在链环里打了。 */
+  if (__nbBatch.length >= 1 && typeof resolveSimultaneous === 'function') {
     battleState._leaveHooksBatchedFor = card;     // 让 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过琉璃/冬马（防重复）
     try { resolveSimultaneous(player, __nbBatch, function () {}); }
     catch (e) { console.error('非结算中触发窗口出错，退回就地执行', e); try { delete battleState._leaveHooksBatchedFor; } catch (e2) {} __graveBody(); }
@@ -21084,8 +21086,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   var effect = card.effect || '';
 
   // 永奏进行曲：自己回合内每有1张卡进入墓地，对一名玩家造无序伤害；单回合7/14次后升至2/3点
-  // （skipYongzou=true 时跳过：它已作为**独立链节点**与卡自身触发同批入队，避免重复计数）
-  if (!skipYongzou) __yongzouGraveHit();
+  // 【2026-09-27 作者口径：每次满足各占一条链环（c1进行曲 c2进行曲…），伤害在**该环逆结算时**打】
+  // 所以这里**不再就地打**（原来 !skipYongzou 时在这里直接 __yongzouGraveHit() ⇒ 链上只 1 条却打了 2 次 ✗）；
+  // 它一律由批次里的"独立链节点"负责（__buildLeaveBatch / 忙碌分支各自入队一次）。
 
   // 神乐铃 SP：每进入墓地一次，永久+1层（上限9层，使用不消耗；之后每次使用最终伤害+当前层数）
   if (cardName.indexOf('神乐铃') >= 0) {
