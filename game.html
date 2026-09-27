@@ -6894,11 +6894,7 @@ function onlineLiuliHWP2(done) {
     p.hand.push(card); card._addedByEffect = true;
     if (typeof __emitAddHand === 'function') __emitAddHand('p2', card, 'permanent');
     addBattleLog('p2', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
-    /* 【作者 2026-09-27 报：回收永续区的卡不触发琉璃SP】—— 这属于"卡**不因使用**离开原本的区域"，
-       必须走统一离场入口（它按座位判 _liuliHWSP 与"本回合是否已用"，并弹窗询问是否发动；
-       对手回合满足条件同样会问）。原来这里只 splice 就走了 ⇒ 触发被漏掉。 */
-    try { if (typeof __noUseLeaveHooks === 'function') __noUseLeaveHooks('p2', card, 'remove', '被回收', function () {}); }
-    catch (e) { console.error('回收后的离场触发入口出错', e); }
+    /* 离场触发已集中到 __emitAddHand（fromZone==='permanent'）统一发，这里不再单独调，避免双触发。 */
     updateBattleUI();
     if (done) done();
   });
@@ -13247,9 +13243,7 @@ function activateLiuliHWRecycle() {
     p.hand.push(card); card._addedByEffect = true;
     if (typeof __emitAddHand === 'function') __emitAddHand('p1', card, 'permanent');
     addBattleLog('p1', '【琉璃(万圣祭)被动·来点喜欢的】支付3点同步值，回收效果处理区的【' + card.name + '】加入手卡（同步' + p.sync + '）');
-    /* 同上：回收 = 不因使用离开原本区域 ⇒ 必须走统一离场入口（触发琉璃SP，含对手回合的询问）。 */
-    try { if (typeof __noUseLeaveHooks === 'function') __noUseLeaveHooks('p1', card, 'remove', '被回收', function () {}); }
-    catch (e) { console.error('回收后的离场触发入口出错', e); }
+    /* 离场触发已集中到 __emitAddHand（fromZone==='permanent'）统一发，这里不再单独调，避免双触发。 */
     updateBattleUI();
   }, 1, true);
 }
@@ -16954,6 +16948,15 @@ function runTiming(point, ctx, cb) {
 // 统一资源移动时点：卡加入手卡（来自移出区则为“移出卡加入手卡”）
 function __emitAddHand(player, card, fromZone) {
   runTiming((fromZone === 'removed' || fromZone === 'removedFromGame') ? TIMING.ON_REMOVE_TO_HAND : TIMING.ON_ADD_HAND, { player: player, card: card, fromZone: fromZone || 'deck' });
+  /* 【统一离场触发（作者 2026-09-27 报：琉璃主动技能回收永续区的卡不触发SP）】
+     凡是卡**不因使用**从场上/处理区离开（回收、移出、被别的效果搬走…），都在这个**唯一出口**发一次离场入口；
+     入口自己按座位判"每回合一次"，并按卡面判必发/选发后**弹窗询问**（对手回合同样会问）。
+     放在这里而不是逐个调用点补：以后新增任何"回收进手牌"的路径都自动带上（举一反三）。 */
+  try {
+    if (fromZone === 'permanent' && typeof __noUseLeaveHooks === 'function') {
+      __noUseLeaveHooks(player, card, 'remove', '被回收', function () {});
+    }
+  } catch (e) { console.error('进手牌时的离场触发入口出错', e); }
 }
 // 统一回复音韵值时点
 function __emitRecover(player, amount, source) { runTiming(TIMING.ON_RECOVER_COST, { player: player, amount: amount, source: source || '' }); }
