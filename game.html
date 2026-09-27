@@ -3008,13 +3008,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     .ol-btn:disabled{opacity:.5;cursor:not-allowed;}
     .ol-status{margin-top:14px;background:#0d1424;border:1px dashed #33405f;border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;min-height:64px;white-space:pre-wrap;}
     .ol-roomid{font-family:monospace;font-size:18px;letter-spacing:2px;color:#7dd3fc;font-weight:700;}
-    #onlineChainBar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9999;display:none;min-width:340px;max-width:92vw;background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid #38bdf8;border-radius:14px;padding:12px 14px;color:#e8eefc;box-shadow:0 8px 30px rgba(0,0,0,.55);}
-    #onlineChainBar .oc-title{font-weight:700;color:#7dd3fc;margin-bottom:6px;font-size:14px;}
-    #onlineChainBar .oc-desc{font-size:13px;color:#cbd5e1;margin-bottom:10px;}
-    #onlineChainBar .oc-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-    #onlineChainBar .oc-btns button{border:none;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;color:#fff;background:#334155;}
-    #onlineChainBar .oc-btns button.pass{background:#16a34a;}
-    #onlineChainBar select{background:#0b1220;color:#e8eefc;border:1px solid #334155;border-radius:7px;padding:6px;}
+    /* 【2026-09-27 删除死 UI】原 #onlineChainBar（联机连锁操作条）的 5 条 CSS：该元素及内部
+       #ocTitle/#ocDesc/#ocBtns 在 JS 里**零引用**（联机决策已统一走 onlineDecideModal）——
+       属目标②点名的"多套并存实现"，删除以免下次又被误当成"要收的覆盖层"。 */
   </style>
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
   <div class="ol-wrap">
@@ -3038,12 +3034,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   </div>
 </div>
 
-<!-- 联机连锁操作条（权威窗口） -->
-<div id="onlineChainBar">
-  <div class="oc-title" id="ocTitle">连锁窗口</div>
-  <div class="oc-desc" id="ocDesc"></div>
-  <div class="oc-btns" id="ocBtns"></div>
-</div>
+<!-- 【2026-09-27 删除死 UI】原 #onlineChainBar（联机连锁操作条）DOM：JS 零引用（见上方 CSS 注释） -->
 
 <!-- 对战界面 -->
 <div id="battleScreen" class="screen">
@@ -7433,7 +7424,7 @@ var cardCategories = [
  * 这里把"战斗浮层"收成一份清单统一关掉；对局结束时先清、再弹结果面板。
  * ============================================================ */
 var __BATTLE_OVERLAY_IDS = ['choiceModal', 'cardModal', 'targetSelectModal', 'cardDetailModal', 'timingModal',
-  'effectLogModal', 'cardListModal', 'cardPicker', 'chainBar', 'onlineChainBar', 'resolveTimeline',
+  'effectLogModal', 'cardListModal', 'cardPicker', 'chainBar', 'resolveTimeline',
   'turnBanner', 'emotePanel', 'handCardMenu'];
 function __clearBattleOverlays(reason) {
   var cleared = [];
@@ -10384,6 +10375,21 @@ var TW = {
     function step() {
       if (i < 0) {
         addBattleLog('system', '═══ 连锁全部结算完成 ═══');
+  /* 【收尾：把两个覆盖层收干净（作者 2026-09-27 反馈："连锁处理完成后还有一个连锁结算框挡在对手状态栏那里"）】
+     原因：结算时间线只会"折叠"（表头与按钮仍压着状态栏），连锁栏的 hideChainBar() 定义了却没人调用。
+     这里统一延迟收：先给玩家时间看最终状态，再收连锁栏，最后整体隐藏时间线（也可随时手动"关闭"）。
+     竞态保护：若期间有新连锁重新打开了时间线（__rtShownAt 变新），就跳过这次隐藏。 */
+  (function () {
+    setTimeout(function () {
+      try { if (typeof hideChainBar === 'function') hideChainBar(); } catch (e) { try { console.error('收尾隐藏连锁栏失败', e); } catch (e2) {} }
+    }, 1400);
+    setTimeout(function () {
+      try {
+        if (Date.now() - __rtShownAt < 3200) return;      // 期间又被打开过 ⇒ 交给新一轮的收尾
+        if (typeof hideResolveTimeline === 'function') hideResolveTimeline();
+      } catch (e) { try { console.error('收尾隐藏结算时间线失败', e); } catch (e2) {} }
+    }, 3400);
+  })();
         self.close(win);
         return;
       }
@@ -19115,6 +19121,7 @@ function extractNumber(text, keyword) {
 
 // 显示效果执行日志
 var __rtCollapseTimer = null;
+var __rtShownAt = 0;      // 供"收尾时隐藏时间线"判断有没有被新的连锁重新打开（防竞态）
 // 效果执行轨迹：非阻塞右侧时间线（不再用强制遮罩 + “确认并继续”打断出牌）
 function showEffectLog() {
   var box = document.getElementById('resolveTimeline');
@@ -19132,6 +19139,7 @@ function showEffectLog() {
     body.appendChild(div);
   }
   box.classList.add('show'); box.classList.remove('collapsed');
+  __rtShownAt = Date.now();
   body.scrollTop = body.scrollHeight;
   if (__rtCollapseTimer) clearTimeout(__rtCollapseTimer);
   __rtCollapseTimer = setTimeout(function () { box.classList.add('collapsed'); }, 12000);
