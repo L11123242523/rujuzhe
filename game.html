@@ -12203,8 +12203,32 @@ function aiResourceStep(done) {
   if (done) done();
 }
 
+/* 【等待决断的读门 + 超时兜底】AI 的回合驱动用它判断"是否该停下等玩家作答"。
+   兜底很重要：若某个异常路径漏清了标记（弹窗被外部逻辑跳过、对局结束…），AI 会**永久等待** ⇒
+   超过 20 秒就**有声地**清掉并继续（宁可漏等一次，也不能整局卡死）。 */
+function __decideWaitGate(tag, retryFn) {
+  try {
+    var ad = battleState && battleState._awaitingDecision;
+    if (!ad) return false;
+    var age = Date.now() - (ad.since || 0);
+    if (age > 20000) {
+      try { console.error('【等待决断·超时】' + (ad.label || '') + ' 已等待 ' + Math.round(age / 1000) + 's，自动放行（' + tag + '）'); } catch (e) {}
+      try { addBattleLog('system', '【提示】等待「' + (ad.label || '') + '」的作答超时，已自动继续'); } catch (e2) {}
+      battleState._awaitingDecision = null;
+      return false;
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
 function aiTurn(seat) {
   if (!battleState || battleState._over) return;
+  /* 【时点转交必须等对方决断（作者 2026-09-27 反馈）】若正在等玩家（对手）就"是否发动/是否连锁"作答，
+     AI **不得继续行动**（实测：AI 献祭触发对手的琉璃SP询问后，仍继续出牌并结束回合，导致效果跑到对方回合才结算）。 */
+  if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiTurn', null) : battleState._awaitingDecision) {
+    setTimeout(function () { try { aiTurn(seat); } catch (e) { console.error('aiTurn 等待重试出错', e); } }, 250);
+    return;
+  }
   if (!isAISeat(battleState.currentPlayer)) return;   // B·一：原来写死 !== 'p2'
   __setAiSeat(seat || battleState.currentPlayer);     // 回合驱动：默认就是当前回合的座位
   if (battleState._over) return; // 对局已结束：AI 不再行动
@@ -12352,6 +12376,11 @@ function aiScoreCard(c) {
 // AI出牌辅助函数（递归使用卡牌，走完整效果处理流程）
 function aiPlayCards(maxActions, callback) {
   if (battleState._over) { if (callback) callback(); return; }
+  /* 同上：等待玩家对"是否发动/是否连锁"作答期间，AI 每一步都要**停下等**，不能抢在对手思考时操作。 */
+  if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiPlayCards', null) : battleState._awaitingDecision) {
+    setTimeout(function () { try { aiPlayCards(maxActions, callback); } catch (e) { console.error('aiPlayCards 等待重试出错', e); } }, 250);
+    return;
+  }
   if (maxActions <= 0 || aiMe().hand.length === 0) {
     if (callback) callback();
     return;
@@ -14629,13 +14658,19 @@ function __offerOptionalEffect(owner, title, question, fireFn, done) {
       } else { fireFn(); done(); }
     } catch (e) { console.error(title + '：开连锁失败，改为直接结算', e); try { fireFn(); } catch (e2) {} done(); }
   }
-  if (isAISeat(owner)) { __begin(); return; }   // AI 座位：按既定策略接受发动
+  if (isAISeat(owner)) { __begin(); return; }   // AI 座位：按既定策略接受发动（不等待、不标记）
+  /* 【时点转交：标记"正在等谁决断"（作者 2026-09-27 反馈）】
+     AI 的回合驱动 aiTurn / aiPlayCards 会读 battleState._awaitingDecision 并停下等 ——
+     修的是实测问题：AI 献祭触发对手的琉璃SP询问后，仍继续出牌并结束回合，效果跑到对方回合才结算。 */
+  var __waiting = function (on) { try { if (battleState) battleState._awaitingDecision = on ? { seat: owner, label: title, since: Date.now() } : null; } catch (e) {} };
+  var __answer = function (yes) { __waiting(false); if (yes) __begin(); else done(); };
   var opts = ['发动', '不发动'];
+  __waiting(true);
   if (typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
-    onlineDecideModal(owner, title + '（本机）', question, '是否发动？', opts, function (o) { if (o === 0) __begin(); else done(); });
+    onlineDecideModal(owner, title + '（本机）', question, '是否发动？', opts, function (o) { __answer(o === 0); });
   } else if (typeof showChoiceModal === 'function') {
-    showChoiceModal(title, question, '', opts, function (i) { if (i === 0) __begin(); else done(); });
-  } else __begin();
+    showChoiceModal(title, question, '', opts, function (i) { __answer(i === 0); });
+  } else { __waiting(false); __begin(); }
 }
 
 function nextPhase() {
@@ -16976,6 +17011,29 @@ function __waterGunExtraSegments(card, user) {
   return Math.min(5, n);
 }
 
+// 冬马SP 的离场效果体（2026-09-27 抽出：供"事件批次候选"与"非忙时的当场询问"共用，避免两处各写一遍）
+function __tomaSPLeaveHit(w, owner, card, how) {
+  try {
+    var d = battleState[w]; if (!d) return;
+    var __before = d.sync || 0;
+    addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成4点无序属性伤害');
+    dealDamageWithResponse(owner, 4, '冬马SP', function () {
+      try {
+        if ((d.sync || 0) < __before) {
+          recoverCost(w, 4, '冬马SP');
+          var __cnt = {};
+          (d.grave || []).forEach(function (c) { var a = c && c.attribute; if (a) __cnt[a] = (__cnt[a] || 0) + 1; });
+          var __max = 0, __attr = null;
+          Object.keys(__cnt).forEach(function (a) { if (__cnt[a] > __max) { __max = __cnt[a]; __attr = a; } });
+          if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵；墓地无序卡最多 → 再抽1张'); }
+          else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵（墓地无序卡不是最多，不抽卡）');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        }
+      } catch (e) { console.error('冬马SP后续出错', e); }
+    }, '无序', w);
+  } catch (e) { console.error('冬马SP离场效果出错', e); }
+}
+
 // 卡「不因使用」离开原本所在的区域（送墓 / 移出游戏）时的统一入口。
 // · 琉璃(万圣祭)SP（编组类）：一回合一次，任意玩家的卡不因使用离开区域 → 自己抽1张
 // · 羽奈(往昔)被动①（仅队长）：自己回合内、自己的卡不因使用送墓 → 可发动（调整墓地两张卡位置，
@@ -16988,8 +17046,15 @@ function __noUseLeaveHooks(owner, card, reason, how, finish) {
      琉璃(万圣祭)SP 与 冬马SP 的卡面都写「…时可以发动」⇒ 不能在触发点直接执行，必须先问。
      做法：把两条询问**按顺序排进 __asks 队列**，一条问完（无论发动与否）再问下一条，最后才轮到羽奈(往昔)①。 */
   var __asks = [];
+  /* 若本次事件已在 checkGraveTrigger 的忙碌分支里把这两条**选发**打包进批次（同一窗口），这里就跳过（避免重复发动）。 */
+  var __batchedLeave = false;
+  try {
+    __batchedLeave = (battleState._leaveHooksBatchedFor === card);
+    if (__batchedLeave) battleState._leaveHooksBatchedFor = null;
+  } catch (e) { try { console.error('离场批次标记读取失败（按未打包处理）', e); } catch (e2) {} }
   // ---- 琉璃(万圣祭)SP：一回合一次（任意玩家的卡都算）----
   playerIds().forEach(function (w) {
+    if (__batchedLeave) return;   // 已随事件批次进同一窗口（见 checkGraveTrigger 忙碌分支）
     var q = battleState[w];
     // 2026-09-27 修：初值 0（=本回合还没用过）曾被误判成"已用过"导致 SP 永不触发；只判"本回合是否已用过"。
     if (!q || !q._liuliHWSP || q._liuliHWSPTurn === battleState.turn) return;
@@ -17007,6 +17072,7 @@ function __noUseLeaveHooks(owner, card, reason, how, finish) {
   // ---- 冬马SP（2026-09-26 新卡面）：有玩家的卡不因使用离开原本区域时，对其造成4点无序属性伤害；
   //      如果自己因此受到伤害（响应反伤等）则适用：回复自身4点音韵值，若自己墓地无序卡最多再抽1张 ----
   playerIds().forEach(function (w) {
+    if (__batchedLeave) return;   // 同上：已随事件批次进同一窗口
     var d = battleState[w];
     if (!d || !d._tomaSP) return;
     __asks.push({
@@ -20726,21 +20792,93 @@ function moveCardToGrave(player, card, reason) {
   return true;
 }
 
+// 永奏进行曲：自己回合内每有1张卡进入墓地 → 造无序伤害（单回合 7/14 次后升为 2/3 点）
+// 【2026-09-27 拆出为独立链节点】原来它写在 checkGraveTrigger 的"卡自己触发体"内部 ⇒ 与卡自己的 SP 挤在同一个链节点里
+//   ⇒ 两个弹窗互相排队（日志里的「【弹窗排队】"永奏进行曲"…」），玩家看不到"同一窗口、顺序可选"的连锁。
+//   现在它是一条**独立触发**：随卡离场事件一起入队/成窗（见 checkGraveTrigger 的批次收集）。
+function __yongzouGraveHit() {
+  try {
+    var tp = battleState && battleState.currentPlayer; if (!tp) return false;
+    var tpp = battleState[tp]; if (!tpp) return false;
+    var has = (tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
+    if (!has) return false;
+    tpp._yongzouCount = (tpp._yongzouCount || 0) + 1;
+    var n = tpp._yongzouCount, dmg = n >= 14 ? 3 : (n >= 7 ? 2 : 1);
+    function __hit(t) {
+      dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp);
+      addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓，对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    }
+    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地，选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
+    else __hit(foeOf(tp));
+    return true;
+  } catch (e) { console.error('永奏进行曲进墓触发出错', e); return false; }
+}
+// 本次"卡离场"事件是否满足进行曲的触发条件（用于事件批次收集，不实际结算）
+function __yongzouGraveApplies() {
+  try {
+    var tp = battleState && battleState.currentPlayer; if (!tp) return false;
+    var tpp = battleState[tp]; if (!tpp) return false;
+    return !!(tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
+  } catch (e) { return false; }
+}
+
 // 检查卡牌进入墓地时的触发效果
-function checkGraveTrigger(player, card, reason) {
+function checkGraveTrigger(player, card, reason, skipYongzou) {
   // 作者口径：**连锁处理中产生的新效果，在本次连锁处理完成后另开一个新连锁**（不再就地结算）。
   // 例外：正在被"新一轮连锁"结算的那张卡自己（由 _drainingCard 标记）必须直通执行，
   //       否则它会把自己再次入队 → 无限循环（我第一版就踩了这个，探针里表现为同一张卡反复"另开新连锁"）。
   var __isDrainSelf = false;
   try { __isDrainSelf = !!(effectEngine && effectEngine._drainingCard && effectEngine._drainingCard === card); } catch (e) {}
   if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && !__isDrainSelf && __chainIsBusy()) {
+    /* 【2026-09-27 修：同一次"卡离场"事件的多个触发要进**同一个窗口】**（作者实测反馈：
+       盒子送墓时，进行曲的"本回合进墓计数造伤"没跟它进同一个链，窗口只有 1 个候选）。
+       做法：在**同一次同步收集**里把本事件满足的触发都入队 ⇒ 排空时它们进同一个窗口，顺序由玩家按优先权选。 */
     queueOrRunTrigger({
       owner: player,
       card: card,
       label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
       mandatory: true,
-      fire: function () { checkGraveTrigger(player, card, reason); }
+      fire: function () { checkGraveTrigger(player, card, reason, true); }
     });
+    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
+      queueOrRunTrigger({
+        owner: (battleState.currentPlayer || player),
+        card: card,
+        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
+        mandatory: true,
+        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+      });
+    }
+    /* 「不因使用离场」的两条**选发**（琉璃(万圣祭)SP / 冬马SP）：与本次事件的其他触发**同批入队** ⇒ 进同一个窗口，
+       顺序由玩家按优先权选（mandatory:false ⇒ 窗口里问"是否发动"，而不是就地弹窗排队）。
+       同时打标记，让随后 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过这两条（避免重复发动）。 */
+    var __how = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    try {
+      playerIds().forEach(function (w) {
+        var q = battleState[w]; if (!q) return;
+        if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn) {
+          queueOrRunTrigger({
+            owner: w, card: card, mandatory: false,
+            label: '【琉璃(万圣祭)·SP】有卡不因使用' + __how + '·自己抽1张',
+            fire: function () {
+              q._liuliHWSPTurn = battleState.turn;   // 发动时才占用本回合这一次
+              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
+              if (typeof drawCard === 'function') drawCard(w);
+              if (typeof updateBattleUI === 'function') updateBattleUI();
+            }
+          });
+        }
+        if (q._tomaSP) {
+          queueOrRunTrigger({
+            owner: w, card: card, mandatory: false,
+            label: '【现实间冬马·SP】有卡不因使用' + __how + '·造4点无序',
+            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __how); }
+          });
+        }
+      });
+      battleState._leaveHooksBatchedFor = card;
+    } catch (e) { console.error('离场选发批次入队出错', e); }
     return;
   }
   runTiming(TIMING.ON_TO_GRAVE, { player: player, card: card, reason: reason || "" });
@@ -20754,17 +20892,8 @@ function checkGraveTrigger(player, card, reason) {
   var effect = card.effect || '';
 
   // 永奏进行曲：自己回合内每有1张卡进入墓地，对一名玩家造无序伤害；单回合7/14次后升至2/3点
-  (function () {
-    var tp = battleState.currentPlayer; if (!tp) return;
-    var tpp = battleState[tp];
-    var has = (tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
-    if (!has) return;
-    tpp._yongzouCount = (tpp._yongzouCount || 0) + 1;
-    var n = tpp._yongzouCount, dmg = n >= 14 ? 3 : (n >= 7 ? 2 : 1);
-    function __hit(t) { dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp); addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓，对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害'); if (typeof updateBattleUI === 'function') updateBattleUI(); }
-    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地，选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
-    else __hit(foeOf(tp));
-  })();
+  // （skipYongzou=true 时跳过：它已作为**独立链节点**与卡自身触发同批入队，避免重复计数）
+  if (!skipYongzou) __yongzouGraveHit();
 
   // 神乐铃 SP：每进入墓地一次，永久+1层（上限9层，使用不消耗；之后每次使用最终伤害+当前层数）
   if (cardName.indexOf('神乐铃') >= 0) {
