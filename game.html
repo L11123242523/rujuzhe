@@ -9736,6 +9736,22 @@ function collectChainable(player, effect){
   (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
   // 事件卡（全时点）：也可作为连锁响应发动（如大风在移动将执行前终止所有移动）
   (me.eventCards||[]).forEach(function(c,i){consider(c,'event',i);});
+  /* 【座位级连锁候选（作者 2026-09-27 裁决）】主动型"每回合可以发动一次"的角色能力：
+     **只在自己以外的回合**作为连锁响应出现（游戏王式：对手回合不能主动发动，但可以跟连锁）。
+     自己回合的主动发动走 __offerOptionalEffect 弹窗（见 nextPhase），不经这里。 */
+  try {
+    if (battleState.currentPlayer !== player) {
+      if (me._edwardSP && me._edwardSPTurn !== battleState.turn
+          && typeof __breakerCount === 'function' && __breakerCount(player) >= 3) {
+        out.push({ card: { name: '露璐缇雅·破坏', cost: 0, _category: 'seat_effect', effect: '破坏一名玩家区域内的1张卡，然后其回复4点音韵值' },
+          from: 'seatEffect', index: 0, seatEffect: 'edward' });
+      }
+      if (me._lilySP && me._lilySPTurn !== battleState.turn && (me.grave || []).length) {
+        out.push({ card: { name: '莉莉·回收', cost: 0, _category: 'seat_effect', effect: '把墓地最下方一张卡放回牌组最下方' },
+          from: 'seatEffect', index: 0, seatEffect: 'lily' });
+      }
+    }
+  } catch (e) { console.error('座位级连锁候选收集出错', e); }
   return out;
 }
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
@@ -9798,6 +9814,18 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
 // 发动一张连锁卡并修改待结算效果；需要二次选择（点数/增减）时走可视化弹窗，结束回调 done
 function applyChainCard(player,pick,effect,done){
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
+  /* 【座位级连锁效果（作者 2026-09-27 裁决）】非卡片的角色能力作为连锁响应时：不付费、不动卡区，
+     只把一环压入连锁，具体效果在**逆结算**时执行（见 resolveChainStack 的 __applyNode → kind:'seatEffect'）。 */
+  if (pick.from === 'seatEffect') {
+    effect._chain = effect._chain || [];
+    effect._chain.push({ kind: 'seatEffect', by: player, name: name, seatEffect: pick.seatEffect });
+    addBattleLog(player, '连锁发动【' + name + '】（角色能力，已上链，待逆结算）');
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
+    if (typeof renderChainBar === 'function') renderChainBar(effect);
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    setTimeout(function () { if (typeof done === 'function') done(); }, 200);
+    return;
+  }
   effect._chain = effect._chain || [];
   function payAndRemove(){
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
@@ -10474,7 +10502,14 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else if (hasNum && cur !== e.from) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】锁定的原始值' + e.from + '已被先结算的连锁变为' + cur + '，丢失对象，不处理'); }
       else { cur = e.kind === 'set' ? e.to : Math.max(0, cur + e.delta); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】生效，点数/位移变为 ' + cur); }
-    } else if (e.kind === 'reverse') {
+    } else if (e.kind === 'seatEffect') {
+    /* 座位级角色能力（非卡片）：在逆结算时执行（发动时只上链，符合连锁语义） */
+    try {
+      if (e.seatEffect === 'edward' && typeof activateEdwardSP === 'function') { activateEdwardSP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
+      else if (e.seatEffect === 'lily' && typeof activateLilySP === 'function') { activateLilySP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
+      else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】找不到对应能力实现，跳过'); }
+    } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) {} }
+  } else if (e.kind === 'reverse') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else { effect._reverseDir = !effect._reverseDir; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动方向反转生效'); }
     } else if (e.kind === 'negate') {
@@ -11190,26 +11225,37 @@ function rollPlayerDice(player) {
       var __g = __gospelSeat ? battleState[__gospelSeat] : null;
       var __gKey = 'gospelRound:' + player;
       if (__g && !__g[__gKey]) {
-        __g[__gKey] = true;   // 一轮内每名玩家限一次
-        var __gPool = (p.grave || []).map(function (c) { return { card: c, zone: 'grave' }; })
-          .filter(function (x) { return x.card && /item_single/.test(String(x.card._category || '')); });
-        var __gTake = function (pick) {
-          if (pick) {
-            var ix = p.grave.indexOf(pick);
-            if (ix >= 0) { p.grave.splice(ix, 1); pick._returnBottom = true; p.hand.push(pick);
-              addBattleLog(player, '【福音雅颂】从墓地取回【' + (pick.name || '') + '】（用后放回牌组最下方）'); }
-          } else {
-            addBattleLog(player, '【福音雅颂】墓地没有单次种类的卡可回收');
-          }
-          recoverCost(__gospelSeat, 2, '福音雅颂');
-          recoverCost(player, 2, '福音雅颂');
-          addBattleLog(__gospelSeat, '【小野葵被动·福音雅颂】本回合第二次投掷发生，双方各回复2点音韵值');
-          if (typeof updateBattleUI === 'function') updateBattleUI();
-        };
-        if (!__gPool.length) __gTake(null);
-        else if (player === 'p1' && typeof pickFromList === 'function') {
-          pickFromList('p1', __gPool, '福音雅颂：选自己墓地一张单次种类的卡加入手卡', 1, function (picks) { __gTake(picks && picks[0] && picks[0].card); });
-        } else __gTake(__gPool[0].card);
+        /* 选发（作者口径）：卡面写"…后**可以**发动，其**可以**选择…"⇒ 条件满足时先弹窗，发动才作为 C1 进连锁。
+           注意：一轮一次的额度在**发动时**才占用（拒绝不消耗）。 */
+        (function () {
+          var __gRun = function () {
+            __g[__gKey] = true;   // 一轮内每名玩家限一次（发动时才占用）
+            var __gPool = (p.grave || []).map(function (c) { return { card: c, zone: 'grave' }; })
+              .filter(function (x) { return x.card && /item_single/.test(String(x.card._category || '')); });
+            var __gTake = function (pick) {
+              if (pick) {
+                var ix = p.grave.indexOf(pick);
+                if (ix >= 0) { p.grave.splice(ix, 1); pick._returnBottom = true; p.hand.push(pick);
+                  addBattleLog(player, '【福音雅颂】从墓地取回【' + (pick.name || '') + '】（用后放回牌组最下方）'); }
+              } else {
+                addBattleLog(player, '【福音雅颂】墓地没有单次种类的卡可回收');
+              }
+              recoverCost(__gospelSeat, 2, '福音雅颂');
+              recoverCost(player, 2, '福音雅颂');
+              addBattleLog(__gospelSeat, '【小野葵被动·福音雅颂】本回合第二次投掷发生，双方各回复2点音韵值');
+              if (typeof updateBattleUI === 'function') updateBattleUI();
+            };
+            if (!__gPool.length) __gTake(null);
+            else if (player === 'p1' && typeof pickFromList === 'function') {
+              pickFromList('p1', __gPool, '福音雅颂：选自己墓地一张单次种类的卡加入手卡', 1, function (picks) { __gTake(picks && picks[0] && picks[0].card); });
+            } else __gTake(__gPool[0].card);
+          };
+          if (typeof __offerOptionalEffect === 'function') {
+            __offerOptionalEffect(__gospelSeat, '小野葵·福音雅颂',
+              '有玩家在本回合进行了第二次投掷：是否发动？（从其墓地取回一张单次种类的卡，之后双方各回复2点音韵值）',
+              __gRun);
+          } else __gRun();
+        })();
       }
     }
   } catch (e) { console.error('福音雅颂出错', e); }
@@ -12969,7 +13015,8 @@ function useCharacterPassive() {
   }
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+2 / γ回6同步+抽1馈赠 / δ献祭次数+1并造4理智', action: activateMegumiSP});
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
-  if (p._lilySP && p._lilySPTurn !== T) options.push({name: '莉莉·回收', desc: '墓地最下方1卡回牌组最下方，单次且新最下方非单次时视为使用并回1音韵', action: activateLilySP});
+  /* 莉莉·回收：**改为"自己回合开始时弹窗询问"**（作者 2026-09-27 裁决），不再挂本菜单。
+     对手回合不能主动发动，只能作为连锁响应（下一步接"非卡片的连锁候选"）。 */
   /* 最佳化·SP（卡面 2026-09-25 版）：「把墓地的这张卡移出游戏才能发动，提升自身1点攻击力。」
      放在本菜单（这里本来就是"本回合可主动发动的能力"，引导核心等非角色能力也在这儿）。 */
   if ((p.grave || []).some(function (c) { return c && c.name === '最佳化'; })) {
@@ -12985,7 +13032,10 @@ function useCharacterPassive() {
   if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
     options.push({name: '羽奈(往昔)·置顶', desc: '把自己墓地最下方一张卡以正面朝上的形式放到牌组最上方（每回合一次）', action: activateYunaiPastTop});
   }
-  if (p._edwardSP && p._edwardSPTurn !== T) options.push({name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p1') + '）', action: activateEdwardSP});
+  /* 入间予·解构与求索 / 现实间冬马·分析大师：都是"可以发动"的**选发** ——
+     条件满足时由 __offerOptionalEffect 弹窗询问（发动则作为 C1 进连锁），**不再挂本菜单**
+     （作者 2026-09-27 口径：这类应在条件满足时弹窗，而不是放进角色技能菜单）。 */
+  /* 露璐缇雅·破坏：同上，改为"自己回合开始时弹窗询问"（不再挂菜单）。 */
   if ((p._guideCore || 0) > 0) options.push({name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', action: function(){ useGuideCore('p1'); }});
   if (options.length === 0) { showToast('当前没有可发动的角色技能', 'warn'); return; }
   // 联机：广播角色技能意图（对方远端位重放同一选项表并等待选择答案）
@@ -14489,6 +14539,7 @@ function __yuPrepareEnd(player) {
     var attr = __yuMajorityAttr(player);
     if (!attr) { addBattleLog(player, '【入间予被动·解构与求索】手卡没有带属性的卡，四选一不发动'); return; }
     addBattleLog(player, '【入间予被动·解构与求索】公开手卡，数量最多的属性是「' + attr + '」');
+  p._yuPrepareTurn = battleState.turn;   // 选发：本回合已发动（防止从「角色技能」菜单里重复发动）
     if (attr === '无序') {
       p._extraRollPhase = (p._extraRollPhase || 0) + 2;
       addBattleLog(player, '【解构与求索·无序】本回合的投掷阶段可以额外投掷2次');
@@ -14560,6 +14611,33 @@ function __tomaDeclare(player) {
   } catch (e) { console.error('冬马被动出错', e); }
 }
 
+/* 【选发效果的统一入口 —— 作者 2026-09-27 口径】
+   卡面写「**可以**发动」的效果属于**选发**：条件满足时**弹窗询问是否发动**；
+   选"发动" ⇒ 该效果作为 **C1 进入连锁**（对手仍可继续连锁，走唯一的 TimingWindow 路径），逆结算时照常结算；
+   选"不发动" ⇒ 什么都不发生、不占连锁。
+   线下用 showChoiceModal；联机用 onlineDecideModal（本机位的选择据此广播）。 */
+function __offerOptionalEffect(owner, title, question, fireFn, done) {
+  done = done || function () {};
+  function __begin() {
+    try {
+      if (typeof resolveSimultaneous === 'function') {
+        resolveSimultaneous(owner, [{
+          owner: owner, label: title, mandatory: true,
+          alive: function () { return true; },
+          fire: function (next) { try { fireFn(); } catch (e) { console.error(title + '：结算异常', e); } if (typeof next === 'function') next(); }
+        }], function () { done(); });
+      } else { fireFn(); done(); }
+    } catch (e) { console.error(title + '：开连锁失败，改为直接结算', e); try { fireFn(); } catch (e2) {} done(); }
+  }
+  if (isAISeat(owner)) { __begin(); return; }   // AI 座位：按既定策略接受发动
+  var opts = ['发动', '不发动'];
+  if (typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
+    onlineDecideModal(owner, title + '（本机）', question, '是否发动？', opts, function (o) { if (o === 0) __begin(); else done(); });
+  } else if (typeof showChoiceModal === 'function') {
+    showChoiceModal(title, question, '', opts, function (i) { if (i === 0) __begin(); else done(); });
+  } else __begin();
+}
+
 function nextPhase() {
   if (battleState.currentPlayer !== 'p1') return;
   // 联机：广播阶段推进意图（对方远端位按同一状态机重放）
@@ -14569,9 +14647,43 @@ function nextPhase() {
   
   if (battleState.phase === 'prepare') {
     // 准备阶段 → 主要阶段1
-    if (typeof __yuPrepareEnd === 'function') __yuPrepareEnd('p1');   // 予被动：准备阶段结束时四选一
-    if (typeof __tomaDeclare === 'function') setTimeout(function () { __tomaDeclare('p1'); }, 260);   // 冬马被动：主要阶段发动一次
+    /* 【选发/必发 判据（作者 2026-09-27 明确）】卡面写「**可以**发动」的是**选发**，没有"可以"的才是必发。
+       予被动（准备阶段结束时可以发动）与冬马被动（主要阶段可以发动一次）都是选发 ⇒
+       条件满足时**弹窗询问**，选发动才作为 C1 进连锁（对手可继续连锁），不发动就不结算。
+       （原来这里是无条件自动调用，属"强制发动"的错误实现。） */
+    if (typeof __offerOptionalEffect === 'function' && battleState.p1._yuPassive
+        && battleState.p1._yuPrepareTurn !== battleState.turn) {   // 每回合一次（读完标记才发动，发动时置位）
+      setTimeout(function () {
+        __offerOptionalEffect('p1', '入间予·解构与求索',
+          '准备阶段结束：公开自己的手卡，按数量最多的属性发动四选一？', function () { __yuPrepareEnd('p1'); });
+      }, 0);
+    }
     battleState.phase = 'main1';
+    if (typeof __offerOptionalEffect === 'function' && battleState.p1._tomaPassive) {
+      setTimeout(function () {
+        __offerOptionalEffect('p1', '现实间冬马·分析大师',
+          '主要阶段：声明一种属性并公开一名玩家的一张暗置卡？', function () { __tomaDeclare('p1'); });
+      }, 300);
+    }
+    /* 主动型「每回合可以发动一次」的选发（作者 2026-09-27 裁决）：也改为**弹窗询问**（不再挂角色技能菜单）；
+       对手回合不能主动发动，只能作为连锁响应 —— 那部分要接"非卡片的连锁候选"，见《收口记录》。 */
+    if (typeof __offerOptionalEffect === 'function' && battleState.p1._lilySP
+        && battleState.p1._lilySPTurn !== battleState.turn && (battleState.p1.grave || []).length) {
+      setTimeout(function () {
+        __offerOptionalEffect('p1', '莉莉·回收',
+          '每个自己回合可以发动一次：把墓地最下方一张卡放回牌组最下方（若放回的是单次卡且新最下方非单次，视为使用它并回1音韵）？',
+          function () { if (typeof activateLilySP === 'function') activateLilySP(); });
+      }, 360);
+    }
+    if (typeof __offerOptionalEffect === 'function' && battleState.p1._edwardSP
+        && battleState.p1._edwardSPTurn !== battleState.turn
+        && typeof __breakerCount === 'function' && __breakerCount('p1') >= 3) {
+      setTimeout(function () {
+        __offerOptionalEffect('p1', '露璐缇雅·破坏',
+          '每个自己回合可以发动一次：破坏一名玩家区域内一张卡，然后其回复4点音韵值？',
+          function () { if (typeof activateEdwardSP === 'function') activateEdwardSP(); });
+      }, 420);
+    }
     addBattleLog('phase', '进入主要阶段1：可使用手牌');
     updateBattleUI();
     // 机场：本主阶段开始时可前进到地图任意1格
@@ -16872,40 +16984,63 @@ function __noUseLeaveHooks(owner, card, reason, how, finish) {
   finish = finish || function () {};
   if (!battleState || !card || !card.name) { finish(); return; }
   var __cur = battleState.currentPlayer;
+  /* 【选发：条件满足 → 弹窗询问 → 发动则作为 C1 进连锁（作者 2026-09-27 口径）】
+     琉璃(万圣祭)SP 与 冬马SP 的卡面都写「…时可以发动」⇒ 不能在触发点直接执行，必须先问。
+     做法：把两条询问**按顺序排进 __asks 队列**，一条问完（无论发动与否）再问下一条，最后才轮到羽奈(往昔)①。 */
+  var __asks = [];
   // ---- 琉璃(万圣祭)SP：一回合一次（任意玩家的卡都算）----
   playerIds().forEach(function (w) {
     var q = battleState[w];
-    // 2026-09-27 修：原来这里多了「!q._liuliHWSPTurn」—— 初值 0（=本回合还没用过）被判成"已用过"，
-    // 于是 SP **永远不触发**。只该判"是否已在本回合用过"。
+    // 2026-09-27 修：初值 0（=本回合还没用过）曾被误判成"已用过"导致 SP 永不触发；只判"本回合是否已用过"。
     if (!q || !q._liuliHWSP || q._liuliHWSPTurn === battleState.turn) return;
-    q._liuliHWSPTurn = battleState.turn;
-    addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + card.name + '】），自己抽1张');
-    if (typeof drawCard === 'function') drawCard(w);
-    if (typeof updateBattleUI === 'function') updateBattleUI();
+    __asks.push({
+      owner: w, title: '琉璃(万圣祭)·SP',
+      question: '有玩家的卡不因使用' + how + '（【' + card.name + '】）：是否发动，自己抽1张？',
+      fire: function () {
+        q._liuliHWSPTurn = battleState.turn;              // 发动时才占用本回合这一次
+        addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + card.name + '】），自己抽1张');
+        if (typeof drawCard === 'function') drawCard(w);
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+      }
+    });
   });
   // ---- 冬马SP（2026-09-26 新卡面）：有玩家的卡不因使用离开原本区域时，对其造成4点无序属性伤害；
   //      如果自己因此受到伤害（响应反伤等）则适用：回复自身4点音韵值，若自己墓地无序卡最多再抽1张 ----
   playerIds().forEach(function (w) {
     var d = battleState[w];
     if (!d || !d._tomaSP) return;
-    var __before = d.sync || 0;
-    addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成4点无序属性伤害');
-    dealDamageWithResponse(owner, 4, '冬马SP', function () {
-      try {
-        if ((d.sync || 0) < __before) {                      // 自己因此受到伤害
-          recoverCost(w, 4, '冬马SP');
-          var __cnt = {};
-          (d.grave || []).forEach(function (c) { var a = c && c.attribute; if (a) __cnt[a] = (__cnt[a] || 0) + 1; });
-          var __max = 0, __attr = null;
-          Object.keys(__cnt).forEach(function (a) { if (__cnt[a] > __max) { __max = __cnt[a]; __attr = a; } });
-          if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵；墓地无序卡最多 → 再抽1张'); }
-          else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵（墓地无序卡不是最多，不抽卡）');
-          if (typeof updateBattleUI === 'function') updateBattleUI();
-        }
-      } catch (e) { console.error('冬马SP后续出错', e); }
-    }, '无序', w);
+    __asks.push({
+      owner: w, title: '现实间冬马·SP',
+      question: '有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）：是否发动，对' + owner + '造成4点无序属性伤害？',
+      fire: function () {
+        var __before = d.sync || 0;
+        addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成4点无序属性伤害');
+        dealDamageWithResponse(owner, 4, '冬马SP', function () {
+          try {
+            if ((d.sync || 0) < __before) {                      // 自己因此受到伤害
+              recoverCost(w, 4, '冬马SP');
+              var __cnt = {};
+              (d.grave || []).forEach(function (c) { var a = c && c.attribute; if (a) __cnt[a] = (__cnt[a] || 0) + 1; });
+              var __max = 0, __attr = null;
+              Object.keys(__cnt).forEach(function (a) { if (__cnt[a] > __max) { __max = __cnt[a]; __attr = a; } });
+              if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵；墓地无序卡最多 → 再抽1张'); }
+              else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵（墓地无序卡不是最多，不抽卡）');
+              if (typeof updateBattleUI === 'function') updateBattleUI();
+            }
+          } catch (e) { console.error('冬马SP后续出错', e); }
+        }, '无序', w);
+      }
+    });
   });
+  // 依次询问（每问完一条再问下一条；全部问完才继续羽奈(往昔)① 的流程）
+  (function __runAsks(i) {
+    if (i >= __asks.length) return __pastPhase();
+    var a = __asks[i];
+    __offerOptionalEffect(a.owner, a.title, a.question, a.fire, function () { __runAsks(i + 1); });
+  })(0);
+  return;
   // ---- 羽奈(往昔)被动①：仅在自己回合内 ----
+  function __pastPhase() {
   var yq = battleState[owner];
   if (!yq || !yq._yunaiPastPassive || battleState.currentPlayer !== owner) { finish(); return; }
   // 相邻的单次种类卡：墓地中相邻两格都是单次道具卡
@@ -16979,6 +17114,7 @@ function __noUseLeaveHooks(owner, card, reason, how, finish) {
     __pastAdjust(function () { __pastPunish(true); finish(); });
   }
   __pastOffer();
+  }
 }
 
 // 送墓入口（非使用）→ 触发上面两组钩子 + 贪欲烙印累积
@@ -18788,32 +18924,8 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
   }
 }
 
-function processSingleEffect(effectText, context, callback) {
-  if (!effectText) {
-    callback();
-    return;
-  }
-  
-  var target = context.target || 'p2';
-  var user = context.user || 'p1';
-  var isAuto = isAISeat(user); // AI 结算：选择类自动决策、不挂起等待点击（A5：原来写死 user === 'p2'）
-  // 显式异步控制：需要玩家在效果中途选择时 hold() 暂停自动推进，选择回调里 finish() 继续
-  var __finished = false, __autoTimer = null, __held = false;
-  function finish() { if (__finished) return; __finished = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } callback(); }
-  // hold()：效果中途弹出选择/判定窗口时暂停“200ms自动推进”，由窗口回调里的 finish() 负责继续（修复弹窗未答完链已推进）
-  function hold() { if (isAuto) return; __held = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } }
-  
-  // 伤害效果：统一走 dealDamageWithResponse（公式增伤/属性克制/防御 + 护符抵消 + 护盾 + 造伤前诱发 + 造伤后时点）
-  target = (__psDamageClause(user, target, effectText, context, hold, finish) || target);
-  
-  __psResourceClauses(user, target, effectText);
-  
-  __psMoveCostClauses(user, target, effectText);
-  
-  __psSearchDrawClauses(user, target, effectText, context, hold, finish);
-  
-
-  
+/* MiscClauses 子句（2026-09-27 Phase B 抽出）：获得金币 / 破坏区域内一张卡(选择) / 自身攻击+2 / 手卡送墓后抽卡(选择) */
+function __psMiscClauses(user, target, effectText, context, hold, finish) {
   // 获得金币（支持"获得X金币"、"+X金币"、"X金币"等格式）
   if (effectText.indexOf('金币') >= 0 && effectText.indexOf('支付') < 0 && effectText.indexOf('消耗') < 0 && effectText.indexOf('花费') < 0) {
     var goldAmount = extractNumber(effectText, '获得') || extractNumber(effectText, '+') || extractNumber(effectText, '金币') || 0;
@@ -18889,6 +19001,35 @@ function processSingleEffect(effectText, context, callback) {
       });
     }
   }
+}
+
+function processSingleEffect(effectText, context, callback) {
+  if (!effectText) {
+    callback();
+    return;
+  }
+  
+  var target = context.target || 'p2';
+  var user = context.user || 'p1';
+  var isAuto = isAISeat(user); // AI 结算：选择类自动决策、不挂起等待点击（A5：原来写死 user === 'p2'）
+  // 显式异步控制：需要玩家在效果中途选择时 hold() 暂停自动推进，选择回调里 finish() 继续
+  var __finished = false, __autoTimer = null, __held = false;
+  function finish() { if (__finished) return; __finished = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } callback(); }
+  // hold()：效果中途弹出选择/判定窗口时暂停“200ms自动推进”，由窗口回调里的 finish() 负责继续（修复弹窗未答完链已推进）
+  function hold() { if (isAuto) return; __held = true; if (__autoTimer) { clearTimeout(__autoTimer); __autoTimer = null; } }
+  
+  // 伤害效果：统一走 dealDamageWithResponse（公式增伤/属性克制/防御 + 护符抵消 + 护盾 + 造伤前诱发 + 造伤后时点）
+  target = (__psDamageClause(user, target, effectText, context, hold, finish) || target);
+  
+  __psResourceClauses(user, target, effectText);
+  
+  __psMoveCostClauses(user, target, effectText);
+  
+  __psSearchDrawClauses(user, target, effectText, context, hold, finish);
+  
+
+  
+  __psMiscClauses(user, target, effectText, context, hold, finish);
   
   // 无挂起窗口时才挂自动推进定时器；有 hold() 时由选择回调的 finish() 推进
   if (!__held && !__finished) __autoTimer = setTimeout(finish, 200);
@@ -18964,78 +19105,15 @@ function useEventCard(index) {
   useEventCardFor('p1', index, null, null);
 }
 // 参数化事件卡使用：单机 p1 与联机远端位 p2 共用同一代码路径（决策/RNG 双机一致）
-function useEventCardFor(player, index, name, done) {
-  if (!battleState) return;
-  var __ecFoe = foeOf(player);
-  var __ecOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
-  var __oppTurn = battleState.currentPlayer !== player;
-  
-  var card = battleState[player].eventCards ? battleState[player].eventCards[index] : null;
-  if (!card) {
-    // 尝试从手牌中找事件卡
-    if (battleState[player].hand[index] && battleState[player].hand[index]._category === 'event_cards') {
-      card = battleState[player].hand[index];
-    }
-  }
-  if (!card) { if (done) done(); return; }
-  
-  var effectText = card.effect || card.text || '';
-  
-  // 事件卡使用条件检查
-  var canUse = true;
-  var reason = '';
-  
-  // 检查是否需要特定条件
-  if (effectText.indexOf('受到伤害时') >= 0 && !battleState.damageResponseWindow) {
-    canUse = false;
-    reason = '只能在受到伤害时使用！';
-  }
-  if (effectText.indexOf('移动时') >= 0 && battleState.phase !== 'roll') {
-    canUse = false;
-    reason = '只能在移动时使用！';
-  }
-  if (effectText.indexOf('攻击时') >= 0 && battleState.phase !== 'main1' && battleState.phase !== 'main2') {
-    canUse = false;
-    reason = '只能在主要阶段使用！';
-  }
-  
-  if (!canUse) {
-    if (player === 'p1') showToast('【' + card.name + '】' + reason, 'warn');
-    if (done) done();
-    return;
-  }
-  
-  // 阶段检查：事件卡全时点——对手回合任意阶段可连锁发动；自己回合需主要阶段（有特殊时点的卡除外）
-  if (!__oppTurn && battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
-      effectText.indexOf('受到伤害时') < 0 && effectText.indexOf('移动时') < 0) {
-    if (player === 'p1') showToast('当前阶段不能使用事件卡，请在主要阶段使用！', 'warn');
-    if (done) done();
-    return;
-  }
-  
-  // 赌徒游戏：金币不足时不消耗卡（先检查后移除，修复原吞卡）
-  if (card.name === '赌徒游戏') {
-    var __gp = battleState[player].gold || 0;
-    if (__gp < __goldPrice(battleState[player], 500)) { if (player === 'p1') showToast('金币不足，无法进行赌徒游戏', 'warn'); if (done) done(); return; }
-  }
+var __EVENT_CASE_A = { '交互冲动': 1, '即兴演出': 1, '命运之回声': 1, '圆桌会议': 1 };
+var __EVENT_CASE_B = { '大风': 1, '独奏': 1, '王车易位': 1, '赌徒游戏': 1, '躁动之心': 1, '闲庭信步': 1 };
 
-  // 从eventCards或hand中移除事件卡
-  var removedFromEventCards = false;
-  if (battleState[player].eventCards && battleState[player].eventCards[index]) {
-    battleState[player].eventCards.splice(index, 1);
-    removedFromEventCards = true;
-  } else if (battleState[player].hand[index] && battleState[player].hand[index]._category === 'event_cards') {
-    battleState[player].hand.splice(index, 1);
-  }
-  
-  addBattleLog(player, '使用事件卡【' + card.name + '】');
-  
-  var p = battleState[player];
-  
-  // 根据事件卡名称执行完整效果
-  var __applyEventEffect = function () {
-  switch(card.name) {
+/* 事件卡效果·A（2026-09-27 从 useEventCardFor 的 switch 抽出；case 体原样搬移）
+   ⚠ 必须由调用方传 env（闭包局部量 __ecFoe/__ecOL/effectText/__oppTurn）——
+      第一版漏了它们 ⇒ case 体抛错被静默吞掉 ⇒ 效果完全没发生（batchC 出现 5 条红，已回滚重做）。 */
+function __eventCasesA(card, player, p, done, env) {
+  var __ecFoe = env.__ecFoe, __ecOL = env.__ecOL, effectText = env.effectText, __oppTurn = env.__oppTurn;
+  switch (card.name) {
     case '交互冲动': {
       // 瞬移至最近交互格（环形距离），获得金币；入间枫在场可任意交互格且金币升级，入间予同在则2000
       var interactTiles = [];
@@ -19172,6 +19250,15 @@ function useEventCardFor(player, index, name, done) {
       }
       break;
       
+  }
+}
+
+/* 事件卡效果·B（2026-09-27 从 useEventCardFor 的 switch 抽出；case 体原样搬移）
+   ⚠ 必须由调用方传 env（闭包局部量 __ecFoe/__ecOL/effectText/__oppTurn）——
+      第一版漏了它们 ⇒ case 体抛错被静默吞掉 ⇒ 效果完全没发生（batchC 出现 5 条红，已回滚重做）。 */
+function __eventCasesB(card, player, p, done, env) {
+  var __ecFoe = env.__ecFoe, __ecOL = env.__ecOL, effectText = env.effectText, __oppTurn = env.__oppTurn;
+  switch (card.name) {
     case '大风':
       // 终止移动，双方下次位移-2（里绪/光太郎免疫）
       playerIds().forEach(function (pl) {
@@ -19377,6 +19464,84 @@ function useEventCardFor(player, index, name, done) {
       return;
       break;
   }
+}
+
+function useEventCardFor(player, index, name, done) {
+  if (!battleState) return;
+  var __ecFoe = foeOf(player);
+  var __ecOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
+  var __oppTurn = battleState.currentPlayer !== player;
+  
+  var card = battleState[player].eventCards ? battleState[player].eventCards[index] : null;
+  if (!card) {
+    // 尝试从手牌中找事件卡
+    if (battleState[player].hand[index] && battleState[player].hand[index]._category === 'event_cards') {
+      card = battleState[player].hand[index];
+    }
+  }
+  if (!card) { if (done) done(); return; }
+  
+  var effectText = card.effect || card.text || '';
+  
+  // 事件卡使用条件检查
+  var canUse = true;
+  var reason = '';
+  
+  // 检查是否需要特定条件
+  if (effectText.indexOf('受到伤害时') >= 0 && !battleState.damageResponseWindow) {
+    canUse = false;
+    reason = '只能在受到伤害时使用！';
+  }
+  if (effectText.indexOf('移动时') >= 0 && battleState.phase !== 'roll') {
+    canUse = false;
+    reason = '只能在移动时使用！';
+  }
+  if (effectText.indexOf('攻击时') >= 0 && battleState.phase !== 'main1' && battleState.phase !== 'main2') {
+    canUse = false;
+    reason = '只能在主要阶段使用！';
+  }
+  
+  if (!canUse) {
+    if (player === 'p1') showToast('【' + card.name + '】' + reason, 'warn');
+    if (done) done();
+    return;
+  }
+  
+  // 阶段检查：事件卡全时点——对手回合任意阶段可连锁发动；自己回合需主要阶段（有特殊时点的卡除外）
+  if (!__oppTurn && battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
+      effectText.indexOf('受到伤害时') < 0 && effectText.indexOf('移动时') < 0) {
+    if (player === 'p1') showToast('当前阶段不能使用事件卡，请在主要阶段使用！', 'warn');
+    if (done) done();
+    return;
+  }
+  
+  // 赌徒游戏：金币不足时不消耗卡（先检查后移除，修复原吞卡）
+  if (card.name === '赌徒游戏') {
+    var __gp = battleState[player].gold || 0;
+    if (__gp < __goldPrice(battleState[player], 500)) { if (player === 'p1') showToast('金币不足，无法进行赌徒游戏', 'warn'); if (done) done(); return; }
+  }
+
+  // 从eventCards或hand中移除事件卡
+  var removedFromEventCards = false;
+  if (battleState[player].eventCards && battleState[player].eventCards[index]) {
+    battleState[player].eventCards.splice(index, 1);
+    removedFromEventCards = true;
+  } else if (battleState[player].hand[index] && battleState[player].hand[index]._category === 'event_cards') {
+    battleState[player].hand.splice(index, 1);
+  }
+  
+  addBattleLog(player, '使用事件卡【' + card.name + '】');
+  
+  var p = battleState[player];
+  
+  // 根据事件卡名称执行完整效果
+  var __applyEventEffect = function () {
+  /* 事件卡效果分派（2026-09-27 拆出两族，见 __eventCasesA/B；case 体未改动）。
+     ⚠ **不能 return** —— 原 case 的 break 之后还要继续执行 switch 之外的收尾代码（第一版就是因此 5 条红）。 */
+  var __evtEnv = { __ecFoe: __ecFoe, __ecOL: __ecOL, effectText: effectText, __oppTurn: __oppTurn };
+  if (__EVENT_CASE_A[card.name]) __eventCasesA(card, player, p, done, __evtEnv);
+  else if (__EVENT_CASE_B[card.name]) __eventCasesB(card, player, p, done, __evtEnv);
   }; // end __applyEventEffect
   
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制（如崩塌之乌托邦）
@@ -19872,27 +20037,10 @@ function closeCardList() {
 
 
 // ========== 角色被动和SP处理 ==========
-function processCharacterPassives(player) {
-  if (!battleState || !deckConfig) return;
-  var p = battleState[player];
-  var chars = deckConfig[player].chars;
-  var memberSPApplied = false; // 队员SP冲突标记：编组类效果只生效第一个
-  
-  for (var i = 0; i < chars.length; i++) {
-    var char = chars[i];
-    if (!char) continue;
-    
-    var charName = char.name || '';
-    var passive = char.passive || '';
-    var sp = char.sp || '';
-    var isCaptain = (i === 0);
-    var spWorksAsMember = (char.sp_member === true) || sp.indexOf('作为队员编组也会生效') >= 0 || sp.indexOf('作为队员编组时也会生效') >= 0 || sp.indexOf('队员编组也生效') >= 0; // 优先用数据字段 sp_member，文本兜底
-    var isGroupSP = sp.indexOf('冲突') >= 0; // 编组类SP（会冲突）
-    
-    addBattleLog(player, '角色【' + charName + '】' + (isCaptain ? '（队长）' : '（队员）'));
-    
-    // ========== 队长被动效果（只有队长触发） ==========
-    if (isCaptain) {
+/* 队长被动注册（2026-09-27 从 processCharacterPassives 抽出，Phase B）：按角色名逐条注册队长被动。
+   ⚠ 必须由调用方传 env（闭包局部量 charName/sp/i/isCaptain）—— 与拆 useEventCardFor 同一条教训。 */
+function __captainPassives(player, p, env) {
+  var charName = env.charName, sp = env.sp, i = env.i, isCaptain = env.isCaptain;
       
       // 宁雨清被动：游戏开始抽7张选5张作初始手牌，剩余送墓
       if (charName.indexOf('雨清') >= 0 || charName.indexOf('宁雨清') >= 0) {
@@ -20137,7 +20285,33 @@ function processCharacterPassives(player) {
       }
 
       // 宁雨清被动（其他角色的被动可以继续添加）
-    }
+}
+
+function processCharacterPassives(player) {
+  if (!battleState || !deckConfig) return;
+  var p = battleState[player];
+  var chars = deckConfig[player].chars;
+  var memberSPApplied = false; // 队员SP冲突标记：编组类效果只生效第一个
+  
+  for (var i = 0; i < chars.length; i++) {
+    var char = chars[i];
+    if (!char) continue;
+    
+    var charName = char.name || '';
+    var passive = char.passive || '';
+    var sp = char.sp || '';
+    var isCaptain = (i === 0);
+    var spWorksAsMember = (char.sp_member === true) || sp.indexOf('作为队员编组也会生效') >= 0 || sp.indexOf('作为队员编组时也会生效') >= 0 || sp.indexOf('队员编组也生效') >= 0; // 优先用数据字段 sp_member，文本兜底
+    var isGroupSP = sp.indexOf('冲突') >= 0; // 编组类SP（会冲突）
+    
+    addBattleLog(player, '角色【' + charName + '】' + (isCaptain ? '（队长）' : '（队员）'));
+    
+    // ========== 队长被动效果（只有队长触发） ==========
+  if (isCaptain) {
+    var __capEnv = { charName: charName, sp: sp, i: i, isCaptain: isCaptain };
+    __captainPassives(player, p, __capEnv);
+    sp = __capEnv.sp;              // 块内若改写过 sp，回写（机械保险）
+  }
     
     // ========== SP效果（队长和满足条件的队员） ==========
     // 队员SP必须卡面声明“作为队员编组也生效”，否则不生效
