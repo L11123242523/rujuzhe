@@ -20937,6 +20937,8 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
        原来卡自身的送墓触发一律 mandatory:true ⇒ 盒子("送墓时可选")被**自动上链** ✗，玩家没得选。
        现在按卡面文本判定：写"可以/可选"的是选发（窗口里问），没写的才必发。 */
     var __ownMandatory = !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || ''));
+    /* ⚠ 逐节点判定：**这张卡自己**没有送墓触发就不排它（事件级判定不够 —— 琉璃SP成立会把无关的卡也带进来 ✗）。 */
+    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
     queueOrRunTrigger({
       owner: player,
       card: card,
@@ -20944,6 +20946,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       mandatory: __ownMandatory,
       fire: function () { checkGraveTrigger(player, card, reason, true); }
     });
+    }
     if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
       queueOrRunTrigger({
         owner: (battleState.currentPlayer || player),
@@ -20998,12 +21001,15 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       __graveBody(); return;
     }
     var __nbHow = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    /* 逐节点判定：这张卡自己没有送墓触发就不排（只保留真正会触发的那几条） */
+    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
     __nbBatch.push({
       owner: player, card: card,
-      mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),   // 同上：按卡面"可以/可选"判必发/选发
+      mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),   // 按卡面"可以/可选"判必发/选发
       label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
       fire: function () { skipYongzou = true; __graveBody(); }   // 进行曲已单独成节点，别在 body 里再跑一次
     });
+    }
     if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
       __nbBatch.push({
         owner: (battleState.currentPlayer || player), card: card, mandatory: true,
