@@ -20867,7 +20867,11 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
          不在结算中则**立刻排空 = 立刻开这一个窗口**（排空本身就是"开窗口"的统一入口）。
      之前只补了"结算中"那一半 ⇒ 献祭（非结算中）时琉璃SP与进行曲各开一个窗，正是作者第二次实测的现象。 */
   if (__isDrainSelf) { __graveBody(); return; }
-  if (typeof queueOrRunTrigger === 'function') {
+  /* 【2026-09-27 回滚一半】上一版在"非结算中"也调 __tryDrainTriggers() 想统一成"一批一窗口"，
+     结果**献祭选卡时网页卡死**（排空 → fire → 再收集 → 再排空的重入死循环）。
+     先保住不卡死：非结算中恢复旧行为（就地执行 body）；只在**结算中**才收集成批。
+     "非结算中也应同窗、顺序可选"要等重入守卫写好再上，见《收口记录》。 */
+  if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && __chainIsBusy()) {
     queueOrRunTrigger({
       owner: player,
       card: card,
@@ -20912,12 +20916,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       });
       battleState._leaveHooksBatchedFor = card;
     } catch (e) { console.error('离场选发批次入队出错', e); }
-    /* 统一排空：结算中会被推迟；不在结算中则立刻开这一个窗口。 */
-    try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) { console.error('触发批次排空出错', e); }
-    return;
+    return;   // 结算中：入批即可；排空交给"本次连锁结束"的释放点（**不要在这里排空** —— 会重入卡死）
   }
-  // 没有排空机制（理论上不会走到）：退回旧行为
-  __graveBody();
+  __graveBody();   // 非结算中：就地执行（与引入"统一收集"之前一致）
   return;
 
   /* 卡自身的送墓触发本体（含 ON_TO_GRAVE 时点、神乐铃、通用回复、盒子SP、破损回收、共鸣…）。
