@@ -2984,6 +2984,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   <p class="game-subtitle">入 局 者</p>
   <div class="menu-buttons">
     <button class="menu-btn btn-pve" onclick="startBattle()">⚔️ 单机对战</button>
+    <!-- 【测试卡组·沙盒（作者 2026-09-27 需求）】用于测卡组爆发/运转/bug：AI 同步值给足（打不死）、每回合满音韵 -->
+    <button class="menu-btn" style="background:linear-gradient(135deg,#7c3aed,#a855f7);" onclick="startBattle(true)">🧪 测试卡组（沙盒）</button>
     <button class="menu-btn" style="background:linear-gradient(135deg,#e67e22,#f1c40f);" onclick="openDeckBuilder('pve')">🎛 单机卡组（你 + AI）</button>
     <button class="menu-btn" style="background:linear-gradient(135deg,#2563eb,#0ea5e9);" onclick="openOnlineLobby()">🌐 联机对战(PvP)</button>
     <button class="menu-btn btn-pve" onclick="showToast('🚧 肉鸽模式开发中\n专属卡牌设计完成后开放', 'info')" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);opacity:0.6;cursor:not-allowed;">🚧 肉鸽模式（开发中）</button>
@@ -8217,7 +8219,9 @@ function importDeckCode(player) {
 }
 
 // ========== 对战 ==========
-function startBattle() {
+var __pendingSandbox = false;   // 【测试卡组·沙盒】由菜单按钮置位，startTurn 首次进入时落到 battleState._sandbox
+function startBattle(__sandbox) {
+  try { __pendingSandbox = !!__sandbox; } catch (e) {}
   /* ⚠ 这里**必须**区分单机与联机（作者 2026-09-16 报："联机对战使用的卡组还是单机对战的卡组"）：
      联机房主开局走的也是 startBattle()（见 Online._onGameStart 里的 startBattle() 调用），
      而本函数第一行就会 setDeckMode('pve') 把卡组切到"单机 vs AI"那一套 ——
@@ -9447,6 +9451,22 @@ function drawCard(player) {  var __p = battleState[player];
 
 function startTurn() {
   if (battleState && battleState._over) return; // 对局已结束：不再开始新回合
+  /* 【测试卡组·沙盒（作者 2026-09-27 需求）】进入对局后每回合：双方同步值给足（AI 打不死，便于测爆发）、
+     音韵补满到上限。菜单「🧪 测试卡组（沙盒）」进入；普通单机/联机不受影响。 */
+  try {
+    if (typeof __pendingSandbox !== 'undefined' && __pendingSandbox && battleState) { battleState._sandbox = true; __pendingSandbox = false; }
+    if (battleState && battleState._sandbox) {
+      playerIds().forEach(function (w) {
+        var q = battleState[w]; if (!q) return;
+        if ((q.sync || 0) < 999) q.sync = 999;
+        if (typeof q.maxSync === 'number') q.maxSync = Math.max(q.maxSync, 999);
+        if (typeof q.syncMax === 'number') q.syncMax = Math.max(q.syncMax, 999);
+        var __mc = Math.max(q.maxCost || 0, 30);
+        q.maxCost = __mc; q.cost = __mc;
+      });
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    }
+  } catch (e) { console.error('沙盒模式参数设置出错', e); }
   // S5：回合开始先清一次陈旧锁（规格用例8：不残留锁标志；清理会记日志，不静默）
   if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('回合开始');
   // 重置每回合一次的永续卡标记（按回合归属者对称重置，修复原代码写死 p1 导致 p2 永不复位）
@@ -20851,6 +20871,44 @@ function __yongzouGraveApplies() {
   } catch (e) { return false; }
 }
 
+/* 【这张卡本身有没有"送墓触发"要处理】—— 作者实测：没有送墓效果的卡（如「先哲之"馈赠"」）也被排进了连锁 ✗。
+   只有真的会做事时才排队/开窗；条件是 __graveBody 里那些分支（神乐铃 / 通用送墓回复 / 盒子SP / 破损回收 / 共鸣 / 认真起来了）。 */
+function __graveSelfApplies(player, card, reason) {
+  try {
+    if (!card) return false;
+    var nm = card.name || '', sp = card.sp || '', eff = card.effect || '';
+    var effReason = (reason === 'sacrifice' || reason === 'effect' || reason === 'destroy');
+    if (nm.indexOf('神乐铃') >= 0) return true;
+    if (effReason && sp && /被献祭|因卡的效果[^，。]*送入墓地|送入墓地时[^。，]*(回复|回)/.test(sp)) return true;
+    if (nm.indexOf('来自地狱的盒子') >= 0 && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时/.test(sp)) return true;
+    if (nm.indexOf('破损电子设备') >= 0) return true;
+    var t2 = sp + eff;
+    if (/进(入)?墓地后/.test(t2) && t2.indexOf('回收') >= 0) return true;
+    if (nm === '共鸣' && sp && sp.indexOf('回收') >= 0) return true;
+    if (nm.indexOf('认真起来了') >= 0) return true;
+    return false;
+  } catch (e) { console.error('判断送墓触发条件出错', e); return true; }
+}
+
+/* 【本事件是否真的会触发什么】= 卡自身送墓触发 ∪ 进行曲 ∪ 琉璃(万圣祭)SP ∪ 冬马SP ∪ 羽奈(往昔)①。
+   全都不成立 ⇒ 不收集、不开窗（原来无条件排队 ⇒ 出现"这张卡有送墓效果吗就进连锁"）。 */
+function __leaveEventHasTrigger(player, card, reason) {
+  try {
+    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) return true;
+    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) return true;
+    var cur = battleState && battleState.currentPlayer;
+    var hit = false;
+    playerIds().forEach(function (w) {
+      if (hit) return;
+      var q = battleState[w]; if (!q) return;
+      if (q._liuliHWSP && q._liuliHWSPTurn !== (battleState.turn || 0)) hit = true;
+      else if (q._tomaSP) hit = true;
+      else if (q._yunaiPastPassive && cur === w && w === player) hit = true;   // 羽奈(往昔)①：自己回合、自己的卡送墓
+    });
+    return hit;
+  } catch (e) { console.error('判断离场事件是否有触发出错', e); return true; }
+}
+
 // 检查卡牌进入墓地时的触发效果
 function checkGraveTrigger(player, card, reason, skipYongzou) {
   // 作者口径：**连锁处理中产生的新效果，在本次连锁处理完成后另开一个新连锁**（不再就地结算）。
@@ -20872,11 +20930,18 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      先保住不卡死：非结算中恢复旧行为（就地执行 body）；只在**结算中**才收集成批。
      "非结算中也应同窗、顺序可选"要等重入守卫写好再上，见《收口记录》。 */
   if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && __chainIsBusy()) {
+    /* 【先判断"这一事件是否真的会触发什么"】全都不成立 ⇒ 不入队、不开窗。
+       （作者实测：没有送墓效果的「先哲之"馈赠"」也被排进连锁 ✗ —— 就是这里无条件排队造成的。） */
+    if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) return;
+    /* 【必发/选发按卡面判据（作者口径："可以/可选" ⇒ 选发）】
+       原来卡自身的送墓触发一律 mandatory:true ⇒ 盒子("送墓时可选")被**自动上链** ✗，玩家没得选。
+       现在按卡面文本判定：写"可以/可选"的是选发（窗口里问），没写的才必发。 */
+    var __ownMandatory = !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || ''));
     queueOrRunTrigger({
       owner: player,
       card: card,
       label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
-      mandatory: true,
+      mandatory: __ownMandatory,
       fire: function () { checkGraveTrigger(player, card, reason, true); }
     });
     if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
@@ -20894,7 +20959,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     try {
       playerIds().forEach(function (w) {
         var q = battleState[w]; if (!q) return;
-        if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn) {
+        /* 每个座位在**同一事件里只排一次**（作者实测：一次送墓把琉璃SP排了两遍 ✗ —— 你方两条、对手两条）。 */
+        if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
+          q._liuliHWQueuedFor = card;
           queueOrRunTrigger({
             owner: w, card: card, mandatory: false,
             label: '【琉璃(万圣祭)·SP】有卡不因使用' + __how0 + '·自己抽1张',
@@ -20906,7 +20973,8 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
             }
           });
         }
-        if (q._tomaSP) {
+        if (q._tomaSP && q._tomaQueuedFor !== card) {
+          q._tomaQueuedFor = card;
           queueOrRunTrigger({
             owner: w, card: card, mandatory: false,
             label: '【现实间冬马·SP】有卡不因使用' + __how0 + '·造4点无序',
@@ -20925,9 +20993,14 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      只有 1 条触发时（绝大多数情况）走下面的旧路径，行为一字不变。 */
   var __nbBatch = [];
   try {
+    /* 先判断"这一事件是否真的会触发什么"；全都不成立 ⇒ 直接走 body（不收集、不开窗，防"没送墓效果的卡也进连锁"）。 */
+    if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) {
+      __graveBody(); return;
+    }
     var __nbHow = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
     __nbBatch.push({
-      owner: player, card: card, mandatory: true,
+      owner: player, card: card,
+      mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),   // 同上：按卡面"可以/可选"判必发/选发
       label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
       fire: function () { skipYongzou = true; __graveBody(); }   // 进行曲已单独成节点，别在 body 里再跑一次
     });
@@ -20940,7 +21013,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     }
     playerIds().forEach(function (w) {
       var q = battleState[w]; if (!q) return;
-      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn) {
+      // 同一事件里每个座位只排一次（防重复入窗）
+      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
+        q._liuliHWQueuedFor = card;
         __nbBatch.push({
           owner: w, card: card, mandatory: false,
           label: '【琉璃(万圣祭)·SP】有卡不因使用' + __nbHow + '·自己抽1张',
@@ -20952,7 +21027,8 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
           }
         });
       }
-      if (q._tomaSP) {
+      if (q._tomaSP && q._tomaQueuedFor !== card) {
+        q._tomaQueuedFor = card;
         __nbBatch.push({
           owner: w, card: card, mandatory: false,
           label: '【现实间冬马·SP】有卡不因使用' + __nbHow + '·造4点无序',
