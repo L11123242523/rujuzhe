@@ -9743,7 +9743,20 @@ function collectChainable(player, effect){
       }
     }
   } catch (e) { console.error('座位级连锁候选收集出错', e); }
-  return out;
+  /* 【按卡的身份去重（作者 2026-09-27 反馈：事件卡/技能卡在连锁窗口里各占两个选项）】
+     同一张实体卡可能同时出现在两个区域（手牌 + 效果处理区 / 盖伏区）。
+     去重时**优先保留"效果处理区 / 盖伏区"那条**：事件卡经事件区发动才走"送公共墓地"的口径，
+     若保留手牌那条会按"单次卡"送自己的墓地，去向就错了。 */
+  var __zoneRank = function (f) { return f === 'event' ? 0 : (f === 'faceDown' ? 1 : 2); };
+  var __best = [], __dedup = [];
+  for (var __ci = 0; __ci < out.length; __ci++) {
+    var it = out[__ci], __cc = it && it.card;
+    if (!__cc) { __dedup.push(it); continue; }
+    var at = __best.indexOf(__cc);
+    if (at < 0) { __best.push(__cc); __dedup.push(it); continue; }
+    if (__zoneRank(it.from) < __zoneRank(__dedup[at].from)) __dedup[at] = it;   // 换成更"权威"的那个区域
+  }
+  return __dedup;
 }
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
 // 会话级记忆（刷新页面即失效，避免永久改变规则）
@@ -10549,10 +10562,17 @@ function resolveChainStack(effect, onDone) {
         playerIds().forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
         addBattleLog(e.by, '【大风】终止所有移动动作；双方下次执行的位移效果-2');
       }
-      if (typeof useEventCardFor === 'function' && __evCard && __evCard._alreadyInPublicGrave) {
-        var __evP = battleState[e.by];
-        if (__evP) { __evP.eventCards = __evP.eventCards || []; __evP.eventCards.push(__evCard); }
-        try { useEventCardFor(e.by, __evP.eventCards.length - 1, __evCard.name, function () {}); } catch (err) { console.error('事件卡连锁结算异常', err); }
+      if (__evCard) {
+        /* 【2026-09-27 修（作者实测：事件卡连锁"能连锁但效果不执行，反而让手卡多一张同名事件卡"）】
+           旧写法把这卡**塞回 eventCards** 再调 useEventCardFor(by, 末位索引, …) —— 那是"从手牌使用"的入口：
+           费用早在 applyChainCard 的 payAndRemove 付过、卡也已进公共墓地 ⇒ 重复处理 + 索引漂移 ⇒
+           效果没执行、还多一张到手牌。
+           改为与**技能卡那一环完全同构**：直接执行这张卡的效果本体（费用与去向已处理完）。 */
+        addBattleLog(e.by, '▸ 逆结算执行事件卡【' + (e.name || __evCard.name || '') + '】');
+        try {
+          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard);
+          else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () {});
+        } catch (err) { console.error('事件卡连锁结算异常', err); }
       }
     } else if (e.kind === 'skill') {
       /* 作者口径：技能卡是全时点卡 —— 作为连锁响应发动后，**逆结算到这一环时执行它的效果本体**。
@@ -20838,10 +20858,16 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   //       否则它会把自己再次入队 → 无限循环（我第一版就踩了这个，探针里表现为同一张卡反复"另开新连锁"）。
   var __isDrainSelf = false;
   try { __isDrainSelf = !!(effectEngine && effectEngine._drainingCard && effectEngine._drainingCard === card); } catch (e) {}
-  if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && !__isDrainSelf && __chainIsBusy()) {
-    /* 【2026-09-27 修：同一次"卡离场"事件的多个触发要进**同一个窗口】**（作者实测反馈：
-       盒子送墓时，进行曲的"本回合进墓计数造伤"没跟它进同一个链，窗口只有 1 个候选）。
-       做法：在**同一次同步收集**里把本事件满足的触发都入队 ⇒ 排空时它们进同一个窗口，顺序由玩家按优先权选。 */
+  /* 【原理（作者 2026-09-27 点明，要求举一反三）】
+     同一次"卡离场"事件满足的**所有触发**，无论它发生在**结算中**还是**行动中**（献祭/破坏/移动/效果送墓…），
+     都必须**收集成一批**、进**同一个连锁窗口**（顺序按优先权由玩家选）。
+     所以这里不再分"结算中 / 非结算中"两条路：
+       · 正在被排空的那张卡自己（_drainingCard）⇒ 直接跑本体（防自我入队死循环）；
+       · 其余一律先入批，再排空 —— 结算中则排空推迟到本次连锁结束（另开新连锁），
+         不在结算中则**立刻排空 = 立刻开这一个窗口**（排空本身就是"开窗口"的统一入口）。
+     之前只补了"结算中"那一半 ⇒ 献祭（非结算中）时琉璃SP与进行曲各开一个窗，正是作者第二次实测的现象。 */
+  if (__isDrainSelf) { __graveBody(); return; }
+  if (typeof queueOrRunTrigger === 'function') {
     queueOrRunTrigger({
       owner: player,
       card: card,
@@ -20858,20 +20884,19 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
         fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
       });
     }
-    /* 「不因使用离场」的两条**选发**（琉璃(万圣祭)SP / 冬马SP）：与本次事件的其他触发**同批入队** ⇒ 进同一个窗口，
-       顺序由玩家按优先权选（mandatory:false ⇒ 窗口里问"是否发动"，而不是就地弹窗排队）。
-       同时打标记，让随后 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过这两条（避免重复发动）。 */
-    var __how = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    /* 「不因使用离场」的两条**选发**（琉璃(万圣祭)SP / 冬马SP）：同样入这一批 ⇒ 同一窗口里问"是否发动"
+       （mandatory:false），而不是各自弹窗排队。标记让随后 ON_TO_GRAVE 的 __noUseLeaveHooks 跳过这两条（防重复）。 */
+    var __how0 = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
     try {
       playerIds().forEach(function (w) {
         var q = battleState[w]; if (!q) return;
         if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn) {
           queueOrRunTrigger({
             owner: w, card: card, mandatory: false,
-            label: '【琉璃(万圣祭)·SP】有卡不因使用' + __how + '·自己抽1张',
+            label: '【琉璃(万圣祭)·SP】有卡不因使用' + __how0 + '·自己抽1张',
             fire: function () {
-              q._liuliHWSPTurn = battleState.turn;   // 发动时才占用本回合这一次
-              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
+              q._liuliHWSPTurn = battleState.turn;
+              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __how0 + '（【' + ((card && card.name) || '') + '】），自己抽1张');
               if (typeof drawCard === 'function') drawCard(w);
               if (typeof updateBattleUI === 'function') updateBattleUI();
             }
@@ -20880,15 +20905,24 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
         if (q._tomaSP) {
           queueOrRunTrigger({
             owner: w, card: card, mandatory: false,
-            label: '【现实间冬马·SP】有卡不因使用' + __how + '·造4点无序',
-            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __how); }
+            label: '【现实间冬马·SP】有卡不因使用' + __how0 + '·造4点无序',
+            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __how0); }
           });
         }
       });
       battleState._leaveHooksBatchedFor = card;
     } catch (e) { console.error('离场选发批次入队出错', e); }
+    /* 统一排空：结算中会被推迟；不在结算中则立刻开这一个窗口。 */
+    try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) { console.error('触发批次排空出错', e); }
     return;
   }
+  // 没有排空机制（理论上不会走到）：退回旧行为
+  __graveBody();
+  return;
+
+  /* 卡自身的送墓触发本体（含 ON_TO_GRAVE 时点、神乐铃、通用回复、盒子SP、破损回收、共鸣…）。
+     收进内层函数只为让上面两条路径共用它；里面各处的 `return` 语义**不变**（返回即"这张卡的效果处理到此为止"）。 */
+  function __graveBody() {
   runTiming(TIMING.ON_TO_GRAVE, { player: player, card: card, reason: reason || "" });
   if (!battleState || !card) return;
   // 未显式传 reason 的送墓一律按"因效果送墓"处理（规则书第十一章二-1：献祭≠效果送墓；
@@ -21047,6 +21081,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     }
     return;
   }
+  }   // ← 内层 __graveBody() 结束（上面两条路径共用它）
 }
 
 // ========== 受伤时点询问系统 ==========
