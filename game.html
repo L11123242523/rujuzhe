@@ -20918,7 +20918,56 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     } catch (e) { console.error('离场选发批次入队出错', e); }
     return;   // 结算中：入批即可；排空交给"本次连锁结束"的释放点（**不要在这里排空** —— 会重入卡死）
   }
-  __graveBody();   // 非结算中：就地执行（与引入"统一收集"之前一致）
+  /* 【非结算中：本事件同时满足多条触发时，也进**同一个窗口**（作者实测：献祭神乐铃 → 琉璃SP 与 进行曲 各开一个窗）】
+     关键：**不经队列、不调 __tryDrainTriggers**，而是直接调用同时点驱动 resolveSimultaneous ——
+     所以不可能像上一版那样"排空 → fire → 再收集 → 再排空"地重入卡死。
+     节点 fire 一律用**闭包内的 __graveBody/直调函数**，也不再回调 checkGraveTrigger（彻底断掉重入）。
+     只有 1 条触发时（绝大多数情况）走下面的旧路径，行为一字不变。 */
+  var __nbBatch = [];
+  try {
+    var __nbHow = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    __nbBatch.push({
+      owner: player, card: card, mandatory: true,
+      label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
+      fire: function () { skipYongzou = true; __graveBody(); }   // 进行曲已单独成节点，别在 body 里再跑一次
+    });
+    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
+      __nbBatch.push({
+        owner: (battleState.currentPlayer || player), card: card, mandatory: true,
+        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
+        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+      });
+    }
+    playerIds().forEach(function (w) {
+      var q = battleState[w]; if (!q) return;
+      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn) {
+        __nbBatch.push({
+          owner: w, card: card, mandatory: false,
+          label: '【琉璃(万圣祭)·SP】有卡不因使用' + __nbHow + '·自己抽1张',
+          fire: function () {
+            q._liuliHWSPTurn = battleState.turn;
+            addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __nbHow + '（【' + ((card && card.name) || '') + '】），自己抽1张');
+            if (typeof drawCard === 'function') drawCard(w);
+            if (typeof updateBattleUI === 'function') updateBattleUI();
+          }
+        });
+      }
+      if (q._tomaSP) {
+        __nbBatch.push({
+          owner: w, card: card, mandatory: false,
+          label: '【现实间冬马·SP】有卡不因使用' + __nbHow + '·造4点无序',
+          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __nbHow); }
+        });
+      }
+    });
+  } catch (e) { console.error('非结算中触发批次构建出错', e); }
+  if (__nbBatch.length > 1 && typeof resolveSimultaneous === 'function') {
+    battleState._leaveHooksBatchedFor = card;     // 让 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过琉璃/冬马（防重复）
+    try { resolveSimultaneous(player, __nbBatch, function () {}); }
+    catch (e) { console.error('非结算中触发窗口出错，退回就地执行', e); try { delete battleState._leaveHooksBatchedFor; } catch (e2) {} __graveBody(); }
+    return;
+  }
+  __graveBody();   // 只 1 条触发（常见情况）：完全保持原行为
   return;
 
   /* 卡自身的送墓触发本体（含 ON_TO_GRAVE 时点、神乐铃、通用回复、盒子SP、破损回收、共鸣…）。
