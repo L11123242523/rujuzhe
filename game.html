@@ -9541,7 +9541,6 @@ function startTurn() {
         if (typeof q.syncMax === 'number') q.syncMax = Math.max(q.syncMax, 999);
         var __mc = Math.max(q.maxCost || 0, 30);
         q.maxCost = __mc; q.cost = __mc;
-      try { if (typeof __memberGate === 'function' && !q._memberGateDone) { q._memberGateDone = true; __memberGate(battleState.currentPlayer === q ? battleState.currentPlayer : (q === battleState.p1 ? 'p1' : 'p2')); } } catch (e) { }
       });
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
