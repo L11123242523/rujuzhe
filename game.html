@@ -10288,6 +10288,22 @@ registerTrigger({
   }
 });
 
+registerTrigger({
+  id: 'self-grave',
+  timing: 'leave-field',
+  ownerOf: function (ctx) { return ctx && ctx.player; },
+  /* 卡自身在送墓时有要处理的东西才排这条；羽奈(往昔)①的询问搭在 ON_TO_GRAVE 时点上（见 __noUseLeaveHooks→__pastPhase），
+     所以只要羽奈适用也必须排这条节点（这条依赖待下一轮把羽奈也做成独立候选后即可去掉）。 */
+  cond: function (ctx, owner) {
+    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(owner, ctx.card, ctx.reason)) return true;
+    var q = battleState[owner];
+    return !!(q && q._yunaiPastPassive && battleState.currentPlayer === owner);
+  },
+  mandatory: function (ctx) { return !/可以|可选/.test(((ctx.card && ctx.card.sp) || '') + ((ctx.card && ctx.card.effect) || '')); },
+  label: function (ctx) { return '【' + ((ctx.card && ctx.card.name) || '?') + '】' + ctx.how + '触发'; },
+  fire: function (ctx, owner) { checkGraveTrigger(owner, ctx.card, ctx.reason, true); }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -17227,147 +17243,98 @@ function __tomaSPLeaveHit(w, owner, card, how) {
 function __noUseLeaveHooks(owner, card, reason, how, finish) {
   finish = finish || function () {};
   if (!battleState || !card || !card.name) { finish(); return; }
-  var __cur = battleState.currentPlayer;
-  /* 【选发：条件满足 → 弹窗询问 → 发动则作为 C1 进连锁（作者 2026-09-27 口径）】
-     琉璃(万圣祭)SP 与 冬马SP 的卡面都写「…时可以发动」⇒ 不能在触发点直接执行，必须先问。
-     做法：把两条询问**按顺序排进 __asks 队列**，一条问完（无论发动与否）再问下一条，最后才轮到羽奈(往昔)①。 */
-  var __asks = [];
-  /* 若本次事件已在 checkGraveTrigger 的忙碌分支里把这两条**选发**打包进批次（同一窗口），这里就跳过（避免重复发动）。 */
-  var __batchedLeave = false;
-  try {
-    __batchedLeave = (battleState._leaveHooksBatchedFor === card);
-    if (__batchedLeave) battleState._leaveHooksBatchedFor = null;
-  } catch (e) { try { console.error('离场批次标记读取失败（按未打包处理）', e); } catch (e2) {} }
-  // ---- 琉璃(万圣祭)SP：一回合一次（任意玩家的卡都算）----
-  playerIds().forEach(function (w) {
-    if (__batchedLeave) return;   // 已随事件批次进同一窗口（见 checkGraveTrigger 忙碌分支）
-    var q = battleState[w];
-    // 2026-09-27 修：初值 0（=本回合还没用过）曾被误判成"已用过"导致 SP 永不触发；只判"本回合是否已用过"。
-    if (!q || !q._liuliHWSP || q._liuliHWSPTurn === battleState.turn) return;
-    __asks.push({
-      owner: w, title: '琉璃(万圣祭)·SP',
-      question: '有玩家的卡不因使用' + how + '（【' + card.name + '】）：是否发动，自己抽1张？',
-      fire: function () {
-        q._liuliHWSPTurn = battleState.turn;              // 发动时才占用本回合这一次
-        addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + card.name + '】），自己抽1张');
-        if (typeof drawCard === 'function') drawCard(w);
-        if (typeof updateBattleUI === 'function') updateBattleUI();
-      }
-    });
-  });
-  // ---- 冬马SP（2026-09-26 新卡面）：有玩家的卡不因使用离开原本区域时，对其造成4点无序属性伤害；
-  //      如果自己因此受到伤害（响应反伤等）则适用：回复自身4点音韵值，若自己墓地无序卡最多再抽1张 ----
-  playerIds().forEach(function (w) {
-    if (__batchedLeave) return;   // 同上：已随事件批次进同一窗口
-    var d = battleState[w];
-    if (!d || !d._tomaSP) return;
-    __asks.push({
-      owner: w, title: '现实间冬马·SP',
-      question: '有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）：是否发动，对' + owner + '造成4点无序属性伤害？',
-      fire: function () {
-        var __before = d.sync || 0;
-        addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成4点无序属性伤害');
-        dealDamageWithResponse(owner, 4, '冬马SP', function () {
-          try {
-            if ((d.sync || 0) < __before) {                      // 自己因此受到伤害
-              recoverCost(w, 4, '冬马SP');
-              var __cnt = {};
-              (d.grave || []).forEach(function (c) { var a = c && c.attribute; if (a) __cnt[a] = (__cnt[a] || 0) + 1; });
-              var __max = 0, __attr = null;
-              Object.keys(__cnt).forEach(function (a) { if (__cnt[a] > __max) { __max = __cnt[a]; __attr = a; } });
-              if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵；墓地无序卡最多 → 再抽1张'); }
-              else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵（墓地无序卡不是最多，不抽卡）');
-              if (typeof updateBattleUI === 'function') updateBattleUI();
-            }
-          } catch (e) { console.error('冬马SP后续出错', e); }
-        }, '无序', w);
-      }
-    });
-  });
-  // 依次询问（每问完一条再问下一条；全部问完才继续羽奈(往昔)① 的流程）
-  (function __runAsks(i) {
-    if (i >= __asks.length) return __pastPhase();
-    var a = __asks[i];
-    __offerOptionalEffect(a.owner, a.title, a.question, a.fire, function () { __runAsks(i + 1); });
-  })(0);
-  return;
-  // ---- 羽奈(往昔)被动①：仅在自己回合内 ----
-  function __pastPhase() {
-  var yq = battleState[owner];
-  if (!yq || !yq._yunaiPastPassive || battleState.currentPlayer !== owner) { finish(); return; }
-  // 相邻的单次种类卡：墓地中相邻两格都是单次道具卡
-  function __hasAdjacentSingle() {
-    var g = yq.grave || [];
-    for (var i = 0; i + 1 < g.length; i++) {
-      if (g[i] && g[i + 1] && g[i]._category === 'item_single' && g[i + 1]._category === 'item_single') return true;
-    }
-    return false;
-  }
-  function __pastPunish(fromAdjust) {
-    if (__hasAdjacentSingle()) {
-      if (fromAdjust) addBattleLog(owner, '【羽奈(往昔)被动·憧憬的正义】墓地内仍存在相邻的单次种类卡，不造成伤害');
-      return;
-    }
-    var foe = foeOf(owner);
-    if (!battleState[foe]) return;
-    addBattleLog(owner, '【羽奈(往昔)被动·憧憬的正义】墓地内不存在相邻的单次种类卡，对' + (foe === 'p1' ? '对手' : '你') + '造成4点理智属性伤害');
-    dealDamageWithResponse(foe, 4, '羽奈(往昔)被动·憧憬的正义', null, '理智', owner, { kind: 'sanity' });
-    if (typeof updateBattleUI === 'function') updateBattleUI();
-  }
-  function __pastAdjust(cb) {
-    var g = (yq.grave || []).slice();
-    if (!g.length) { cb(false); return; }
-    var __apply = function (sel) {
-      var idxs = (sel || []).filter(function (i) { return typeof i === 'number' && i >= 0 && i < g.length; }).slice(0, 2);
-      idxs.sort(function (a, b) { return b - a; });
-      var moved = [];
-      idxs.forEach(function (i) { moved.push(g[i]); yq.grave.splice(yq.grave.indexOf(g[i]), 1); });
-      moved.reverse().forEach(function (c) { yq.grave.push(c); });   // 移到墓地最下方（最下方=数组末尾）
-      if (moved.length) addBattleLog(owner, '【羽奈(往昔)被动】将墓地中' + moved.length + '张卡调整到墓地最下方');
-      cb(true);
-    };
-    if (owner === 'p1' && typeof showCardPickerMulti === 'function') {
-      showCardPickerMulti(g, '【羽奈(往昔)被动】选至多2张移到墓地最下方（选0张＝不调整位置）', __apply, 2, true);
-      return;
-    }
-    if (typeof Online !== 'undefined' && Online.active && owner === 'p2' && Online.awaitAnswer) {
-      Online.awaitAnswer({ label: '羽奈(往昔)被动·调整墓地位置（至多2张）', cards: g.map(function (c) { return c.name; }), need: 2 }, function (v) { __apply(v); });
-      return;
-    }
-    // AI：若存在相邻单次卡，尝试把其中一张单次卡移到墓地最下方以破坏相邻（最多2张）
-    var tries = 0;
-    while (__hasAdjacentSingle() && tries < 2) {
-      var gg = yq.grave, pick = -1;
-      for (var i2 = 0; i2 + 1 < gg.length; i2++) {
-        if (gg[i2] && gg[i2 + 1] && gg[i2]._category === 'item_single' && gg[i2 + 1]._category === 'item_single') { pick = i2; break; }
-      }
-      if (pick < 0) break;
-      var mv = gg.splice(pick, 1)[0]; gg.push(mv); tries++;
-    }
-    if (tries) addBattleLog(owner, '【羽奈(往昔)被动】（AI）调整墓地' + tries + '张卡位置以破坏相邻单次卡');
-    cb(true);
-  }
-  function __pastOffer() {
-    // 可选触发：弹窗未答完不得推进链条（与 宁雨清/星奈 被动同款做法——next() 放在弹窗回调里）
-    if (owner === 'p1' && typeof showChoiceModal === 'function') {
-      showChoiceModal('羽奈(往昔)被动·憧憬的正义', '【' + card.name + '】不因使用送入墓地', '可以发动：调整自己墓地至多两张卡的位置；那之后若墓地内不存在相邻的单次种类卡，对一名其他玩家造成4点理智属性伤害', ['发动', '不发动'], function (o) {
-        if (o === 0) __pastAdjust(function () { __pastPunish(true); finish(); });
-        else finish();
-      });
-      return;
-    }
-    if (typeof Online !== 'undefined' && Online.active && owner === 'p2' && typeof onlineDecideModal === 'function') {
-      onlineDecideModal('p2', '羽奈(往昔)被动·憧憬的正义（对手）', '【' + card.name + '】不因使用送入墓地', '可以发动：调整自己墓地至多两张卡的位置；那之后若墓地内不存在相邻的单次种类卡，造成4点理智属性伤害', ['发动', '不发动'], function (o) {
-        if (o === 0) __pastAdjust(function () { __pastPunish(true); finish(); });
-        else finish();
-      });
-      return;
-    }
-    __pastAdjust(function () { __pastPunish(true); finish(); });
-  }
-  __pastOffer();
-  }
+  /* 【结构性：本函数的手工询问已全部迁出（2026-09-28）】
+     琉璃(万圣祭)SP / 冬马SP / 羽奈(往昔)① 现在都在注册表 __TRIGGERS 里声明，
+     由 __scanTriggers('leave-field') 统一产出候选、判定必发/选发、并按 MD 口径排序（回合玩家先、同组玩家自排）。
+     "是否发动"这个问题**由窗口本身承担**（候选可选/可 PASS）—— 不再各写一套弹窗、也不会再出现"弹窗排队"互相挡。
+     这里只负责放行时点。 */
+  finish();
 }
+
+/* 羽奈(往昔)被动①：调整墓地至多两张位置；其后若墓地内不存在相邻的单次种类卡，对一名其他玩家造成4点理智伤害。
+   （2026-09-28 从 __noUseLeaveHooks 抽出：作为注册表里的**独立候选**，不再搭在"卡自身送墓"节点上。） */
+function __yunaiPastAsk(owner, card) {
+  try {
+    var yq = battleState && battleState[owner];
+    if (!yq) return;
+    function __hasAdjacentSingle() {
+      var g = yq.grave || [];
+      for (var i = 0; i + 1 < g.length; i++) {
+        if (g[i] && g[i + 1] && g[i]._category === 'item_single' && g[i + 1]._category === 'item_single') return true;
+      }
+      return false;
+    }
+    function __pastPunish(fromAdjust) {
+      if (__hasAdjacentSingle()) {
+        if (fromAdjust) addBattleLog(owner, '【羽奈(往昔)被动·憧憬的正义】墓地内仍存在相邻的单次种类卡，不造成伤害');
+        return;
+      }
+      var foe = foeOf(owner);
+      if (!battleState[foe]) return;
+      addBattleLog(owner, '【羽奈(往昔)被动·憧憬的正义】墓地内不存在相邻的单次种类卡，对' + (foe === 'p1' ? '对手' : '你') + '造成4点理智属性伤害');
+      dealDamageWithResponse(foe, 4, '羽奈(往昔)被动·憧憬的正义', null, '理智', owner, { kind: 'sanity' });
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    }
+    function __pastAdjust(cb) {
+      var g = (yq.grave || []).slice();
+      if (!g.length) { cb(false); return; }
+      var __apply = function (sel) {
+        var idxs = (sel || []).filter(function (i) { return typeof i === 'number' && i >= 0 && i < g.length; }).slice(0, 2);
+        idxs.sort(function (a, b) { return b - a; });
+        var moved = [];
+        idxs.forEach(function (i) { moved.push(g[i]); yq.grave.splice(yq.grave.indexOf(g[i]), 1); });
+        moved.reverse().forEach(function (c) { yq.grave.push(c); });   // 移到墓地最下方（最下方=数组末尾）
+        if (moved.length) addBattleLog(owner, '【羽奈(往昔)被动】将墓地中' + moved.length + '张卡调整到墓地最下方');
+        cb(true);
+      };
+      if (owner === 'p1' && typeof showCardPickerMulti === 'function') {
+        showCardPickerMulti(g, '【羽奈(往昔)被动】选至多2张移到墓地最下方（选0张＝不调整位置）', __apply, 2, true);
+        return;
+      }
+      if (typeof Online !== 'undefined' && Online.active && owner === 'p2' && Online.awaitAnswer) {
+        Online.awaitAnswer({ label: '羽奈(往昔)被动·调整墓地位置（至多2张）', cards: g.map(function (c) { return c.name; }), need: 2 }, function (v) { __apply(v); });
+        return;
+      }
+      // AI：若存在相邻单次卡，尝试把其中一张单次卡移到墓地最下方以破坏相邻（最多2张）
+      var tries = 0;
+      while (__hasAdjacentSingle() && tries < 2) {
+        var gg = yq.grave, pick = -1;
+        for (var i2 = 0; i2 + 1 < gg.length; i2++) {
+          if (gg[i2] && gg[i2 + 1] && gg[i2]._category === 'item_single' && gg[i2 + 1]._category === 'item_single') { pick = i2; break; }
+        }
+        if (pick < 0) break;
+        var mv = gg.splice(pick, 1)[0]; gg.push(mv); tries++;
+      }
+      if (tries) addBattleLog(owner, '【羽奈(往昔)被动】（AI）调整墓地' + tries + '张卡位置以破坏相邻单次卡');
+      cb(true);
+    }
+    addBattleLog(owner, '【羽奈(往昔)被动·憧憬的正义】发动：调整墓地至多两张位置');
+    __pastAdjust(function () { __pastPunish(true); });
+  } catch (e) { console.error('羽奈(往昔)被动执行出错', e); }
+}
+registerTrigger({
+  id: 'yunai-past-ask',
+  timing: 'leave-field',
+  ownerOf: function (ctx) {
+    var hit = null;
+    playerIds().forEach(function (w) {
+      if (hit) return;
+      var q = battleState[w];
+      // 卡面：仅**队长**、且**自己回合内**、且是**自己的卡**不因使用送墓
+      if (q && q._yunaiPastPassive && battleState.currentPlayer === w && w === ctx.player) hit = w;
+    });
+    return hit;
+  },
+  cond: function (ctx, owner) {
+    var q = battleState[owner];
+    return !!(q && q._yunaiPastPassive && battleState.currentPlayer === owner && owner === ctx.player);
+  },
+  mandatory: false,   // 卡面"可以发动" ⇒ 选发：由窗口询问（可选/可 PASS）
+  label: function () { return '【羽奈(往昔)被动·憧憬的正义】调整墓地并造成4点理智伤害'; },
+  fire: function (ctx, owner) { __yunaiPastAsk(owner, ctx.card); }
+});
+
+
 
 // 送墓入口（非使用）→ 触发上面两组钩子 + 贪欲烙印累积
 onTiming(TIMING.ON_TO_GRAVE, function (ctx, next) {
@@ -21068,20 +21035,9 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
   var out = [];
   try {
     var how = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
-    /* 卡自身节点：①这张卡自己有送墓触发 ⇒ 必须排；②羽奈(往昔)①的询问搭在 ON_TO_GRAVE 时点上
-       （见 __noUseLeaveHooks→__pastPhase），所以只要羽奈适用也得排这条节点，否则她的询问会被漏掉。 */
-    if ((typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason))
-        || (battleState[player] && battleState[player]._yunaiPastPassive && battleState.currentPlayer === player)) {
-      out.push({
-        owner: player, card: card,
-        mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),
-        label: '【' + ((card && card.name) || '?') + '】' + how + '触发',
-        /* ⚠ 收 next 并回调：TW.settle 的循环是 node.fire(next)，不收/不调 ⇒ **整条链在这一环停摆**
-           （2026-09-27 深夜实测：羽奈(往昔)①的询问就这样丢了——它在 C1，C2 冬马SP 之后循环再没推进）。 */
-        fire: function (next) { try { ownFire(); } finally { if (typeof next === 'function') next(); } }
-      });
-    }
-    /* 【统一扫描（结构性）】"卡不因使用离场"家族（进行曲 / 琉璃SP / 冬马SP）不再手工收集 ——
+    /* 【已删除：卡自身节点的手工收集块】它已迁入注册表（id: self-grave，条件含"羽奈(往昔)①适用"），
+       由下面的扫描器统一产出 —— 手工收集在这里彻底消失。 */
+    /* 【统一扫描（结构性）】"卡不因使用离场"家族（卡自身 / 进行曲 / 琉璃SP / 冬马SP）不再手工收集 ——
        由注册表统一产出，且已按 MD 口径排序（回合玩家先、同组玩家自排）。 */
     var __ctxB = { player: player, card: card, reason: reason, how: how };
     var __scannedB = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxB) : [];
@@ -21120,21 +21076,9 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     /* 【先判断"这一事件是否真的会触发什么"】全都不成立 ⇒ 不入队、不开窗。
        （作者实测：没有送墓效果的「先哲之"馈赠"」也被排进连锁 ✗ —— 就是这里无条件排队造成的。） */
     if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) return;
-    /* 【必发/选发按卡面判据（作者口径："可以/可选" ⇒ 选发）】
-       原来卡自身的送墓触发一律 mandatory:true ⇒ 盒子("送墓时可选")被**自动上链** ✗，玩家没得选。
-       现在按卡面文本判定：写"可以/可选"的是选发（窗口里问），没写的才必发。 */
-    var __ownMandatory = !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || ''));
-    /* ⚠ 逐节点判定：**这张卡自己**没有送墓触发就不排它（事件级判定不够 —— 琉璃SP成立会把无关的卡也带进来 ✗）。 */
-    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
-    queueOrRunTrigger({
-      owner: player,
-      card: card,
-      label: '【' + ((card && card.name) || '?') + '】' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发',
-      mandatory: __ownMandatory,
-      fire: function () { checkGraveTrigger(player, card, reason, true); }
-    });
-    }
-    /* 【统一扫描（结构性）】"卡不因使用离场"家族的触发（进行曲 / 琉璃SP / 冬马SP）不再在这里手工收集，
+    /* 【已删除：卡自身节点的手工收集块】已迁入注册表（id: self-grave）。 */
+    /* 【统一扫描（结构性）】"卡不因使用离场"家族的触发（卡自身 / 进行曲 / 琉璃SP / 冬马SP）不再在这里手工收集，
+    /* 【统一扫描（结构性）】"卡不因使用离场"家族的触发（卡自身 / 进行曲 / 琉璃SP / 冬马SP）不再手工收集，
        改由注册表 __TRIGGERS 统一产出，并已按 MD 口径排好序（回合玩家先、同组玩家自排）。 */
     try {
       var __ctxQ = { player: player, card: card, reason: reason,
