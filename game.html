@@ -15152,33 +15152,10 @@ function __tomaDeclare(player) {
    选"发动" ⇒ 该效果作为 **C1 进入连锁**（对手仍可继续连锁，走唯一的 TimingWindow 路径），逆结算时照常结算；
    选"不发动" ⇒ 什么都不发生、不占连锁。
    线下用 showChoiceModal；联机用 onlineDecideModal（本机位的选择据此广播）。 */
-function __offerOptionalEffect(owner, title, question, fireFn, done) {
-  done = done || function () {};
-  function __begin() {
-    try {
-      if (typeof resolveSimultaneous === 'function') {
-        resolveSimultaneous(owner, [{
-          owner: owner, label: title, mandatory: true,
-          alive: function () { return true; },
-          fire: function (next) { try { fireFn(); } catch (e) { console.error(title + '：结算异常', e); } if (typeof next === 'function') next(); }
-        }], function () { done(); });
-      } else { fireFn(); done(); }
-    } catch (e) { console.error(title + '：开连锁失败，改为直接结算', e); try { fireFn(); } catch (e2) {} done(); }
-  }
-  if (isAISeat(owner)) { __begin(); return; }   // AI 座位：按既定策略接受发动（不等待、不标记）
-  /* 【时点转交：标记"正在等谁决断"（作者 2026-09-27 反馈）】
-     AI 的回合驱动 aiTurn / aiPlayCards 会读 battleState._awaitingDecision 并停下等 ——
-     修的是实测问题：AI 献祭触发对手的琉璃SP询问后，仍继续出牌并结束回合，效果跑到对方回合才结算。 */
-  var __waiting = function (on) { try { if (battleState) battleState._awaitingDecision = on ? { seat: owner, label: title, since: Date.now() } : null; } catch (e) {} };
-  var __answer = function (yes) { __waiting(false); if (yes) __begin(); else done(); };
-  var opts = ['发动', '不发动'];
-  __waiting(true);
-  if (typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
-    onlineDecideModal(owner, title + '（本机）', question, '是否发动？', opts, function (o) { __answer(o === 0); });
-  } else if (typeof showChoiceModal === 'function') {
-    showChoiceModal(title, question, '', opts, function (i) { __answer(i === 0); });
-  } else { __waiting(false); __begin(); }
-}
+/* 【已删除（2026-09-28 结构性收口）】原 __offerOptionalEffect（弹窗问"是否发动"→ 作为 C1 进连锁）。
+   它的职责现在由**统一时点扫描器**承担：__scanTriggers 产出候选 ⇒ 窗口本身就是"是否发动"的询问
+   （候选可选 / 可 PASS），必发选发按卡面"可以/可选"在注册表里声明，"等谁决断"的标记也由窗口统一维护。
+   所有调用点（予/冬马/莉莉SP/露璐缇雅SP/葵·福音雅颂/回收离场…）都已迁到注册表。 */
 
 function nextPhase() {
   if (battleState.currentPlayer !== 'p1') return;
