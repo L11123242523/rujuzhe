@@ -10819,6 +10819,15 @@ var TW = {
           return;
         }
       }
+      /* 【AI：触发类（simultaneous）窗口 —— 按既定策略**接受**自己的触发】
+         response 窗口继续走 aiDecideChain（那是"响应"策略）；但 simultaneous 是"同一时点的触发"窗口，
+         原来 __offerOptionalEffect 对 AI 座位就是**直接接受发动** —— 我把它迁进窗口时丢了这一步，
+         实测表现就是：AI 的琉璃(万圣祭)SP 明明满足了条件，却既不上链也不抽卡。 */
+      if (aiIdx < 0 && isAISeat(who) && win.type === 'simultaneous' && pool.length) {
+        addBattleLog(who, '【连锁】AI 接受触发的效果：' + (pool[0] && pool[0].label ? pool[0].label : ''));
+        activate(pool[0]);
+        return;
+      }
       if (aiIdx >= 0 && pool[aiIdx]) { activate(pool[aiIdx]); }
       else pass();
       return;
@@ -13559,11 +13568,8 @@ function useCharacterPassive() {
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
   /* 莉莉·回收：**改为"自己回合开始时弹窗询问"**（作者 2026-09-27 裁决），不再挂本菜单。
      对手回合不能主动发动，只能作为连锁响应（下一步接"非卡片的连锁候选"）。 */
-  /* 最佳化·SP（卡面 2026-09-25 版）：「把墓地的这张卡移出游戏才能发动，提升自身1点攻击力。」
-     放在本菜单（这里本来就是"本回合可主动发动的能力"，引导核心等非角色能力也在这儿）。 */
-  if ((p.grave || []).some(function (c) { return c && c.name === '最佳化'; })) {
-    options.push({name: '最佳化·SP', desc: '把墓地的【最佳化】移出游戏，提升自身1点攻击力', action: activateZuijiahuaSP});
-  }
+  /* 【已移除（作者 2026-09-28）】最佳化·SP **不是角色技能**，而是"墓地发动"效果：
+     现在点墓地里那张卡上的 ⚡ 就能发动（见 GRAVE_SP_DEFS 里的表项），不该挂在角色技能菜单。 */
   /* 琉璃(万圣祭)·回收 —— 作者 2026-09-16 纠正：卡面"可以支付3点同步值来回收自己效果处理区的永续种类的卡"
      是**自己回合内可以主动发动**的效果，不是回合开始自动弹窗。挂进这张"角色技能"菜单（与莉莉·回收同款）。
      卡面未写次数限制 ⇒ 不做每回合限制（由 3 点同步值的成本自然限流，可反复发动）。 */
@@ -21297,11 +21303,16 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
          不在结算中则**立刻排空 = 立刻开这一个窗口**（排空本身就是"开窗口"的统一入口）。
      之前只补了"结算中"那一半 ⇒ 献祭（非结算中）时琉璃SP与进行曲各开一个窗，正是作者第二次实测的现象。 */
   if (__isDrainSelf) { __graveBody(); return; }
+  /* 【防重入（作者 2026-09-28 实测：一次献祭把同批触发排队两遍 ⇒ 进行曲造伤打了两次）】
+     同一张卡的**同一次离场事件**正在处理中（批次/窗口已建、还没轮到它的本体节点）⇒ 再来一次调用
+     一律**只跑本体**（__graveBody），绝不再收集/再排队。标记在"本体真正执行"时消费掉。 */
+  if (battleState && battleState._graveEventCard === card) { battleState._graveEventCard = null; __graveBody(); return; }
   /* 【2026-09-27 回滚一半】上一版在"非结算中"也调 __tryDrainTriggers() 想统一成"一批一窗口"，
      结果**献祭选卡时网页卡死**（排空 → fire → 再收集 → 再排空的重入死循环）。
      先保住不卡死：非结算中恢复旧行为（就地执行 body）；只在**结算中**才收集成批。
      "非结算中也应同窗、顺序可选"要等重入守卫写好再上，见《收口记录》。 */
   if (typeof queueOrRunTrigger === 'function' && typeof __chainIsBusy === 'function' && __chainIsBusy()) {
+    battleState._graveEventCard = card;   // 防重入标记（见函数开头说明）
     /* 【先判断"这一事件是否真的会触发什么"】全都不成立 ⇒ 不入队、不开窗。
        （作者实测：没有送墓效果的「先哲之"馈赠"」也被排进连锁 ✗ —— 就是这里无条件排队造成的。） */
     if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) return;
@@ -21332,6 +21343,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   if (typeof __leaveEventHasTrigger === 'function' && !__leaveEventHasTrigger(player, card, reason)) {
     __graveBody(); return;
   }
+  battleState._graveEventCard = card;   // 防重入标记（见函数开头说明）
   var __nbBatch = (typeof __buildLeaveBatch === 'function')
     ? __buildLeaveBatch(player, card, reason, function () { skipYongzou = true; __graveBody(); })
     : [];
