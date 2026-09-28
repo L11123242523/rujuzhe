@@ -9459,8 +9459,76 @@ function drawCard(player) {  var __p = battleState[player];
   return card;
 }
 
+function __memberGate(player) {
+  try {
+    var seat = battleState && battleState[player]; if (!seat) return;
+    var capN = String(((seat.captain && seat.captain.name) || (seat.leader && seat.leader.name) || ''));
+    var FLAGS = {
+      '冬马': { sp: ['_tomaSP'], passive: ['_tomaPassive'] },
+      '樱子': { sp: ['_sakuraHealSync'], passive: ['_sakuraPassive'] },
+      '霜烬': { sp: [], passive: ['_frostPassive'] },
+      '琉璃': { sp: ['_ruriMizugiSP', '_liuliHWSP'], passive: ['_ruriMizugiPassive', '_liuliHWPassive'] },
+      '羽奈': { sp: ['_hinaSP'], passive: ['_hinaPassive', '_yunaiPastPassive'] },
+      '里尔亚斯': { sp: ['_lilithSP'], passive: ['_lilithPassive'] },
+      '结衣': { sp: ['_yuiSP'], passive: ['_yuiPassive'] },
+      '予': { sp: [], passive: ['_yuPassive', '_yuMizugiPassive'] },
+      '枫': { sp: ['_kaedeSP', '_kaedeMizugiSP'], passive: ['_kaedeMizugiPassive'] },
+      '光太郎': { sp: ['_kotaroSP'], passive: ['_kotaroPassive'] },
+      '惠': { sp: ['_megumiSP'], passive: [] },
+      '葵': { sp: ['_aoiSP'], passive: [] },
+      '里绪': { sp: ['_rioSP'], passive: ['_rioMizugiPassive'] },
+      '星奈': { sp: [], passive: ['_senaPassive'] },
+      '宁雨清': { sp: [], passive: ['_ningPassive'] },
+      '露璐缇雅': { sp: ['_edwardSP'], passive: ['_edwardPassive'] },
+      '莉莉': { sp: ['_lilySP'], passive: ['_lilyPassive'] },
+      '伊织': { sp: [], passive: ['_ioriPassive'] },
+      '小春': { sp: [], passive: ['_koharuPassive'] },
+      '霞': { sp: [], passive: ['_kasumiPassive'] },
+      '爱德华': { sp: [], passive: ['_edwardPassive'] },
+      'XHZD': { sp: [], passive: ['_xhzdPassive'] }
+    };
+    var chars = (seat.chars || [seat.captain]).filter(Boolean);
+    var data = null;
+    try { var el = document.getElementById('cardData'); if (el) data = JSON.parse(el.textContent); } catch (e) { data = null; }
+    var findData = function (nm) {
+      if (!data || !Array.isArray(data.characters)) return null;
+      for (var i = 0; i < data.characters.length; i++) {
+        var c = data.characters[i];
+        if (c && c.name && (c.name.indexOf(nm) >= 0 || nm.indexOf(c.name) >= 0)) return c;
+      }
+      return null;
+    };
+    Object.keys(FLAGS).forEach(function (nm) {
+      if (capN.indexOf(nm) >= 0) return;                                   // 队长位 ⇒ 全部保留
+      /* 【__memberGateV3】不靠 seat.chars 判在不在队里（真实座席里 chars 可能为空）：
+         标记本身就是"该角色在本队"的证据 —— 只要它的标记被置上了，就按位置规则裁决。 */
+      var __flagPresent = FLAGS[nm].sp.concat(FLAGS[nm].passive).some(function (f) { return !!seat[f]; });
+      if (!__flagPresent) return;
+      var d = findData(nm) || {};
+      var spTxt = String(d.sp || ''), pasTxt = String(d.passive || '');
+      var spMember = /作为队员|队员编组/.test(spTxt);
+      var pasMember = /作为队员|队员编组/.test(pasTxt);
+      var revoked = [];
+      if (!spMember) FLAGS[nm].sp.forEach(function (f) { if (seat[f]) { try { delete seat[f]; } catch (e) { seat[f] = false; } revoked.push(f); } });
+      if (!pasMember) FLAGS[nm].passive.forEach(function (f) { if (seat[f]) { try { delete seat[f]; } catch (e) { seat[f] = false; } revoked.push(f); } });
+      if (revoked.length) addBattleLog(player, '【编组生效规则】' + nm + '不在队长位，且卡面未写"作为队员编组也生效" ⇒ 本局其' + (spMember ? '' : 'SP/') + (pasMember ? '' : '被动') + '不生效');
+    });
+  } catch (e) { console.error('编组生效规则裁决出错', e); }
+}
+
 function startTurn() {
   if (battleState && battleState._over) return; // 对局已结束：不再开始新回合
+  /* 【编组生效规则·__memberGateV4】放在回合最前面，保证一定跑到（每座位一次、幂等）：
+     卡面没写"作为队员编组也生效"的角色，其被动/SP 只在队长位生效。 */
+  try {
+    if (typeof __memberGate === 'function' && battleState) {
+      playerIds().forEach(function (w) {
+        var __mq = battleState[w]; if (!__mq || __mq._memberGateDone) return;
+        __mq._memberGateDone = true;
+        __memberGate(w);
+      });
+    }
+  } catch (e) { console.error('编组生效规则调用出错', e); }
   /* 【测试卡组·沙盒（作者 2026-09-27 需求）】进入对局后每回合：双方同步值给足（AI 打不死，便于测爆发）、
      音韵补满到上限。菜单「🧪 测试卡组（沙盒）」进入；普通单机/联机不受影响。 */
   try {
@@ -9473,12 +9541,22 @@ function startTurn() {
         if (typeof q.syncMax === 'number') q.syncMax = Math.max(q.syncMax, 999);
         var __mc = Math.max(q.maxCost || 0, 30);
         q.maxCost = __mc; q.cost = __mc;
+      try { if (typeof __memberGate === 'function' && !q._memberGateDone) { q._memberGateDone = true; __memberGate(battleState.currentPlayer === q ? battleState.currentPlayer : (q === battleState.p1 ? 'p1' : 'p2')); } } catch (e) { }
       });
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
   } catch (e) { console.error('沙盒模式参数设置出错', e); }
   // S5：回合开始先清一次陈旧锁（规格用例8：不残留锁标志；清理会记日志，不静默）
   if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('回合开始');
+  /* 【编组生效规则】每局第一次回合开始时对每个座位裁决一次（幂等）：power 里队长此时已确定 */
+  try {
+    if (typeof __memberGate === 'function') {
+      playerIds().forEach(function (w) {
+        var __q = battleState[w]; if (!__q || __q._memberGateDone) return;
+        __q._memberGateDone = true; __memberGate(w);
+      });
+    }
+  } catch (e) { console.error('编组生效规则调用出错', e); }
   // 重置每回合一次的永续卡标记（按回合归属者对称重置，修复原代码写死 p1 导致 p2 永不复位）
   var __rs = battleState.currentPlayer;
   if (battleState && battleState[__rs] && battleState[__rs].permanent) {
@@ -10232,6 +10310,15 @@ function __scanTriggers(timing, ctx) {
     for (var i = 0; i < __TRIGGERS.length; i++) {
       var d = __TRIGGERS[i];
       if (!d || d.timing !== timing) continue;
+      /* 【结构性总闸·__memberGateV2 配套（作者 2026-09-28）】"使用"绝不算"不因使用"：
+         凡是标签里写了"不因使用"的触发，在 reason==='use' 的事件里一律不产出。
+         （原来琉璃(万圣祭)SP / 冬马SP 的 cond 没判 reason ⇒ 玩家正常"使用"一张卡也会触发它们 —— 实测把自己打死。） */
+      if (ctx && ctx.reason === 'use') {
+        var __lbUse = '';
+        try { __lbUse = (typeof d.label === 'function') ? String(d.label(ctx, null)) : String(d.label || ''); }
+        catch (e) { __lbUse = String(d.label || d.id || ''); }
+        if (__lbUse.indexOf('不因使用') >= 0) continue;
+      }
       /* ownerOf 可以返回一个座位，也可以返回**多个**（例：双方都编组了琉璃(万圣祭) ⇒ 各出一条候选） */
       var owners = null;
       try { owners = (typeof d.ownerOf === 'function') ? d.ownerOf(ctx) : (d.owner || null); } catch (e) { console.error('触发 ownerOf 出错 ' + d.id, e); continue; }
@@ -10272,7 +10359,7 @@ registerTrigger({
     });
     return list;   // 可能多个座位（双方都编组了琉璃(万圣祭)）
   },
-  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card); },
+  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; var q = battleState[owner]; return !!(q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card); },
   mandatory: false,   // 卡面"可以发动" ⇒ 选发
   label: function (ctx) { return '【琉璃(万圣祭)·SP】有卡不因使用' + ctx.how + '·自己抽1张'; },
   fire: function (ctx, owner) {
@@ -10295,7 +10382,7 @@ registerTrigger({
     });
     return list;   // 可能多个座位
   },
-  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
+  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
   mandatory: false,   // 卡面"可以发动" ⇒ 选发
   label: function (ctx) { return '【现实间冬马·SP】有卡不因使用' + ctx.how + '·造4点无序'; },
   fire: function (ctx, owner) {
@@ -18404,7 +18491,7 @@ function __opsResource(op, ctx, next, env) {
       p.sync = Math.min(p.sync + op.amount, p.maxSync || 999); break;
     case 'gain_gold': p.gold = (p.gold || 0) + op.amount; break;
     case 'gain_core': p._guideCore = (p._guideCore || 0) + op.n; addBattleLog(user, '获得' + op.n + '点引导核心'); break;
-    case 'gain_motivation': { var __lm = op.n + (p._lilithPassive ? 1 : 0); p.motivation = (p.motivation || 0) + __lm; if (p._lilithPassive) addBattleLog(user, '【里尔亚斯被动】获取激励点数额外+1（本次共+' + __lm + '）'); if (typeof checkLevelUp === 'function') checkLevelUp(user); break; }
+    case 'gain_motivation': { var __lm = op.n; p.motivation = (p.motivation || 0) + __lm; if (p._lilithPassive) addBattleLog(user, '【里尔亚斯被动】获取激励点数额外+1（本次共+' + __lm + '）'); if (typeof checkLevelUp === 'function') checkLevelUp(user); break; }
     case 'overload': { p._overload = { until: op.duration }; p.cost = Math.min(p.maxCost || 12, p.cost + 2); addBattleLog(user, '进入过载状态，回复2点音韵值' + (op.duration === -1 ? '（直到游戏结束）' : op.duration ? '（持续' + op.duration + '次行动）' : '')); break; }
     case 'next_cost_down': p._nextCostReduction = op.amount; if (op.alsoTarget && target !== user) q._nextCostReduction = op.amount; break;
     case 'reduce_fascination': p.fascination = Math.max(0, (p.fascination || 0) - op.amount); break;
@@ -20241,10 +20328,10 @@ function triggerMusicCard(player) {
   p.musicCards.push(music);
   
   // 获得时立即给予激励点数（使用卡牌数据中的inspire字段；里尔亚斯被动①额外+1）
-  var motivation = (music.inspire || music.motivation || 2) + (p._lilithPassive ? 1 : 0);
+  var motivation = (music.inspire || music.motivation || 2);   // 【新卡面】不再有里尔亚斯"激励+1"
   if (!p.motivation) p.motivation = 0;
   p.motivation += motivation;
-  addBattleLog(player, '获得乐谱卡【' + music.name + '】，立即获得' + motivation + '点激励点数' + (p._lilithPassive ? '（里尔亚斯被动+1）' : '') + '（当前' + p.motivation + '点）');
+  addBattleLog(player, '获得乐谱卡【' + music.name + '】，立即获得' + motivation + '点激励点数'  + '（当前' + p.motivation + '点）');
   checkLevelUp(player);
   
   updateBattleUI();
@@ -20951,6 +21038,7 @@ function __captainPassives(player, p, env) {
         }
       }
 
+
       // 宁雨清被动（其他角色的被动可以继续添加）
 }
 
@@ -20998,7 +21086,7 @@ function processCharacterPassives(player) {
     {
       var __team = (deckConfig[player].chars || []).filter(Boolean);
       // 1 冬马：用攻击/技能卡后前进1-3（钩子读 _tomaSP）
-      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【冬马SP】使用攻击/技能卡后前进1-3格'); }
+      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【现实间冬马SP】有卡不因使用离开原本区域时对其造成4点无序伤害（自己因此受伤则回4音韵；墓地无序卡最多则再抽1张）'); }
       // 2 入间枫（普通）：开局3选2
       if (charName.indexOf('枫') >= 0 && charName.indexOf('水着') < 0) {
         p._kaedeSP = true; p._kaedeSPPending = true;
@@ -23653,19 +23741,6 @@ function postUsePassiveHooks(user, card, done) {
     });
   }
 
-  // 冬马被动·Lv7追加：每回合首次使用道具卡也能触发一次“移动累计造伤”（按当前等级阈值/伤害结算）
-  if (p._tomaPassive && (p.level || 1) >= 7 && !p._tomaItemTurn && /item/.test(card._category || '')) {
-    p._tomaItemTurn = true;
-    __add(user, true, '冬马被动·Lv7道具触发', function (next) {
-      var __tl2 = p.level || 7;
-      var __tThr2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 4 : 5);
-      var __tDmg2 = __tl2 >= 7 ? 3 : (__tl2 >= 4 ? 2 : 1);
-      var __tFoe2 = foeOf(user);
-      dealDamageWithResponse(__tFoe2, __tDmg2, '冬马被动·Lv7道具触发', null, '无序', user);
-      addBattleLog(user, '【冬马被动·Lv7】使用道具卡触发：对其他玩家造成' + __tDmg2 + '点无序伤害（本回合首次）');
-      next();
-    });
-  }
 
   // 结衣被动·小野一刀流：使用攻击卡、[侵略]标签的道具卡**或热忱属性的卡**（指定了目标）后可将其一张卡移出游戏直到回合结束（选发）
   //   【2026-09-28 新卡面】触发范围加上"热忱属性的卡"（卡面：攻击卡、[侵略]标签的道具卡或者热忱属性的卡）
@@ -23749,16 +23824,6 @@ function postUsePassiveHooks(user, card, done) {
       if (typeof drawCard === 'function') drawCard(user);
       p._nextFervorFinalUp = (p._nextFervorFinalUp || 0) + 1;
       addBattleLog(user, '【琉璃(水着)被动】使用攻击/技能卡，抽1张，下次热忱属性最终伤害+1');
-      next();
-    });
-  }
-  // 冬马SP：使用攻击卡或技能卡之后前进1-3格（必发）
-  if (p._tomaSP && card && (card._category === 'attack_cards' || card._category === 'skill_cards')) {
-    __add(user, true, '冬马SP·前进1-3格', function (next) {
-      var __tomaSteps = GameRNG.range(1, 3);
-      p.position = ((p.position + __tomaSteps) % 42 + 42) % 42;
-      addBattleLog(user, '【现实间冬马SP】使用攻击/技能卡后前进' + __tomaSteps + '格');
-      if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
       next();
     });
   }
