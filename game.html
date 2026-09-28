@@ -10165,6 +10165,26 @@ function __twClearStaleChainLock(tag) {
   } catch (e) { return false; }
 }
 
+/* 【游戏王 MD 口径：同一时点多个效果的排布顺序（作者 2026-09-28 要求，引擎级统一规则）】
+     回合玩家的**必发** → 对手的**必发** → 回合玩家的**选发** → 对手的**选发**；
+     同一组内保持"收集顺序"，即**由玩家自排**（窗口里选哪个先发动，哪个就先上链）。
+   作用于**所有**同时点窗口（不只"卡离场"那一处）—— 以前顺序由代码书写顺序决定，那是打补丁式做法。
+   候选约定：{ owner: 座位, mandatory: false 表示选发（缺省=必发） }。 */
+function __mdOrderSimultaneous(tp, list) {
+  try {
+    var arr = (list || []).filter(Boolean);
+    if (arr.length < 2) return arr;
+    var rank = function (n) {
+      var mine = (n && n.owner === tp) ? 0 : 1;          // 回合玩家优先
+      var mand = (n && n.mandatory === false) ? 1 : 0;   // 必发优先于选发
+      return mine * 2 + mand;
+    };
+    return arr.map(function (n, i) { return { n: n, i: i, r: rank(n) }; })
+      .sort(function (a, b) { return a.r - b.r || a.i - b.i; })   // 稳定排序：同组保持原顺序（玩家自排）
+      .map(function (x) { return x.n; });
+  } catch (e) { console.error('同时点排序出错（按原顺序处理）', e); return (list || []).filter(Boolean); }
+}
+
 var TW = {
   active: null,
   seq: 0,
@@ -10185,7 +10205,9 @@ var TW = {
       passStreak: 0,
       parent: opts.parent || null,
       scan: (typeof opts.scan === 'function') ? opts.scan : null,
-      candidates: (opts.candidates || []).filter(Boolean),
+      candidates: (typeof __mdOrderSimultaneous === 'function')
+        ? __mdOrderSimultaneous(tp, (opts.candidates || []).filter(Boolean))
+        : (opts.candidates || []).filter(Boolean),
       effect: opts.effect || null,
       meta: opts.meta || null,
       done: (typeof opts.done === 'function') ? opts.done : function () {},
