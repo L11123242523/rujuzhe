@@ -10628,6 +10628,18 @@ var TW = {
     opts = opts || {};
     var self = this;
     var tp = opts.tp || (battleState && battleState.currentPlayer) || 'p1';
+    /* 【标记"正在等谁决断"】（原来由已删的 __offerOptionalEffect 维护；迁到窗口后**没人再写它** ⇒
+       aiTurn / aiPlayCards 的停等闸门失效 ⇒ AI 会在你还没答完窗口时继续出牌、效果跑到下一回合才结算）。
+       只在"确实轮到一个人类座位决策"时标记；AI 自己的触发会被 AI 分支直接接受，不需要等人。 */
+    try {
+      if (battleState) {
+        var __candsH = opts.candidates || [];
+        var __humanCand = __candsH.filter(function (c) { return c && c.owner && !isAISeat(c.owner); });
+        battleState._awaitingDecision = __humanCand.length
+          ? { seat: __humanCand[0].owner, label: (opts.label || '时点窗口'), since: Date.now() }
+          : null;
+      }
+    } catch (e) { console.error('标记等待决断出错', e); }
     var win = {
       id: ++this.seq,
       type: opts.type || 'simultaneous',
@@ -10922,6 +10934,7 @@ var TW = {
   /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
   close: function (win) {
     win.state = 'done';
+    try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
     if (this.active === win) this.active = null;
