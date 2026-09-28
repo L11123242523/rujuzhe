@@ -10332,6 +10332,82 @@ registerTrigger({
   fire: function (ctx, owner) { if (typeof triggerLanzhangAfterJudge === 'function') triggerLanzhangAfterJudge(owner, ctx.target, function () {}); }
 });
 
+/* —— 受伤后家族（继续迁移，2026-09-28）—— */
+registerTrigger({
+  id: 'sakura-heal-sync',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._sakuraHealSync && ctx.hit); },
+  mandatory: true,   // 卡面"造成伤害后回1同步"（无"可以"）⇒ 必发
+  label: function () { return '宫樱子SP·回复1同步'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q.sync = Math.min(q.sync + 1, q.maxSync || 999);
+    addBattleLog(owner, '【宫樱子SP】造成伤害后回复1点同步');
+  }
+});
+registerTrigger({
+  id: 'ruri-mizugi-sp',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return false;
+    return !!(q._ruriMizugiSP && ctx.kind === 'fervor' && ctx.hit && q._ruriMizugiCostTurn !== battleState.turn);
+  },
+  mandatory: true,
+  label: function () { return '琉璃(水着)SP·热忱造伤回1音韵'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._ruriMizugiCostTurn = battleState.turn;
+    recoverCost(owner, 1, '琉璃(水着)SP');
+    addBattleLog(owner, '【琉璃(水着)SP】造成热忱伤害后回1音韵（一回合一次）');
+  }
+});
+registerTrigger({
+  id: 'ruri-judge-passive',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && ctx.judge && q._ruriPassive); },
+  mandatory: true,
+  label: function () { return '琉璃被动·判定后回1音韵/累计阶梯'; },
+  fire: function (ctx, owner) { __ruriJudgeAfterDamage(owner); }
+});
+
+/* 琉璃被动（判定伤害后）：回1音韵；每累计 3/6/11/14 次进入阶梯——抽2张、选1张送墓，之后全队判定伤害+1。
+   2026-09-28 从 __finish 的手工 __cands.push 抽出，作为注册表触发 ruri-judge-passive 的效果本体。 */
+function __ruriJudgeAfterDamage(owner) {
+  try {
+    var rp = battleState && battleState[owner]; if (!rp) return;
+    recoverCost(owner, 1, '琉璃被动');
+    addBattleLog(owner, '【琉璃被动】判定伤害后回复1音韵');
+    rp._ruriJudgeCount = (rp._ruriJudgeCount || 0) + 1;
+    var TH = [3, 6, 11, 14];
+    if (TH.indexOf(rp._ruriJudgeCount) < 0) return;
+    // 到达累计阈值：抽两张卡，然后选一张卡送入墓地，那之后全队造成的判定伤害+1
+    if (typeof drawCard === 'function') { drawCard(owner); drawCard(owner); }
+    function __ruriTier() {
+      rp._judgeDamageBonus = (rp._judgeDamageBonus || 0) + 1;
+      addBattleLog(owner, '【琉璃被动】累计' + rp._ruriJudgeCount + '次：抽2选1弃完成，全队判定伤害+1（当前+' + rp._judgeDamageBonus + '）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    }
+    var dl = (typeof collectZoneCards === 'function') ? collectZoneCards(owner, ['hand'], null, null) : [];
+    if (!dl.length) { __ruriTier(); return; }
+    if (owner === 'p1' && typeof pickFromList === 'function') {
+      pickFromList('p1', dl, '琉璃被动：抽2张后选1张送入墓地（那之后全队判定+1）', 1, function (picks) {
+        picks.forEach(function (pk) {
+          var arr = rp[pk.zone], ix = arr.indexOf(pk.card);
+          if (ix >= 0) { arr.splice(ix, 1); rp.grave.push(pk.card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, pk.card, 'effect'); }
+        });
+        __ruriTier();
+      });
+    } else {
+      var pk = dl[0], arr = rp[pk.zone], ix = arr.indexOf(pk.card);
+      if (ix >= 0) { arr.splice(ix, 1); rp.grave.push(pk.card); }
+      __ruriTier();
+    }
+  } catch (e) { console.error('琉璃被动·判定后处理出错', e); }
+}
+
 var TW = {
   active: null,
   seq: 0,
@@ -21650,25 +21726,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         var __sc = opts.srcCard, __tags = __sc ? ((typeof __cardTags === 'function') ? __cardTags(__sc) : (__sc.tags || [])) : [], __cat = __sc ? __sc._category : '';
         // 造伤后同时满足的多个被动/SP：不再写死顺序立即执行，统一收集为连锁候选，由玩家决定选发顺序后逆结算
         var __cands = [];
-        if (opts.judge && __ap._ruriPassive) __cands.push({ key: 'ruri', label: '琉璃被动·判定后回1音韵/累计阶梯', owner: attacker, mandatory: true, fire: function (d) {
-          recoverCost(attacker, 1, '琉璃被动'); addBattleLog(attacker, '【琉璃被动】判定伤害后回复1音韵');
-          var __rp = battleState[attacker]; __rp._ruriJudgeCount = (__rp._ruriJudgeCount || 0) + 1;
-          var __TH = [3, 6, 11, 14];
-          if (__TH.indexOf(__rp._ruriJudgeCount) < 0) { d(); return; }
-          // 到达累计阈值：抽两张卡，然后选一张卡送入墓地，那之后全队造成的判定伤害+1
-          if (typeof drawCard === 'function') { drawCard(attacker); drawCard(attacker); }
-          function __ruriTier() { __rp._judgeDamageBonus = (__rp._judgeDamageBonus || 0) + 1; addBattleLog(attacker, '【琉璃被动】累计' + __rp._ruriJudgeCount + '次：抽2选1弃完成，全队判定伤害+1（当前+' + __rp._judgeDamageBonus + '）'); if (typeof updateBattleUI === 'function') updateBattleUI(); d(); }
-          var __dl = (typeof collectZoneCards === 'function') ? collectZoneCards(attacker, ['hand'], null, null) : [];
-          if (!__dl.length) { __ruriTier(); return; }
-          if (attacker === 'p1' && typeof pickFromList === 'function') {
-            pickFromList('p1', __dl, '琉璃被动：抽2张后选1张送入墓地（那之后全队判定+1）', 1, function (picks) {
-              picks.forEach(function (pk) { var arr = __rp[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) { arr.splice(ix, 1); __rp.grave.push(pk.card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, pk.card, 'effect'); } });
-              __ruriTier();
-            });
-          } else { var pk = __dl[0]; var arr = __rp[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) { arr.splice(ix, 1); __rp.grave.push(pk.card); } __ruriTier(); }
-        } });
-        if (__ap._sakuraHealSync && __hit) __cands.push({ key: 'sakura', label: '宫樱子SP·回复1同步', owner: attacker, mandatory: true, fire: function (d) { __ap.sync = Math.min(__ap.sync + 1, __ap.maxSync || 999); addBattleLog(attacker, '【宫樱子SP】造成伤害后回复1点同步'); d(); } });
-        if (__ap._ruriMizugiSP && opts.kind === 'fervor' && __hit && __ap._ruriMizugiCostTurn !== battleState.turn) __cands.push({ key: 'ruriM', label: '琉璃(水着)SP·热忱造伤回1音韵', owner: attacker, mandatory: true, alive: function () { var __q = battleState[attacker]; return __q._ruriMizugiCostTurn !== battleState.turn; }, fire: function (d) { __ap._ruriMizugiCostTurn = battleState.turn; recoverCost(attacker, 1, '琉璃(水着)SP'); addBattleLog(attacker, '【琉璃(水着)SP】造成热忱伤害后回1音韵（一回合一次）'); d(); } });
+        /* 【已迁移（结构性）】琉璃被动 / 宫樱子SP / 琉璃(水着)SP 三条手工 __cands.push 已删除，
+           改为注册表声明（ruri-judge-passive / sakura-heal-sync / ruri-mizugi-sp），由下面的扫描器统一产出。 */
         if (__ap._hinaPassive && __cat && /item/.test(__cat) && __tags.indexOf('侵略') >= 0 && __hit) __cands.push({ key: 'hina', label: '羽奈被动·[侵略]道具追加1理智', owner: attacker, mandatory: true, fire: function (d) { __dealSegment(1, '雨宫羽奈被动·追加', '理智', 'sanity'); addBattleLog(attacker, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); d(); } });
         // 【入间予】解构与求索·热忱：本回合造成属性伤害后，对**相同目标**追加1点判定伤害
         if (__ap._yuFervorThisTurn && __hit) __cands.push({ key: 'yuFervor', label: '入间予被动·热忱·追加判定', owner: attacker, mandatory: true, fire: function (d) {
