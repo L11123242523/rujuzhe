@@ -10408,6 +10408,63 @@ function __ruriJudgeAfterDamage(owner) {
   } catch (e) { console.error('琉璃被动·判定后处理出错', e); }
 }
 
+registerTrigger({
+  id: 'hina-aggression-item',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q || !q._hinaPassive || !ctx.hit) return false;
+    var cat = ctx.srcCard ? ctx.srcCard._category : '';
+    var tags = (ctx.srcCard && typeof __cardTags === 'function') ? __cardTags(ctx.srcCard) : ((ctx.srcCard && ctx.srcCard.tags) || []);
+    return !!(cat && /item/.test(cat) && tags.indexOf('侵略') >= 0);
+  },
+  mandatory: true,
+  label: function () { return '羽奈被动·[侵略]道具追加1理智'; },
+  fire: function (ctx, owner) {
+    if (typeof ctx.dealSegment === 'function') ctx.dealSegment(1, '雨宫羽奈被动·追加', '理智', 'sanity');
+    addBattleLog(owner, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害');
+  }
+});
+registerTrigger({
+  id: 'yu-fervor-judge',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._yuFervorThisTurn && ctx.hit); },
+  mandatory: true,
+  label: function () { return '入间予被动·热忱·追加判定'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._yuFervorThisTurn = false;
+    addBattleLog(owner, '【入间予被动·热忱】对相同目标追加1点判定伤害');
+    dealDamageWithResponse(ctx.target, 1, '予被动·热忱追加判定', function () {}, null, owner, { judge: true });
+  }
+});
+
+registerTrigger({
+  id: 'kaede-mizugi-after-damage',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q || !q._kaedeMizugiPassive || !ctx.hit) return false;
+    return !!(ctx.srcCard && (ctx.srcCard.attribute || '') === '理智');
+  },
+  mandatory: true,
+  label: function () { return '枫(水着)被动·追加理智伤害'; },
+  fire: function (ctx, owner) {
+    if (typeof ctx.dealSegment === 'function') ctx.dealSegment(1, '枫(水着)被动·追加', '理智', 'sanity');
+    addBattleLog(owner, '【枫(水着)被动】理智卡造伤后追加1段1点理智伤害');
+    var steps = GameRNG.range(1, 3);
+    if (owner === 'p1' && typeof showChoiceModal === 'function') {
+      showChoiceModal('枫(水着)被动·自信少女的连续攻势', '追加伤害结算完毕', '那之后可以前进1-3格', ['前进1-3格', '不前进'], function (o) {
+        if (o === 0) { applyMove(owner, steps); addBattleLog(owner, '【枫(水着)被动】前进' + steps + '格'); }
+      });
+    } else {
+      applyMove(owner, steps);
+      addBattleLog(owner, '【枫(水着)被动】前进' + steps + '格');
+    }
+  }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -21728,36 +21785,17 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         var __cands = [];
         /* 【已迁移（结构性）】琉璃被动 / 宫樱子SP / 琉璃(水着)SP 三条手工 __cands.push 已删除，
            改为注册表声明（ruri-judge-passive / sakura-heal-sync / ruri-mizugi-sp），由下面的扫描器统一产出。 */
-        if (__ap._hinaPassive && __cat && /item/.test(__cat) && __tags.indexOf('侵略') >= 0 && __hit) __cands.push({ key: 'hina', label: '羽奈被动·[侵略]道具追加1理智', owner: attacker, mandatory: true, fire: function (d) { __dealSegment(1, '雨宫羽奈被动·追加', '理智', 'sanity'); addBattleLog(attacker, '【羽奈被动】[侵略]道具造伤后追加1点理智伤害'); d(); } });
-        // 【入间予】解构与求索·热忱：本回合造成属性伤害后，对**相同目标**追加1点判定伤害
-        if (__ap._yuFervorThisTurn && __hit) __cands.push({ key: 'yuFervor', label: '入间予被动·热忱·追加判定', owner: attacker, mandatory: true, fire: function (d) {
-          __ap._yuFervorThisTurn = false;
-          addBattleLog(attacker, '【入间予被动·热忱】对相同目标追加1点判定伤害');
-          dealDamageWithResponse(target, 1, '予被动·热忱追加判定', function () { d(); }, null, attacker, { judge: true });
-        } });
-        // 枫(水着)被动·自信少女的连续攻势：使用理智属性的卡造成伤害后追加1段1点理智伤害，那之后可以前进1-3格
-        if (__ap._kaedeMizugiPassive && __sc && (__sc.attribute || '') === '理智' && __hit) __cands.push({ key: 'kaedeM', label: '枫(水着)被动·追加理智伤害', owner: attacker, mandatory: true, fire: function (d) {
-          __dealSegment(1, '枫(水着)被动·追加', '理智', 'sanity');
-          addBattleLog(attacker, '【枫(水着)被动】理智卡造伤后追加1段1点理智伤害');
-          var __kmSteps = GameRNG.range(1, 3);
-          if (attacker === 'p1') {
-            showChoiceModal('枫(水着)被动·自信少女的连续攻势', '追加伤害结算完毕', '那之后可以前进1-3格', ['前进1-3格', '不前进'], function (o) {
-              if (o === 0) { applyMove(attacker, __kmSteps); addBattleLog(attacker, '【枫(水着)被动】前进' + __kmSteps + '格'); }
-              d();
-            });
-          } else {
-            applyMove(attacker, __kmSteps);
-            addBattleLog(attacker, '【枫(水着)被动】前进' + __kmSteps + '格');
-            d();
-          }
-        } });
+        /* 【已迁移（结构性）】羽奈被动([侵略]道具) / 入间予被动(热忱追加判定) 两条手工 __cands.push 已删除，
+           改为注册表（hina-aggression-item / yu-fervor-judge）；__dealSegment 经 ctx 传入（它是 __finish 的闭包）。 */
+        /* 【已迁移（结构性）】枫(水着)被动·追加理智伤害 也从手工 __cands.push 迁入注册表（kaede-mizugi-after-damage）。
+           ⇒ "受伤后"家族的手工收集**全部清空**：__finish 现在只做 __scanTriggers('after-damage') 一件事。 */
         /* 【已迁移（结构性）】妖刀五月雨 / 蓝宝之杖·命 两条手工 __cands.push 已删除，
            改为注册表声明（id: yaodao-after-damage / lanzhang-after-judge），由下面的扫描器统一产出。 */
         /* 【统一扫描（结构性）】"受伤后"家族里已迁入注册表的（极夜君王之冕 / 妖刀 / 蓝宝…）由扫描器统一产出，
        与上面手工收集的候选一起交给同一个窗口，顺序按 MD 口径（回合玩家先、同组玩家自排）。 */
     try {
       var __scannedD = (typeof __scanTriggers === 'function')
-        ? __scanTriggers('after-damage', { attacker: attacker, target: target, judge: !!opts.judge, srcCard: __sc, value: actual, hit: __hit })
+        ? __scanTriggers('after-damage', { attacker: attacker, target: target, judge: !!opts.judge, srcCard: __sc, value: actual, hit: __hit, kind: opts.kind, dealSegment: __dealSegment })
         : [];
       __scannedD.forEach(function (c) {
         __cands.push({ key: c.id, label: c.label, owner: c.owner, mandatory: c.mandatory,
