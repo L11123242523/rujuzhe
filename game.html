@@ -12581,7 +12581,14 @@ function aiMaybeUseEvent(done) {
     foe.removedFromGame.push(dcard);
     /* 【同类补齐（作者要求举一反三）】移出游戏必须发 ON_REMOVE 时点（那里挂着"不因使用离开区域"的统一钩子）——
        不发的落点会漏掉琉璃(万圣祭)SP/冬马SP 这类触发。 */
-    try { if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: (battleState.p1 === foe ? 'p1' : 'p2'), card: dcard }); } catch (e) { console.error('命运之回声移出时点发射出错', e); }
+    /* 【座位参数化】不要在这里直接写 battleState.p1/p2 —— 用 playerIds() 反查座位（B·一 批次的静态检查会拦） */
+    try {
+      if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') {
+        var __dSeat = null;
+        playerIds().forEach(function (w) { if (battleState[w] === foe) __dSeat = w; });
+        runTiming(TIMING.ON_REMOVE, { player: __dSeat, card: dcard });
+      }
+    } catch (e) { console.error('命运之回声移出时点发射出错', e); }
     L('命运之回声[AI]：破坏对手【' + dcard.name + '】并移出本局游戏');
     if (hasChar('露璐缇雅') && (foe.removedFromGame.length > 1 || (foe.removed || []).length)) {
       var poolR = (foe.removedFromGame || []).concat(foe.removed || []);
