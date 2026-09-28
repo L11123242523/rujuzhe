@@ -17372,8 +17372,10 @@ function __emitAddHand(player, card, fromZone) {
      入口自己按座位判"每回合一次"，并按卡面判必发/选发后**弹窗询问**（对手回合同样会问）。
      放在这里而不是逐个调用点补：以后新增任何"回收进手牌"的路径都自动带上（举一反三）。 */
   try {
-    if (fromZone === 'permanent' && typeof __noUseLeaveHooks === 'function') {
-      __noUseLeaveHooks(player, card, 'remove', '被回收', function () {});
+    if (fromZone === 'permanent' && typeof __runTimingTriggers === 'function') {
+      /* 【结构性】原来调 __noUseLeaveHooks（迁移后已成直通 ⇒ 回收不再触发琉璃SP ✗）；
+         改为走统一时点扫描器，与其它离场触发同一套。 */
+      __runTimingTriggers('leave-field', { player: player, card: card, reason: 'remove', how: '被回收' }, function () {});
     }
   } catch (e) { console.error('进手牌时的离场触发入口出错', e); }
 }
@@ -17462,13 +17464,9 @@ function __tomaSPLeaveHit(w, owner, card, how) {
 // · 羽奈(往昔)被动①（仅队长）：自己回合内、自己的卡不因使用送墓 → 可发动（调整墓地两张卡位置，
 //   其后若墓地内不存在相邻的单次种类卡，可对一名其他玩家造成4点理智属性伤害）
 function __noUseLeaveHooks(owner, card, reason, how, finish) {
+  /* 【已废弃（2026-09-28）】它的全部询问都迁到注册表了；调用点也已改为 __runTimingTriggers。
+     保留这个直通壳只为兼容极少数历史调用点（新代码不要再用）。 */
   finish = finish || function () {};
-  if (!battleState || !card || !card.name) { finish(); return; }
-  /* 【结构性：本函数的手工询问已全部迁出（2026-09-28）】
-     琉璃(万圣祭)SP / 冬马SP / 羽奈(往昔)① 现在都在注册表 __TRIGGERS 里声明，
-     由 __scanTriggers('leave-field') 统一产出候选、判定必发/选发、并按 MD 口径排序（回合玩家先、同组玩家自排）。
-     "是否发动"这个问题**由窗口本身承担**（候选可选/可 PASS）—— 不再各写一套弹窗、也不会再出现"弹窗排队"互相挡。
-     这里只负责放行时点。 */
   finish();
 }
 
