@@ -10608,6 +10608,17 @@ registerTrigger({
   fire: function (ctx, owner) { if (typeof activateEdwardSP === 'function') activateEdwardSP(); }
 });
 
+registerTrigger({
+  id: 'aoi-gospel-second-roll',
+  timing: 'second_roll',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._gospelPassive); },
+  mandatory: false,   // 卡面"是否发动" ⇒ 选发（窗口候选即询问）
+  label: function () { return '小野葵·福音雅颂（本回合第二次投掷后）'; },
+  /* 效果本体 __gRun 是调用点闭包（要读那一掷的池子）⇒ 经 ctx 传入，与我处理 __dealSegment 同一手法。 */
+  fire: function (ctx) { if (ctx && typeof ctx.gRun === 'function') ctx.gRun(); }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -11742,11 +11753,11 @@ function rollPlayerDice(player) {
               pickFromList('p1', __gPool, '福音雅颂：选自己墓地一张单次种类的卡加入手卡', 1, function (picks) { __gTake(picks && picks[0] && picks[0].card); });
             } else __gTake(__gPool[0].card);
           };
-          if (typeof __offerOptionalEffect === 'function') {
-            __offerOptionalEffect(__gospelSeat, '小野葵·福音雅颂',
-              '有玩家在本回合进行了第二次投掷：是否发动？（从其墓地取回一张单次种类的卡，之后双方各回复2点音韵值）',
-              __gRun);
-          } else __gRun();
+          /* 【结构性（2026-09-28）】不再手写 __offerOptionalEffect：交给统一时点扫描器
+             （注册表 aoi-gospel-second-roll）；效果本体 __gRun 经 ctx 传入。窗口本身就是"是否发动"的询问。 */
+          if (typeof __runTimingTriggers === 'function') {
+            __runTimingTriggers('second_roll', { player: __gospelSeat, gRun: __gRun }, function () {});
+          } else if (typeof __gRun === 'function') __gRun();
         })();
       }
     }
