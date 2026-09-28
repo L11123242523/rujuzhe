@@ -10304,6 +10304,34 @@ registerTrigger({
   fire: function (ctx, owner) { checkGraveTrigger(owner, ctx.card, ctx.reason, true); }
 });
 
+registerTrigger({
+  id: 'yaodao-after-damage',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return false;
+    if (q._yaodaoTriggered) return false;
+    if (!(ctx.value >= 5)) return false;
+    return (typeof playerOwnsCard === 'function') ? playerOwnsCard(owner, /妖刀|五月雨/) : true;
+  },
+  mandatory: false,
+  label: function () { return '妖刀五月雨·造伤≥5选①破坏②抽1'; },
+  fire: function (ctx, owner) { if (typeof triggerYaodaoOnDamage === 'function') triggerYaodaoOnDamage(owner, ctx.value, function () {}); }
+});
+registerTrigger({
+  id: 'lanzhang-after-judge',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return false;
+    if (q._lanzhangUsed || !ctx.judge) return false;
+    return (q.permanent || []).some(function (c) { return c.name && /蓝宝|蓝杖/.test(c.name); });
+  },
+  mandatory: false,
+  label: function () { return '蓝宝之杖·命·追加硬币判定'; },
+  fire: function (ctx, owner) { if (typeof triggerLanzhangAfterJudge === 'function') triggerLanzhangAfterJudge(owner, ctx.target, function () {}); }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -21664,13 +21692,13 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
             d();
           }
         } });
-        if (!__ap._yaodaoTriggered && actual >= 5 && (typeof playerOwnsCard==='function'?playerOwnsCard(attacker, /妖刀|五月雨/):true) && typeof triggerYaodaoOnDamage === 'function') __cands.push({ key: 'yaodao', label: '妖刀五月雨·造伤≥5选①破坏②抽1', owner: attacker, mandatory: false, alive: function () { var q=battleState[attacker]; return !q._yaodaoTriggered && (typeof playerOwnsCard==='function'?playerOwnsCard(attacker, /妖刀|五月雨/):true); }, fire: function (d) { triggerYaodaoOnDamage(attacker, actual, d); } });
-        if (opts.judge && __hit && !__ap._lanzhangUsed && (__ap.permanent||[]).some(function(c){return c.name&&/蓝宝|蓝杖/.test(c.name);}) && typeof triggerLanzhangAfterJudge === 'function') __cands.push({ key: 'lanzhang', label: '蓝宝之杖·命·追加硬币判定', owner: attacker, mandatory: false, alive: function () { var q = battleState[attacker]; return !q._lanzhangUsed && (q.permanent||[]).some(function(c){return c.name&&/蓝宝|蓝杖/.test(c.name);}); }, fire: function (d) { triggerLanzhangAfterJudge(attacker, target, d); } });
-        /* 【统一扫描（结构性）】"受伤后"家族里已迁入注册表的（极夜君王之冕…）由扫描器统一产出，
+        /* 【已迁移（结构性）】妖刀五月雨 / 蓝宝之杖·命 两条手工 __cands.push 已删除，
+           改为注册表声明（id: yaodao-after-damage / lanzhang-after-judge），由下面的扫描器统一产出。 */
+        /* 【统一扫描（结构性）】"受伤后"家族里已迁入注册表的（极夜君王之冕 / 妖刀 / 蓝宝…）由扫描器统一产出，
        与上面手工收集的候选一起交给同一个窗口，顺序按 MD 口径（回合玩家先、同组玩家自排）。 */
     try {
       var __scannedD = (typeof __scanTriggers === 'function')
-        ? __scanTriggers('after-damage', { attacker: attacker, judge: !!opts.judge, srcCard: __sc, value: actual })
+        ? __scanTriggers('after-damage', { attacker: attacker, target: target, judge: !!opts.judge, srcCard: __sc, value: actual, hit: __hit })
         : [];
       __scannedD.forEach(function (c) {
         __cands.push({ key: c.id, label: c.label, owner: c.owner, mandatory: c.mandatory,
