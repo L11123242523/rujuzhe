@@ -17474,16 +17474,13 @@ function __xhzdEndPhaseOffer(player, done) {
 //  ②选移出游戏的一张卡以正面朝上的形式放置在持有者牌组的最上方，然后自己下次造成的判定伤害+1（可叠加）
 // 说明：卡面为"造成判定伤害后"的触发式能力，因此挂在 AFTER_DAMAGE 时点上（而非可点击的主动发动），
 //       避免出现"没有造成判定伤害也能发动"的语义偏差。
-onTiming(TIMING.AFTER_DAMAGE, function (ctx, next) {
+// 【已迁入统一注册表（2026-09-28）】原来是 onTiming(AFTER_DAMAGE) 内联钩子、**就地执行**（顺序写死、无法与同
+// 时点的其他触发一起排序）。现在改为：__jiyeAfterJudgeResolve 是效果本体，触发条件/必发选发/标签由注册表声明，
+// 由 __finish 里的 __scanTriggers('after-damage') 统一产出 —— 与其他"受伤后"触发同窗、按 MD 口径排序。
+function __jiyeAfterJudgeResolve(ctx, atk) {
   try {
-    if (!battleState || !ctx || !ctx.attacker || !ctx.judge) { next(); return; }
-    var atk = ctx.attacker, p = battleState[atk];
-    if (!p) { next(); return; }
-    var has = (p.permanent || []).some(function (c) { return c && (c.name || '').indexOf('极夜君王') >= 0; });
-    if (!has) { next(); return; }
-    if (p._jiyeUsedTurn === battleState.turn) { next(); return; }
-    /* 【额度只在**真的发动**时占用（作者判据，与葵·福音雅颂同一处修正）】
-       原来在这一行就先占掉了本回合额度 ⇒ 玩家选"不发动"也被消耗，本回合再也用不了 ✗。 */
+    if (!battleState || !ctx || !atk) return;
+    var p = battleState[atk]; if (!p) return;
     var same = (ctx.value || ctx.amount || 2);
     var foe = foeOf(atk);
     function __jiye1() {
@@ -17492,7 +17489,7 @@ onTiming(TIMING.AFTER_DAMAGE, function (ctx, next) {
       var card = p.hand.splice(ix, 1)[0];
       (p.removed = p.removed || []).push(card);
       addBattleLog(atk, '【极夜君王之冕·①】随机将手卡【' + card.name + '】移出游戏，再造成一次同等数值（' + same + '点）的判定伤害');
-      try { runTiming(TIMING.ON_REMOVE, { player: atk, card: card }); } catch (e) {}
+      try { runTiming(TIMING.ON_REMOVE, { player: atk, card: card }); } catch (e) { console.error('极夜①移出时点发射出错', e); }
       dealDamageWithResponse(foe, same, '极夜君王之冕·①', null, null, atk, { judge: true });
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
@@ -17511,18 +17508,32 @@ onTiming(TIMING.AFTER_DAMAGE, function (ctx, next) {
     var __opts = ['①随机将一张手卡移出游戏，再造成一次同等数值（' + same + '点）的判定伤害',
                   '②选移出游戏的1张卡正面朝上放牌组最上方，自己下次判定伤害+1',
                   '不发动'];
+    /* 额度只在**真的发动**时占用（作者判据）—— 选"不发动"不消耗每回合这一次 */
     var __pick = function (i) { if (i === 0 || i === 1) p._jiyeUsedTurn = battleState.turn; if (i === 0) __jiye1(); else if (i === 1) __jiye2(); };
     if (atk === 'p1' && typeof showChoiceModal === 'function') {
       showChoiceModal('极夜君王之冕', '本回合首次造成判定伤害后', '选择一项发动（每回合一次）', __opts, __pick);
     } else if (typeof Online !== 'undefined' && Online.active && atk === 'p2' && typeof onlineDecideModal === 'function') {
       onlineDecideModal('p2', '极夜君王之冕（对手）', '本回合首次造成判定伤害后', '选择一项发动（每回合一次）', __opts, __pick);
     } else {
-      // AI：有移出卡优先②（把资源换回来并蓄判定增伤），否则①（AI 必发动 ⇒ 这里占用额度）
+      // AI：有移出卡优先②，否则①（AI 必发动 ⇒ 这里占用额度）
       p._jiyeUsedTurn = battleState.turn;
       if ((p.removed || []).length) __jiye2(); else __jiye1();
     }
-  } catch (e) { console.error('jiye AFTER_DAMAGE hook', e); }
-  next();
+  } catch (e) { console.error('极夜君王之冕·受伤后效果出错', e); }
+}
+registerTrigger({
+  id: 'jiye-after-judge',
+  timing: 'after-damage',
+  ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
+  cond: function (ctx, owner) {
+    var p = battleState[owner]; if (!p) return false;
+    if (!ctx || !ctx.judge) return false;                                    // 只认"判定伤害"
+    if (!(p.permanent || []).some(function (c) { return c && (c.name || '').indexOf('极夜君王') >= 0; })) return false;
+    return p._jiyeUsedTurn !== battleState.turn;                             // 每回合一次
+  },
+  mandatory: false,   // 卡面"**可以**选择一项发动" ⇒ 选发：窗口里问，不发动不消耗额度
+  label: function () { return '【极夜君王之冕】本回合首次判定伤害后·选择一项发动'; },
+  fire: function (ctx, owner) { __jiyeAfterJudgeResolve(ctx, owner); }
 });
 
 
@@ -21711,7 +21722,18 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         } });
         if (!__ap._yaodaoTriggered && actual >= 5 && (typeof playerOwnsCard==='function'?playerOwnsCard(attacker, /妖刀|五月雨/):true) && typeof triggerYaodaoOnDamage === 'function') __cands.push({ key: 'yaodao', label: '妖刀五月雨·造伤≥5选①破坏②抽1', owner: attacker, mandatory: false, alive: function () { var q=battleState[attacker]; return !q._yaodaoTriggered && (typeof playerOwnsCard==='function'?playerOwnsCard(attacker, /妖刀|五月雨/):true); }, fire: function (d) { triggerYaodaoOnDamage(attacker, actual, d); } });
         if (opts.judge && __hit && !__ap._lanzhangUsed && (__ap.permanent||[]).some(function(c){return c.name&&/蓝宝|蓝杖/.test(c.name);}) && typeof triggerLanzhangAfterJudge === 'function') __cands.push({ key: 'lanzhang', label: '蓝宝之杖·命·追加硬币判定', owner: attacker, mandatory: false, alive: function () { var q = battleState[attacker]; return !q._lanzhangUsed && (q.permanent||[]).some(function(c){return c.name&&/蓝宝|蓝杖/.test(c.name);}); }, fire: function (d) { triggerLanzhangAfterJudge(attacker, target, d); } });
-        if (__cands.length) { resolveSimultaneous(attacker, __cands, __tail); return; }
+        /* 【统一扫描（结构性）】"受伤后"家族里已迁入注册表的（极夜君王之冕…）由扫描器统一产出，
+       与上面手工收集的候选一起交给同一个窗口，顺序按 MD 口径（回合玩家先、同组玩家自排）。 */
+    try {
+      var __scannedD = (typeof __scanTriggers === 'function')
+        ? __scanTriggers('after-damage', { attacker: attacker, judge: !!opts.judge, srcCard: __sc, value: actual })
+        : [];
+      __scannedD.forEach(function (c) {
+        __cands.push({ key: c.id, label: c.label, owner: c.owner, mandatory: c.mandatory,
+                       fire: function (d) { try { c.fire(); } finally { if (typeof d === 'function') d(); } } });
+      });
+    } catch (e) { console.error('受伤后触发扫描出错', e); }
+    if (__cands.length) { resolveSimultaneous(attacker, __cands, __tail); return; }
       }
     }
     __tail();
