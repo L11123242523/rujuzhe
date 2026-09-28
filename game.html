@@ -13667,7 +13667,16 @@ function activateEdwardSP() {
 // 口径：移出游戏是"发动费用"，从墓地移出并触发 ON_REMOVE 时点；攻击力+1 走统一 attackBuff
 //（规则：攻击力÷2向下取整才是伤害加成，所以+1 未必立刻改变伤害 —— 与规则书一致，不做特殊处理）。
 function activateZuijiahuaSP() {
-  if (__resolveLocked()) return;
+  /* 【不再静默】（2026-09-28：作者报"最佳化的墓地效果无法发动"）
+     原来碰到结算锁就**无声 return** ⇒ 玩家只看到"点不动"。现在锁住时给出明确提示与日志，
+     便于定位（也让下次报告能带上锁状态）。 */
+  if (__resolveLocked()) {
+    var __eeZ = (typeof effectEngine !== 'undefined' && effectEngine) ? effectEngine : null;
+    addBattleLog('p1', '【最佳化·SP】当前有结算未收尾（depth=' + ((__eeZ && __eeZ._resolveDepth) || 0)
+      + ' chainLock=' + !!(__eeZ && __eeZ._chainLock) + '）→ 本次未能发动');
+    if (typeof showToast === 'function') showToast('有结算正在进行，请稍后再发动【最佳化·SP】', 'warn');
+    return;
+  }
   var p = battleState.p1;
   var ix = -1;
   (p.grave || []).forEach(function (c, i) { if (ix < 0 && c && c.name === '最佳化') ix = i; });
@@ -20208,6 +20217,23 @@ function showDeckList() {
 // 显示墓地列表
 // ===== 墓地/移出区主动 SP（通用通道：卡面写了可在墓地支付条件主动发动的效果）=====
 var GRAVE_SP_DEFS = [
+  { // 最佳化（作者 2026-09-28 报"墓地效果无法发动"）：把墓地的这张卡移出游戏 ⇒ 自身攻击力+1
+    //   原来这张表里**漏了它** ⇒ 墓地里它的卡上没有 ⚡ 按钮 ⇒ 只能去"角色技能"菜单发动（作者要的是点墓地卡就能发动）
+    match: /^最佳化$/,
+    label: '移出此卡，自身攻击力+1',
+    ok: function () { return true; }, reason: '',
+    run: function (card, zone, redraw) {
+      var p = battleState.p1;
+      var arr = p[zone] || [], ri = arr.indexOf(card); if (ri < 0) return;
+      arr.splice(ri, 1);
+      (p.removed = p.removed || []).push(card);
+      try { if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: 'p1', card: card }); } catch (e) { console.error('最佳化移出时点发射出错', e); }
+      p.attackBuff = (p.attackBuff || 0) + 1;
+      addBattleLog('p1', '【最佳化·SP】把墓地的【最佳化】移出游戏，自身攻击力+1（当前攻击+' + p.attackBuff + '）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      redraw();
+    }
+  },
   { // 永奏进行曲：付4同步、把墓地的自身移出，抽2
     match: /永奏/, label: '付4同步并移出此卡，抽2张',
     ok: function (p) { return p.sync >= 4; }, reason: '同步值不足4点',
