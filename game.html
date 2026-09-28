@@ -20940,14 +20940,16 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
         owner: player, card: card,
         mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),
         label: '【' + ((card && card.name) || '?') + '】' + how + '触发',
-        fire: ownFire
+        /* ⚠ 收 next 并回调：TW.settle 的循环是 node.fire(next)，不收/不调 ⇒ **整条链在这一环停摆**
+           （2026-09-27 深夜实测：羽奈(往昔)①的询问就这样丢了——它在 C1，C2 冬马SP 之后循环再没推进）。 */
+        fire: function (next) { try { ownFire(); } finally { if (typeof next === 'function') next(); } }
       });
     }
     if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
       out.push({
         owner: (battleState.currentPlayer || player), card: card, mandatory: true,
         label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
-        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+        fire: function (next) { try { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); } finally { if (typeof next === 'function') next(); } }
       });
     }
     playerIds().forEach(function (w) {
@@ -20957,11 +20959,13 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
         out.push({
           owner: w, card: card, mandatory: false,
           label: '【琉璃(万圣祭)·SP】有卡不因使用' + how + '·自己抽1张',
-          fire: function () {
-            q._liuliHWSPTurn = battleState.turn;
-            addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
-            if (typeof drawCard === 'function') drawCard(w);
-            if (typeof updateBattleUI === 'function') updateBattleUI();
+          fire: function (next) {
+            try {
+              q._liuliHWSPTurn = battleState.turn;
+              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
+              if (typeof drawCard === 'function') drawCard(w);
+              if (typeof updateBattleUI === 'function') updateBattleUI();
+            } finally { if (typeof next === 'function') next(); }
           }
         });
       }
@@ -20970,7 +20974,7 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
         out.push({
           owner: w, card: card, mandatory: false,
           label: '【现实间冬马·SP】有卡不因使用' + how + '·造4点无序',
-          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, how); }
+          fire: function (next) { try { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, how); } finally { if (typeof next === 'function') next(); } }
         });
       }
     });
