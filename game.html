@@ -9557,6 +9557,14 @@ function startTurn() {
         __reg += __lilB;
         __p.maxCost = 12 + __lilB + (__p._lilithPassive ? 2 : 0);   // 里尔亚斯②（新卡面）：初始音韵值与上限+2
       } else if (__p.maxCost < 12) { __p.maxCost = 12; }
+      /* 【里尔亚斯被动②（2026-09-28 新卡面）·实战保底】"初始音韵值和音韵值上限+2"。
+         ⚠ 上面那个分支挂在"自然回复"里，而**第一回合会被 _firstRegenSkipped 跳过** ⇒ 实测实战第一回合上限仍是12。
+         这里做一次**无条件**保底（幂等）：只抬不降，且不会叠加。 */
+      if (__p._lilithPassive && (__p.maxCost || 0) < 14) {
+        __p.maxCost = 14;
+        if ((__p.cost || 0) > __p.maxCost) __p.cost = __p.maxCost;
+        __p._lilithFloorApplied = true;
+      }
       // 霜烬被动·黎明灰烬：同步<14 每回合自然回复+4且攻击力+4（回合刷新不叠加）；同步>26 全队免疫其他玩家施加的负面效果
       if (__p._frostPassive) {
         if (__p._frostAtkBonus) { __p.attackBuff = (__p.attackBuff || 0) - __p._frostAtkBonus; __p._frostAtkBonus = 0; }
@@ -10628,42 +10636,9 @@ registerTrigger({
   fire: function (ctx) { if (ctx && typeof ctx.gRun === 'function') ctx.gRun(); }
 });
 
-registerTrigger({
-  id: 'lilith-huginn-discard-draw',
-  timing: 'main1_start',
-  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
-  cond: function (ctx, owner) {
-    var q = battleState[owner];
-    return !!(q && q._lilithPassive && q._lilithDDTurn !== battleState.turn && (q.hand || []).length);
-  },
-  mandatory: false,   // 卡面"每个自己回合可以发动一次"（含"可以"）⇒ 选发：由窗口询问
-  label: function () { return '里尔亚斯·Huginn&Muninn：弃1张手卡→抽1（弃到混沌卡再造成2点混沌伤害）'; },
-  fire: function (ctx, owner) {
-    var q = battleState[owner];
-    if (!q || !(q.hand || []).length) return;
-    q._lilithDDTurn = battleState.turn;
-    if (owner === 'p1' && typeof pickFromList === 'function') {
-      var __list = q.hand.map(function (c) { return { card: c, zone: 'hand' }; });
-      pickFromList('p1', __list, '里尔亚斯·Huginn&Muninn：选1张手卡送入墓地，然后抽1张', 1, function (picks) {
-        var pk = picks && picks[0];
-        if (pk && pk.card) {
-          var ix = q.hand.indexOf(pk.card);
-          if (ix >= 0) { q.hand.splice(ix, 1); (q.grave = q.grave || []).push(pk.card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, pk.card, 'effect'); }
-        }
-        __lilithAfterDiscard(owner, pk && pk.card);
-      });
-      return;
-    }
-    /* AI：优先丢混沌卡（能吃那2点混沌伤害），否则丢第一张 */
-    var idx = -1;
-    for (var i = 0; i < q.hand.length; i++) { if ((q.hand[i].attribute || '') === '混沌') { idx = i; break; } }
-    if (idx < 0) idx = 0;
-    var card = q.hand.splice(idx, 1)[0];
-    (q.grave = q.grave || []).push(card);
-    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, card, 'effect');
-    __lilithAfterDiscard(owner, card);
-  }
-});
+/* 【2026-09-28 作者口径】里尔亚斯的"弃1抽1"是**主动**能力 ⇒ 挂角色技能菜单（__lilithDiscardDraw + 菜单项），
+   不再作为 main1_start 的阶段弹窗候选。 */
+
 /* 里尔亚斯·Huginn&Muninn 的"弃1→抽1（弃到混沌再造成2点混沌伤害）"结算尾巴 */
 function __lilithAfterDiscard(owner, card) {
   try {
@@ -10676,6 +10651,54 @@ function __lilithAfterDiscard(owner, card) {
     }
     if (typeof updateBattleUI === 'function') updateBattleUI();
   } catch (e) { console.error('里尔亚斯弃抽结算出错', e); }
+}
+
+/* ============================================================
+   【预设卡堆（作者 2026-09-28 需求）】__presetDecksV1
+   背景：事件卡本来是从卡池里**随机**抽（GameRNG.pick），乐谱卡本来是按固定顺序抽（allMusic[_musicIndex++]）。
+   这里允许玩家预设两份**按顺序**的名单：对局中优先按名单发放，名单用完就回落到原机制。
+   入口：角色技能菜单里的「🗂 预设卡堆」（事件卡/乐谱卡两份名单，逗号分隔卡名）。
+   ============================================================ */
+var __presetDecks = (function () {
+  try { var s = localStorage.getItem('ruzju_preset_decks'); if (s) { var o = JSON.parse(s); return { events: o.events || [], music: o.music || [] }; } } catch (e) { }
+  return { events: [], music: [] };
+})();
+function __savePresetDecks() { try { localStorage.setItem('ruzju_preset_decks', JSON.stringify(__presetDecks)); } catch (e) { } }
+function __presetConsume(kind) {
+  var arr = __presetDecks[kind] || [];
+  return arr.length ? arr.shift() : null;
+}
+function __presetPeek(kind) {
+  var arr = __presetDecks[kind] || [];
+  return arr.length ? arr[0] : null;
+}
+/* 里尔亚斯被动①：查询下一张事件卡（预设优先；未预设就如实说是随机） */
+function __peekNextEventCard(player) {
+  try {
+    var nm = __presetPeek('events');
+    if (nm) return '下一张事件卡（预设卡堆）：【' + nm + '】';
+    var mm = __presetPeek('music');
+    return '事件卡是从卡池里**随机抽取**的，未预设卡堆 ⇒ 无法预知具体是哪一张。\n'
+      + '如需确定顺序，请在角色技能菜单里用「🗂 预设卡堆」填写名单（逗号分隔卡名）。'
+      + (mm ? ('\n（顺带：乐谱卡预设的下一张是【' + mm + '】）') : '');
+  } catch (e) { return '（查询失败：' + ((e && e.message) || e) + '）'; }
+}
+/* 预设卡堆编辑入口（P1 用 prompt：简单、无依赖、离线也能用） */
+function __editPresetDecks() {
+  try {
+    var cur = '当前预设——\n事件卡（按顺序）：' + ((__presetDecks.events || []).join('、') || '（空：随机抽取）')
+      + '\n乐谱卡（按顺序）：' + ((__presetDecks.music || []).join('、') || '（空：固定顺序 序幕→渐起→回响→高涨→尾声→谢幕）');
+    var e1 = prompt(cur + '\n\n请输入【事件卡】预设名单（逗号或顿号分隔卡名；留空=清空并恢复随机）：', (__presetDecks.events || []).join(','));
+    if (e1 === null) return;
+    var m1 = prompt('请输入【乐谱卡】预设名单（逗号或顿号分隔卡名；留空=清空并恢复固定顺序）：', (__presetDecks.music || []).join(','));
+    if (m1 === null) return;
+    var split = function (s) { return String(s || '').split(/[,，、;；\s]+/).map(function (x) { return x.trim(); }).filter(Boolean); };
+    __presetDecks.events = split(e1);
+    __presetDecks.music = split(m1);
+    __savePresetDecks();
+    addBattleLog('p1', '【预设卡堆】事件卡：' + (__presetDecks.events.join('、') || '（空/随机）') + '；乐谱卡：' + (__presetDecks.music.join('、') || '（空/固定顺序）'));
+    if (typeof showToast === 'function') showToast('预设卡堆已保存（事件卡按顺序优先发放，用完回落到随机）', 'good');
+  } catch (e) { console.error('编辑预设卡堆出错', e); }
 }
 
 var TW = {
@@ -13663,15 +13686,19 @@ function useCharacterPassive() {
   if (p._lilithPassive) {
     options.push({name: '福金与穆宁·预视', desc: '查看下一张事件卡的内容（无须发动）', action: function () {
       try {
-        var __deck = (typeof battleState !== 'undefined' && battleState && (battleState.eventDeck || battleState._eventDeck)) || null;
-        var __next = __deck && __deck.length ? __deck[0] : null;
-        if (!__next && typeof eventDeck !== 'undefined' && eventDeck && eventDeck.length) __next = eventDeck[0];
-        var __txt = __next ? ('下一张事件卡：【' + (__next.name || '?') + '】\n' + (__next.effect || '')) : '事件卡牌堆为空（或本局未使用事件卡）';
-        addBattleLog('p1', '【里尔亚斯被动·预视】' + __txt.replace(/\n/g, ' '));
+        var __txt = __peekNextEventCard('p1');
+        addBattleLog('p1', '【里尔亚斯被动·预视】' + String(__txt).replace(/\n/g, ' '));
         if (typeof alert === 'function') alert(__txt);
       } catch (e) { console.error('预视事件卡出错', e); }
     }});
   }
+  /* 【里尔亚斯被动②（2026-09-28 新卡面）】每个自己回合可以发动一次：弃1张手卡→抽1；
+     若弃到混沌属性的卡，再对一名玩家造成2点混沌属性伤害。作者口径：这是**主动**能力 ⇒ 放本菜单。 */
+  if (p._lilithPassive && p._lilithDDTurn !== T && (p.hand || []).length) {
+    options.push({name: '福金与穆宁·弃抽', desc: '选1张手卡送入墓地，然后抽1张（若弃到混沌属性的卡，再对一名玩家造成2点混沌属性伤害）', action: function () { __lilithDiscardDraw('p1'); }});
+  }
+  /* 【预设卡堆】事件卡（随机抽）/ 乐谱卡（按顺序抽）都可以先预设名单 ⇒ 便于验证与测试 */
+  options.push({name: '🗂 预设卡堆', desc: '设定事件卡/乐谱卡的发放顺序（事件卡默认随机、乐谱卡默认固定顺序；用完回落到原机制）', action: function () { __editPresetDecks(); }});
   if ((p._guideCore || 0) > 0) options.push({name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', action: function(){ useGuideCore('p1'); }});
   if (options.length === 0) { showToast('当前没有可发动的角色技能', 'warn'); return; }
   // 联机：广播角色技能意图（对方远端位重放同一选项表并等待选择答案）
@@ -14529,8 +14556,16 @@ function triggerEventCard(player) {
     return;
   }
   
-  // 随机抽取一张事件卡
-  var event = JSON.parse(JSON.stringify(GameRNG.pick(__pool)));
+  // 抽取一张事件卡：**预设卡堆优先**（按顺序取名单里的下一张），否则按原机制随机
+  var __presetEventName = (typeof __presetConsume === 'function') ? __presetConsume('events') : null;
+  var __presetEvent = null;
+  if (__presetEventName) {
+    for (var __pi = 0; __pi < (__pool || []).length; __pi++) {
+      if (__pool[__pi] && __pool[__pi].name === __presetEventName) { __presetEvent = __pool[__pi]; break; }
+    }
+    if (!__presetEvent) addBattleLog(player, '【预设卡堆】名单里的【' + __presetEventName + '】不在本局事件卡池中，已回落到随机');
+  }
+  var event = JSON.parse(JSON.stringify(__presetEvent || GameRNG.pick(__pool)));
   event._category = 'event_cards';
   event.cost = 0;
   
@@ -20187,7 +20222,16 @@ function triggerMusicCard(player) {
   
   // 乐谱卡按固定顺序：序幕→渐起→回响→高涨→尾声→谢幕
   if (!p._musicIndex) p._musicIndex = 0;
-  var music = JSON.parse(JSON.stringify(allMusic[p._musicIndex % allMusic.length]));
+  /* 【预设卡堆】乐谱卡本来按固定顺序抽；若玩家预设了名单，则按名单顺序优先发放 */
+  var __presetMusicName = (typeof __presetConsume === 'function') ? __presetConsume('music') : null;
+  var __presetMusic = null;
+  if (__presetMusicName) {
+    for (var __mi = 0; __mi < allMusic.length; __mi++) {
+      if (allMusic[__mi] && allMusic[__mi].name === __presetMusicName) { __presetMusic = allMusic[__mi]; break; }
+    }
+    if (!__presetMusic) addBattleLog(player, '【预设卡堆】乐谱名单里的【' + __presetMusicName + '】不存在，已回落到固定顺序');
+  }
+  var music = JSON.parse(JSON.stringify(__presetMusic || allMusic[p._musicIndex % allMusic.length]));
   p._musicIndex++;
   music._category = 'music_cards';
   music.cost = 0;
