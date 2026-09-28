@@ -10185,6 +10185,109 @@ function __mdOrderSimultaneous(tp, list) {
   } catch (e) { console.error('同时点排序出错（按原顺序处理）', e); return (list || []).filter(Boolean); }
 }
 
+/* ============================================================
+ * 【统一触发注册表 + 时点扫描器（结构性，2026-09-28）】
+ * ------------------------------------------------------------
+ * 问题（作者点明）：以前每个事件各自手工收集触发 —— "卡离场"一套、"移出游戏"一套、"受伤后"又一套，
+ * 顺序由代码书写顺序决定、漏一处就漏一个触发（这几天报的 bug 几乎都是这么来的）。
+ * 现在改成"一个表 + 一个扫描器"：
+ *   · 每条触发在此**声明**：{ id, timing, ownerOf(ctx), cond(ctx), mandatory(ctx), label(ctx,owner), fire(ctx,owner) }
+ *   · 各时点只做两件事：emit 时点 / 交给 __scanTriggers 拿候选
+ *   · 扫描器统一做：条件判定 → 必发/选发 → **MD 口径排序**（见 __mdOrderSimultaneous）
+ * 迁移中：已迁"卡不因使用离场"家族（进行曲 / 琉璃(万圣祭)SP / 冬马SP）；
+ *         卡自身送墓触发与羽奈(往昔)① 仍走原路（它们和卡对象强绑定），按同一张表逐步迁。
+ * ============================================================ */
+var __TRIGGERS = [];
+function registerTrigger(def) { if (def && def.id) __TRIGGERS.push(def); return def; }
+function __scanTriggers(timing, ctx) {
+  var out = [];
+  try {
+    var tp = (battleState && battleState.currentPlayer) || 'p1';
+    var __mk = function (d, owner) {
+      return {
+        owner: owner,
+        mandatory: (typeof d.mandatory === 'function') ? !!d.mandatory(ctx, owner) : (d.mandatory !== false),
+        id: d.id,
+        label: (typeof d.label === 'function') ? String(d.label(ctx, owner)) : String(d.label || d.id),
+        fire: function (next) { try { d.fire(ctx, owner); } finally { if (typeof next === 'function') next(); } }
+      };
+    };
+    for (var i = 0; i < __TRIGGERS.length; i++) {
+      var d = __TRIGGERS[i];
+      if (!d || d.timing !== timing) continue;
+      /* ownerOf 可以返回一个座位，也可以返回**多个**（例：双方都编组了琉璃(万圣祭) ⇒ 各出一条候选） */
+      var owners = null;
+      try { owners = (typeof d.ownerOf === 'function') ? d.ownerOf(ctx) : (d.owner || null); } catch (e) { console.error('触发 ownerOf 出错 ' + d.id, e); continue; }
+      if (!owners) continue;
+      if (!Array.isArray(owners)) owners = [owners];
+      for (var oi = 0; oi < owners.length; oi++) {
+        var owner = owners[oi];
+        if (!owner) continue;
+        var ok = true;
+        try { ok = (typeof d.cond === 'function') ? !!d.cond(ctx, owner) : true; } catch (e) { console.error('触发条件出错 ' + d.id, e); ok = false; }
+        if (!ok) continue;
+        out.push(__mk(d, owner));
+      }
+    }
+  } catch (e) { console.error('触发扫描出错', e); }
+  return __mdOrderSimultaneous(tp, out);
+}
+
+/* 【卡"不因使用离开原本区域"家族的触发声明（迁到统一注册表）】
+   how: 送入墓地 / 被献祭 / 被破坏 / 被移出游戏 / 被回收 …… 由 ctx.how 提供 */
+registerTrigger({
+  id: 'yongzou-grave-hit',
+  timing: 'leave-field',
+  ownerOf: function () { return (battleState && battleState.currentPlayer) || null; },
+  cond: function () { return (typeof __yongzouGraveApplies === 'function') && __yongzouGraveApplies(); },
+  mandatory: true,
+  label: function () { return '【永奏进行曲】本回合有卡进墓·造无序伤害'; },
+  fire: function (ctx) { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+});
+registerTrigger({
+  id: 'liuli-hw-sp-leave',
+  timing: 'leave-field',
+  ownerOf: function (ctx) {
+    var list = [];
+    playerIds().forEach(function (w) {
+      var q = battleState[w];
+      if (q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card) list.push(w);
+    });
+    return list;   // 可能多个座位（双方都编组了琉璃(万圣祭)）
+  },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card); },
+  mandatory: false,   // 卡面"可以发动" ⇒ 选发
+  label: function (ctx) { return '【琉璃(万圣祭)·SP】有卡不因使用' + ctx.how + '·自己抽1张'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._liuliHWQueuedFor = ctx.card;
+    q._liuliHWSPTurn = battleState.turn;
+    addBattleLog(owner, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + ctx.how + '（【' + ((ctx.card && ctx.card.name) || '') + '】），自己抽1张');
+    if (typeof drawCard === 'function') drawCard(owner);
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+registerTrigger({
+  id: 'toma-sp-leave',
+  timing: 'leave-field',
+  ownerOf: function (ctx) {
+    var list = [];
+    playerIds().forEach(function (w) {
+      var q = battleState[w];
+      if (q && q._tomaSP && q._tomaQueuedFor !== ctx.card) list.push(w);
+    });
+    return list;   // 可能多个座位
+  },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
+  mandatory: false,   // 卡面"可以发动" ⇒ 选发
+  label: function (ctx) { return '【现实间冬马·SP】有卡不因使用' + ctx.how + '·造4点无序'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._tomaQueuedFor = ctx.card;
+    if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(owner, ctx.player, ctx.card, ctx.how);
+  }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -20967,38 +21070,16 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
         fire: function (next) { try { ownFire(); } finally { if (typeof next === 'function') next(); } }
       });
     }
-    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
+    /* 【统一扫描（结构性）】"卡不因使用离场"家族（进行曲 / 琉璃SP / 冬马SP）不再手工收集 ——
+       由注册表统一产出，且已按 MD 口径排序（回合玩家先、同组玩家自排）。 */
+    var __ctxB = { player: player, card: card, reason: reason, how: how };
+    var __scannedB = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxB) : [];
+    __scannedB.forEach(function (c) {
       out.push({
-        owner: (battleState.currentPlayer || player), card: card, mandatory: true,
-        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
-        fire: function (next) { try { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); } finally { if (typeof next === 'function') next(); } }
+        owner: c.owner, card: card, mandatory: c.mandatory, label: c.label,
+        fire: function (next) { try { c.fire(); } finally { if (typeof next === 'function') next(); } }
       });
-    }
-    playerIds().forEach(function (w) {
-      var q = battleState[w]; if (!q) return;
-      if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
-        q._liuliHWQueuedFor = card;
-        out.push({
-          owner: w, card: card, mandatory: false,
-          label: '【琉璃(万圣祭)·SP】有卡不因使用' + how + '·自己抽1张',
-          fire: function (next) {
-            try {
-              q._liuliHWSPTurn = battleState.turn;
-              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + how + '（【' + ((card && card.name) || '') + '】），自己抽1张');
-              if (typeof drawCard === 'function') drawCard(w);
-              if (typeof updateBattleUI === 'function') updateBattleUI();
-            } finally { if (typeof next === 'function') next(); }
-          }
-        });
-      }
-      if (q._tomaSP && q._tomaQueuedFor !== card) {
-        q._tomaQueuedFor = card;
-        out.push({
-          owner: w, card: card, mandatory: false,
-          label: '【现实间冬马·SP】有卡不因使用' + how + '·造4点无序',
-          fire: function (next) { try { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, how); } finally { if (typeof next === 'function') next(); } }
-        });
-      }
+      if (c.id === 'liuli-hw-sp-leave' || c.id === 'toma-sp-leave') { try { battleState._leaveHooksBatchedFor = card; } catch (e) {} }
     });
   } catch (e) { console.error('非结算中触发批次构建出错', e); }
   return out;
@@ -21042,46 +21123,20 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       fire: function () { checkGraveTrigger(player, card, reason, true); }
     });
     }
-    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) {
-      queueOrRunTrigger({
-        owner: (battleState.currentPlayer || player),
-        card: card,
-        label: '【永奏进行曲】本回合有卡进墓·造无序伤害',
-        mandatory: true,
-        fire: function () { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
-      });
-    }
-    /* 「不因使用离场」的两条**选发**（琉璃(万圣祭)SP / 冬马SP）：同样入这一批 ⇒ 同一窗口里问"是否发动"
-       （mandatory:false），而不是各自弹窗排队。标记让随后 ON_TO_GRAVE 的 __noUseLeaveHooks 跳过这两条（防重复）。 */
-    var __how0 = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
+    /* 【统一扫描（结构性）】"卡不因使用离场"家族的触发（进行曲 / 琉璃SP / 冬马SP）不再在这里手工收集，
+       改由注册表 __TRIGGERS 统一产出，并已按 MD 口径排好序（回合玩家先、同组玩家自排）。 */
     try {
-      playerIds().forEach(function (w) {
-        var q = battleState[w]; if (!q) return;
-        /* 每个座位在**同一事件里只排一次**（作者实测：一次送墓把琉璃SP排了两遍 ✗ —— 你方两条、对手两条）。 */
-        if (q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== card) {
-          q._liuliHWQueuedFor = card;
-          queueOrRunTrigger({
-            owner: w, card: card, mandatory: false,
-            label: '【琉璃(万圣祭)·SP】有卡不因使用' + __how0 + '·自己抽1张',
-            fire: function () {
-              q._liuliHWSPTurn = battleState.turn;
-              addBattleLog(w, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + __how0 + '（【' + ((card && card.name) || '') + '】），自己抽1张');
-              if (typeof drawCard === 'function') drawCard(w);
-              if (typeof updateBattleUI === 'function') updateBattleUI();
-            }
-          });
-        }
-        if (q._tomaSP && q._tomaQueuedFor !== card) {
-          q._tomaQueuedFor = card;
-          queueOrRunTrigger({
-            owner: w, card: card, mandatory: false,
-            label: '【现实间冬马·SP】有卡不因使用' + __how0 + '·造4点无序',
-            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, __how0); }
-          });
-        }
+      var __ctxQ = { player: player, card: card, reason: reason,
+                     how: (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地')) };
+      var __scannedQ = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxQ) : [];
+      __scannedQ.forEach(function (c) {
+        queueOrRunTrigger({ owner: c.owner, card: card, label: c.label, mandatory: c.mandatory,
+                            fire: function () { try { c.fire(); } catch (e) { console.error('扫描出的触发执行出错 ' + c.id, e); } } });
+        if (c.id === 'liuli-hw-sp-leave' || c.id === 'toma-sp-leave') { try { battleState._leaveHooksBatchedFor = card; } catch (e) {} }
       });
-      battleState._leaveHooksBatchedFor = card;
-    } catch (e) { console.error('离场选发批次入队出错', e); }
+    } catch (e) { console.error('离场触发扫描/入队出错', e); }
+    /* 【已删除：原来的琉璃SP/冬马SP 手工收集块】它们现在由上面的 __scanTriggers('leave-field') 统一产出
+       （条件、必发/选发、排序、以及"每座位每事件只排一次"的标记都在注册表里），此处不再重复。 */
     return;   // 结算中：入批即可；排空交给"本次连锁结束"的释放点（**不要在这里排空** —— 会重入卡死）
   }
   /* 【非结算中：本事件同时满足多条触发时，也进**同一个窗口**（作者实测：献祭神乐铃 → 琉璃SP 与 进行曲 各开一个窗）】
