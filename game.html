@@ -17357,7 +17357,8 @@ onTiming(TIMING.AFTER_DAMAGE, function (ctx, next) {
     var has = (p.permanent || []).some(function (c) { return c && (c.name || '').indexOf('极夜君王') >= 0; });
     if (!has) { next(); return; }
     if (p._jiyeUsedTurn === battleState.turn) { next(); return; }
-    p._jiyeUsedTurn = battleState.turn;
+    /* 【额度只在**真的发动**时占用（作者判据，与葵·福音雅颂同一处修正）】
+       原来在这一行就先占掉了本回合额度 ⇒ 玩家选"不发动"也被消耗，本回合再也用不了 ✗。 */
     var same = (ctx.value || ctx.amount || 2);
     var foe = foeOf(atk);
     function __jiye1() {
@@ -17385,13 +17386,14 @@ onTiming(TIMING.AFTER_DAMAGE, function (ctx, next) {
     var __opts = ['①随机将一张手卡移出游戏，再造成一次同等数值（' + same + '点）的判定伤害',
                   '②选移出游戏的1张卡正面朝上放牌组最上方，自己下次判定伤害+1',
                   '不发动'];
-    var __pick = function (i) { if (i === 0) __jiye1(); else if (i === 1) __jiye2(); };
+    var __pick = function (i) { if (i === 0 || i === 1) p._jiyeUsedTurn = battleState.turn; if (i === 0) __jiye1(); else if (i === 1) __jiye2(); };
     if (atk === 'p1' && typeof showChoiceModal === 'function') {
       showChoiceModal('极夜君王之冕', '本回合首次造成判定伤害后', '选择一项发动（每回合一次）', __opts, __pick);
     } else if (typeof Online !== 'undefined' && Online.active && atk === 'p2' && typeof onlineDecideModal === 'function') {
       onlineDecideModal('p2', '极夜君王之冕（对手）', '本回合首次造成判定伤害后', '选择一项发动（每回合一次）', __opts, __pick);
     } else {
-      // AI：有移出卡优先②（把资源换回来并蓄判定增伤），否则①
+      // AI：有移出卡优先②（把资源换回来并蓄判定增伤），否则①（AI 必发动 ⇒ 这里占用额度）
+      p._jiyeUsedTurn = battleState.turn;
       if ((p.removed || []).length) __jiye2(); else __jiye1();
     }
   } catch (e) { console.error('jiye AFTER_DAMAGE hook', e); }
@@ -20930,7 +20932,10 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
   var out = [];
   try {
     var how = (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'));
-    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) {
+    /* 卡自身节点：①这张卡自己有送墓触发 ⇒ 必须排；②羽奈(往昔)①的询问搭在 ON_TO_GRAVE 时点上
+       （见 __noUseLeaveHooks→__pastPhase），所以只要羽奈适用也得排这条节点，否则她的询问会被漏掉。 */
+    if ((typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason))
+        || (battleState[player] && battleState[player]._yunaiPastPassive && battleState.currentPlayer === player)) {
       out.push({
         owner: player, card: card,
         mandatory: !/可以|可选/.test(((card && card.sp) || '') + ((card && card.effect) || '')),
@@ -20965,7 +20970,7 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
         out.push({
           owner: w, card: card, mandatory: false,
           label: '【现实间冬马·SP】有卡不因使用' + how + '·造4点无序',
-          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, how); }
+          fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, how); }
         });
       }
     });
@@ -21045,7 +21050,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
           queueOrRunTrigger({
             owner: w, card: card, mandatory: false,
             label: '【现实间冬马·SP】有卡不因使用' + __how0 + '·造4点无序',
-            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, owner, card, __how0); }
+            fire: function () { if (typeof __tomaSPLeaveHit === 'function') __tomaSPLeaveHit(w, player, card, __how0); }
           });
         }
       });
