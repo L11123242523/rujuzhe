@@ -10465,6 +10465,105 @@ registerTrigger({
   }
 });
 
+registerTrigger({
+  id: 'sena-mizugi-recover',
+  timing: 'leave-field',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx, owner) {
+    if (!ctx || !ctx.card || ctx.reason === 'use') return false;                 // 只在"不因使用"进墓时
+    var q = battleState[owner]; if (!q || !q._senaPassive) return false;
+    if (typeof __isMoveItemCard !== 'function' || !__isMoveItemCard(ctx.card)) return false;
+    return (q.sync || 0) >= 4;
+  },
+  mandatory: false,   // 卡面"可以支付4点同步值" ⇒ 选发
+  label: function (ctx) { return '星奈(水着)被动·支付4同步回收【' + ((ctx.card && ctx.card.name) || '') + '】'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    var ix = (q.grave || []).indexOf(ctx.card);
+    if (ix < 0) { addBattleLog(owner, '【星奈(水着)被动】卡已不在墓地，回收不成立'); return; }
+    q.sync -= 4; q.grave.splice(ix, 1); q.hand.push(ctx.card); ctx.card._addedByEffect = true;
+    if (typeof __emitAddHand === 'function') __emitAddHand(owner, ctx.card, 'grave');
+    addBattleLog(owner, '【星奈(水着)被动】支付4点同步值，回收【' + ctx.card.name + '】加入手卡');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+registerTrigger({
+  id: 'greed-mark-accumulate',
+  timing: 'leave-field',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx) { return !!(ctx && ctx.card && (ctx.card.name || '').indexOf('贪欲者的烙印') >= 0); },
+  mandatory: true,   // 卡面"每次进入墓地…累积"（无"可以"）⇒ 必发；因使用入墓同样算 ⇒ 不过滤 reason
+  label: function () { return '贪欲者的烙印·SP·进入墓地累积1个'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._greedMark = Math.min(7, (q._greedMark || 0) + 1);
+    addBattleLog(owner, '【贪欲者的烙印·SP】进入墓地，累积贪欲烙印至' + q._greedMark + '个（上限7）');
+  }
+});
+
+/* 【时点扫描器通用件（结构性核心）】任何时点都只做一件事：问注册表有没有触发；有就开一个窗口，
+   窗口完成后回调 next() —— 各时点不再各写一套"收集 + 弹窗 + 排序"。 */
+function __runTimingTriggers(timing, ctx, next) {
+  try {
+    var cands = (typeof __scanTriggers === 'function') ? __scanTriggers(timing, ctx) : [];
+    if (cands.length && typeof resolveSimultaneous === 'function') {
+      var tp = (ctx && (ctx.player || ctx.attacker)) || (battleState && battleState.currentPlayer) || 'p1';
+      resolveSimultaneous(tp, cands, next);
+      return;
+    }
+  } catch (e) { console.error('时点触发扫描出错 ' + timing, e); }
+  next();
+}
+registerTrigger({
+  id: 'ning-draw-recover',
+  timing: 'on_draw',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._ningPassive); },
+  mandatory: true,   // 卡面"抽卡后回复1点音韵值"（无"可以"）⇒ 必发
+  label: function () { return '宁雨清被动·抽卡后回1音韵'; },
+  fire: function (ctx, owner) {
+    recoverCost(owner, 1, '宁雨清被动');
+    var q = battleState[owner];
+    addBattleLog(owner, '【宁雨清被动】抽卡后回复1点音韵值，当前' + ((q && q.cost) || 0) + '点');
+  }
+});
+registerTrigger({
+  id: 'ning-addhand-drain',
+  timing: 'on_add_hand',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q || !q._ningPassive) return false;
+    var foe = battleState[foeOf(owner)];
+    return !!(foe && (foe.sync || 0) > 0);
+  },
+  mandatory: false,   // 卡面"可以扣除…" ⇒ 选发
+  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方3同步'; },
+  fire: function (ctx, owner) {
+    var foe = battleState[foeOf(owner)]; if (!foe) return;
+    foe.sync = Math.max(0, (foe.sync || 0) - 3);
+    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方3点同步值');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+registerTrigger({
+  id: 'ning-addhand-drain-remove',
+  timing: 'on_remove_to_hand',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner]; if (!q || !q._ningPassive) return false;
+    var foe = battleState[foeOf(owner)];
+    return !!(foe && (foe.sync || 0) > 0);
+  },
+  mandatory: false,
+  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方3同步'; },
+  fire: function (ctx, owner) {
+    var foe = battleState[foeOf(owner)]; if (!foe) return;
+    foe.sync = Math.max(0, (foe.sync || 0) - 3);
+    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方3点同步值');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -17290,64 +17389,11 @@ function __syncRecoverTiming() {
   });
 }
 // 宁雨清被动：每次抽卡后回1音韵（挂时点总线，替代散落硬编码）
-onTiming(TIMING.ON_DRAW, function (ctx, next) {
-  if (!battleState || !ctx) { next(); return; }
-  var __np = battleState[ctx.player];
-  if (__np && __np._ningPassive) {
-    recoverCost(ctx.player, 1, '宁雨清被动');
-    addBattleLog(ctx.player, '【宁雨清被动】抽卡后回复1点音韵值，当前' + __np.cost + '点');
-  }
-  next();
-});
-// 宁雨清被动：每次用效果把卡加入手卡时（不含普通抽卡）可以扣除一名其他玩家3点同步值（选发：玩家弹窗 / AI自动发动）
-function __ningAddHandHook(ctx, next) {
-  if (!battleState || !ctx || !ctx.player || !ctx.card) { next(); return; }
-  var __np = battleState[ctx.player];
-  if (!__np || !__np._ningPassive) { next(); return; }
-  var __tgt = foeOf(ctx.player), __tp = battleState[__tgt];
-  if (!__tp || (__tp.sync || 0) <= 0) { next(); return; }
-  if (ctx.player === 'p1') {
-    showChoiceModal('宁雨清被动·图书管理员的矜持', '因效果将【' + ctx.card.name + '】加入手卡', '可以扣除一名其他玩家3点同步值', ['扣除对方3点同步值', '不发动'], function (o) {
-      if (o === 0) { __tp.sync = Math.max(0, (__tp.sync || 0) - 3); addBattleLog(ctx.player, '【宁雨清被动】因效果加卡，扣除对方3点同步值'); if (typeof updateBattleUI === 'function') updateBattleUI(); }
-      next();
-    });
-    return;
-  }
-  if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && ctx.player === 'p2') {
-    onlineDecideModal('p2', '宁雨清被动·图书管理员的矜持（对手）', '因效果将【' + ctx.card.name + '】加入手卡', '可以扣除一名其他玩家3点同步值', ['扣除对方3点同步值', '不发动'], function (o) {
-      if (o === 0) { __tp.sync = Math.max(0, (__tp.sync || 0) - 3); addBattleLog(ctx.player, '【宁雨清被动】因效果加卡，扣除对方3点同步值'); if (typeof updateBattleUI === 'function') updateBattleUI(); }
-      next();
-    });
-    return;
-  }
-  __tp.sync = Math.max(0, (__tp.sync || 0) - 3);
-  addBattleLog(ctx.player, '【宁雨清被动】因效果加卡，扣除对方3点同步值');
-  next();
-}
-onTiming(TIMING.ON_ADD_HAND, __ningAddHandHook);
-onTiming(TIMING.ON_REMOVE_TO_HAND, __ningAddHandHook);
-// 星奈(水着)被动·戏水②：[移动]标签道具卡因结算进入墓地后，可以支付4点同步值将其重新加入手卡
-onTiming(TIMING.ON_TO_GRAVE, function (ctx, next) {
-  if (!battleState || !ctx || !ctx.card || ctx.reason !== 'use') { next(); return; }
-  var __sp = battleState[ctx.player];
-  if (!__sp || !__sp._senaPassive) { next(); return; }
-  if (typeof __isMoveItemCard !== 'function' || !__isMoveItemCard(ctx.card)) { next(); return; }
-  if ((__sp.sync || 0) < 4) { addBattleLog(ctx.player, '【星奈(水着)被动】[移动]道具进墓，但同步不足4点，无法回收'); next(); return; }
-  function __senaRecover() {
-    var __ix = (__sp.grave || []).indexOf(ctx.card);
-    if (__ix < 0) { next(); return; }
-    __sp.sync -= 4; __sp.grave.splice(__ix, 1); __sp.hand.push(ctx.card); ctx.card._addedByEffect = true;
-    if (typeof __emitAddHand === 'function') __emitAddHand(ctx.player, ctx.card, 'grave');
-    addBattleLog(ctx.player, '【星奈(水着)被动】支付4点同步值，回收【' + ctx.card.name + '】加入手卡');
-    if (typeof updateBattleUI === 'function') updateBattleUI();
-    next();
-  }
-  if (ctx.player === 'p1') {
-    showChoiceModal('星奈(水着)被动·戏水', '【' + ctx.card.name + '】因结算进入墓地', '可以支付4点同步值将其重新加入手卡', ['支付4点同步值回收', '不回收'], function (o) { if (o === 0) __senaRecover(); else next(); });
-  } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && ctx.player === 'p2') {
-    onlineDecideModal('p2', '星奈(水着)被动·戏水（对手）', '【' + ctx.card.name + '】因结算进入墓地', '可以支付4点同步值将其重新加入手卡', ['支付4点同步值回收', '不回收'], function (o) { if (o === 0) __senaRecover(); else next(); });
-  } else { __senaRecover(); }
-});
+// 【已迁移（结构性，2026-09-28）】宁雨清被动的两条（抽卡回音韵 / 因效果加卡扣同步）已迁入注册表，
+// 时点钩子改成通用的 __runTimingTriggers（问注册表 → 有触发就开窗口）。原来各自弹窗/就地执行的代码已删除。
+onTiming(TIMING.ON_DRAW, function (ctx, next) { __runTimingTriggers('on_draw', ctx, next); });
+onTiming(TIMING.ON_ADD_HAND, function (ctx, next) { __runTimingTriggers('on_add_hand', ctx, next); });
+onTiming(TIMING.ON_REMOVE_TO_HAND, function (ctx, next) { __runTimingTriggers('on_remove_to_hand', ctx, next); });
 // ============================================================
 // 新卡角色/道具时点钩子（2026-09-16 加入的 7 张卡）
 // ============================================================
@@ -17498,32 +17544,22 @@ registerTrigger({
 
 
 // 送墓入口（非使用）→ 触发上面两组钩子 + 贪欲烙印累积
-onTiming(TIMING.ON_TO_GRAVE, function (ctx, next) {
-  try {
-    if (battleState && ctx && ctx.card) {
-      // 贪欲者的烙印·SP：这张卡每次进入墓地为自己累积1个贪欲烙印（上限7）。
-      // 口径：卡面写"每次进入墓地"，因使用入墓同样算（这里的 use 不排除）；
-      //       而下面「不因使用离开原本区域」的钩子才排除 use。
-      if ((ctx.card.name || '').indexOf('贪欲者的烙印') >= 0) {
-        var __gp = battleState[ctx.player];
-        if (__gp) {
-          __gp._greedMark = Math.min(7, (__gp._greedMark || 0) + 1);
-          addBattleLog(ctx.player, '【贪欲者的烙印·SP】进入墓地，累积贪欲烙印至' + __gp._greedMark + '个（上限7）');
-        }
-      }
-      // 「不因使用」离开：使用（use）不算。注意 __noUseLeaveHooks 可能在弹窗里等玩家作答，
-      // next() 一律由它的完成回调驱动（弹窗未答完不推进链条）。
-      if (ctx.reason !== 'use') { __noUseLeaveHooks(ctx.player, ctx.card, ctx.reason, '送入墓地', function () { next(); }); return; }
-    }
-  } catch (e) { console.error('newcard ON_TO_GRAVE hook', e); }
-  next();
-});
-// 移出游戏入口 → 同样属于「不因使用离开原本所在的区域」
+// 【已迁移（结构性，2026-09-28）】原 ON_TO_GRAVE / ON_REMOVE 两条钩子已删除：
+//   · 贪欲者的烙印·SP 累积 → 注册表 greed-mark-accumulate（必发）
+//   · 「不因使用离开原本区域」家族 → 由 checkGraveTrigger 的批次扫描统一处理（__noUseLeaveHooks 已成直通）
+// ============================================================
+// 新卡角色/道具时点钩子（2026-09-16 加入的 7 张卡）
+// ============================================================
+// 移出游戏入口 → 同样属于「不因使用离开原本所在的区域」：改为**注册表扫描**（原来是直通调用，迁移后必须在这里扫）
 onTiming(TIMING.ON_REMOVE, function (ctx, next) {
   try {
-    if (battleState && ctx && ctx.card) { __noUseLeaveHooks(ctx.player, ctx.card, 'remove', '被移出游戏', function () { next(); }); return; }
-  }
-  catch (e) { console.error('newcard ON_REMOVE hook', e); }
+    if (battleState && ctx && ctx.card) {
+      var __candsR = (typeof __scanTriggers === 'function')
+        ? __scanTriggers('leave-field', { player: ctx.player, card: ctx.card, reason: 'remove', how: '被移出游戏' })
+        : [];
+      if (__candsR.length && typeof resolveSimultaneous === 'function') { resolveSimultaneous(ctx.player, __candsR, next); return; }
+    }
+  } catch (e) { console.error('移出游戏触发扫描出错', e); }
   next();
 });
 // 贪欲者的烙印·SP：每次获取音韵值时那个量+1（按烙印数叠加）。
@@ -21174,19 +21210,18 @@ function __graveSelfApplies(player, card, reason) {
 /* 【本事件是否真的会触发什么】= 卡自身送墓触发 ∪ 进行曲 ∪ 琉璃(万圣祭)SP ∪ 冬马SP ∪ 羽奈(往昔)①。
    全都不成立 ⇒ 不收集、不开窗（原来无条件排队 ⇒ 出现"这张卡有送墓效果吗就进连锁"）。 */
 function __leaveEventHasTrigger(player, card, reason) {
+  /* 【结构性：改成"问扫描器"】（2026-09-28）
+     原来是手写的条件表（卡自身/进行曲/琉璃SP/冬马SP/羽奈…）—— 每加一条触发都得回来改这里，
+     迁注册表时就漏掉了贪欲烙印/星奈水着（实测：因使用进墓不累积烙印 ✗）。
+     现在直接问注册表：扫描器能产出候选，就说明这个事件有触发。 */
   try {
-    if (typeof __graveSelfApplies === 'function' && __graveSelfApplies(player, card, reason)) return true;
-    if (typeof __yongzouGraveApplies === 'function' && __yongzouGraveApplies()) return true;
-    var cur = battleState && battleState.currentPlayer;
-    var hit = false;
-    playerIds().forEach(function (w) {
-      if (hit) return;
-      var q = battleState[w]; if (!q) return;
-      if (q._liuliHWSP && q._liuliHWSPTurn !== (battleState.turn || 0)) hit = true;
-      else if (q._tomaSP) hit = true;
-      else if (q._yunaiPastPassive && cur === w && w === player) hit = true;   // 羽奈(往昔)①：自己回合、自己的卡送墓
-    });
-    return hit;
+    var cands = (typeof __scanTriggers === 'function')
+      ? __scanTriggers('leave-field', {
+          player: player, card: card, reason: reason,
+          how: (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地'))
+        })
+      : [];
+    return cands.length > 0;
   } catch (e) { console.error('判断离场事件是否有触发出错', e); return true; }
 }
 
