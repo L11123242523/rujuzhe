@@ -10564,6 +10564,50 @@ registerTrigger({
   }
 });
 
+registerTrigger({
+  id: 'yu-prepare-end',
+  timing: 'prepare_end',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._yuPassive && q._yuPrepareTurn !== battleState.turn); },
+  mandatory: false,   // 卡面"可以发动" ⇒ 选发（窗口候选就是那个询问）
+  label: function () { return '入间予·解构与求索（准备阶段结束）'; },
+  fire: function (ctx, owner) { if (typeof __yuPrepareEnd === 'function') __yuPrepareEnd(owner); }
+});
+registerTrigger({
+  id: 'toma-main1',
+  timing: 'main1_start',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._tomaPassive); },
+  mandatory: false,
+  label: function () { return '现实间冬马·分析大师（主要阶段）'; },
+  fire: function (ctx, owner) { if (typeof __tomaDeclare === 'function') __tomaDeclare(owner); }
+});
+registerTrigger({
+  id: 'lily-sp-main1',
+  timing: 'main1_start',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner];
+    return !!(q && q._lilySP && q._lilySPTurn !== battleState.turn && (q.grave || []).length);
+  },
+  mandatory: false,   // 卡面"每个自己回合可以发动一次" ⇒ 选发
+  label: function () { return '莉莉·回收（每回合一次）'; },
+  fire: function (ctx, owner) { if (typeof activateLilySP === 'function') activateLilySP(); }
+});
+registerTrigger({
+  id: 'edward-sp-main1',
+  timing: 'main1_start',
+  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
+  cond: function (ctx, owner) {
+    var q = battleState[owner];
+    if (!q || !q._edwardSP || q._edwardSPTurn === battleState.turn) return false;
+    return (typeof __breakerCount === 'function') && __breakerCount(owner) >= 3;
+  },
+  mandatory: false,
+  label: function () { return '露璐缇雅·破坏（每回合一次）'; },
+  fire: function (ctx, owner) { if (typeof activateEdwardSP === 'function') activateEdwardSP(); }
+});
+
 var TW = {
   active: null,
   seq: 0,
@@ -15134,43 +15178,13 @@ function nextPhase() {
   
   if (battleState.phase === 'prepare') {
     // 准备阶段 → 主要阶段1
-    /* 【选发/必发 判据（作者 2026-09-27 明确）】卡面写「**可以**发动」的是**选发**，没有"可以"的才是必发。
-       予被动（准备阶段结束时可以发动）与冬马被动（主要阶段可以发动一次）都是选发 ⇒
-       条件满足时**弹窗询问**，选发动才作为 C1 进连锁（对手可继续连锁），不发动就不结算。
-       （原来这里是无条件自动调用，属"强制发动"的错误实现。） */
-    if (typeof __offerOptionalEffect === 'function' && battleState.p1._yuPassive
-        && battleState.p1._yuPrepareTurn !== battleState.turn) {   // 每回合一次（读完标记才发动，发动时置位）
-      setTimeout(function () {
-        __offerOptionalEffect('p1', '入间予·解构与求索',
-          '准备阶段结束：公开自己的手卡，按数量最多的属性发动四选一？', function () { __yuPrepareEnd('p1'); });
-      }, 0);
-    }
+    /* 【结构性（2026-09-28）】予被动 / 冬马被动 / 莉莉·回收 / 露璐缇雅·破坏 这四条"每回合可以发动一次"
+       不再在这里手写弹窗（原来四条各写一段 setTimeout + __offerOptionalEffect ✗），改为注册表触发：
+       由 __runTimingTriggers('prepare_end' / 'main1_start') 统一产出候选、按 MD 口径排序、开一个窗口，
+       **窗口本身就是"是否发动"的询问**（可 PASS）。必发/选发按卡面"可以"判据在注册表里声明。 */
+    if (typeof __runTimingTriggers === 'function') __runTimingTriggers('prepare_end', { player: 'p1' }, function () {});
     battleState.phase = 'main1';
-    if (typeof __offerOptionalEffect === 'function' && battleState.p1._tomaPassive) {
-      setTimeout(function () {
-        __offerOptionalEffect('p1', '现实间冬马·分析大师',
-          '主要阶段：声明一种属性并公开一名玩家的一张暗置卡？', function () { __tomaDeclare('p1'); });
-      }, 300);
-    }
-    /* 主动型「每回合可以发动一次」的选发（作者 2026-09-27 裁决）：也改为**弹窗询问**（不再挂角色技能菜单）；
-       对手回合不能主动发动，只能作为连锁响应 —— 那部分要接"非卡片的连锁候选"，见《收口记录》。 */
-    if (typeof __offerOptionalEffect === 'function' && battleState.p1._lilySP
-        && battleState.p1._lilySPTurn !== battleState.turn && (battleState.p1.grave || []).length) {
-      setTimeout(function () {
-        __offerOptionalEffect('p1', '莉莉·回收',
-          '每个自己回合可以发动一次：把墓地最下方一张卡放回牌组最下方（若放回的是单次卡且新最下方非单次，视为使用它并回1音韵）？',
-          function () { if (typeof activateLilySP === 'function') activateLilySP(); });
-      }, 360);
-    }
-    if (typeof __offerOptionalEffect === 'function' && battleState.p1._edwardSP
-        && battleState.p1._edwardSPTurn !== battleState.turn
-        && typeof __breakerCount === 'function' && __breakerCount('p1') >= 3) {
-      setTimeout(function () {
-        __offerOptionalEffect('p1', '露璐缇雅·破坏',
-          '每个自己回合可以发动一次：破坏一名玩家区域内一张卡，然后其回复4点音韵值？',
-          function () { if (typeof activateEdwardSP === 'function') activateEdwardSP(); });
-      }, 420);
-    }
+    if (typeof __runTimingTriggers === 'function') __runTimingTriggers('main1_start', { player: 'p1' }, function () {});
     addBattleLog('phase', '进入主要阶段1：可使用手牌');
     updateBattleUI();
     // 机场：本主阶段开始时可前进到地图任意1格
