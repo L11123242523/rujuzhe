@@ -9499,6 +9499,9 @@ function __memberGate(player) {
       return null;
     };
     Object.keys(FLAGS).forEach(function (nm) {
+      /* 【诊断】（作者报"里尔亚斯的弃抽/+2 不生效"）队里每个角色都记一条，下一局日志即可定位。 */
+      var __diagFlag = FLAGS[nm].sp.concat(FLAGS[nm].passive).some(function (f) { return !!seat[f]; });
+      if (__diagFlag) addBattleLog(player, '【编组生效规则·诊断】' + nm + '：队长=' + (capN || '(空)') + ' ⇒ ' + (capN.indexOf(nm) >= 0 ? '队长位（保留全部）' : '非队长位（按卡面文字裁决）'));
       if (capN.indexOf(nm) >= 0) return;                                   // 队长位 ⇒ 全部保留
       /* 【__memberGateV3】不靠 seat.chars 判在不在队里（真实座席里 chars 可能为空）：
          标记本身就是"该角色在本队"的证据 —— 只要它的标记被置上了，就按位置规则裁决。 */
@@ -9547,15 +9550,31 @@ function startTurn() {
   } catch (e) { console.error('沙盒模式参数设置出错', e); }
   // S5：回合开始先清一次陈旧锁（规格用例8：不残留锁标志；清理会记日志，不静默）
   if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('回合开始');
-  /* 【编组生效规则】每局第一次回合开始时对每个座位裁决一次（幂等）：power 里队长此时已确定 */
+  /* 【编组生效规则】每局第一次回合开始时对每个座位裁决一次。
+     ⚠ 不能在"角色标记还没登记"时就把它标记为已完成 —— 那样它永远不会重试（实测踩到：裁决跑在设置之前）。 */
   try {
     if (typeof __memberGate === 'function') {
       playerIds().forEach(function (w) {
         var __q = battleState[w]; if (!__q || __q._memberGateDone) return;
+        var __anyFlag = ['_tomaSP', '_tomaPassive', '_liuliHWSP', '_liuliHWPassive', '_lilithPassive', '_lilithSP',
+                         '_yuiSP', '_yuiPassive', '_sakuraPassive', '_sakuraHealSync', '_yuPassive', '_frostPassive'].some(function (f) { return !!__q[f]; });
+        if (!__anyFlag) return;                 // 角色标记还没登记 ⇒ 本轮不裁决、也不标记完成（下回合再来）
         __q._memberGateDone = true; __memberGate(w);
       });
     }
   } catch (e) { console.error('编组生效规则调用出错', e); }
+  /* 【里尔亚斯被动②（2026-09-28 新卡面）】初始音韵值和音韵值上限+2 —— **无条件保底**：
+     幂等、只抬不降、不叠加。必须放在回合最前面、且不依赖"自然回复"分支
+     （那个分支第一回合会被 _firstRegenSkipped 跳过 ⇒ 实测上限仍是 12；而且早先那道保底被后续脚本连带删掉过）。 */
+  try {
+    playerIds().forEach(function (w) {
+      var __lq = battleState[w]; if (!__lq || !__lq._lilithPassive) return;
+      if ((__lq.maxCost || 0) < 14) {
+        __lq.maxCost = 14;
+        if ((__lq.cost || 0) > __lq.maxCost) __lq.cost = __lq.maxCost;
+      }
+    });
+  } catch (e) { console.error('里尔亚斯上限保底出错', e); }
   // 重置每回合一次的永续卡标记（按回合归属者对称重置，修复原代码写死 p1 导致 p2 永不复位）
   var __rs = battleState.currentPlayer;
   if (battleState && battleState[__rs] && battleState[__rs].permanent) {
@@ -9595,8 +9614,8 @@ function startTurn() {
   battleState[player]._koharuMoveCount = 0; // 小春SP单回合移动累计，每回合清零
   battleState[player]._kaedeMizugiMove = 0; // 枫(水着)被动单回合移动累计
   battleState[player]._kaedeMizugiRecycledTurn = false; // 枫(水着)被动单回合回收一次标记
-  battleState[player]._tomaMoveCount = 0; // 冬马被动单回合移动累计
-  battleState[player]._tomaItemTurn = false; // 冬马被动Lv7每回合首次道具触发标记
+  /* 【已清理 2026-09-28】旧冬马被动（累计移动造伤 / Lv7道具触发）的标记 _tomaMoveCount / _tomaItemTurn
+     随旧卡面实现一并删除 —— 新被动是"主要阶段声明属性、公开暗置卡"（见 __tomaDeclare）。 */
   
   // 重置每回合被动标记
   battleState[player]._kasumiUsedThisTurn = false;
@@ -10758,15 +10777,17 @@ function __presetPeek(kind) {
   var arr = __presetDecks[kind] || [];
   return arr.length ? arr[0] : null;
 }
-/* 里尔亚斯被动①：查询下一张事件卡（预设优先；未预设就如实说是随机） */
+/* 里尔亚斯被动①：查询下一张事件卡。
+   【卡堆模型（作者 2026-09-28 口径）】事件卡 / 馈赠卡 / 御神签 各自都是**一个每局洗一次的堆**，
+   所以"下一张"就是**堆顶**，直接看就行 —— 不需要玩家做任何配置。 */
 function __peekNextEventCard(player) {
   try {
-    var nm = __presetPeek('events');
-    if (nm) return '下一张事件卡（预设卡堆）：【' + nm + '】';
-    var mm = __presetPeek('music');
-    return '事件卡是从卡池里**随机抽取**的，未预设卡堆 ⇒ 无法预知具体是哪一张。\n'
-      + '如需确定顺序，请在角色技能菜单里用「🗂 预设卡堆」填写名单（逗号分隔卡名）。'
-      + (mm ? ('\n（顺带：乐谱卡预设的下一张是【' + mm + '】）') : '');
+    var preset = (typeof __presetPeek === 'function') ? __presetPeek('events') : null;
+    if (preset) return '下一张事件卡（预设名单优先）：【' + preset + '】';
+    var top = (typeof __pilePeek === 'function') ? __pilePeek('events', []) : null;
+    if (top) return '下一张事件卡：【' + top + '】（本局事件卡堆的堆顶）';
+    return '本局事件卡堆尚未洗牌 —— 第一次抽到事件卡时会洗出一副随机顺序，之后随时可以查到堆顶。\n'
+      + '（「🗂 预设卡堆」只是测试/验证用的可选覆盖，平时不需要填。）';
   } catch (e) { return '（查询失败：' + ((e && e.message) || e) + '）'; }
 }
 /* 预设卡堆编辑入口（P1 用 prompt：简单、无依赖、离线也能用） */
@@ -12556,7 +12577,7 @@ function endTurn() {
   // 单回合移动累计：回合结束立即归零（里绪/直尺）
   battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
   battleState.p1._kaedeMizugiMove = 0; battleState.p1._kaedeMizugiRecycledTurn = false;
-  battleState.p1._tomaMoveCount = 0; battleState.p1._tomaItemTurn = false;
+  // 【已清理 2026-09-28】旧冬马移动/道具标记不再重置（旧实现已删）
   // 结衣被动：对方被移出游戏的卡（直到本回合结束）回合结束返回原区域
   __restoreTempExiled('p2');
 
@@ -13274,7 +13295,7 @@ function aiEndTurn(seat) {
   // 单回合移动累计：AI回合结束立即归零（里绪/直尺）
   aiMe()._rioMoveCount = 0; aiMe()._zhichiMoveCount = 0; aiMe()._koharuMoveCount = 0;
   aiMe()._kaedeMizugiMove = 0; aiMe()._kaedeMizugiRecycledTurn = false;
-  aiMe()._tomaMoveCount = 0; aiMe()._tomaItemTurn = false;
+  // 【已清理 2026-09-28】旧冬马移动/道具标记不再重置（旧实现已删）
   // 结衣被动：我方被移出游戏的卡（直到本回合结束）回合结束返回原区域
   __restoreTempExiled(aiFoe());
   function __aiEndTail() {
@@ -14292,6 +14313,50 @@ function __goldPrice(pp, amount) {
   var dis = (pp && pp.permanent && pp.permanent.some(function (c) { return c.name && c.name.indexOf('黑色卡片') >= 0; })) ? 1000 : 0;
   return Math.max(0, (amount || 0) - dis);
 }
+/* ============================================================
+   【卡堆模型】（作者 2026-09-28 口径）
+   事件卡 / 馈赠卡 / 御神签 在现实规则里各自是**一个卡堆**：每局开始时把该类型的卡洗成随机顺序，
+   之后从**堆顶**逐张抽；抽空了就重新洗一副（保证抽得到）。因此"查看下一张"= 看堆顶，**不需要玩家配置**。
+   （可选的"预设卡堆"仍保留：填了名单就优先按名单发，只作为测试/验证用的覆盖手段。）
+   ============================================================ */
+function __pileGet(kind) {
+  if (!battleState) return null;
+  if (!battleState._piles) battleState._piles = {};
+  if (!Array.isArray(battleState._piles[kind])) battleState._piles[kind] = [];
+  return battleState._piles[kind];
+}
+function __pileShuffleIn(kind, names) {
+  var pile = __pileGet(kind); if (!pile) return [];
+  var arr = (names || []).slice();
+  for (var i = arr.length - 1; i > 0; i--) { var j = GameRNG.range(0, i); var t = arr[i]; arr[i] = arr[j]; arr[j] = t; }
+  battleState._piles[kind] = arr;
+  return arr;
+}
+/* 看堆顶（不消耗）：堆空则按 allNames 洗一副新堆 */
+function __pilePeek(kind, allNames) {
+  var pile = __pileGet(kind); if (!pile) return null;
+  if (!pile.length) pile = __pileShuffleIn(kind, allNames);
+  return pile.length ? pile[0] : null;
+}
+/* 从堆顶抽一张（消耗）。opt.name=指定要抽到的卡名（如"必定大吉/和声"）；opt.exclude=要跳过的卡名数组 */
+function __pilePop(kind, allNames, opt) {
+  opt = opt || {};
+  var pile = __pileGet(kind); if (!pile) return null;
+  if (!pile.length) pile = __pileShuffleIn(kind, allNames);
+  var exclude = opt.exclude || [];
+  var ix = -1;
+  if (opt.name) { for (var i = 0; i < pile.length; i++) { if (pile[i] === opt.name) { ix = i; break; } } }
+  if (ix < 0) {
+    for (var k = 0; k < pile.length; k++) { if (exclude.indexOf(pile[k]) < 0) { ix = k; break; } }
+  }
+  if (ix < 0) {                       // 整堆都被排除 ⇒ 重洗（不改排除规则，避免抽不到）
+    pile = __pileShuffleIn(kind, allNames);
+    for (var m = 0; m < pile.length; m++) { if (exclude.indexOf(pile[m]) < 0) { ix = m; break; } }
+  }
+  if (ix < 0) ix = 0;
+  return pile.splice(ix, 1)[0] || null;
+}
+
 function drawGiftCard(player) {
   if (!battleState) return;
   var p = battleState[player];
@@ -14330,7 +14395,16 @@ function drawGiftCard(player) {
       }
     }
     p._giftStreak = (p._giftStreak || 0) + 1;
-    var card = __rioFirst ? giftPool.filter(function (c) { return c.name === '和声'; })[0] || GameRNG.pick(giftPool) : GameRNG.pick(giftPool);
+    /* 【卡堆模型】馈赠卡也是"一个堆"：从堆顶抽；被当前效果排除的卡（共鸣者剔200$/伊织剔500$）自动跳过；
+       里绪(水着)首次馈赠 ⇒ 指定抽【和声】；抽空了自动重洗。 */
+    var __giftNames = giftPool.map(function (c) { return c.name; });
+    var __giftExclude = [];
+    if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('共鸣者') >= 0; })) __giftExclude.push('200$');
+    if (p._ioriPassive) __giftExclude.push('500$');
+    var __giftName = (typeof __pilePop === 'function') ? __pilePop('gifts', __giftNames, { name: __rioFirst ? '和声' : null, exclude: __giftExclude }) : null;
+    var card = null;
+    for (var __gi = 0; __gi < giftPool.length; __gi++) { if (giftPool[__gi].name === __giftName) { card = giftPool[__gi]; break; } }
+    if (!card) card = __rioFirst ? (giftPool.filter(function (c) { return c.name === '和声'; })[0] || GameRNG.pick(giftPool)) : GameRNG.pick(giftPool);
     if (__rioFirst) addBattleLog(player, '【里绪(水着)被动】首次抽取馈赠卡，必定抽中【和声】');
     var __giftGuarantee = (card.name.indexOf('和声') < 0 && p._giftStreak >= 6); // 连续6次未中和声→第6次附赠和声
     if (card.name.indexOf('和声') >= 0) p._giftStreak = 0; // 中途抽到和声即重置保底计数
@@ -14401,15 +14475,19 @@ function drawOmikuji(player, opt) {
     __rioDaikichi = true;
     addBattleLog(player, '【里绪(水着)被动】首次到达神社，必定抽中【大吉】');
   }
-  var card = __rioDaikichi ? omikujiPool.filter(function (c) { return c.name === '大吉'; })[0] : GameRNG.pick(omikujiPool);
+  /* 【卡堆模型】御神签也是"一个堆"：从堆顶抽；里绪(水着)首次神社 ⇒ 指定抽【大吉】；抽空了自动重洗。 */
+  var __omNames = omikujiPool.map(function (c) { return c.name; });
+  var __omName = (typeof __pilePop === 'function') ? __pilePop('omikuji', __omNames, { name: __rioDaikichi ? '大吉' : null }) : null;
+  var card = null;
+  for (var __oi = 0; __oi < omikujiPool.length; __oi++) { if (omikujiPool[__oi].name === __omName) { card = omikujiPool[__oi]; break; } }
+  if (!card) card = __rioDaikichi ? omikujiPool.filter(function (c) { return c.name === '大吉'; })[0] : GameRNG.pick(omikujiPool);
   addBattleLog(player, '抽到御神签【' + card.name + '】 - ' + card.effect);
   
-  // 御神签获得激励点数（里尔亚斯被动①：获取激励点数时额外+1）
+  // 御神签获得激励点数（卡面数据里的 inspire 字段）
   if (!p.motivation) p.motivation = 0;
-  var __lilExtra2 = p._lilithPassive ? 1 : 0;
-  var omikujiMotivation = dataInspire('omikuji', '御神签·' + card.name, card.inspire || 0) + __lilExtra2;
+  var omikujiMotivation = dataInspire('omikuji', '御神签·' + card.name, card.inspire || 0);   // 【新卡面】不再有里尔亚斯"激励+1"
   p.motivation += omikujiMotivation;
-  addBattleLog(player, '获得' + omikujiMotivation + '点激励点数' + (__lilExtra2 ? '（里尔亚斯被动+1）' : '') + '，当前' + p.motivation + '点激励');
+  addBattleLog(player, '获得' + omikujiMotivation + '点激励点数，当前' + p.motivation + '点激励');
   checkLevelUp(player);
 
   if (card.type === 'calibrate' || card.type === 'calibrate_risk') {
@@ -14651,7 +14729,16 @@ function triggerEventCard(player) {
     }
     if (!__presetEvent) addBattleLog(player, '【预设卡堆】名单里的【' + __presetEventName + '】不在本局事件卡池中，已回落到随机');
   }
-  var event = JSON.parse(JSON.stringify(__presetEvent || GameRNG.pick(__pool)));
+  /* 【卡堆模型】事件卡也是一个"堆"：从堆顶抽（预设名单优先）；抽空了自动重洗。
+     里尔亚斯被动①"查询下一张事件卡"看的就是这个堆顶 ⇒ 不需要玩家配置。 */
+  var __evAllNames = (__pool || []).map(function (c) { return c.name; });
+  var __evTop = (!__presetEvent && typeof __pilePeek === 'function') ? __pilePeek('events', __evAllNames) : null;
+  var __evCard = null;
+  if (__evTop) {
+    for (var __evi = 0; __evi < (__pool || []).length; __evi++) { if (__pool[__evi] && __pool[__evi].name === __evTop) { __evCard = __pool[__evi]; break; } }
+    if (__evCard && typeof __pilePop === 'function') __pilePop('events', __evAllNames, { name: __evCard.name });
+  }
+  var event = JSON.parse(JSON.stringify(__presetEvent || __evCard || GameRNG.pick(__pool)));
   event._category = 'event_cards';
   event.cost = 0;
   
