@@ -1317,6 +1317,51 @@ body.map3d-on .minimap-container { display: none !important; }
 #chainFlash{position:fixed;top:34%;left:50%;transform:translate(-50%,-50%) scale(.8);z-index:9700;pointer-events:none;display:none;max-width:82vw;text-align:center;}
 #chainFlash.show{display:block;animation:chainFlashPop .5s cubic-bezier(.2,1.3,.4,1) forwards;}
 #chainFlash .cf-tag{display:inline-block;padding:7px 20px;border-radius:999px;font-size:21px;font-weight:900;letter-spacing:1px;color:#fff;background:linear-gradient(135deg,rgba(96,80,180,.96),rgba(48,40,100,.96));border:1.5px solid rgba(184,156,255,.85);box-shadow:0 0 30px rgba(140,110,255,.8),0 12px 30px rgba(0,0,0,.45);text-shadow:0 1px 3px rgba(0,0,0,.5);line-height:1.3;}
+/* ================= __UI_PHASE1 · MD 风设计变量（2026-09-30） =================
+   配色/圆角/时长统一在这里；后续铺到全局时只引用这些变量。 */
+:root{
+  --md-bg:#070b14; --md-bg-2:#0b1322; --md-bg-3:#101a2e;
+  --md-glass:rgba(16,24,42,.74); --md-glass-2:rgba(10,16,30,.88);
+  --md-line:rgba(140,190,255,.16); --md-line-2:rgba(140,190,255,.30);
+  --md-text:#e9f2ff; --md-dim:#9db0cc;
+  --md-gold:#f2cf82; --md-gold-2:#c99a4e; --md-gold-3:#8a6630;
+  --md-neon:#5cc8ff; --md-neon-2:#8b7bff;
+  --md-crimson:#ff7a92; --md-crimson-2:#a8344f;
+  --md-r:14px; --md-r-s:10px; --md-r-pill:999px;
+  --md-t-fast:.16s; --md-t:.26s; --md-t-slow:.4s;
+  --md-ease:cubic-bezier(.22,.61,.36,1);
+  --md-glow-neon:0 0 16px rgba(92,200,255,.38);
+  --md-glow-gold:0 0 16px rgba(242,207,130,.4);
+  --md-shadow:0 14px 34px rgba(0,0,0,.5);
+}
+/* 连锁堆栈：玻璃卡片 + 金色链号 + 我方霓虹/对方绯红描边 */
+#chainStackAnim{filter:drop-shadow(0 10px 24px rgba(0,0,0,.45));}
+.csa-node{min-width:158px;max-width:248px;padding:9px 13px;border-radius:var(--md-r-s);
+  font-size:12.5px;font-weight:700;color:var(--md-text);line-height:1.35;
+  background:linear-gradient(150deg,var(--md-glass),var(--md-glass-2));
+  border:1px solid var(--md-line-2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:var(--md-shadow),inset 0 1px 0 rgba(255,255,255,.06);
+  display:flex;align-items:center;gap:9px;opacity:0;transform:translateX(56px) scale(.9);}
+.csa-node.owner-p1{border-left:3px solid var(--md-neon);}
+.csa-node.owner-p2{background:linear-gradient(150deg,rgba(52,22,34,.86),rgba(30,12,20,.9));border-color:rgba(255,122,146,.42);border-left:3px solid var(--md-crimson);}
+.csa-node .csa-no{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:900;font-size:14px;background:linear-gradient(135deg,var(--md-gold),var(--md-gold-2));color:#2c2008;
+  box-shadow:var(--md-glow-gold);}
+.csa-node.csa-in{animation:csaFlyIn var(--md-t) var(--md-ease) forwards;}
+.csa-node.csa-resolving{animation:csaResolve .5s ease infinite;border-color:var(--md-neon);box-shadow:var(--md-glow-neon);}
+.csa-node.csa-done{opacity:.55;filter:grayscale(.4);}
+.csa-node.csa-lost{opacity:.6;border-color:#ff7b7b;}
+/* 中央横幅：更薄、更"金属" */
+#chainFlash .cf-tag{backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);letter-spacing:1.5px;}
+/* 出牌飞行体（CardAnim）：不承重，纯视觉 */
+.md-card-fly{position:fixed;z-index:99998;pointer-events:none;border-radius:8px;overflow:hidden;
+  box-shadow:0 12px 30px rgba(0,0,0,.55),0 0 18px rgba(92,200,255,.35);will-change:transform,opacity;}
+.md-card-fly img{width:100%;height:100%;object-fit:cover;display:block;}
+.md-card-fly .md-card-fly-name{display:flex;align-items:center;justify-content:center;height:100%;
+  font-size:12px;font-weight:800;color:#2c2008;background:linear-gradient(150deg,var(--md-gold),var(--md-gold-2));padding:4px;text-align:center;}
+.md-card-fly-land{position:fixed;z-index:99997;pointer-events:none;border-radius:10px;border:2px solid var(--md-neon);
+  box-shadow:0 0 22px rgba(92,200,255,.55);animation:mdCardLand var(--md-t) var(--md-ease) forwards;}
+@keyframes mdCardLand{0%{opacity:.9;transform:scale(1.06);}100%{opacity:0;transform:scale(1);}}
 #chainFlash.flash-activate .cf-tag{background:linear-gradient(135deg,#f6c343,#e08a1e);color:#3a2c10;border-color:#ffe6a0;box-shadow:0 0 34px rgba(255,210,110,.9);}
 #chainFlash.flash-resolve .cf-tag{background:linear-gradient(135deg,#5ad1ff,#2b7de9);border-color:#bfeaff;box-shadow:0 0 34px rgba(110,200,255,.9);}
 #chainFlash.flash-ok .cf-tag{background:linear-gradient(135deg,#34d399,#0f9f73);border-color:#aaf5d8;}
@@ -10230,6 +10275,63 @@ globalThis.__aiChainDecide = function (who, pool, chain) {
 // 组链完成后统一【从最后一个往前逆序结算】，每个节点结算前再做 alive 丢失目标校验。
 // ============================================================
 // 连锁堆叠动画控制器：组链时 C1/C2… 依次飞入堆叠，逆结算时逐个高亮、结算/丢失，最后整体淡出
+/* ================= __UI_PHASE1 · 出牌/上链飞行动画（不承重） =================
+   作者 2026-09-30："打出卡牌和连锁没有动画" ⇒ 出牌时让卡图从手牌位置飞到连锁堆栈。
+   约束：任何异常都吞掉；animate 不可用时直接不做（绝不影响结算与推进）。 */
+var CardAnim = {
+  enabled: function () { try { return window.__UI_ANIM !== false && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return true; } },
+  _handRect: function () {
+    try {
+      var h = document.getElementById('hand') || document.getElementById('handRow') || document.querySelector('.hand-area') || document.querySelector('#battleScreen .hand');
+      if (h) { var r = h.getBoundingClientRect(); if (r && r.width) return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: 72, h: 96 }; }
+      var m = document.querySelector('.map3d-wrap') || document.querySelector('#battleScreen .battle-main-area');
+      if (m) { var r2 = m.getBoundingClientRect(); return { x: r2.left + r2.width / 2, y: r2.top + r2.height * .78, w: 72, h: 96 }; }
+    } catch (e) { console.error('取手牌位置失败', e); }
+    return { x: window.innerWidth / 2, y: window.innerHeight * .8, w: 72, h: 96 };
+  },
+  _targetRect: function () {
+    try {
+      var b = document.getElementById('chainStackAnim');
+      if (b) { var r = b.getBoundingClientRect(); if (r && r.width) return { x: r.left + r.width / 2, y: r.bottom - 24, w: 88, h: 118 }; }
+    } catch (e) { console.error('取连锁堆栈位置失败', e); }
+    return { x: window.innerWidth - 140, y: window.innerHeight * .5, w: 88, h: 118 };
+  },
+  /** 把一张卡从手牌"甩"到连锁堆栈；抛错绝不上抛 */
+  play: function (card, label) {
+    try {
+      if (!this.enabled()) return;
+      if (typeof document === 'undefined' || !document.body) return;
+      var from = this._handRect(), to = this._targetRect();
+      var src = (card && (card.image_url || card.avatar_url)) || '';
+      var el = document.createElement('div');
+      el.className = 'md-card-fly';
+      el.style.width = from.w + 'px'; el.style.height = from.h + 'px';
+      el.style.left = '0px'; el.style.top = '0px';
+      el.innerHTML = src ? ('<img src="' + src + '" alt="">') : ('<div class="md-card-fly-name">' + String(label || (card && card.name) || '') + '</div>');
+      document.body.appendChild(el);
+      var dx = to.x - from.x, dy = to.y - from.y, sc = to.w / from.w;
+      var done = function () { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) { } };
+      if (typeof el.animate !== 'function') { done(); return; }
+      var a = el.animate([
+        { transform: 'translate(' + from.x + 'px,' + from.y + 'px) translate(-50%,-50%) scale(.72) rotate(-8deg)', opacity: 0 },
+        { transform: 'translate(' + (from.x + dx * .55) + 'px,' + (from.y + dy * .45 - 24) + 'px) translate(-50%,-50%) scale(' + (sc * .95) + ') rotate(2deg)', opacity: 1, offset: .6 },
+        { transform: 'translate(' + to.x + 'px,' + to.y + 'px) translate(-50%,-50%) scale(' + sc + ') rotate(0deg)', opacity: 1 }
+      ], { duration: 280, easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'forwards' });
+      a.onfinish = function () {
+        done();
+        try {
+          var land = document.createElement('div');
+          land.className = 'md-card-fly-land';
+          land.style.width = to.w + 'px'; land.style.height = to.h + 'px';
+          land.style.left = (to.x - to.w / 2) + 'px'; land.style.top = (to.y - to.h / 2) + 'px';
+          document.body.appendChild(land);
+          setTimeout(function () { try { if (land.parentNode) land.parentNode.removeChild(land); } catch (e) { } }, 300);
+        } catch (e) { console.error('落点闪光失败', e); }
+      };
+      a.oncancel = done;
+    } catch (e) { try { console.error('出牌动画异常（不影响结算）', e); } catch (e2) { } }
+  }
+};
 var ChainAnim = {
   _nodes: [], _box: null,
   _el: function () { if (!this._box) this._box = document.getElementById('chainStackAnim'); return this._box; },
@@ -10245,6 +10347,8 @@ var ChainAnim = {
   },
   begin: function () { var b = this._el(); if (!b) return; b.innerHTML = '<div class="csa-title">CHAIN · 连锁</div>'; b.classList.remove('csa-ending'); b.classList.add('show'); this._nodes = []; },
   push: function (node) {
+    /* 出牌/上链飞行（不承重：CardAnim.play 内部吞掉一切异常） */
+    try { if (typeof CardAnim !== 'undefined' && CardAnim.play) CardAnim.play(node && node.card, node && node.label); } catch (e) { console.error('出牌动画调用异常（不影响推进）', e); }
     var b = this._el(); var i = this._nodes.length;
     if (b) { var d = document.createElement('div'); d.className = 'csa-node owner-' + (node.owner || 'p1') + ' csa-in';
       var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
