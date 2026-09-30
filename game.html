@@ -9661,7 +9661,6 @@ function startTurn() {
       if (__p._lilithPassive && (__p.maxCost || 0) < 14) {
         __p.maxCost = 14;
         if ((__p.cost || 0) > __p.maxCost) __p.cost = __p.maxCost;
-        __p._lilithFloorApplied = true;
       }
       // 霜烬被动·黎明灰烬：同步<14 每回合自然回复+4且攻击力+4（回合刷新不叠加）；同步>26 全队免疫其他玩家施加的负面效果
       if (__p._frostPassive) {
@@ -10895,6 +10894,18 @@ var TW = {
      这个区分是 S1b 的关键 —— 一开始把 applyChainCard 放进 fire，结果响应窗口（走 onClose、不跑 TW.settle）
      永远不会发动那张卡，链是空的（现象：卡"打了但没有任何生效日志"）。 */
   _addChain: function (win, c, done) {
+    /* P1（MD：同一连锁一次）：同一张卡的同一个触发，在**同一条连锁**里只允许入链一次 */
+    var __fin0 = (typeof done === 'function') ? done : function () { };
+    try {
+      if (c) {
+        c.key = c.key || (String(c.id || c.label || '?') + '|' + String((c.card && c.card.name) || ''));
+        var dup = (win.chain || []).some(function (x) { return x && x.key === c.key; });
+        if (dup) {
+          addBattleLog((c.owner || 'system'), '【连锁·MD口径】「' + (c.label || c.key) + '」本连锁已在链上 ⇒ 不再重复入链');
+          return __fin0();
+        }
+      }
+    } catch (e) { console.error('同链去重出错（放行）', e); }
     if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
     win.chain.push(c);
     var fin = (typeof done === 'function') ? done : function () {};
@@ -11130,6 +11141,8 @@ var TW = {
   /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
   close: function (win) {
     win.state = 'done';
+    /* P1（MD：同一连锁一次）：连锁结束 ⇒ 清空"本连锁已排过"的集合（下一条连锁重新计） */
+    try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { }
     try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
@@ -11397,10 +11410,34 @@ function __chainIsBusy() {
     return false;
   } catch (e) { return false; }
 }
+/* ============================================================
+   【MD 口径 P1：同一连锁一次】（2026-09-30）
+   同一条连锁上，同一个「触发 id + 卡名」只允许出现一次 —— 防止同一张卡的触发被排两次
+   （老毛病：重入收集、事件级标记只算了一侧）。**每条连锁开始时清空**，所以不影响"每回合一次"的语义。
+   ============================================================ */
+function __chainOnce(key) {
+  try {
+    if (!key) return true;
+    if (typeof effectEngine === 'undefined' || !effectEngine) return true;
+    if (!effectEngine._chainOnceSet) effectEngine._chainOnceSet = {};
+    if (effectEngine._chainOnceSet[key]) return false;
+    effectEngine._chainOnceSet[key] = true;
+    return true;
+  } catch (e) { return true; }
+}
+function __chainOnceReset() {
+  try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainOnceSet = {}; } catch (e) { }
+}
 /** 结算中 → 入队；否则立即执行 */
 function queueOrRunTrigger(desc) {
   try {
     if (!desc || typeof desc.fire !== 'function') return 'ran';
+    /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃 */
+    if (!desc.key) desc.key = String(desc.id || desc.label || '?') + '|' + String((desc.card && desc.card.name) || '');
+    if (!__chainOnce(desc.key)) {
+      addBattleLog(desc.owner || 'system', '【连锁·MD口径】「' + (desc.label || desc.key) + '」本连锁已排过 ⇒ 丢弃重复');
+      return 'dup';
+    }
     if (!__chainIsBusy()) { desc.fire(); return 'ran'; }
     effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
     effectEngine._pendingTriggers.push(desc);
