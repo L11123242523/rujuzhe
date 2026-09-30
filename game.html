@@ -14085,15 +14085,29 @@ function checkBattleEnd() {
     try { showBattleResult(win, title, desc, __endStats()); } catch (e) {}
     __olEnd();
   }
-  // 同步值归零判定（常规获胜）
-  if (battleState.p1.sync <= 0) {
+  /* 【2026-10-01 豁免闸】同步值归零是事实判负，但"即将归零、回复手段还没轮到"时**先不判负**。
+     判据：这一轮还没走完（结算中 / 有活动时点窗口 / 队列里还有待触发 / 正在等弹窗决策）⇒ 延后判定。 */
+  var __syncZeroDefer = (function () {
+    try {
+      if (typeof __chainIsBusy === 'function' && __chainIsBusy()) return true;
+      if (typeof TW !== 'undefined' && TW && TW.active) return true;
+      if (typeof effectEngine !== 'undefined' && effectEngine) {
+        if ((effectEngine._resolveDepth || 0) > 0) return true;
+        if ((effectEngine._pendingTriggers || []).length > 0) return true;
+      }
+      if (battleState && battleState._awaitingDecision) return true;
+    } catch (e) { console.error('同步归零豁免判定出错（按不豁免处理）', e); }
+    return false;
+  })();
+    // 同步值归零判定（常规获胜）
+  if (battleState.p1.sync <= 0 && !__syncZeroDefer) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(false); return true; }
     __finishBattle(false, __oppNm + ' 获胜', '你的同步值归零，败北了。再挑战一次吧！');
     return true;
   }
-  if (battleState.p2.sync <= 0) {
+  if (battleState.p2.sync <= 0 && !__syncZeroDefer) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
