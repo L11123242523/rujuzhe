@@ -10289,7 +10289,11 @@ function applyChainCard(player,pick,effect,done){
   } else if(eff.indexOf('抵消')>=0&&eff.indexOf('伤害')>=0){
     payAndRemove(); effect._chain.push({kind:'cancelDamage',by:player,name:name}); afterUse();
   } else if(eff.indexOf('效果无效')>=0||name.indexOf('崩塌之乌托邦')>=0){
-    payAndRemove(); effect._chain.push({kind:'negate',by:player,name:name}); afterUse();
+    /* 【MD 口径 A3】（2026-09-30）这一支的卡面写的就是「**效果无效**」⇒ 按 MD 口径属于**效果无效**：
+       仍占连锁环、只是效果不生效；而**发动代价不返还**（代价在发动时已付）。
+       原来统一用 kind:'negate'（= 发动无效：整条动作消失 + A2 次数返还）⇒ 与卡面语义不符。
+       「发动无效」的 kind:'negate' 分支保留（供卡面写明"发动无效/破坏并无效"的卡使用）。 */
+    payAndRemove(); effect._chain.push({kind:'negate_effect',by:player,name:name}); afterUse();
   } else if(name==='Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff)){
     // Twice 重判：在骰子/判定结果确定前连锁，重掷一次（修复原兜底分支吞卡白费）
     payAndRemove(); effect._chain.push({kind:'reroll',by:player,name:name}); afterUse();
