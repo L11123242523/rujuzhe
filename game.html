@@ -7545,19 +7545,10 @@ function evaluatePlayable(card,player,opts){
   if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
   var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
   if(me.cost + __loanCap < cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
-  /* 【MD 口径 P2：发动的代价前置】（2026-09-30）
-     卡面写「扣除自身N点同步值」的卡 ⇒ 同步值不够时**不能发动**。
-     原来这条代价只在**结算时**扣（不满足也照样发动）⇒ 与 MD 口径不符。这里做**发动前校验**，
-     结算时仍照常扣除（两处保持一致，不改动结算路径）。 */
-  try {
-    var __syncCostM = String(card.effect || card.text || '').match(/扣除自身\s*(\d+)\s*点同步值/);
-    if (__syncCostM) {
-      var __syncNeed = parseInt(__syncCostM[1], 10) || 0;
-      if (__syncNeed > 0 && (me.sync || 0) < __syncNeed) {
-        return { ok: false, reason: '同步值不足（发动要扣除 ' + __syncNeed + ' 点，当前 ' + (me.sync || 0) + '）' };
-      }
-    }
-  } catch (e) { console.error('同步值代价前置校验出错（放行）', e); }
+  /* 【2026-10-01 作者裁决】"扣除自身 N 点同步值"**不再前置拦截**：允许发动，
+     代价按 0 下限扣（不足不补）；若因此归零则由"同步值归零 ⇒ 败北"规则处理（无回复手段时才判负）。
+     ⚠ 音韵值（费用）不足仍然拦（上面的 __loanCap 那段不受影响）。 */
+
   // 5) 攻击卡：范围内必须存在可攻击目标
   if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
@@ -19423,10 +19414,23 @@ function __opsBuff(op, ctx, next, env) {
          （当前 2 点攻击力 ⇒ +2；3 点 ⇒ +3；以此类推），**不是**把伤害翻倍 ——
          因为攻击力在伤害公式里还要 ÷2（见 __offensiveBuffSum）。
          所以这里按"当前攻击力（常驻 attackBuff + 临时 _tempAttack）× N%"累加到**临时**档。 */
-      var __pvBase = (p.attackBuff || 0) + (p._tempAttack || 0);
+      /* 【2026-10-01 修正】基数必须与**伤害公式**同源：攻击力不只是 p.attackBuff，
+         还含队伍攻击力/SP 加成 ⇒ 原写法在"常驻=0"的角色上算成 100%×0=0（作者实测：加了等于没加）。 */
+      var __pvBase = 0;
+      try {
+        var __ob = (typeof __offensiveBuffSum === 'function') ? __offensiveBuffSum(user) : null;
+        if (typeof __ob === 'number' && isFinite(__ob)) __pvBase = __ob;
+        else if (__ob && typeof __ob === 'object') {
+          var __cand = [__ob.total, __ob.sum, __ob.value, __ob.attack].filter(function (x) { return typeof x === 'number' && isFinite(x); });
+          if (__cand.length) __pvBase = __cand[0];
+        }
+      } catch (e) { console.error('取攻击力基数失败（用兜底）', e); }
+      if (!__pvBase) __pvBase = (p.attackBuff || 0) + (p._tempAttack || 0) + (p.teamAttack || 0) + (p._teamAttack || 0) + (p.attackBonus || 0);
+      if (!__pvBase && (op.pct || 0) >= 100) { __pvBase = 1; window.__pvFloorHit = true; }   // 保底：+100% 至少 +1
       var __pvAdd = Math.floor(__pvBase * (op.pct || 0) / 100);
       p._tempAttack = (p._tempAttack || 0) + __pvAdd;
-      addBattleLog(user, '攻击力+' + (op.pct || 0) + '%（当前攻击力' + __pvBase + ' ⇒ +' + __pvAdd + '，直到当前阶段结束）');
+      addBattleLog(user, '攻击力+' + (op.pct || 0) + '%（攻击力基数' + __pvBase + (window.__pvFloorHit ? '·保底' : '') + ' ⇒ 实际+' + __pvAdd + '，直到当前阶段结束）');
+      window.__pvFloorHit = false;
       break;
     }
     case 'attack_buff': p.attackBuff = (p.attackBuff || 0) + op.amount; break;
