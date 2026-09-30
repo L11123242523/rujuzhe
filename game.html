@@ -11140,6 +11140,49 @@ function __missTiming(id, ctx) {
   } catch (e) { console.error('错过时点判定出错（放行）', e); return false; }
 }
 
+/* ================= __MD_A2A3 · MD 口径 A2/A3（2026-09-30） =================
+   A2：发动被无效 ⇒ "一回合一次"不消耗 —— 用"链环建立时快照、发动无效时还原"实现，
+       不改任何卡自己的计数逻辑（这些标记散落在几十处，逐个改风险大）。
+   A3：区分「效果无效」与「发动无效」。 */
+function __onceKeysOf(p) {
+  try {
+    var out = [];
+    if (!p) return out;
+    Object.keys(p).forEach(function (k) {
+      /* 后缀匹配（大小写不敏感）：标记形如 _liuliHWSPTurn / _tomaSPUsed / _xxxDone。
+         ⚠ 首版 /_(Turn|…)$/ 要求"以 _Turn 结尾" ⇒ 几乎一个都匹配不到（_liuliHWSPTurn 结尾是 SPTurn）✗
+         排除引擎内部状态（锁/深度/卡堆/窗口），它们不是"每回合一次"标记 */
+      if (/^__/.test(k)) return;
+      if (/Lock|Depth|_piles|_awaiting|_chainOnce/i.test(k)) return;
+      if (!/(Turn|Used|Done|Queued|Count|Flag)$/i.test(k)) return;
+      var t = typeof p[k];
+      if (t === 'number' || t === 'boolean' || t === 'string') out.push(k);
+    });
+  } catch (e) { console.error('收集每次一回标记失败', e); }
+  return out;
+}
+function __snapshotOncePerTurn(player) {
+  try {
+    var p = battleState && battleState[player];
+    if (!p) return null;
+    var keys = __onceKeysOf(p), snap = {};
+    keys.forEach(function (k) { snap[k] = p[k]; });
+    return { keys: keys, vals: snap };
+  } catch (e) { console.error('快照每次一回标记失败', e); return null; }
+}
+function __restoreOncePerTurn(player, snap, label) {
+  try {
+    if (!snap || !snap.keys) return 0;
+    var p = battleState && battleState[player];
+    if (!p) return 0;
+    var n = 0;
+    snap.keys.forEach(function (k) {
+      if (p[k] !== snap.vals[k]) { p[k] = snap.vals[k]; n++; }
+    });
+    if (n > 0) addBattleLog(player || 'system', '【连锁·MD口径A2】' + (label || '该发动') + '被**无效** ⇒ 本次消耗的「一回合一次」次数已**返还**（' + n + ' 项）');
+    return n;
+  } catch (e) { console.error('还原每次一回标记失败', e); return 0; }
+}
 var TW = {
   active: null,
   seq: 0,
@@ -11245,6 +11288,8 @@ var TW = {
         }
       }
     } catch (e) { console.error('咒文速度校验出错（放行）', e); }
+    /* A2：记录该环建立时，发动者的"每回合一次"类标记（若本环最终被发动无效 ⇒ 还原） */
+    try { if (c && c.owner && !c._onceSnap && typeof __snapshotOncePerTurn === 'function') c._onceSnap = __snapshotOncePerTurn(c.owner); } catch (e) { console.error('A2 快照失败（忽略）', e); }
     if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
     win.chain.push(c);
     var fin = (typeof done === 'function') ? done : function () {};
@@ -11579,7 +11624,18 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else { effect._reverseDir = !effect._reverseDir; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动方向反转生效'); }
     } else if (e.kind === 'negate') {
-      actionAlive = false; effect.cancelled = true; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】反制成立，将要执行的效果被无效');
+      /* 【发动无效】整条动作消失 + A2：把发动者这次消耗的"一回合一次"次数**返还** */
+      actionAlive = false; effect.cancelled = true; effect.negateKind = 'activate'; __doneSet[i] = true;
+      addBattleLog(e.by, '【' + e.name + '】反制成立 ⇒ **发动被无效**（本环的动作整条不处理）');
+      try {
+        var __snapNode = null;
+        for (var __si = 0; __si < stack.length; __si++) { if (stack[__si] && stack[__si]._onceSnap) { __snapNode = stack[__si]; break; } }
+        if (__snapNode && typeof __restoreOncePerTurn === 'function') __restoreOncePerTurn(__snapNode.owner, __snapNode._onceSnap, '【' + __snapNode.name + '】');
+      } catch (e3) { console.error('A2 次数返还失败（忽略）', e3); }
+    } else if (e.kind === 'negate_effect') {
+      /* 【效果无效】（MD A3）：**仍占连锁环**，只是效果不生效 —— 不改变 actionAlive（位移/点数等非效果部分不受影响） */
+      effect.cancelled = true; effect.negateKind = 'effect'; __doneSet[i] = true;
+      addBattleLog(e.by, '【' + e.name + '】反制成立 ⇒ **效果被无效**（占据连锁环，但不生效；发动代价不返还）');
     } else if (e.kind === 'reroll') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else {
