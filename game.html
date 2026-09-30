@@ -13650,7 +13650,9 @@ function aiResourceStep(done) {
         p._sacrificeUsedThisTurn = usedSac + 1;
         var rec = 2 + ((usedSac === 0 && p._kotaroPassive) ? 2 : 0) +
           ((usedSac === 0 && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('黑色卡片') >= 0; })) ? 1 : 0);
-        p.cost = Math.min(p.cost + rec, p.maxCost);
+        /* 【2026-10-01】改走唯一回费出口 recoverCost：否则"回音韵时点"（烙印+1 等）要等到下次刷新才补，
+           而下一行日志已经把 **补发前** 的 p.cost 打出去了 ⇒ 日志里的"当前N"与实际对不上。 */
+        recoverCost(aiSeat(), rec, 'AI献祭');
         addBattleLog(aiSeat(), '【AI】献祭【' + sac.name + '】回复' + rec + '点音韵（当前' + p.cost + '）');
         if (typeof updateBattleUI === 'function') updateBattleUI();
       }
@@ -14355,7 +14357,9 @@ function triggerTileEffect(player) {
       break; }
     case 'inspire':
       // 灵感（权威）：获得3点音韵值和1点激励点数
-      p.cost = Math.min(p.cost + 3, p.maxCost);
+      /* 【2026-10-01 修·队列②】走 recoverCost：先把"回音韵时点"发完（烙印每枚+1 等），
+         下一行日志里的"当前音韵"才是真值（原来直写 ⇒ 日志永远少算烙印数）。 */
+      recoverCost(player, 3, '灵感');
       p.motivation = (p.motivation || 0) + 1;
       addBattleLog(player, '灵感：获得3点音韵值、1点激励点数（当前音韵' + p.cost + '，激励' + p.motivation + '）');
       checkLevelUp(player);
@@ -14509,7 +14513,9 @@ function doSacrifice() {
         }
       }
     }
-    p.cost = Math.min(p.cost + recover, p.maxCost);
+    /* 【2026-10-01 修·队列②】走 recoverCost：先把"回音韵时点"发完（烙印每枚+1 等）再打日志，
+       否则日志里的"当前N/上限"是补发前的值、与界面显示的实时值对不上（作者实测：显示 8、日志写 5）。 */
+    recoverCost('p1', recover, '献祭');
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
     // 立即刷新界面：回费/手牌变化即时可见，不再等到后续询问窗关闭（修复献祭后回费延迟感）
     updateBattleUI();
@@ -18498,15 +18504,22 @@ function recoverCost(player, amount, source) {
 }
 /* 回音韵时点兜底：卡牌效果里仍有约 30 处直接写 p.cost = min(cost+N)，绕过了 recoverCost，
    导致"玩家回复音韵值时"（规则书第十三章时点11）漏发。这里在每次 UI 刷新前对比快照，
-   把绕过出口的回费补发一次时点（只补发时点，不改变数值，避免双重加费）。 */
+   把绕过出口的回费补发一次时点（只补发时点，不改变数值，避免双重加费）。
+   ⚠【2026-10-01 修·作者实测"贪欲者的烙印：音韵值显示与实际不符"】原来补发完把快照写回**补发前**的 now，
+   而"回音韵时点"上的烙印加成会让 p.cost 在补发过程中再涨一次 ⇒ 快照永远落后于真实值 ⇒
+   **每刷新一次 UI 就再补发一次、烙印加成被反复累加**（实测 5 → 8 → 11，到上限才停）。
+   两处修正：①补发期间（_greedAdding）不再递归补发；②快照一律取"补发**之后**的真实值"。 */
 function __syncRecoverTiming() {
   if (!battleState) return;
   playerIds().forEach(function (w) {
     var p = battleState[w]; if (!p) return;
+    /* 正在吃"回音韵时点"上的数值修正（烙印等）⇒ 此刻只同步快照，绝不递归补发 */
+    if (p._greedAdding) { p._lastCostSnapshot = (typeof p.cost === 'number') ? p.cost : (p._lastCostSnapshot || 0); return; }
     var last = (typeof p._lastCostSnapshot === 'number') ? p._lastCostSnapshot : (p.cost || 0);
     var now = p.cost || 0;
     if (now > last) { try { __emitRecover(w, now - last, '回音韵（补发时点）'); } catch (e) {} }
-    p._lastCostSnapshot = now;
+    /* 快照取发射后的真实值（时点里的修正也算进去），否则下次刷新会重复补发 */
+    p._lastCostSnapshot = (typeof p.cost === 'number') ? p.cost : now;
   });
 }
 // 宁雨清被动：每次抽卡后回1音韵（挂时点总线，替代散落硬编码）
@@ -21296,7 +21309,7 @@ function useMusicCardFor(player, index, name, done) {
     var __ovDur = (card.name.indexOf('谢幕') >= 0) ? -1 : 3; // 序幕持续3次自己行动，谢幕直到游戏结束
     options.push({ label: '进入过载状态（回2费）', action: function() {
       p._overload = { until: __ovDur };
-      p.cost = Math.min(p.cost + 2, p.maxCost);
+      recoverCost(player, 2, '乐谱卡·过载');   // 【2026-10-01 修·队列②】先发时点再打日志
       addBattleLog(player, '乐谱卡效果：进入过载状态（' + (__ovDur === -1 ? '直到本场游戏结束' : '持续' + __ovDur + '次自己行动') + '），回复2点音韵值，当前' + p.cost + '点');
       updateBattleUI();
     }});
@@ -22159,7 +22172,7 @@ function kaedeSPSelect(player) {
       selected.applied = true;
       p._kaedeSPSelected.push(selected);
       if (selected.id === 1) {
-        p.cost = Math.min(p.cost + 6, p.maxCost);
+        recoverCost(player, 6, '入间枫SP');   // 【2026-10-01 修·队列②】先发时点再打日志
         addBattleLog(player, '【入间枫SP】回复6点音韵值，当前' + p.cost + '音韵');
       } else if (selected.id === 2) {
         for (var j = 0; j < 2; j++) {
@@ -22571,7 +22584,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     var __rc = sp.match(/回复自身?\s*(\d+)\s*点音韵/);
     if (__rc) {
       var __rv = parseInt(__rc[1]);
-      p.cost = Math.min(p.cost + __rv, p.maxCost);
+      recoverCost(player, __rv, '墓地SP回音韵');   // 【2026-10-01 修·队列②】先发时点再打日志
       addBattleLog(player, '【' + cardName + '·' + (reason === 'sacrifice' ? '被献祭' : (reason === 'destroy' ? '被破坏' : '因效果送墓')) + '触发】回复自身' + __rv + '点音韵（当前' + p.cost + '）');
     }
   }
@@ -23759,7 +23772,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
       var __qkEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
       if (__qkEff) p._kotaroGraveViewTurn = battleState.turn;
       checkGraveTrigger(user, sac, __qkEff ? 'effect' : 'sacrifice');
-      p.cost = Math.min(p.cost + 2, p.maxCost);
+      recoverCost(user, 2, '巧匠之手·献祭');   // 【2026-10-01 修·队列②】先发时点再打日志
       addBattleLog(user, '【巧匠之手】献祭【' + sac.name + '】，回复2音韵（当前' + p.cost + '）');
       draw();
     }
@@ -23887,7 +23900,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
       var __qkEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
       if (__qkEff) p._kotaroGraveViewTurn = battleState.turn;
       checkGraveTrigger(user, sac, __qkEff ? 'effect' : 'sacrifice');
-      p.cost = Math.min(p.cost + 2, p.maxCost);
+      recoverCost(user, 2, '巧匠之手·献祭');   // 【2026-10-01 修·队列②】先发时点再打日志
       addBattleLog(user, '【巧匠之手】献祭【' + sac.name + '】，回复2音韵（当前' + p.cost + '）');
       var __gi = p.grave.indexOf(sac); if (__gi >= 0) p.grave.splice(__gi, 1);
       if (!p.removed) p.removed = [];
@@ -25637,8 +25650,11 @@ var NetSync = {
   }
   function roll(el, from, to, up) {
     try {
-      if (el.__rolling) return;
-      el.__rolling = 1;
+      /* 【2026-10-01 修·队列②】原来"已在滚就直接 return" ⇒ 后一次刷新的新值被丢掉，
+         而先那次动画收尾时又把自己的旧目标写回 DOM ⇒ **数字停在旧值**（作者实测"音韵值显示与实际不符"）。
+         现在：已在滚 → 只把目标更新为最新值，动画自己会收敛到它。 */
+      if (el.__rolling) { el.__rollTo = to; return; }
+      el.__rolling = 1; el.__rollTo = to;
       var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       var dur = 260;
       el.style.transition = 'color .18s ease, text-shadow .18s ease';
@@ -25649,17 +25665,27 @@ var NetSync = {
           var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           var p = Math.min(1, (now - t0) / dur);
           var e = 1 - Math.pow(1 - p, 3);                    // easeOutCubic
-          var v = Math.round(from + (to - from) * e);
+          var __to = (el.__rollTo == null) ? to : el.__rollTo;   // 滚动途中若又刷新，目标以最新值为准
+          var v = Math.round(from + (__to - from) * e);
           el.textContent = String(v);
           if (p < 1) requestAnimationFrame(step);
           else {
-            el.textContent = String(to);
-            el.__rolling = 0;
+            el.textContent = String(__to);
+            el.__rolling = 0; el.__rollTo = null;
             setTimeout(function () { try { el.style.color = ''; el.style.textShadow = ''; } catch (e2) { } }, 220);
           }
-        } catch (e2) { try { el.textContent = String(to); el.__rolling = 0; } catch (e3) { } }
+        } catch (e2) { try { el.textContent = String(to); el.__rolling = 0; el.__rollTo = null; } catch (e3) { } }
       };
       requestAnimationFrame(step);
+      /* 兜底：requestAnimationFrame 被隐藏标签页/节流拖住时，时间到就强制落到真值
+         （动画层**绝不承重**：宁可不动画，也不能让显示停在与实际不同的数字上）。 */
+      setTimeout(function () {
+        try {
+          if (!el.__rolling) return;
+          el.textContent = String(el.__rollTo == null ? to : el.__rollTo);
+          el.__rolling = 0; el.__rollTo = null;
+        } catch (e3) { }
+      }, dur + 150);
     } catch (e) { console.error('数字滚动失败（忽略）', e); }
   }
   function wrap() {
