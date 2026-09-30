@@ -3062,7 +3062,97 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   
 /* ================= __UI_PHASE2A · MD 风皮肤收口层（2026-09-30） =================
    作者指令：MD 风（深色+金/霓虹+玻璃）/ 动画克制 / 对战页先行，之后铺全局。
-   本层在**所有**旧样式之后（最后一个 </style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
+   本层在**所有**旧样式之后（最后一个 
+/* ================= __UI_PHASE3 · MD 风全局皮肤层（2026-09-30） =================
+   主菜单 / 编组 / 卡牌列表 / 弹窗 / 滚动条 统一到与对战页同一套语言。纯 CSS。 */
+/* —— 全局底色与文字 —— */
+body{
+  background:
+    radial-gradient(1400px 700px at 50% -12%, rgba(92,200,255,.10), transparent 62%),
+    radial-gradient(1000px 560px at 92% 108%, rgba(139,123,255,.10), transparent 62%),
+    linear-gradient(180deg,#0b1322,#070b14 60%) !important;
+  color:var(--ink);
+}
+/* 极细网格：MD 那种"高科技背景" */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.35;
+  background-image:linear-gradient(rgba(150,195,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(150,195,255,.05) 1px,transparent 1px);
+  background-size:44px 44px;
+  -webkit-mask-image:radial-gradient(1200px 700px at 50% 20%,#000,transparent 78%);
+  mask-image:radial-gradient(1200px 700px at 50% 20%,#000,transparent 78%);
+}
+/* —— 滚动条 / 选中 / 焦点 —— */
+*{scrollbar-width:thin;scrollbar-color:rgba(150,195,255,.32) transparent;}
+*::-webkit-scrollbar{width:10px;height:10px;}
+*::-webkit-scrollbar-track{background:transparent;}
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(150,195,255,.34),rgba(150,195,255,.18));border-radius:99px;border:2px solid transparent;background-clip:content-box;}
+*::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,rgba(242,207,130,.5),rgba(201,154,78,.3));background-clip:content-box;}
+::selection{background:rgba(92,200,255,.32);color:#fff;}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:6px;}
+/* —— 屏幕与标题 —— */
+.screen{position:relative;z-index:1;}
+.screen-header{background:linear-gradient(180deg,var(--md2-glass),transparent) !important;border-bottom:1px solid var(--line-2) !important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+.screen-title{
+  color:var(--gold) !important;font-weight:900 !important;letter-spacing:1.4px;
+  background:linear-gradient(120deg,var(--gold-hi),var(--gold),var(--gold-deep));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  text-shadow:0 2px 18px rgba(242,207,130,.18);
+}
+/* —— 主菜单按钮：玻璃 + 金色描边 + 悬停上浮 —— */
+.menu-btn{
+  border-radius:var(--r) !important;letter-spacing:2px !important;font-weight:900 !important;
+  border:1px solid rgba(255,255,255,.16) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 14px 30px -12px rgba(0,0,0,.75) !important;
+  transition:transform .16s var(--ease),filter .16s var(--ease),box-shadow .16s var(--ease) !important;
+}
+.menu-btn:hover{transform:translateY(-3px) !important;filter:brightness(1.08) saturate(1.05) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 20px 40px -14px rgba(0,0,0,.8),0 0 0 1px var(--gold) !important;}
+.menu-btn:active{transform:translateY(0) scale(.99) !important;}
+/* —— 卡牌列表项：玻璃卡 + 金色费用 —— */
+.card-item{
+  background:linear-gradient(160deg,rgba(30,40,72,.86),rgba(16,22,44,.86)) !important;
+  border:1px solid var(--line-2) !important;border-radius:var(--r-sm) !important;
+  box-shadow:0 8px 20px -10px rgba(0,0,0,.7) !important;
+  transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s var(--ease) !important;
+}
+.card-item:hover{transform:translateY(-4px) !important;border-color:var(--gold) !important;box-shadow:0 18px 34px -12px rgba(0,0,0,.8),0 0 0 1px var(--gold) !important;}
+.card-item-name{color:var(--ink) !important;font-weight:800 !important;}
+.card-item-cost{background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)) !important;color:#2b2008 !important;font-weight:900 !important;box-shadow:0 0 12px rgba(242,207,130,.4) !important;}
+/* —— 编组页 —— */
+.deck-side{background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)) !important;border:1px solid var(--line-2) !important;border-radius:var(--r) !important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+.deck-side-title{border-bottom:1px solid var(--line-2) !important;color:var(--gold) !important;font-weight:800 !important;letter-spacing:.6px;}
+.deck-slot{background:rgba(0,0,0,.34) !important;border:1.5px dashed rgba(150,195,255,.26) !important;border-radius:var(--r-sm) !important;transition:all .18s var(--ease) !important;}
+.deck-slot:hover{border-color:var(--gold) !important;background:rgba(242,207,130,.08) !important;box-shadow:0 0 18px -4px rgba(242,207,130,.4) !important;}
+.deck-mode-bar{background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)) !important;border:1px solid var(--line-2) !important;border-radius:var(--r) !important;}
+.deck-mode-btn{background:rgba(255,255,255,.06) !important;border:1px solid var(--line-2) !important;color:var(--ink) !important;border-radius:var(--r-pill) !important;font-weight:800 !important;transition:all .16s var(--ease) !important;}
+.deck-mode-btn:hover{border-color:var(--gold) !important;color:var(--gold) !important;}
+/* —— 弹窗：玻璃 + 霓虹发丝边 + 金色确认键 —— */
+.modal-overlay{background:rgba(4,7,14,.72) !important;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.modal-content,.choice-modal,.card-list-modal,.card-detail-content{
+  background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)) !important;
+  border:1px solid var(--line-2) !important;border-radius:var(--r-lg) !important;
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  box-shadow:0 30px 70px -20px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.08) !important;
+}
+.modal-header{border-bottom:1px solid var(--line-2) !important;}
+.modal-btn{border-radius:var(--r-sm) !important;font-weight:900 !important;letter-spacing:.6px;transition:transform .14s var(--ease),filter .14s var(--ease) !important;}
+.modal-btn:hover{transform:translateY(-2px) !important;filter:brightness(1.07) !important;}
+.modal-btn-confirm{background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)) !important;color:#2b2008 !important;box-shadow:0 0 18px -4px rgba(242,207,130,.6) !important;}
+.modal-btn-cancel{background:rgba(255,255,255,.07) !important;border:1px solid var(--line-2) !important;color:var(--ink) !important;}
+.modal-input{background:rgba(0,0,0,.4) !important;border:1px solid var(--line-2) !important;border-radius:var(--r-sm) !important;color:var(--ink) !important;}
+.modal-input:focus{border-color:var(--gold) !important;box-shadow:0 0 0 3px rgba(242,207,130,.18) !important;outline:none !important;}
+/* —— 角色卡详情弹窗：可读性优先 —— */
+.card-detail-name{color:var(--gold) !important;font-weight:900 !important;letter-spacing:.6px;}
+.card-detail-meta span{background:rgba(255,255,255,.06) !important;border:1px solid var(--line-2) !important;border-radius:var(--r-pill) !important;padding:2px 10px !important;color:var(--ink) !important;font-weight:700 !important;}
+.card-detail-effect{line-height:1.75 !important;color:var(--ink) !important;background:rgba(0,0,0,.26) !important;border:1px solid var(--line) !important;border-radius:var(--r-sm) !important;padding:12px 14px !important;}
+.card-detail-tip{color:var(--faint) !important;}
+/* —— 数字统一等宽（所有页面）—— */
+.cost,.sync,.gold,.level,.hp, .hand-card-cost, .card-item-cost, .slot-cost{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";}
+/* —— 手机：削弱网格与模糊，省性能 —— */
+@media (max-width:768px){
+  body::before{opacity:.22;background-size:32px 32px;}
+  .modal-content,.choice-modal,.card-list-modal,.card-detail-content{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+}
+</style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
 :root{
   /* —— 统一到 MD 观感：更深的底、更细的描边、金色更"金属"、阴影更聚 —— */
   --line:rgba(150,195,255,.10); --line-2:rgba(150,195,255,.22);
