@@ -14924,10 +14924,13 @@ function __updateBattleUI_impl() {
         var P = battleState[pl];
         var cap = P.captain || null;
         var img = document.getElementById(pl + 'PortraitImg');
-        if (img && cap && cap.image_url && img.getAttribute('data-src') !== cap.image_url) {
-          img.setAttribute('data-src', cap.image_url);
+        /* 【2026-09-30 作者要求】对战页（对决头）名字旁改用**角色头像**（assets/avatars/av_N.jpg），
+           没有头像的角色自动回落到卡图。上一版我改错了地方（改成了肉鸽页 rlPlayerPortrait）⇒ 界面没变化。 */
+        var __face = cap ? (cap.avatar_url || cap.image_url) : null;
+        if (img && __face && img.getAttribute('data-src') !== __face) {
+          img.setAttribute('data-src', __face);
           img.style.display = '';
-          img.src = cap.image_url;
+          img.src = __face;
         }
         var nm = document.getElementById(pl + 'Name');
         if (nm && cap) nm.textContent = cap.name;
