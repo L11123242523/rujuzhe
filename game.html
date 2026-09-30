@@ -3918,7 +3918,26 @@ body::before{
   //   reverse      改变移动方向（颠倒骰子）
   //   move_adjust  位移量增减 / 打断移动（侦探放大镜/猎手爪链）
   //   negate_damage 抵消即将受到的伤害（幸运护符等）
-  function classifyChainCard(card) {
+  /* ================= __UTOPIA_TIMING · 崩塌之乌托邦"被卡时点"（2026-10-01 作者裁决） =================
+   灰流丽类「～时」选发：要回应的动作**不是该次结算的最后一步** ⇒ 时点被卡、不能发动。
+   判据：把来源效果文本编译成步骤序列，"检索/抽卡/送墓"这些触发步骤若后面还有步骤 ⇒ 卡时点。
+   ⚠ 只影响**反制整效类**（negate_effect）卡的可发动性；不确定时一律放行。 */
+var __NEGATE_TRIGGER_OPS = /^(search|draw|draw_gift|draw_omikuji|discard|destroy_pick|exile_pick|grave_copy)$/;
+function __negateTimingMissed(srcText) {
+  try {
+    if (!srcText || typeof compileSingle !== 'function') return false;
+    var ops = compileSingle(String(srcText)) || [];
+    if (ops.length < 2) return false;
+    var last = -1;
+    for (var i = 0; i < ops.length; i++) {
+      var o = ops[i] || {};
+      if (__NEGATE_TRIGGER_OPS.test(String(o.op || ''))) last = i;
+    }
+    if (last < 0) return false;
+    return last < ops.length - 1;                 // 触发步后面还有步骤 ⇒ 时点被卡
+  } catch (e) { console.error('乌托邦卡时点判定出错（放行）', e); return false; }
+}
+function classifyChainCard(card) {
     var name = (card && card.name) || '';
     var eff = (card && (card.effect || card.text)) || '';
     var isReverse = name.indexOf('颠倒骰子') >= 0 || /改变[^。；]*方向/.test(eff);
@@ -10076,6 +10095,11 @@ function collectChainable(player, effect){
       if(stage!=='effect_activate') return;
       var __src=((effect&&effect.card&&(effect.card.effect||effect.card.text))||(effect&&effect.description)||'');
       if(!/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__src)) return;
+      /* __UTOPIA_TIMING：灰流丽类 ⇒ 触发步不是该次结算的最后一步时**时点被卡**、不能发动 */
+      if (typeof __negateTimingMissed === 'function' && __negateTimingMissed(__src)) {
+        try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { }
+        return;
+      }
     } else {
       if(!isChainOnlyCard(c) || !hasChainTarget(c) || !__matchStage(c)) return;
     }
@@ -23176,7 +23200,8 @@ function aiPickFaceDownForWindow(effect, seat) {
     if (stage === 'damage' || dmg > 0) usable = /抵消/.test(eff) && /伤害/.test(eff);
     else if (stage === 'move' || stage === 'dice_result' || stage === 'dice') usable = /位移量|打断|改变[^。；]*方向|修改.*(骰|点)/.test(eff) || nm.indexOf('侦探放大镜') >= 0 || nm.indexOf('猎手爪链') >= 0 || nm.indexOf('遥控骰子') >= 0 || nm.indexOf('颠倒骰子') >= 0;
     else if (stage === 'rand' || stage === 'rand_result') usable = nm === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
-    else if (stage === 'effect_activate') usable = /效果无效/.test(eff) || nm.indexOf('崩塌之乌托邦') >= 0;
+    else if (stage === 'effect_activate') usable = (/效果无效/.test(eff) || nm.indexOf('崩塌之乌托邦') >= 0)
+      && !(typeof __negateTimingMissed === 'function' && __negateTimingMissed(((effect && effect.card && (effect.card.effect || effect.card.text)) || (effect && effect.description) || '')));
     if (usable) return i;
   }
   return -1;
