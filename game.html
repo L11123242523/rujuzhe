@@ -7192,6 +7192,19 @@ function evaluatePlayable(card,player,opts){
   if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
   var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
   if(me.cost + __loanCap < cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
+  /* 【MD 口径 P2：发动的代价前置】（2026-09-30）
+     卡面写「扣除自身N点同步值」的卡 ⇒ 同步值不够时**不能发动**。
+     原来这条代价只在**结算时**扣（不满足也照样发动）⇒ 与 MD 口径不符。这里做**发动前校验**，
+     结算时仍照常扣除（两处保持一致，不改动结算路径）。 */
+  try {
+    var __syncCostM = String(card.effect || card.text || '').match(/扣除自身\s*(\d+)\s*点同步值/);
+    if (__syncCostM) {
+      var __syncNeed = parseInt(__syncCostM[1], 10) || 0;
+      if (__syncNeed > 0 && (me.sync || 0) < __syncNeed) {
+        return { ok: false, reason: '同步值不足（发动要扣除 ' + __syncNeed + ' 点，当前 ' + (me.sync || 0) + '）' };
+      }
+    }
+  } catch (e) { console.error('同步值代价前置校验出错（放行）', e); }
   // 5) 攻击卡：范围内必须存在可攻击目标
   if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
@@ -11142,7 +11155,7 @@ var TW = {
   close: function (win) {
     win.state = 'done';
     /* P1（MD：同一连锁一次）：连锁结束 ⇒ 清空"本连锁已排过"的集合（下一条连锁重新计） */
-    try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { }
+    try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { console.error('清空"同链一次"集合失败（不影响收尾）', e); }
     try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
@@ -11426,7 +11439,7 @@ function __chainOnce(key) {
   } catch (e) { return true; }
 }
 function __chainOnceReset() {
-  try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainOnceSet = {}; } catch (e) { }
+  try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainOnceSet = {}; } catch (e) { console.error('清空"同链一次"集合失败', e); }
 }
 /** 结算中 → 入队；否则立即执行 */
 function queueOrRunTrigger(desc) {
