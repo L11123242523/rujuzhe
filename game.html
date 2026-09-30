@@ -3059,7 +3059,102 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     /* 【2026-09-27 删除死 UI】原 #onlineChainBar（联机连锁操作条）的 5 条 CSS：该元素及内部
        #ocTitle/#ocDesc/#ocBtns 在 JS 里**零引用**（联机决策已统一走 onlineDecideModal）——
        属目标②点名的"多套并存实现"，删除以免下次又被误当成"要收的覆盖层"。 */
-  </style>
+  
+/* ================= __UI_PHASE2A · MD 风皮肤收口层（2026-09-30） =================
+   作者指令：MD 风（深色+金/霓虹+玻璃）/ 动画克制 / 对战页先行，之后铺全局。
+   本层在**所有**旧样式之后（最后一个 </style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
+:root{
+  /* —— 统一到 MD 观感：更深的底、更细的描边、金色更"金属"、阴影更聚 —— */
+  --line:rgba(150,195,255,.10); --line-2:rgba(150,195,255,.22);
+  --gold:#f2cf82; --gold-deep:#c99a4e; --gold-hi:#ffeec2; --gold-soft:rgba(242,207,130,.14);
+  --ink:#eaf2ff; --dim:rgba(226,238,255,.68); --faint:rgba(226,238,255,.42);
+  --r-lg:16px; --r:12px; --r-sm:8px;
+  --sh:0 16px 40px -14px rgba(0,0,0,.72); --sh-sm:0 6px 18px -6px rgba(0,0,0,.55);
+  --ease:cubic-bezier(.22,.61,.36,1);
+  /* 新增：MD 专用 */
+  --md2-bg:#070b14; --md2-bg2:#0b1322; --md2-glass:rgba(15,23,40,.76); --md2-glass2:rgba(9,14,26,.9);
+  --md2-neon:#5cc8ff; --md2-neon2:#8b7bff; --md2-crimson:#ff7a92;
+  --md2-t:.26s;
+}
+/* —— 战斗页底色：MD 那种"深空 + 极细网格"—— */
+#battleScreen{
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(92,200,255,.10), transparent 60%),
+    radial-gradient(900px 500px at 90% 110%, rgba(139,123,255,.10), transparent 60%),
+    linear-gradient(180deg,var(--md2-bg2),var(--md2-bg)) !important;
+}
+/* —— 顶栏 / 底栏：玻璃 + 细描边（原先是重阴影 + 半透明黑）—— */
+#battleScreen .battle-top-bar,
+#battleScreen .battle-bottom-bar{
+  background:linear-gradient(180deg,var(--md2-glass),var(--md2-glass2)) !important;
+  border:1px solid var(--line-2) !important; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  box-shadow:var(--sh-sm) !important;
+}
+/* —— 对决面板：玻璃卡片 + 我方霓虹 / 对方绯红侧条 —— */
+#battleScreen .duel-panel{
+  background:linear-gradient(150deg,var(--md2-glass),var(--md2-glass2)) !important;
+  border:1px solid var(--line-2) !important; border-left:3px solid var(--md2-neon) !important;
+  border-radius:var(--r) !important; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  box-shadow:var(--sh-sm) !important;
+}
+#battleScreen .duel-p2{ border-left:3px solid var(--md2-crimson) !important; }
+#battleScreen .duel-panel::before{ background:linear-gradient(120deg,rgba(255,255,255,.07),transparent 46%) !important; }
+/* —— 血条：更细更"金属"，数值更清楚 —— */
+#battleScreen .duel-hp-track{ background:rgba(0,0,0,.62) !important; border-color:rgba(255,255,255,.16) !important; box-shadow:inset 0 2px 6px rgba(0,0,0,.65) !important; }
+#battleScreen .duel-hp-p1{ background:linear-gradient(90deg,#ffb3c0,#ff4d6d) !important; box-shadow:0 0 12px rgba(255,77,109,.55) !important; }
+#battleScreen .duel-hp-p2{ background:linear-gradient(90deg,#9fe8ff,#2bb6dd) !important; box-shadow:0 0 12px rgba(43,182,221,.55) !important; }
+#battleScreen .duel-hp-text{ font-weight:900 !important; letter-spacing:.4px; }
+/* —— 名牌上的属性徽章：统一细描边 —— */
+#battleScreen .duel-attr{ background:rgba(0,0,0,.42) !important; }
+/* —— 场地/地图容器 —— */
+#battleScreen .battle-map-container{
+  background:linear-gradient(165deg,rgba(14,20,36,.72),rgba(8,12,24,.62)) !important;
+  border:1px solid var(--line-2) !important; border-radius:var(--r) !important; box-shadow:var(--sh-sm) !important;
+}
+/* —— 手牌：MD 那种"厚卡 + 金色高光"，可出的牌有呼吸光 —— */
+#battleScreen .hand-card{
+  background:linear-gradient(165deg,rgba(30,40,72,.96),rgba(16,22,44,.96)) !important;
+  border:1px solid var(--line-2) !important; border-radius:var(--r-sm) !important;
+  box-shadow:0 8px 22px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.10) !important;
+  transition:transform var(--md2-t) var(--ease),box-shadow var(--md2-t),border-color var(--md2-t) !important;
+}
+#battleScreen .hand-card:hover{
+  transform:translateY(-12px) scale(1.04) !important; border-color:var(--gold) !important;
+  box-shadow:0 18px 38px rgba(0,0,0,.55),0 0 0 1px var(--gold),0 0 18px rgba(242,207,130,.35) !important;
+}
+#battleScreen .hand-card.playable{ border-color:rgba(242,207,130,.65) !important; }
+#battleScreen .hand-card-cost{ background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)) !important; color:#2b2008 !important; font-weight:900 !important; box-shadow:0 0 12px rgba(242,207,130,.5) !important; }
+/* —— 动作按钮：MD 的金/霓虹按钮 —— */
+#battleScreen .battle-action-btn{
+  border-radius:var(--r-sm) !important; letter-spacing:1.4px !important; font-weight:900 !important;
+  border:1px solid rgba(255,255,255,.16) !important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 24px -8px rgba(0,0,0,.65) !important;
+  transition:transform .14s var(--ease),filter .14s var(--ease) !important;
+}
+#battleScreen .battle-action-btn:hover{ transform:translateY(-2px) !important; filter:brightness(1.08) !important; }
+#battleScreen .battle-action-btn:active{ transform:translateY(1px) scale(.985) !important; }
+/* —— 日志面板：玻璃 + 细描边 —— */
+#battleScreen .battle-log-panel{
+  background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)) !important;
+  border:1px solid var(--line-2) !important; border-radius:var(--r) !important;
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); box-shadow:var(--sh) !important;
+}
+/* —— 场地格（slot）：统一圆角与描边 —— */
+#battleScreen .slot-img{ border-radius:var(--r-sm) !important; }
+#battleScreen .slot-cost{ background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)) !important; color:#2b2008 !important; font-weight:900 !important; }
+/* —— 资源数字（音韵/同步/金币等）：统一为等宽数字，避免跳动 —— */
+#battleScreen .battle-player-mini, #battleScreen .duel-hp-text, #battleScreen .hand-card-cost{
+  font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+}
+/* —— 受击反馈：已有 .ui-hit 动画，这里把颜色调成 MD 的绯红 + 轻微位移 —— */
+@keyframes mdPanelHit2{0%{box-shadow:inset 0 0 64px rgba(255,70,90,.55),0 0 26px rgba(255,70,90,.42);transform:translateX(-2px);}60%{transform:translateX(2px);}100%{box-shadow:inset 0 0 30px rgba(255,70,90,0),0 6px 18px rgba(0,0,0,.3);transform:none;}}
+#battleScreen .duel-panel.ui-hit{ animation:mdPanelHit2 .5s var(--ease) !important; }
+/* —— 手机：保持紧凑，别让新描边挤掉空间 —— */
+@media (max-width:768px){
+  #battleScreen .duel-panel{ border-left-width:2px !important; }
+  #battleScreen .battle-action-btn{ letter-spacing:.6px !important; }
+}
+
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
   <div class="ol-wrap">
     <h2>🌐 联机对战</h2>
