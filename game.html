@@ -1372,6 +1372,33 @@ body.map3d-on .minimap-container { display: none !important; }
 @media(max-width:768px){#chainFlash .cf-tag{font-size:15px;padding:5px 12px;}}
 @media(max-width:768px){#resolveTimeline{width:calc(100vw - 20px);right:10px;max-height:40vh;} .chain-link{font-size:11px;padding:4px 9px;}}
 
+/* ================= __UI_PHASE6 · MD 式连锁动画（2026-10-01，作者点名） =================
+   作者期望：「卡上浮出链节 C1 → 播放连锁进入动画 → 不连锁则进入结算，结算时再播一次 C1 结算动画」。
+   纪律：动画层**绝不承重** —— 只用 CSS 动画 + Web Animations（都不阻塞推进），JS 侧异常全吞；
+        `window.__UI_ANIM=false` 一键关；`prefers-reduced-motion` 由全局降级块兜住。 */
+/* ① 卡上浮出链节号（出牌飞行体右上角） */
+.md-card-fly-badge{position:absolute;left:-11px;top:-11px;min-width:30px;height:30px;padding:0 7px;border-radius:999px;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;letter-spacing:.5px;
+  color:#2c2008;background:linear-gradient(135deg,var(--md-gold),var(--md-gold-2));border:1.5px solid #ffe9b0;
+  box-shadow:0 0 16px rgba(242,207,130,.85),0 4px 12px rgba(0,0,0,.5);z-index:3;
+  animation:mdBadgePop .34s cubic-bezier(.2,1.5,.4,1) both;}
+@keyframes mdBadgePop{0%{opacity:0;transform:scale(.3) rotate(-18deg);}60%{opacity:1;transform:scale(1.18) rotate(4deg);}100%{opacity:1;transform:scale(1) rotate(0deg);}}
+/* 入链瞬间：堆栈节点上的链号"弹一下" */
+.csa-node.csa-enter .csa-no{animation:csaNoEnter .46s cubic-bezier(.2,1.4,.4,1);}
+@keyframes csaNoEnter{0%{transform:scale(.4);box-shadow:0 0 0 0 rgba(242,207,130,.9);}55%{transform:scale(1.25);box-shadow:0 0 22px 6px rgba(242,207,130,.75);}100%{transform:scale(1);box-shadow:var(--md-glow-gold);}}
+/* ② 结算动画：把这张卡（带「C1 结算」徽章 + 光环）再打出来一次 */
+.md-chain-resolve{position:fixed;z-index:99996;pointer-events:none;border-radius:10px;
+  box-shadow:0 0 0 2px rgba(92,200,255,.7),0 0 34px rgba(92,200,255,.55),0 18px 40px rgba(0,0,0,.55);}
+.md-chain-resolve img{width:100%;height:100%;object-fit:cover;display:block;border-radius:10px;}
+.md-chain-resolve .md-chain-resolve-name{display:flex;align-items:center;justify-content:center;height:100%;border-radius:10px;
+  font-size:12px;font-weight:800;color:#2c2008;background:linear-gradient(150deg,var(--md-gold),var(--md-gold-2));padding:4px;text-align:center;}
+.md-chain-resolve-badge{position:absolute;left:-12px;top:-12px;height:28px;padding:0 9px;border-radius:999px;
+  display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:900;white-space:nowrap;color:#04222e;
+  background:linear-gradient(135deg,#7ef0ff,#3aa9e8);border:1.5px solid #d6f6ff;box-shadow:0 0 18px rgba(126,240,255,.9);}
+.md-chain-resolve-ring{position:absolute;inset:-14px;border-radius:16px;border:2px solid rgba(126,240,255,.85);animation:mdChainRing .7s ease-out forwards;}
+@keyframes mdChainRing{0%{opacity:.95;transform:scale(.86);}100%{opacity:0;transform:scale(1.28);}}
+#chainStackAnim.csa-stack-resolving .csa-title{color:#bff2ff;text-shadow:0 0 14px rgba(126,240,255,.95);}
+
 /* 入迷值样式 */
 .stat.fascination {
   color: #e84393;
@@ -10619,8 +10646,8 @@ var CardAnim = {
     } catch (e) { console.error('取连锁堆栈位置失败', e); }
     return { x: window.innerWidth - 140, y: window.innerHeight * .5, w: 88, h: 118 };
   },
-  /** 把一张卡从手牌"甩"到连锁堆栈；抛错绝不上抛 */
-  play: function (card, label) {
+  /** 把一张卡从手牌"甩"到连锁堆栈；抛错绝不上抛。chainNo（可选）= 链节号，用于"卡上浮出 C1" */
+  play: function (card, label, chainNo) {
     try {
       if (!this.enabled()) return;
       if (typeof document === 'undefined' || !document.body) return;
@@ -10631,6 +10658,17 @@ var CardAnim = {
       el.style.width = from.w + 'px'; el.style.height = from.h + 'px';
       el.style.left = '0px'; el.style.top = '0px';
       el.innerHTML = src ? ('<img src="' + src + '" alt="">') : ('<div class="md-card-fly-name">' + String(label || (card && card.name) || '') + '</div>');
+      /* 【__UI_PHASE6·③】卡上浮出链节号（作者要求"卡上浮出链节 C1"）。
+         ⚠ 飞行体默认 overflow:hidden，加了角标必须放开裁切，否则徽章会被切掉。 */
+      if (chainNo != null) {
+        try {
+          el.style.overflow = 'visible';
+          var __bg = document.createElement('div');
+          __bg.className = 'md-card-fly-badge';
+          __bg.textContent = 'C' + chainNo;
+          el.appendChild(__bg);
+        } catch (e) { console.error('链节号徽章失败（忽略）', e); }
+      }
       document.body.appendChild(el);
       var dx = to.x - from.x, dy = to.y - from.y, sc = to.w / from.w;
       var done = function () { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) { } };
@@ -10652,6 +10690,8 @@ var CardAnim = {
         } catch (e) { console.error('落点闪光失败', e); }
       };
       a.oncancel = done;
+      /* 【__UI_PHASE6】硬兜底：onfinish/oncancel 万一不触发（被打断/被节流），也不留飞行体垃圾节点 */
+      setTimeout(done, 900);
     } catch (e) { try { console.error('出牌动画异常（不影响结算）', e); } catch (e2) { } }
   }
 };
@@ -10660,28 +10700,101 @@ var ChainAnim = {
   _el: function () { if (!this._box) this._box = document.getElementById('chainStackAnim'); return this._box; },
   // 中央闪光横幅：发动 / 逆结算 / 完成 / 丢失对象，各时点都有明确动画提示
   flash: function (text, cls) {
-    if (typeof document === 'undefined') return;
-    var b = document.getElementById('chainFlash');
-    if (!b) { b = document.createElement('div'); b.id = 'chainFlash'; b.innerHTML = '<span class="cf-tag"></span>'; document.body.appendChild(b); }
-    var tag = b.querySelector('.cf-tag'); tag.textContent = text;
-    b.className = ''; b.classList.add('show', cls || '');
-    clearTimeout(this._ft); var self = this;
-    this._ft = setTimeout(function () { b.classList.add('fade'); setTimeout(function () { b.classList.remove('show'); }, 340); }, 560);
+    /* 【__UI_PHASE6·不承重】整段吞异常：flash 有直接调用点（未包 try）⇒ 内部必须自保 */
+    try {
+      if (typeof document === 'undefined') return;
+      var b = document.getElementById('chainFlash');
+      if (!b) { b = document.createElement('div'); b.id = 'chainFlash'; b.innerHTML = '<span class="cf-tag"></span>'; document.body.appendChild(b); }
+      var tag = b.querySelector('.cf-tag'); if (tag) tag.textContent = text;
+      b.className = ''; b.classList.add('show', cls || '');
+      clearTimeout(this._ft); var self = this;
+      this._ft = setTimeout(function () { try { b.classList.add('fade'); setTimeout(function () { try { b.classList.remove('show'); } catch (e) {} }, 340); } catch (e) {} }, 560);
+    } catch (e) { try { console.error('连锁横幅异常（不影响推进）', e); } catch (e2) {} }
   },
-  begin: function () { var b = this._el(); if (!b) return; b.innerHTML = '<div class="csa-title">CHAIN · 连锁</div>'; b.classList.remove('csa-ending'); b.classList.add('show'); this._nodes = []; },
+  begin: function () {
+    /* 【__UI_PHASE6·不承重】吞异常：堆栈只是浮层，画不出来也绝不能让组链流程停摆 */
+    try {
+      var b = this._el(); if (!b) return;
+      b.innerHTML = '<div class="csa-title">CHAIN · 连锁</div>';
+      b.classList.remove('csa-ending'); b.classList.add('show');
+      this._nodes = []; this._cards = [];
+    } catch (e) { try { console.error('连锁堆栈打开异常（不影响推进）', e); } catch (e2) {} }
+  },
   push: function (node) {
+    var i = this._nodes.length;                       // 链号索引：飞行体徽章与堆栈节点必须同号
+    /* 【__UI_PHASE6·③】把这张卡记下来，供结算时"再播一次 C1 结算动画"用（纯动画层记录，不参与任何规则） */
+    try { this._cards = this._cards || []; this._cards[i] = (node && node.card) || null; } catch (e) {}
     /* 出牌/上链飞行（不承重：CardAnim.play 内部吞掉一切异常） */
-    try { if (typeof CardAnim !== 'undefined' && CardAnim.play) CardAnim.play(node && node.card, node && node.label); } catch (e) { console.error('出牌动画调用异常（不影响推进）', e); }
-    var b = this._el(); var i = this._nodes.length;
-    if (b) { var d = document.createElement('div'); d.className = 'csa-node owner-' + (node.owner || 'p1') + ' csa-in';
-      var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
-      var tx = document.createElement('span'); tx.className = 'csa-txt'; tx.textContent = node.label || '';
-      d.appendChild(no); d.appendChild(tx); b.appendChild(d); this._nodes.push(d); }
+    try { if (typeof CardAnim !== 'undefined' && CardAnim.play) CardAnim.play(node && node.card, node && node.label, i + 1); } catch (e) { console.error('出牌动画调用异常（不影响推进）', e); }
+    /* 【__UI_PHASE6·不承重】节点/横幅都只是浮层：这里整段吞异常，画不出来也绝不影响推进 */
+    try {
+      var b = this._el();
+      if (b) {
+        var d = document.createElement('div'); d.className = 'csa-node owner-' + (node.owner || 'p1') + ' csa-in csa-enter';
+        var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
+        var tx = document.createElement('span'); tx.className = 'csa-txt'; tx.textContent = node.label || '';
+        d.appendChild(no); d.appendChild(tx); b.appendChild(d); this._nodes.push(d);
+      }
+    } catch (e) { try { console.error('连锁节点绘制异常（不影响推进）', e); } catch (e2) {} }
     this.flash('C' + (i + 1) + ' 发动 · ' + (node.label || ''), 'flash-activate');
   },
-  resolving: function (i, label) { var d = this._nodes[i]; if (d) d.classList.add('csa-resolving'); this.flash('逆结算 C' + (i + 1) + ' · ' + (label || ''), 'flash-resolve'); },
-  done: function (i, lost, label) { var d = this._nodes[i]; if (d) { d.classList.remove('csa-resolving'); d.classList.add(lost ? 'csa-lost' : 'csa-done'); } this.flash('C' + (i + 1) + (lost ? ' 失去对象' : ' 结算完成'), lost ? 'flash-lost' : 'flash-ok'); },
-  end: function () { var self = this, b = this._el(); if (!b) return; b.classList.add('csa-ending'); setTimeout(function () { b.classList.remove('show'); b.classList.remove('csa-ending'); b.innerHTML = ''; self._nodes = []; }, 620); }
+  resolving: function (i, label) {
+    var d = this._nodes[i]; if (d) d.classList.add('csa-resolving');
+    try { var b = this._el(); if (b) b.classList.add('csa-stack-resolving'); } catch (e) {}
+    /* 【__UI_PHASE6·③】结算时"再播一次 C1 结算动画"：把这张卡（带 C1 徽章与光环）再打出来一次。
+       特意延迟 220ms：让"入链"先看清，再接"结算"（只是视觉错拍，**不阻塞任何推进**）。 */
+    try { var self0 = this; setTimeout(function () { try { self0._cardResolve(i, label); } catch (e) {} }, 220); } catch (e) {}
+    this.flash('逆结算 C' + (i + 1) + ' · ' + (label || ''), 'flash-resolve');
+  },
+  done: function (i, lost, label) {
+    var d = this._nodes[i]; if (d) { d.classList.remove('csa-resolving'); d.classList.add(lost ? 'csa-lost' : 'csa-done'); }
+    try { var b = this._el(); if (b) b.classList.remove('csa-stack-resolving'); } catch (e) {}
+    this.flash('C' + (i + 1) + (lost ? ' 失去对象' : ' 结算完成'), lost ? 'flash-lost' : 'flash-ok');
+  },
+  /* 【__UI_PHASE6·③】结算动画本体：卡 + 「C1 结算」徽章 + 扩散光环，落在连锁堆栈左侧。
+     不承重：动画关闭 / animate 不可用 / 任何异常 ⇒ 只做清理，绝不影响结算。 */
+  _cardResolve: function (i, label) {
+    try {
+      if (typeof CardAnim === 'undefined' || !CardAnim.enabled || !CardAnim.enabled()) return;
+      if (typeof document === 'undefined' || !document.body) return;
+      var card = (this._cards || [])[i];
+      var to = (CardAnim._targetRect ? CardAnim._targetRect() : null) || {};
+      var w = 96, h = 130;
+      var el = document.createElement('div');
+      el.className = 'md-chain-resolve';
+      el.style.width = w + 'px'; el.style.height = h + 'px';
+      var src = (card && (card.image_url || card.avatar_url)) || '';
+      el.innerHTML = src ? ('<img src="' + src + '" alt="">')
+        : ('<div class="md-chain-resolve-name">' + String(label || (card && card.name) || '') + '</div>');
+      var bg = document.createElement('div'); bg.className = 'md-chain-resolve-badge'; bg.textContent = 'C' + (i + 1) + ' 结算';
+      el.appendChild(bg);
+      var ring = document.createElement('div'); ring.className = 'md-chain-resolve-ring'; el.appendChild(ring);
+      var vw = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1280;
+      var vh = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 720;
+      var cx = (typeof to.x === 'number' ? to.x : vw - 140) - (w / 2 + 34);
+      var cy = (typeof to.y === 'number' ? to.y : vh * .5);
+      el.style.left = (cx - w / 2) + 'px'; el.style.top = (cy - h / 2) + 'px';
+      document.body.appendChild(el);
+      var kill = function () { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) {} };
+      /* 硬兜底：onfinish/oncancel 万一不触发（被节流、被打断、或环境没有 WAAPI），也不留垃圾节点 */
+      setTimeout(kill, 1250);
+      if (typeof el.animate !== 'function') { setTimeout(kill, 460); return; }
+      var a = el.animate([
+        { transform: 'translate(34px,30px) scale(.72) rotate(10deg)', opacity: 0 },
+        { transform: 'translate(0,0) scale(1.06) rotate(-2deg)', opacity: 1, offset: .45 },
+        { transform: 'translate(-16px,-10px) scale(1) rotate(0deg)', opacity: 1 }
+      ], { duration: 460, easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'forwards' });
+      a.onfinish = function () { setTimeout(kill, 170); };
+      a.oncancel = kill;
+    } catch (e) { try { console.error('结算动画异常（不影响结算）', e); } catch (e2) {} }
+  },
+  end: function () {
+    var self = this, b = this._el();
+    try { this._cards = []; } catch (e) {}
+    if (!b) return;
+    b.classList.add('csa-ending');
+    setTimeout(function () { b.classList.remove('show'); b.classList.remove('csa-ending'); b.classList.remove('csa-stack-resolving'); b.innerHTML = ''; self._nodes = []; }, 620);
+  }
 };
 /* ============================================================
  * 时点窗口状态机 TimingWindow（TW）—— 连锁重构 S1（2026-09-24）
