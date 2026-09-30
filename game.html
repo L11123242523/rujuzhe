@@ -10919,6 +10919,19 @@ var TW = {
         }
       }
     } catch (e) { console.error('同链去重出错（放行）', e); }
+    /* P3（MD：咒文速度）：**低速不能接高速** —— 触发(1速) 不能接在 技能/道具(2速) 或 反击(3速) 之后；
+       同速或更高速可以接。卡数据里可用 `speed` 显式指定，缺省由 __cardSpeed 推断。 */
+    try {
+      if (c && win.chain && win.chain.length) {
+        var __spNew = __cardSpeed(c);
+        var __spLast = __cardSpeed(win.chain[win.chain.length - 1]);
+        if (__spNew < __spLast) {
+          addBattleLog((c.owner || 'system'), '【连锁·MD口径】「' + (c.label || c.key) + '」是 ' + __spNew + ' 速，'
+            + '不能接在上一环的 ' + __spLast + ' 速之后 ⇒ 本次不能发动');
+          return __fin0();
+        }
+      }
+    } catch (e) { console.error('咒文速度校验出错（放行）', e); }
     if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
     win.chain.push(c);
     var fin = (typeof done === 'function') ? done : function () {};
@@ -11422,6 +11435,19 @@ function __chainIsBusy() {
         (TW.active.state === 'settling' || TW.active.state === 'closed')) return true;
     return false;
   } catch (e) { return false; }
+}
+/* 【MD 口径 P3：咒文速度】（2026-09-30）
+   1速＝触发效果（含本引擎注册表里的各条触发）；2速＝技能卡/速攻类；3速＝反击（无效类）。
+   规则：**低速不能接高速**（可以同级或更高速接链）。卡数据里若有显式 `speed` 字段则以它为准。 */
+function __cardSpeed(card) {
+  try {
+    if (!card) return 2;
+    if (typeof card.speed === 'number' && card.speed > 0) return card.speed;
+    if (card._category === 'skill_cards') return 2;
+    if (card._category === 'attack_cards' || card._category === 'item_single' || card._category === 'item_permanent') return 2;
+    if (card._isTrigger || card.id) return 1;          // 注册表产出的触发节点：1 速
+    return 2;
+  } catch (e) { console.error('取咒文速度出错（按2速处理）', e); return 2; }
 }
 /* ============================================================
    【MD 口径 P1：同一连锁一次】（2026-09-30）
