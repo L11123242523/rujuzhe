@@ -3152,6 +3152,73 @@ body::before{
   body::before{opacity:.22;background-size:32px 32px;}
   .modal-content,.choice-modal,.card-list-modal,.card-detail-content{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
 }
+
+/* ================= __UI_PHASE4 · 版面重排第一版（MD 式场地框，2026-10-01） =================
+   作者："UI 感觉和之前差不多" ⇒ 上一轮只改了颜色/质感。这一版动**版面**：
+   场地框、阶段缎带、手牌/格图放大、导轨式上下栏。全部为 CSS，未改 DOM；
+   回退：document.body.classList.add('ui-classic') ⇒ 下面全部失效。 */
+body:not(.ui-classic) #battleScreen .battle-map-container,
+body:not(.ui-classic) #battleScreen .map3d-wrap{
+  position:relative;
+  border:1px solid rgba(150,195,255,.22) !important;
+  border-radius:18px !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.04),
+    inset 0 0 90px rgba(6,10,22,.75),
+    0 24px 60px -24px rgba(0,0,0,.85) !important;
+  padding:10px !important;
+}
+/* MD 式四角支架 */
+body:not(.ui-classic) #battleScreen .battle-map-container::before,
+body:not(.ui-classic) #battleScreen .battle-map-container::after{
+  content:""; position:absolute; width:26px; height:26px; pointer-events:none;
+  border:2px solid var(--gold); opacity:.85;
+}
+body:not(.ui-classic) #battleScreen .battle-map-container::before{ left:6px; top:6px; border-right:none; border-bottom:none; border-top-left-radius:8px; }
+body:not(.ui-classic) #battleScreen .battle-map-container::after{ right:6px; bottom:6px; border-left:none; border-top:none; border-bottom-right-radius:8px; }
+/* 顶部/底部导轨 */
+body:not(.ui-classic) #battleScreen .battle-top-bar{
+  border-bottom:1px solid rgba(242,207,130,.28) !important;
+  border-radius:0 0 14px 14px !important;
+}
+body:not(.ui-classic) #battleScreen .battle-bottom-bar{
+  border-top:1px solid rgba(242,207,130,.28) !important;
+  border-radius:14px 14px 0 0 !important;
+}
+/* 中央信息 → 阶段缎带 */
+body:not(.ui-classic) #battleScreen .battle-center-info{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:4px 14px !important; border-radius:999px !important;
+  background:linear-gradient(120deg,rgba(242,207,130,.16),rgba(92,200,255,.12)) !important;
+  border:1px solid rgba(242,207,130,.35) !important;
+  font-weight:900 !important; letter-spacing:1px;
+  box-shadow:0 0 18px -6px rgba(242,207,130,.55);
+}
+/* 名牌：金色下划线 */
+body:not(.ui-classic) #battleScreen .duel-name{
+  border-bottom:1px solid rgba(242,207,130,.35);
+  padding-bottom:1px;
+}
+/* 头像：外发光（我方霓虹 / 对方绯红） */
+body:not(.ui-classic) #battleScreen .duel-portrait{ border-color:rgba(255,255,255,.35) !important; }
+body:not(.ui-classic) #battleScreen .duel-p1 .duel-portrait{ box-shadow:0 6px 16px rgba(0,0,0,.5),0 0 16px -2px rgba(92,200,255,.55) !important; }
+body:not(.ui-classic) #battleScreen .duel-p2 .duel-portrait{ box-shadow:0 6px 16px rgba(0,0,0,.5),0 0 16px -2px rgba(255,122,146,.55) !important; }
+/* 手牌/场地格放大 */
+body:not(.ui-classic) #battleScreen .hand-card-img{ width:112px !important; height:136px !important; }
+body:not(.ui-classic) #battleScreen .slot-img{ width:84px !important; height:96px !important; }
+body:not(.ui-classic) #battleScreen .hand-card:hover{ transform:translateY(-16px) scale(1.06) !important; }
+/* 可出的牌：金色呼吸 + 顶部高光条 */
+body:not(.ui-classic) #battleScreen .hand-card.playable::before{
+  content:""; position:absolute; left:8px; right:8px; top:0; height:3px; border-radius:0 0 4px 4px;
+  background:linear-gradient(90deg,transparent,var(--gold),transparent); opacity:.9;
+}
+/* 手机：手牌与格图回到原来的尺度，避免挤出屏幕 */
+@media (max-width:768px){
+  body:not(.ui-classic) #battleScreen .hand-card-img{ width:76px !important; height:92px !important; }
+  body:not(.ui-classic) #battleScreen .slot-img{ width:64px !important; height:74px !important; }
+  body:not(.ui-classic) #battleScreen .battle-map-container::before,
+  body:not(.ui-classic) #battleScreen .battle-map-container::after{ width:18px; height:18px; }
+}
 </style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
 :root{
   /* —— 统一到 MD 观感：更深的底、更细的描边、金色更"金属"、阴影更聚 —— */
