@@ -10396,7 +10396,7 @@ registerTrigger({
     });
     return list;   // 可能多个座位（双方都编组了琉璃(万圣祭)）
   },
-  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; var q = battleState[owner]; return !!(q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card); },
+  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; if (__missTiming('liuli-hw-sp-leave', ctx)) return false; var q = battleState[owner]; return !!(q && q._liuliHWSP && q._liuliHWSPTurn !== battleState.turn && q._liuliHWQueuedFor !== ctx.card); },
   mandatory: false,   // 卡面"可以发动" ⇒ 选发
   label: function (ctx) { return '【琉璃(万圣祭)·SP】有卡不因使用' + ctx.how + '·自己抽1张'; },
   fire: function (ctx, owner) {
@@ -10419,7 +10419,7 @@ registerTrigger({
     });
     return list;   // 可能多个座位
   },
-  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
+  cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; if (__missTiming('toma-sp-leave', ctx)) return false; var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
   mandatory: false,   // 卡面"可以发动" ⇒ 选发
   label: function (ctx) { return '【现实间冬马·SP】有卡不因使用' + ctx.how + '·造4点无序'; },
   fire: function (ctx, owner) {
@@ -10825,6 +10825,30 @@ function __editPresetDecks() {
     addBattleLog('p1', '【预设卡堆】事件卡：' + (__presetDecks.events.join('、') || '（空/随机）') + '；乐谱卡：' + (__presetDecks.music.join('、') || '（空/固定顺序）'));
     if (typeof showToast === 'function') showToast('预设卡堆已保存（事件卡按顺序优先发放，用完回落到随机）', 'good');
   } catch (e) { console.error('编辑预设卡堆出错', e); }
+}
+
+/* ============================================================
+   【MD 口径 P4：错过时点（__missTimingV1）】（2026-09-30，作者点名 4 条）
+   「～时**可以**发动」的选发：若触发事件**不是该次结算的最后一步**，就**错过时点**、不能发动。
+   本引擎能确切判定的"非最后一步" = **代价型离场**（献祭：送墓是代价，之后该效果还要继续结算）。
+   ⚠ 只对作者点名的 4 条生效（其余「～时可以」保持宽松，按作者 2026-09-30 的选择）：
+      现实间冬马 SP / 琉璃(万圣祭) SP / 羽奈(往昔)① / 来自地狱的盒子 SP
+   ============================================================ */
+var __WHEN_TIMED_IDS = { 'toma-sp-leave': 1, 'liuli-hw-sp-leave': 1, 'yunai-past-ask': 1, 'hell-box-sp': 1 };
+function __missTiming(id, ctx) {
+  try {
+    if (!__WHEN_TIMED_IDS[id]) return false;
+    if (!ctx) return false;
+    if (ctx.reason !== 'sacrifice') return false;       // 目前只覆盖"代价型离场"
+    try {
+      if (battleState && battleState._missTimingLoggedFor !== id + '|' + ((ctx.card && ctx.card.name) || '')) {
+        battleState._missTimingLoggedFor = id + '|' + ((ctx.card && ctx.card.name) || '');
+        addBattleLog(ctx.player || 'system', '【连锁·MD口径·错过时点】' + ((ctx.card && ctx.card.name) || '') +
+          ' 是因**代价**离开原区域的 ⇒ 该时点的「～时可以发动」选发错过时点、不能发动');
+      }
+    } catch (e) { console.error('错过时点日志出错', e); }
+    return true;
+  } catch (e) { console.error('错过时点判定出错（放行）', e); return false; }
 }
 
 var TW = {
@@ -18026,6 +18050,7 @@ registerTrigger({
     return hit;
   },
   cond: function (ctx, owner) {
+    if (__missTiming('yunai-past-ask', ctx)) return false;   // P4 错时点：代价型离场（送墓之后该效果还要继续结算）⇒ 错过时点
     var q = battleState[owner];
     return !!(q && q._yunaiPastPassive && battleState.currentPlayer === owner && owner === ctx.player);
   },
@@ -21935,7 +21960,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
 
   // 来自地狱的盒子SP：因卡效果送墓时可选 ①4面骰判定，按点数回复同数值音韵 ②对一名玩家造一次4面骰判定伤害
   // （献祭经光太郎被动视为效果送墓；破坏同样属于“因卡效果送墓”）
-  if (cardName.indexOf('来自地狱的盒子') >= 0 && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时/.test(sp)) {
+  if (cardName.indexOf('来自地狱的盒子') >= 0 && !__missTiming('hell-box-sp', { reason: reason, player: player, card: card }) && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时/.test(sp)) {
     function __hellBoxRecover(roll, __cancelled) {
       if (__cancelled || roll == null) { addBattleLog(player, '【来自地狱的盒子SP】判定被连锁无效'); return; }
       recoverCost(player, roll, '来自地狱的盒子SP');
