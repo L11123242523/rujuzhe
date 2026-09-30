@@ -11516,6 +11516,9 @@ function __tryDrainTriggers() {
     var q = effectEngine._pendingTriggers || [];
     if (!q.length) return;
     effectEngine._pendingTriggers = [];
+    /* P1 健壮性：另开新连锁 ⇒ "本连锁已排过"的集合必须清空
+       （否则若上一条连锁异常收尾没走到 TW.close，新连锁里同名的触发会被误判成重复而丢掉） */
+    try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { console.error('另开新连锁前清空"同链一次"集合失败', e); }
     addBattleLog('system', '【连锁】本次连锁处理完毕 → 其中产生的新效果另开新连锁（共 ' + q.length + ' 个：' +
       q.map(function (x) { return x.label || '效果'; }).join('、') + '）');
     effectEngine._inNewChain = true;
