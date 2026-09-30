@@ -25191,6 +25191,94 @@ var NetSync = {
     return __origStartTurn.apply(this, arguments);
   };
 })();
+
+/* ================= __UI_PHASE2B · 资源数字滚动（2026-09-30，不承重） =================
+   作者要求：MD 风、动画克制（0.2~0.4s）、不挡操作。这里只做"数字滚动 + 涨/降高亮"，
+   整体吞异常、可一键关（window.__UI_ANIM=false）、尊重 prefers-reduced-motion。 */
+(function () {
+  if (typeof window === 'undefined' || window.__UI_PHASE2B) return;
+  window.__UI_PHASE2B = 1;
+  var IDS = ['p1Cost', 'p1Sync', 'p1MaxCost', 'p1Fascination', 'p2Cost', 'p2Sync', 'p2MaxCost', 'p2Fascination',
+    'p1CostCenter', 'p1MaxCostCenter', 'p1SyncCenter', 'p1FascinationCenter', 'p1GoldCenter', 'p1LevelCenter', 'p1MotivationCenter',
+    'p2CostCenter', 'p2MaxCostCenter', 'p2SyncCenter', 'p2FascinationCenter'];
+  function on() {
+    try {
+      if (window.__UI_ANIM === false) return false;
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      return true;
+    } catch (e) { return true; }
+  }
+  function snap() {
+    var o = {};
+    try {
+      for (var i = 0; i < IDS.length; i++) {
+        var el = document.getElementById(IDS[i]);
+        if (el) o[IDS[i]] = String(el.textContent == null ? '' : el.textContent);
+      }
+    } catch (e) { console.error('数字快照失败（忽略）', e); }
+    return o;
+  }
+  function roll(el, from, to, up) {
+    try {
+      if (el.__rolling) return;
+      el.__rolling = 1;
+      var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      var dur = 260;
+      el.style.transition = 'color .18s ease, text-shadow .18s ease';
+      el.style.color = up ? '#b8f5c8' : '#ffb0bd';
+      el.style.textShadow = up ? '0 0 10px rgba(120,255,170,.55)' : '0 0 10px rgba(255,110,140,.55)';
+      var step = function () {
+        try {
+          var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          var p = Math.min(1, (now - t0) / dur);
+          var e = 1 - Math.pow(1 - p, 3);                    // easeOutCubic
+          var v = Math.round(from + (to - from) * e);
+          el.textContent = String(v);
+          if (p < 1) requestAnimationFrame(step);
+          else {
+            el.textContent = String(to);
+            el.__rolling = 0;
+            setTimeout(function () { try { el.style.color = ''; el.style.textShadow = ''; } catch (e2) { } }, 220);
+          }
+        } catch (e2) { try { el.textContent = String(to); el.__rolling = 0; } catch (e3) { } }
+      };
+      requestAnimationFrame(step);
+    } catch (e) { console.error('数字滚动失败（忽略）', e); }
+  }
+  function wrap() {
+    try {
+      if (typeof updateBattleUI !== 'function' || updateBattleUI.__rollWrapped) return false;
+      var orig = updateBattleUI;
+      var wrapped = function () {
+        var before = on() ? snap() : null;
+        var r = orig.apply(this, arguments);
+        try {
+          if (before) {
+            for (var i = 0; i < IDS.length; i++) {
+              var id = IDS[i], el = document.getElementById(id);
+              if (!el || !(id in before)) continue;
+              var after = String(el.textContent == null ? '' : el.textContent);
+              var b = before[id];
+              if (after === b) continue;
+              var nb = parseInt(b.replace(/[^0-9-]/g, ''), 10), na = parseInt(after.replace(/[^0-9-]/g, ''), 10);
+              if (isNaN(nb) || isNaN(na) || nb === na) continue;
+              roll(el, nb, na, na > nb);
+            }
+          }
+        } catch (e) { console.error('数字滚动收尾失败（忽略）', e); }
+        return r;
+      };
+      wrapped.__rollWrapped = 1;
+      updateBattleUI = wrapped;
+      return true;
+    } catch (e) { console.error('包装 updateBattleUI 失败（忽略）', e); return false; }
+  }
+  if (!wrap()) {
+    /* updateBattleUI 可能后定义 ⇒ 稍后重试两次，仍失败就放弃（绝不影响功能） */
+    var tries = 0;
+    var t = setInterval(function () { tries++; if (wrap() || tries >= 20) clearInterval(t); }, 500);
+  }
+})();
 </script>
 </body>
 </html>
