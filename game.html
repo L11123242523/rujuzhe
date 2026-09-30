@@ -10290,9 +10290,14 @@ function __mdOrderSimultaneous(tp, list) {
     var arr = (list || []).filter(Boolean);
     if (arr.length < 2) return arr;
     var rank = function (n) {
-      var mine = (n && n.owner === tp) ? 0 : 1;          // 回合玩家优先
-      var mand = (n && n.mandatory === false) ? 1 : 0;   // 必发优先于选发
-      return mine * 2 + mand;
+      /* SEGOC：**必发两个梯队在前，选发两个梯队在后**，各自内部"回合玩家优先"。
+         ⚠ 2026-09-30 修正：原来是 `mine*2 + mand`，算出来是
+         「回合必发 → 回合选发 → 对手必发 → 对手选发」✗ —— 与注释里写的 MD 口径不符（注释是对的、代码写错了）。
+         现在是 `optional*2 + mine`：
+         0 回合必发 · 1 对手必发 · 2 回合选发 · 3 对手选发 ✓ */
+      var optional = (n && n.mandatory === false) ? 1 : 0;
+      var mine = (n && n.owner === tp) ? 0 : 1;
+      return optional * 2 + mine;
     };
     return arr.map(function (n, i) { return { n: n, i: i, r: rank(n) }; })
       .sort(function (a, b) { return a.r - b.r || a.i - b.i; })   // 稳定排序：同组保持原顺序（玩家自排）
