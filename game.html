@@ -11179,6 +11179,14 @@ function __restoreOncePerTurn(player, snap, label) {
     snap.keys.forEach(function (k) {
       if (p[k] !== snap.vals[k]) { p[k] = snap.vals[k]; n++; }
     });
+    /* ⚠ 缺口修正：发动过程中**新出现**的计数标记（快照时还不存在 ⇒ undefined）也要清掉，
+       否则"从无到有"的那类（例：_tomaSPUsed 首次置 true）不会被返还 */
+    try {
+      __onceKeysOf(p).forEach(function (k) {
+        if (snap.vals[k] === undefined && !(k in snap.vals)) { delete p[k]; n++; }
+        else if (snap.vals[k] === undefined) { delete p[k]; n++; }
+      });
+    } catch (e) { console.error('清理新增计数标记失败', e); }
     if (n > 0) addBattleLog(player || 'system', '【连锁·MD口径A2】' + (label || '该发动') + '被**无效** ⇒ 本次消耗的「一回合一次」次数已**返还**（' + n + ' 项）');
     return n;
   } catch (e) { console.error('还原每次一回标记失败', e); return 0; }
@@ -11867,6 +11875,20 @@ function __tryDrainTriggers() {
     addBattleLog('system', '【连锁】本次连锁处理完毕 → 其中产生的新效果另开新连锁（共 ' + q.length + ' 个：' +
       q.map(function (x) { return x.label || '效果'; }).join('、') + '）');
     effectEngine._inNewChain = true;
+    /* 【MD 口径 A4：优先权交接】（2026-09-30）本连锁结算完 ⇒ **回合玩家先获得优先权**：
+       待处理触发按 SEGOC 排序（回合玩家必发 → 对手必发 → 回合玩家选发 → 对手选发）后再另开新连锁。
+       与 P0 的 __mdOrderSimultaneous 同源，不再"按谁先入队谁先动"。__MD_A4 */
+    try {
+      var __tpA4 = (battleState && battleState.currentPlayer) || 'p1';
+      if (typeof __mdOrderSimultaneous === 'function') {
+        var __sorted = __mdOrderSimultaneous(__tpA4, q);
+        if (__sorted && __sorted.length === q.length) {
+          var __changed = __sorted.some(function (x, i) { return x !== q[i]; });
+          q = __sorted;
+          if (__changed) addBattleLog('system', '【连锁·MD口径A4】新连锁按优先权排序（回合玩家 ' + (__tpA4 === 'p1' ? '你' : '对手') + ' 先）');
+        }
+      }
+    } catch (e) { console.error('A4 优先权排序失败（按原顺序）', e); }
     var owner = (q[0] && q[0].owner) || 'p1';
     // 包裹每个触发节点：
     //  ①标记 `_drainingCard` = 正在结算的那张卡 → 它自己不会再被入队（避免"自己入队自己"的无限循环）
