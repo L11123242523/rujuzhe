@@ -12371,16 +12371,50 @@ function showCardDetail(card) {
   modal.classList.add('active');
 }
 
-/* 【2026-09-30】对战页：点自己/AI 的头像或名字 ⇒ 查看该座席**队长**的完整角色卡。
-   座位字段在不同版本里叫法不同（captain / leader / chars[0]），这里统一兜住。 */
-function __showCaptainCard(pl) {
+/* 【2026-09-30】对战页：查看座席**整队**的角色卡（作者：一队三个角色，都应该能查看）。
+   座位字段在不同版本里叫法不同（chars / captain / leader），组队来源也可能只在 deckConfig 里，
+   这里按  seats.chars → deckConfig[seats].chars → [captain] 依次兜底。 */
+function __teamOfSeat(pl) {
   try {
     var P = (typeof battleState !== 'undefined' && battleState) ? battleState[pl] : null;
-    if (!P) return;
-    var cap = P.captain || P.leader || (P.chars && P.chars[0]) || null;
-    if (!cap) return;
-    if (!cap._category) cap._category = 'characters';
-    showCardDetail(cap);
+    var list = (P && P.chars && P.chars.length) ? P.chars.slice()
+      : ((typeof deckConfig !== 'undefined' && deckConfig && deckConfig[pl] && deckConfig[pl].chars) ? deckConfig[pl].chars.slice() : []);
+    if (!list.length && P) list = [P.captain || P.leader].filter(Boolean);
+    return list.filter(Boolean);
+  } catch (e) { console.error('取队伍出错', e); return []; }
+}
+function __showCaptainCard(pl, idx) {
+  try {
+    var list = __teamOfSeat(pl);
+    if (!list.length) return;
+    var i = (typeof idx === 'number' && idx >= 0 && idx < list.length) ? idx : 0;
+    var card = list[i];
+    if (!card) return;
+    if (!card._category) card._category = 'characters';
+    showCardDetail(card);
+    /* 队伍切换条：队长 + 两名队员都能点开看 */
+    var modal = document.getElementById('cardDetailModal');
+    var body = modal && modal.querySelector('.card-detail-body');
+    if (!body) return;
+    var strip = document.getElementById('cardDetailTeam');
+    if (!strip) {
+      strip = document.createElement('div');
+      strip.id = 'cardDetailTeam';
+      strip.style.cssText = 'display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:0 0 10px;';
+      body.insertBefore(strip, body.firstChild);
+    }
+    strip.innerHTML = '';
+    var who = (pl === 'p1') ? '我方' : '对手';
+    list.forEach(function (c, k) {
+      var b = document.createElement('button');
+      b.textContent = (k === 0 ? '队长·' : '队员·') + (c.name || '?');
+      b.style.cssText = 'padding:4px 10px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '
+        + (k === i ? '#feca57' : 'rgba(255,255,255,.3)') + ';background:' + (k === i ? '#feca57' : 'rgba(255,255,255,.08)')
+        + ';color:' + (k === i ? '#2d3436' : '#fff') + ';';
+      b.title = who + '第' + (k + 1) + '位';
+      b.onclick = function () { window.__showCaptainCard(pl, k); };
+      strip.appendChild(b);
+    });
   } catch (e) { console.error('查看角色卡出错', e); }
 }
 
