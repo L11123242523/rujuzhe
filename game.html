@@ -2671,9 +2671,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .duel-p2{border-color:rgba(86,200,230,.42);box-shadow:inset 0 0 34px rgba(86,200,230,.07),0 6px 18px rgba(0,0,0,.3);}
 .duel-panel.ui-hit{animation:panelHit .55s var(--ease);}
 @keyframes panelHit{0%{box-shadow:inset 0 0 70px rgba(255,60,60,.6),0 0 30px rgba(255,60,60,.5);}100%{box-shadow:inset 0 0 34px rgba(255,60,60,0),0 6px 18px rgba(0,0,0,.3);}}
-.duel-portrait{width:62px;height:62px;border-radius:12px;overflow:hidden;border:2px solid rgba(255,255,255,.28);background:#0d1020;position:relative;flex-shrink:0;box-shadow:0 6px 16px rgba(0,0,0,.45);}
+.duel-portrait{width:88px;height:88px;border-radius:14px;overflow:hidden;border:2px solid rgba(255,255,255,.28);background:#0d1020;position:relative;flex-shrink:0;box-shadow:0 6px 16px rgba(0,0,0,.45);}
 .duel-portrait img{width:100%;height:100%;object-fit:cover;object-position:top;}
-.duel-portrait .duel-lv{position:absolute;bottom:2px;right:2px;background:linear-gradient(135deg,#f6e3bb,#c99a4e);color:#241a05;font-size:10px;font-weight:800;padding:1px 7px;border-radius:99px;box-shadow:0 2px 6px rgba(0,0,0,.5);}
+/* 【2026-09-30 作者要求】等级徽章原来用 absolute 压在头像右下角（挡脸）⇒ 移出头像，做成名字行里的小药丸 */
+.duel-lv{background:linear-gradient(135deg,#f6e3bb,#c99a4e);color:#241a05;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px;box-shadow:0 2px 6px rgba(0,0,0,.5);flex-shrink:0;line-height:1.5;white-space:nowrap;}
 .duel-body{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;}
 .duel-body-r{align-items:flex-end;}
 .duel-name-row{display:flex;align-items:center;gap:8px;min-width:0;}
@@ -2734,7 +2735,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .duel-center{order:-1;width:100%;flex-direction:row;justify-content:center;gap:12px;min-width:0;}
   .duel-vs{font-size:26px;}
   .duel-panel{flex:1 1 auto;padding:6px 10px;gap:8px;}
-  .duel-portrait{width:44px;height:44px;border-radius:9px;}
+  .duel-portrait{width:62px;height:62px;border-radius:11px;}
   .duel-name{font-size:12px;}
   .duel-attr{font-size:9px;padding:0 6px;}
   .duel-hp-track{height:15px;max-width:120px;min-width:64px;}
@@ -2744,7 +2745,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   #duelHeader .battle-exit-btn{order:3;width:26px;height:26px;font-size:12px;}
 }
 @media screen and (max-width: 480px){
-  .duel-portrait{width:36px;height:36px;}
+  .duel-portrait{width:50px;height:50px;}
   .duel-hp-ico{display:none;}
   .duel-hp-track{max-width:96px;}
   .duel-sub .duel-sub:nth-child(1){display:none;}
@@ -2846,7 +2847,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   #battleScreen{padding:6px 10px 8px;}
   #battleScreen .battle-top-bar{margin:0 0 5px;padding:3px 10px;}
   #battleScreen .duel-panel{padding:4px 8px;gap:8px;}
-  #battleScreen .duel-portrait{width:42px;height:42px;border-radius:9px;}
+  #battleScreen .duel-portrait{width:58px;height:58px;border-radius:11px;}
   #battleScreen .duel-hp-track{height:14px;}
   #battleScreen .battle-map-container{min-height:84px;margin-bottom:0;}
   #battleScreen .opponent-area{padding:4px 8px;gap:8px;}
@@ -2892,7 +2893,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 @media screen and (min-width: 769px) and (max-height: 700px){
   #battleScreen{padding:4px 8px 6px;}
   #battleScreen .battle-top-bar{padding:2px 8px;margin-bottom:4px;}
-  #battleScreen .duel-portrait{width:28px;height:28px;}
+  #battleScreen .duel-portrait{width:38px;height:38px;}
   #battleScreen .duel-panel{padding:2px 6px;gap:6px;}
   #battleScreen .battle-map-container{min-height:64px;}
   #battleScreen .map3d-topbar{padding:1px 6px;font-size:10px;}
@@ -3082,9 +3083,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   
   <div class="battle-top-bar" id="duelHeader">
     <div class="duel-panel duel-p1" id="duelP1Panel">
-      <div class="duel-portrait" id="p1Portrait"><img id="p1PortraitImg" alt="队长" onerror="this.style.display='none'"><span class="duel-lv" id="p1LvBadge">Lv1</span></div>
+      <div class="duel-portrait" id="p1Portrait"><img id="p1PortraitImg" alt="队长" onerror="this.style.display='none'"></div>
       <div class="duel-body">
-        <div class="duel-name-row"><span class="duel-name" id="p1Name">你</span><span class="duel-attr" id="p1Attr"></span></div>
+        <div class="duel-name-row"><span class="duel-name" id="p1Name">你</span><span class="duel-attr" id="p1Attr"></span><span class="duel-lv" id="p1LvBadge">Lv1</span></div>
         <div class="duel-hp-row">
           <span class="duel-hp-ico">❤️</span>
           <div class="duel-hp-track"><div class="duel-hp-fill duel-hp-p1" id="p1HpBar"></div><span class="duel-hp-text" id="p1Sync">0</span></div>
@@ -3105,7 +3106,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     </div>
     <div class="duel-panel duel-p2" id="duelP2Panel">
       <div class="duel-body duel-body-r">
-        <div class="duel-name-row"><span class="duel-attr" id="p2Attr"></span><span class="duel-name" id="p2Name">AI</span></div>
+        <div class="duel-name-row"><span class="duel-attr" id="p2Attr"></span><span class="duel-name" id="p2Name">AI</span><span class="duel-lv" id="p2LvBadge">Lv1</span></div>
         <div class="duel-hp-row">
           <div class="duel-hp-track"><div class="duel-hp-fill duel-hp-p2" id="p2HpBar"></div><span class="duel-hp-text" id="p2Sync">0</span></div>
           <span class="duel-hp-ico">❤️</span>
@@ -3118,7 +3119,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
           <span class="duel-sub">⭐<span id="p2MotivationTop">0</span></span>
         </div>
       </div>
-      <div class="duel-portrait" id="p2Portrait"><img id="p2PortraitImg" alt="AI队长" onerror="this.style.display='none'"><span class="duel-lv" id="p2LvBadge">Lv1</span></div>
+      <div class="duel-portrait" id="p2Portrait"><img id="p2PortraitImg" alt="AI队长" onerror="this.style.display='none'"></div>
     </div>
     <button class="battle-exit-btn" onclick="if(typeof Online!=='undefined'&&Online.active){Online.leave();}showScreen('mainMenu')">✕</button>
   </div>
