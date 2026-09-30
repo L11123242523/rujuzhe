@@ -14428,6 +14428,8 @@ function doSacrifice() {
 
   // 可视化选择一张献祭
   showCardPickerMulti(p.hand.slice(), '选择要献祭的手卡（送入墓地并回复音韵值）', function(idx) {
+    /* 取消（2026-10-01 作者要求）：idx 为 null/undefined ⇒ 放弃献祭，不消耗次数、不送墓 */
+    if (idx === null || idx === undefined) { showToast('已取消献祭', 'warn'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
     if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
     if (idx >= p.hand.length) { showToast('手牌已变化，请重新选择献祭的手卡', 'warn'); updateBattleUI(); return; } // 弹窗期间手牌变化：防止越界/误删
     var sacCard = p.hand.splice(idx, 1)[0];
@@ -16475,8 +16477,10 @@ __defEngineState('_cardPickerMultiCallback', null);
 __defEngineState('_cardPickerStack', function () { return []; });      // 待应答的选卡弹窗（栈）：每个弹窗**用自己的闭包**应答，槽只用来表示"当前在屏上的是哪一个"
 // 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
 // C 阶段·第 2 步：同 showChoiceModal —— 调用点不改，只把"身体"搬到环境层（浏览器=弹窗，服务器=问座位）
-function showCardPickerMulti(cards, title, callback, needCount, allowLess) {
-  return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess }, callback);
+function showCardPickerMulti(cards, title, callback, needCount, allowLess, allowCancel) {
+  /* allowCancel（2026-10-01）：允许玩家点"取消"放弃这次选卡（如献祭，防止误触浪费每回合次数）。
+     默认 false ⇒ 其它"必须选卡"的效果流程完全不受影响。 */
+  return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess, allowCancel: !!allowCancel }, callback);
 }
 function __askPickCardsLocal(spec, callback) {
   var cards = (spec && spec.cards) || [];
@@ -16527,6 +16531,17 @@ function __askPickCardsLocal(spec, callback) {
     if (__ix >= 0) _cardPickerStack.splice(__ix, 1);
     _cardPickerMultiCallback = _cardPickerStack.length ? _cardPickerStack[_cardPickerStack.length - 1] : null;
     try { callback(payload); } catch (e) { console.error('选卡回调异常', e); }
+  }
+  /* 取消按钮（仅当 spec.allowCancel）：全宽放在网格最后，点击 ⇒ fire(null)（走正常应答/广播/栈维护） */
+  if (spec && spec.allowCancel) {
+    var __cancelBtn = document.createElement('button');
+    __cancelBtn.type = 'button';
+    __cancelBtn.textContent = '取消（不选）';
+    __cancelBtn.style.cssText = 'grid-column:1/-1;margin:10px auto 0;padding:8px 22px;border-radius:10px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.08);color:#e8f1ff;font-weight:800;letter-spacing:1px;cursor:pointer;';
+    __cancelBtn.onmouseenter = function () { __cancelBtn.style.background = 'rgba(255,255,255,.16)'; };
+    __cancelBtn.onmouseleave = function () { __cancelBtn.style.background = 'rgba(255,255,255,.08)'; };
+    __cancelBtn.onclick = function () { fire(null); };
+    grid.appendChild(__cancelBtn);
   }
   cards.forEach(function(card, idx) {
     var div = document.createElement('div');
