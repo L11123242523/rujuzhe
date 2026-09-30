@@ -3083,9 +3083,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   
   <div class="battle-top-bar" id="duelHeader">
     <div class="duel-panel duel-p1" id="duelP1Panel">
-      <div class="duel-portrait" id="p1Portrait"><img id="p1PortraitImg" alt="队长" onerror="this.style.display='none'"></div>
+      <div class="duel-portrait" id="p1Portrait" onclick="__showCaptainCard('p1')" title="查看我的角色卡" style="cursor:pointer"><img id="p1PortraitImg" alt="队长" onerror="this.style.display='none'"></div>
       <div class="duel-body">
-        <div class="duel-name-row"><span class="duel-name" id="p1Name">你</span><span class="duel-attr" id="p1Attr"></span><span class="duel-lv" id="p1LvBadge">Lv1</span></div>
+        <div class="duel-name-row"><span class="duel-name" id="p1Name" onclick="__showCaptainCard('p1')" title="查看我的角色卡" style="cursor:pointer">你</span><span class="duel-attr" id="p1Attr"></span><span class="duel-lv" id="p1LvBadge">Lv1</span></div>
         <div class="duel-hp-row">
           <span class="duel-hp-ico">❤️</span>
           <div class="duel-hp-track"><div class="duel-hp-fill duel-hp-p1" id="p1HpBar"></div><span class="duel-hp-text" id="p1Sync">0</span></div>
@@ -3106,7 +3106,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
     </div>
     <div class="duel-panel duel-p2" id="duelP2Panel">
       <div class="duel-body duel-body-r">
-        <div class="duel-name-row"><span class="duel-attr" id="p2Attr"></span><span class="duel-name" id="p2Name">AI</span><span class="duel-lv" id="p2LvBadge">Lv1</span></div>
+        <div class="duel-name-row"><span class="duel-attr" id="p2Attr"></span><span class="duel-name" id="p2Name" onclick="__showCaptainCard('p2')" title="查看对手角色卡" style="cursor:pointer">AI</span><span class="duel-lv" id="p2LvBadge">Lv1</span></div>
         <div class="duel-hp-row">
           <div class="duel-hp-track"><div class="duel-hp-fill duel-hp-p2" id="p2HpBar"></div><span class="duel-hp-text" id="p2Sync">0</span></div>
           <span class="duel-hp-ico">❤️</span>
@@ -3119,7 +3119,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
           <span class="duel-sub">⭐<span id="p2MotivationTop">0</span></span>
         </div>
       </div>
-      <div class="duel-portrait" id="p2Portrait"><img id="p2PortraitImg" alt="AI队长" onerror="this.style.display='none'"></div>
+      <div class="duel-portrait" id="p2Portrait" onclick="__showCaptainCard('p2')" title="查看对手角色卡" style="cursor:pointer"><img id="p2PortraitImg" alt="AI队长" onerror="this.style.display='none'"></div>
     </div>
     <button class="battle-exit-btn" onclick="if(typeof Online!=='undefined'&&Online.active){Online.leave();}showScreen('mainMenu')">✕</button>
   </div>
@@ -3503,7 +3503,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
       <div class="card-detail-name" id="cardDetailName"></div>
       <div class="card-detail-meta" id="cardDetailMeta"></div>
       <div class="card-detail-effect" id="cardDetailEffect"></div>
-      <div class="card-detail-tip">右键点击手牌区卡牌可随时查看效果</div>
+      <div class="card-detail-tip">右键点击手牌区卡牌可随时查看效果；对战中点自己/对手的<b>头像或名字</b>可查看完整角色卡</div>
     </div>
   </div>
 </div>
@@ -12309,30 +12309,79 @@ function showCardDetail(card) {
   if (!card) return;
   var modal = document.getElementById('cardDetailModal');
   if (!modal) return;
-  
+
+  var __isChar = (card._category === 'characters') || (!!card.passive && !card.effect);
+  document.getElementById('cardDetailTitle').textContent = __isChar ? '角色卡详情' : '卡牌详情';
   document.getElementById('cardDetailName').textContent = card.name || '未知卡牌';
-  
+
   var metaHtml = '';
-  if (card.cost !== undefined) metaHtml += '<span>费用：' + card.cost + '</span>';
-  if (card.attribute) metaHtml += '<span>属性：' + card.attribute + '</span>';
-  if (card.type) metaHtml += '<span>类型：' + card.type + '</span>';
-  if (card._category) {
-    var catMap = {
-      'characters': '角色卡', 'attack_cards': '攻击卡', 'skill_cards': '技能卡',
-      'item_permanent': '永续道具', 'item_single': '单次道具', 'gift_cards': '馈赠卡',
-      'music_cards': '乐谱卡', 'event_cards': '事件卡', 'omikuji': '御神签'
-    };
-    metaHtml += '<span>' + (catMap[card._category] || card._category) + '</span>';
+  if (__isChar) {
+    if (card.sync !== undefined && card.sync !== '') metaHtml += '<span>同步值：' + card.sync + '</span>';
+    if (card.attribute) metaHtml += '<span>属性：' + card.attribute + '</span>';
+    metaHtml += '<span>角色卡</span>';
+    if (card.cost !== undefined && card.cost !== '') metaHtml += '<span>费用：' + card.cost + '</span>';
+  } else {
+    if (card.cost !== undefined) metaHtml += '<span>费用：' + card.cost + '</span>';
+    if (card.attribute) metaHtml += '<span>属性：' + card.attribute + '</span>';
+    if (card.type) metaHtml += '<span>类型：' + card.type + '</span>';
+    if (card._category) {
+      var catMap = {
+        'characters': '角色卡', 'attack_cards': '攻击卡', 'skill_cards': '技能卡',
+        'item_permanent': '永续道具', 'item_single': '单次道具', 'gift_cards': '馈赠卡',
+        'music_cards': '乐谱卡', 'event_cards': '事件卡', 'omikuji': '御神签'
+      };
+      metaHtml += '<span>' + (catMap[card._category] || card._category) + '</span>';
+    }
+    if (card.baseDamage) metaHtml += '<span>基础伤害：' + card.baseDamage + '</span>';
+    if (card.range) metaHtml += '<span>攻击距离：' + card.range + '</span>';
   }
-  if (card.baseDamage) metaHtml += '<span>基础伤害：' + card.baseDamage + '</span>';
-  if (card.range) metaHtml += '<span>攻击距离：' + card.range + '</span>';
   document.getElementById('cardDetailMeta').innerHTML = metaHtml;
-  
-  // 展示层用完整文本（主效果+SP）；结算路径用的 card.effect 已剥离 SP
-  var effectText = card._fullEffect || ((card.effect || card.text || card.desc || '') + (card.sp ? ('\nSP：' + card.sp) : '')) || '暂无效果描述';
+
+  /* 【2026-09-30 作者要求】对战中也必须能查角色卡的**完整信息** ⇒ 角色卡显示：卡图 + 被动全文 + SP 全文。
+     （普通卡沿用原来的"主效果 + SP"口径） */
+  var effectText;
+  if (__isChar) {
+    var __parts = [];
+    if (card.passive) __parts.push('【被动】\n' + card.passive);
+    if (card.sp) __parts.push('【SP】\n' + card.sp);
+    effectText = __parts.length ? __parts.join('\n\n') : '（该角色卡没有被动/SP文本）';
+  } else {
+    effectText = card._fullEffect || ((card.effect || card.text || card.desc || '') + (card.sp ? ('\nSP：' + card.sp) : '')) || '暂无效果描述';
+  }
   document.getElementById('cardDetailEffect').textContent = effectText;
-  
+
+  /* 卡图：动态插入（弹窗原本没有图片位，用内联样式，避免再改 CSS） */
+  try {
+    var body = modal.querySelector('.card-detail-body');
+    var img = document.getElementById('cardDetailImg');
+    var src = card.image_url || card.avatar_url || '';
+    if (src) {
+      if (!img) {
+        img = document.createElement('img');
+        img.id = 'cardDetailImg';
+        img.style.cssText = 'display:block;width:100%;max-width:340px;margin:0 auto 10px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.5);';
+        body.insertBefore(img, body.firstChild);
+      }
+      img.src = src;
+      img.alt = card.name || '';
+      img.style.display = '';
+    } else if (img) { img.style.display = 'none'; }
+  } catch (e) { console.error('角色卡详情插图出错', e); }
+
   modal.classList.add('active');
+}
+
+/* 【2026-09-30】对战页：点自己/AI 的头像或名字 ⇒ 查看该座席**队长**的完整角色卡。
+   座位字段在不同版本里叫法不同（captain / leader / chars[0]），这里统一兜住。 */
+function __showCaptainCard(pl) {
+  try {
+    var P = (typeof battleState !== 'undefined' && battleState) ? battleState[pl] : null;
+    if (!P) return;
+    var cap = P.captain || P.leader || (P.chars && P.chars[0]) || null;
+    if (!cap) return;
+    if (!cap._category) cap._category = 'characters';
+    showCardDetail(cap);
+  } catch (e) { console.error('查看角色卡出错', e); }
 }
 
 function closeCardDetail() {
