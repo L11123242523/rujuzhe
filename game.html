@@ -3219,6 +3219,62 @@ body:not(.ui-classic) #battleScreen .hand-card.playable::before{
   body:not(.ui-classic) #battleScreen .battle-map-container::before,
   body:not(.ui-classic) #battleScreen .battle-map-container::after{ width:18px; height:18px; }
 }
+
+/* ================= __UI_PHASE5 · 提亮/提对比（2026-10-01，作者："太暗"） ================= */
+body:not(.ui-classic){
+  /* —— 底色整体抬亮一档：深蓝灰而不是近黑 —— */
+  background:
+    radial-gradient(1400px 700px at 50% -12%, rgba(120,190,255,.16), transparent 62%),
+    radial-gradient(1000px 560px at 92% 108%, rgba(150,130,255,.14), transparent 62%),
+    linear-gradient(180deg,#151d31,#0e1524 62%) !important;
+  color:#f2f6ff !important;
+}
+body:not(.ui-classic)::before{ opacity:.16 !important; }
+body:not(.ui-classic) #battleScreen{
+  background:
+    radial-gradient(1200px 620px at 50% -10%, rgba(120,200,255,.16), transparent 60%),
+    radial-gradient(900px 520px at 90% 110%, rgba(150,130,255,.14), transparent 60%),
+    linear-gradient(180deg,#16203a,#0f1728) !important;
+}
+/* —— 面板/玻璃提亮：更"亮面"，少一点浑浊 —— */
+body:not(.ui-classic) #battleScreen .duel-panel,
+body:not(.ui-classic) #battleScreen .battle-log-panel,
+body:not(.ui-classic) .deck-side,
+body:not(.ui-classic) .deck-mode-bar,
+body:not(.ui-classic) .modal-content,
+body:not(.ui-classic) .choice-modal,
+body:not(.ui-classic) .card-list-modal,
+body:not(.ui-classic) .card-detail-content{
+  background:linear-gradient(160deg,rgba(44,58,92,.86),rgba(26,36,62,.92)) !important;
+  border-color:rgba(170,205,255,.26) !important;
+}
+/* —— 场地框：暗角减弱，边界更清楚 —— */
+body:not(.ui-classic) #battleScreen .battle-map-container,
+body:not(.ui-classic) #battleScreen .map3d-wrap{
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    inset 0 0 60px rgba(10,16,30,.45),
+    0 20px 50px -26px rgba(0,0,0,.7) !important;
+  border-color:rgba(170,205,255,.30) !important;
+}
+/* —— 手牌/卡面：底色提亮一档 —— */
+body:not(.ui-classic) #battleScreen .hand-card{
+  background:linear-gradient(165deg,rgba(56,72,116,.96),rgba(34,46,78,.96)) !important;
+}
+body:not(.ui-classic) .card-item{
+  background:linear-gradient(160deg,rgba(52,66,104,.9),rgba(30,42,72,.9)) !important;
+}
+/* —— 文字对比：主文字近白、次要提亮 —— */
+body:not(.ui-classic){ --ink:#f4f8ff; --dim:rgba(230,240,255,.80); --faint:rgba(230,240,255,.56); }
+/* —— 金色/霓虹提亮一档 —— */
+body:not(.ui-classic){ --gold:#ffe39a; --gold-deep:#e0af5c; --gold-hi:#fff5d6; --md2-neon:#7fdcff; --md2-crimson:#ff90a6; }
+/* —— 顶/底导轨与血条：亮一点，别糊在黑里 —— */
+body:not(.ui-classic) #battleScreen .battle-top-bar,
+body:not(.ui-classic) #battleScreen .battle-bottom-bar{
+  background:linear-gradient(180deg,rgba(48,62,96,.9),rgba(26,36,60,.94)) !important;
+  border-color:rgba(170,205,255,.26) !important;
+}
+body:not(.ui-classic) #battleScreen .duel-hp-track{ background:rgba(0,0,0,.42) !important; }
 </style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
 :root{
   /* —— 统一到 MD 观感：更深的底、更细的描边、金色更"金属"、阴影更聚 —— */
