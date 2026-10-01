@@ -3313,7 +3313,18 @@ body:not(.ui-classic) #battleScreen .duel-hp-track{ background:rgba(0,0,0,.42) !
 body:not(.ui-classic) #battleScreen .duel-p1 .duel-sub-row{ display:none; }
 @media (max-width:1099px){ body:not(.ui-classic) #battleScreen .duel-p1 .duel-sub-row{ display:flex; } }
 
-/* ② 地图区不再固定吃满高度：收掉空黑，把下面几个区顶进一屏 */
+/* ② 地图区：容器贴合棋盘宽高比并居中（棋盘 15×10 斜视投影≈2.2:1，容器原来是 5.6:1 的整幅宽条
+   ⇒ 两侧必然大片空黑；相机本身已经是"整盘入画"，所以收容器才是正解，且完全不动 3D 代码）。 */
+body:not(.ui-classic) #battleScreen .battle-map-container,
+body:not(.ui-classic) #battleScreen .map3d-wrap{
+  max-width:min(920px, 92vw) !important;
+  margin-left:auto !important;
+  margin-right:auto !important;
+}
+@media (max-width:1099px){
+  body:not(.ui-classic) #battleScreen .battle-map-container,
+  body:not(.ui-classic) #battleScreen .map3d-wrap{ max-width:100% !important; }
+}
 body:not(.ui-classic) #battleScreen .battle-map-container,
 body:not(.ui-classic) #battleScreen .map3d-wrap{
   min-height:132px !important;
@@ -3327,7 +3338,7 @@ body:not(.ui-classic) #battleScreen .permanent-slots > *{ font-size:11px !import
 body:not(.ui-classic) #battleScreen .opp-zone-counts{ white-space:nowrap !important; font-size:11.5px !important; }
 
 /* ④ 手牌：左对齐 + 定宽，5 张不再被拉满整行；手牌区不再吃固定 min-height */
-body:not(.ui-classic) #battleScreen .hand-cards{ justify-content:flex-start !important; gap:10px !important; padding:2px !important; }
+body:not(.ui-classic) #battleScreen .hand-cards{ justify-content:center !important; gap:12px !important; padding:2px !important; }   /* 作者：靠左很奇怪 ⇒ 居中 */
 body:not(.ui-classic) #battleScreen .hand-card{ flex:0 0 auto !important; width:92px !important; }
 body:not(.ui-classic) #battleScreen .hand-area{ min-height:0 !important; }
 
@@ -3341,6 +3352,12 @@ body:not(.ui-classic) #battleScreen .side-zones .deck-zone,
 body:not(.ui-classic) #battleScreen .side-zones .grave-zone{ padding:4px !important; }
 body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !important; letter-spacing:0 !important; opacity:.82; }
 </style> 前）⇒ 优先级最高，把层层补丁的观感统一回来。 */
+
+/* 【2026-10-01 修】上面那句结束标签写在注释里，被 HTML 解析器当成"提前结束 style 块" ⇒
+   它之后的 CSS（统一 MD 观感的 :root/#battleScreen 一整块）过去一直被当文本丢掉。这里把它单独包成新的 style 块启用。
+   注意：本注释里**不能出现那个标签的字面量**，否则又会提前闭合（写 "style 结束标签" 代替）。
+   回退：把本块整段注释掉即可（它不依赖 ui-classic 开关）。 */
+<style>
 :root{
   /* —— 统一到 MD 观感：更深的底、更细的描边、金色更"金属"、阴影更聚 —— */
   --line:rgba(150,195,255,.10); --line-2:rgba(150,195,255,.22);
@@ -3432,6 +3449,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   #battleScreen .duel-panel{ border-left-width:2px !important; }
   #battleScreen .battle-action-btn{ letter-spacing:.6px !important; }
 }
+</style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
   <div class="ol-wrap">
