@@ -676,7 +676,7 @@ window.__CARD_DATA__ = {
    "sync": 5,
    "sync_value": 5,
    "sp_member": true,
-   "image_url": "assets/images/card_yunai_wangxi.webp",
+   "image_url": "assets/images/card_yunai_wangxi.webp?v=2",
    "_category": "characters",
    "dims": {
     "cost": 7,
@@ -775,7 +775,7 @@ window.__CARD_DATA__ = {
     "辅助"
    ],
    "sp_member": false,
-   "image_url": "assets/images/card_face_yujianyu.webp",
+   "image_url": "assets/images/card_face_yujianyu.webp?v=2",
    "sync": 4,
    "_category": "characters",
    "sync_value": 4,
@@ -813,7 +813,7 @@ window.__CARD_DATA__ = {
     "辅助"
    ],
    "sp_member": true,
-   "image_url": "assets/images/img_ynGbhERmQy.webp",
+   "image_url": "assets/images/img_ynGbhERmQy.webp?v=2",
    "sync": 4,
    "_category": "characters",
    "sync_value": 4,
@@ -850,7 +850,7 @@ window.__CARD_DATA__ = {
     "辅助"
    ],
    "sp_member": true,
-   "image_url": "assets/images/img_WqKZD5V99F.webp",
+   "image_url": "assets/images/img_WqKZD5V99F.webp?v=2",
    "sync": 5,
    "_category": "characters",
    "sync_value": 5,
@@ -3453,7 +3453,7 @@ window.__CARD_DATA__ = {
     "破损电子设备"
    ],
    "combo_notes": "适用判定伤害队、资源运转队。3费回收墓地2张卡，因效果送墓时可选4面骰按点数回音韵或造4面骰判定伤害，回收+选项灵活。判定伤害队搭配琉璃/予/钢笔/蓝杖/破损电子设备；资源运转队搭配枫/光太郎/惠/黑色卡片。",
-   "image_url": "assets/images/img_ZXkWqiqmEt.webp",
+   "image_url": "assets/images/img_ZXkWqiqmEt.webp?v=2",
    "_category": "item_single",
    "dims": {
     "cost": 8.7,
@@ -3577,7 +3577,7 @@ window.__CARD_DATA__ = {
     "打起精神来！"
    ],
    "combo_notes": "通用功能卡，可根据构筑需求加入",
-   "image_url": "assets/images/img_oPYSlc1pF5.webp",
+   "image_url": "assets/images/img_oPYSlc1pF5.webp?v=2",
    "_category": "item_single",
    "dims": {
     "cost": 9,
@@ -4836,7 +4836,7 @@ window.__CARD_DATA__ = {
    "type": "Noise校准",
    "effect": "进行一次[Noise]级别的校准（使用一枚20面骰，自选难度：①点数>10为成功 ②点数≤10为成功），成功校准后降低自身1点入迷值并回复2点音韵值。",
    "flavor": "吉！马上要有好事发生了！",
-   "image_url": "assets/images/img_RGWkKS88f9.webp",
+   "image_url": "assets/images/img_RGWkKS88f9.webp?v=2",
    "inspiration": 4,
    "grade": "A",
    "score": 7.3,
@@ -4896,7 +4896,7 @@ window.__CARD_DATA__ = {
    "type": "基础祝福",
    "effect": "回复自身5点音韵值或前进3-8格。",
    "flavor": "中吉啊！运势不断积累中哦！",
-   "image_url": "assets/images/img_P7dKpYqBT1.webp",
+   "image_url": "assets/images/img_P7dKpYqBT1.webp?v=2",
    "inspiration": 5,
    "grade": "A",
    "score": 7.4,
