@@ -11930,6 +11930,9 @@ var TW = {
     // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
     try { if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('TW.close'); } catch (e) {}
     addBattleLog('system', '【时点窗口】关闭（' + win.type + '，共 ' + win.chain.length + ' 环）');
+    /* 【2026-10-01 修】关窗 = "忙"的来源少一个 ⇒ 若之前因忙链豁免过"同步归零判负"，这里立刻补判 */
+    try { if (typeof checkBattleEnd === 'function' && battleState && !battleState._over) checkBattleEnd(); }
+    catch (e) { try { console.error('关窗补判出错（不影响收尾）', e); } catch (e2) {} }
     try { win.done(); } catch (e) { console.error('TimingWindow done 回调异常', e); }
   }
 };
@@ -12010,7 +12013,10 @@ function resolveChainStack(effect, onDone) {
     __flushGrave();
     /* 【__UI_PHASE6·③补】链收尾 = 效果即将执行 ⇒ 播"再播一次 C1 结算动画"（无 activation 节点时是空操作） */
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.activationResolve) ChainAnim.activationResolve(); } catch (e) { try { console.error('结算动画收尾异常（不影响结算）', e); } catch (e2) {} }
-    if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+    if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750);
+    /* 【2026-10-01 修】连锁收尾 = 这一轮走完了 ⇒ 补判"同步归零"（原来这里没人判，导致要等下一次伤害） */
+    try { if (typeof checkBattleEnd === 'function' && battleState && !battleState._over) checkBattleEnd(); }
+    catch (e) { try { console.error('连锁收尾补判出错（不影响结算）', e); } catch (e2) {} } if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -14305,6 +14311,36 @@ function __revertAllBlueprintCopies() {
     });
   });
 }
+/* 【2026-10-01 修·作者实测】"同步值归 0 哪怕没有治疗手段也不会失去同步，得再吃一刀伤害才行"：
+   判负规则本身没问题（下面就是 sync<=0 ⇒ 判负），问题在**豁免闸的收尾** —— 忙链期间（结算中/时点窗口/待触发/
+   等弹窗决策）会跳过判负，可忙完之后没有任何地方再判一次，于是一直拖到下一次伤害触发新判定才结束对局。
+   这里把"忙"的判据抽成函数，并加一个补判器：豁免发生时挂上，忙完立刻补判；即使某条路径没有收尾钩子也能自愈。 */
+function __syncZeroBusy() {
+  try {
+    if (typeof __chainIsBusy === 'function' && __chainIsBusy()) return true;
+    if (typeof TW !== 'undefined' && TW && TW.active) return true;
+    if (typeof effectEngine !== 'undefined' && effectEngine) {
+      if ((effectEngine._resolveDepth || 0) > 0) return true;
+      if ((effectEngine._pendingTriggers || []).length > 0) return true;
+    }
+    if (battleState && battleState._awaitingDecision) return true;
+  } catch (e) { console.error('同步归零豁免判定出错（按不豁免处理）', e); }
+  return false;
+}
+var __syncZeroRecheck = (function () {
+  var timer = null, tries = 0;
+  function arm(ms) { if (timer) return; timer = setTimeout(fire, ms || 120); }
+  function fire() {
+    timer = null;
+    try {
+      if (!battleState || battleState._over) { tries = 0; return; }
+      if (__syncZeroBusy()) { if (tries++ < 200) arm(150); return; }  // 还在忙 ⇒ 继续等（上限 ~30s，不会无限重试）
+      tries = 0;
+      checkBattleEnd();
+    } catch (e) { try { console.error('同步归零补判出错（不影响对局）', e); } catch (e2) {} }
+  }
+  return { arm: arm };
+})();
 function checkBattleEnd() {
   if (battleState._over) return true; // 已判定过：不再重复弹窗/重复推进
   var isRL = (roguelikeState && roguelikeState._isRoguelike);
@@ -14350,18 +14386,9 @@ function checkBattleEnd() {
   }
   /* 【2026-10-01 豁免闸】同步值归零是事实判负，但"即将归零、回复手段还没轮到"时**先不判负**。
      判据：这一轮还没走完（结算中 / 有活动时点窗口 / 队列里还有待触发 / 正在等弹窗决策）⇒ 延后判定。 */
-  var __syncZeroDefer = (function () {
-    try {
-      if (typeof __chainIsBusy === 'function' && __chainIsBusy()) return true;
-      if (typeof TW !== 'undefined' && TW && TW.active) return true;
-      if (typeof effectEngine !== 'undefined' && effectEngine) {
-        if ((effectEngine._resolveDepth || 0) > 0) return true;
-        if ((effectEngine._pendingTriggers || []).length > 0) return true;
-      }
-      if (battleState && battleState._awaitingDecision) return true;
-    } catch (e) { console.error('同步归零豁免判定出错（按不豁免处理）', e); }
-    return false;
-  })();
+  var __syncZeroDefer = __syncZeroBusy();
+  /* 确实有人同步 ≤0、只是现在还在忙 ⇒ 挂上补判（忙完立刻判，不等到"再吃一刀"） */
+  if (__syncZeroDefer && (battleState.p1.sync <= 0 || battleState.p2.sync <= 0)) __syncZeroRecheck.arm();
     // 同步值归零判定（常规获胜）
   if (battleState.p1.sync <= 0 && !__syncZeroDefer) {
     battleState._over = true;
