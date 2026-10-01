@@ -9391,7 +9391,9 @@ function startRoguelikeBattle(node) {
     var mapContainer = document.querySelector('.battle-map-container');
     if (mapContainer) mapContainer.style.display = 'none';
     // 隐藏投掷阶段按钮（肉鸽模式无移动）
-    var rollBtn = document.getElementById('btnRollDice');
+    /* 【2026-10-01 修·静态审计】原来写的是 btnRollDice —— 页面上没有这个 id（实际按钮是 #btnRoll）
+       ⇒ 这一行从来没生效过，肉鸽战斗里会残留一个点了没用的"投骰移动"按钮。 */
+    var rollBtn = document.getElementById('btnRoll');
     if (rollBtn) rollBtn.style.display = 'none';
   }, 100);
 }
