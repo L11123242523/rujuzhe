@@ -11675,7 +11675,8 @@ var TW = {
     cb();
   },
   _avail: function (win, who) {
-    return win.candidates.filter(function (c) { return c && c.owner === who && win.chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); });
+    /* 【2026-10-01】_chainDisabled：已被"同链一次"拒绝过的候选不再提供（否则 AI 会反复重选 ⇒ 死循环） */
+    return win.candidates.filter(function (c) { return c && c.owner === who && !c._chainDisabled && win.chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); });
   },
   _chainText: function (win) {
     return win.chain.length ? win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + TW._whoName(c.owner) + '·' + c.label; }).join('、') : '（暂无）';
@@ -11694,6 +11695,10 @@ var TW = {
         c.key = c.key || (String(c.id || c.label || '?') + '|' + String((c.card && c.card.name) || ''));
         var dup = (win.chain || []).some(function (x) { return x && x.key === c.key; });
         if (dup) {
+          /* 【2026-10-01 修·死循环】被拒的候选必须**标记为已用**，否则它仍留在候选池里，
+             决策方（尤其 AI）会一次又一次重新选中它 ⇒ 实测无限循环"发动→已在链上⇒不再入链→再发动"，窗口永不关闭、
+             阶段切换的回调永不触发（阶段卡死）。标记后由 TW._avail 过滤掉。 */
+          try { c._chainDisabled = true; } catch (e) {}
           addBattleLog((c.owner || 'system'), '【连锁·MD口径】「' + (c.label || c.key) + '」本连锁已在链上 ⇒ 不再重复入链');
           return __fin0();
         }
@@ -16528,6 +16533,32 @@ function __tomaDeclare(player) {
 
 function nextPhase() {
   if (battleState.currentPlayer !== 'p1') return;
+  /* 【2026-10-01 P1：阶段时点串联（作者口径："阶段切换其实也是会弹是否发动效果的"）】
+     每个阶段边界都走"结束时点 → 切阶段 → 进入时点"，并且**用回调串联**：
+     __runTimingTriggers 的 next 是在时点窗口**结算完毕**后才触发的（无候选时立即触发）
+     ⇒ 修掉"窗口还在问、阶段已经切走"的问题。
+     ctx.players = ['p1','p2']：同一窗口里双方座席的时点触发都能被扫到（ownerOf 返回数组）。 */
+  var __phaseCtx = function () {
+    return { player: battleState.currentPlayer || 'p1', players: ['p1', 'p2'], turnPlayer: battleState.currentPlayer || 'p1' };
+  };
+  var __phaseSeq = function (timing, after) {
+    var __done = false;
+    var __fin = function () { if (__done) return; __done = true; try { after(); } catch (e) { console.error('阶段时点回调出错 ' + timing, e); } };
+    if (typeof __runTimingTriggers !== 'function') { __fin(); return; }
+    try { __runTimingTriggers(timing, __phaseCtx(), __fin); }
+    catch (e) { console.error('阶段时点 ' + timing + ' 出错（继续推进）', e); __fin(); return; }
+    /* 兜底（2026-10-01）：窗口机器若既不开窗也不回调（异常路径），1.5 秒后强制推进，避免阶段边界卡死。
+       只在"确认没有活动窗口"时兜底；真正在等玩家决策时 TW.active 非空，不会误触发。 */
+    var __tries = 0, __quiet = 0;
+    var __iv = setInterval(function () {
+      if (__done) { clearInterval(__iv); return; }
+      var __busy = false;
+      try { __busy = !!(typeof TW !== 'undefined' && TW && TW.active); } catch (e) {}
+      if (__busy) { __quiet = 0; }
+      else if (++__quiet >= 6) { clearInterval(__iv); console.warn('阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
+      if (++__tries > 200) clearInterval(__iv);
+    }, 250);
+  };
   // 联机：广播阶段推进意图（对方远端位按同一状态机重放）
   if (typeof Online !== 'undefined' && Online.active) {
     Online.sendIntent({ type: 'phase' });
@@ -16536,12 +16567,12 @@ function nextPhase() {
   if (battleState.phase === 'prepare') {
     // 准备阶段 → 主要阶段1
     /* 【结构性（2026-09-28）】予被动 / 冬马被动 / 莉莉·回收 / 露璐缇雅·破坏 这四条"每回合可以发动一次"
-       不再在这里手写弹窗（原来四条各写一段 setTimeout + __offerOptionalEffect ✗），改为注册表触发：
-       由 __runTimingTriggers('prepare_end' / 'main1_start') 统一产出候选、按 MD 口径排序、开一个窗口，
-       **窗口本身就是"是否发动"的询问**（可 PASS）。必发/选发按卡面"可以"判据在注册表里声明。 */
-    if (typeof __runTimingTriggers === 'function') __runTimingTriggers('prepare_end', { player: 'p1' }, function () {});
+       不再在这里手写弹窗，改为注册表触发：由 __runTimingTriggers('prepare_end' / 'main1_start')
+       统一产出候选、按 MD 口径排序、开一个窗口，**窗口本身就是"是否发动"的询问**（可 PASS）。
+       【2026-10-01 P1】改为**串联**：prepare_end 的窗口结算完 → 切到 main1 → 再跑 main1_start 的窗口 → 才刷新 UI。 */
+    __phaseSeq('prepare_end', function () {
     battleState.phase = 'main1';
-    if (typeof __runTimingTriggers === 'function') __runTimingTriggers('main1_start', { player: 'p1' }, function () {});
+    __phaseSeq('main1_start', function () {
     addBattleLog('phase', '进入主要阶段1：可使用手牌');
     updateBattleUI();
     // 机场：本主阶段开始时可前进到地图任意1格
@@ -16559,31 +16590,45 @@ function nextPhase() {
         triggerTileEffect('p1'); updateBattleUI();
       } else addBattleLog('p1', '【机场】放弃自由移动');
     }
+    });   // ← main1_start 窗口结束
+    });   // ← prepare_end 窗口结束
   } else if (battleState.phase === 'main1') {
-    // 主要阶段1 → 投骰阶段
+    // 主要阶段1 → 投骰阶段（补 main1_end / roll_start 时点）
+    __phaseSeq('main1_end', function () {
     battleState.phase = 'roll';
+    __phaseSeq('roll_start', function () {
     addBattleLog('phase', '进入投骰阶段');
     updateBattleUI();
+    });
+    });
   } else if (battleState.phase === 'roll') {
     // 投掷阶段 → 主要阶段2：玩家主动结算（已投骰且移动收尾后）
     if (battleState._diceRolledThisPhase && battleState._moveResolved) {
+      __phaseSeq('roll_end', function () {
       battleState.phase = 'main2';
       battleState._moveResolved = false; // 复位，下一回合投骰时重新置位
+      __phaseSeq('main2_start', function () {
       addBattleLog('phase', '进入主要阶段2');
       updateBattleUI();
+      });
+      });
     } else if (!battleState._diceRolledThisPhase) {
       showToast('请先投骰子！', 'warn');
     } else {
       showToast('移动正在结算中，请稍候再进入下个阶段', 'warn');
     }
   } else if (battleState.phase === 'main2') {
-    // 主要阶段2 → 结束阶段
+    // 主要阶段2 → 结束阶段（补 main2_end / end_start 时点）
+    __phaseSeq('main2_end', function () {
     battleState.phase = 'end';
+    __phaseSeq('end_start', function () {
     addBattleLog('phase', '进入结束阶段（可发动每回合一次的角色技能，再点一次结束回合）');
     updateBattleUI();
+    });
+    });
   } else if (battleState.phase === 'end') {
-    // 结束阶段 → 结束回合
-    endTurn();
+    // 结束阶段 → 结束回合（补 end_end 时点）
+    __phaseSeq('end_end', function () { endTurn(); });
   }
 }
 
