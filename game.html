@@ -10722,6 +10722,8 @@ var ChainAnim = {
   },
   push: function (node) {
     var i = this._nodes.length;                       // 链号索引：飞行体徽章与堆栈节点必须同号
+    /* 【__UI_PHASE6·③补】标记"这是效果发动那条主链的 C1"，结算时用它播"再播一次 C1 结算动画" */
+    try { if (node && node.id === 'activation') this._actIdx = i; } catch (e) {}
     /* 【__UI_PHASE6·③】把这张卡记下来，供结算时"再播一次 C1 结算动画"用（纯动画层记录，不参与任何规则） */
     try { this._cards = this._cards || []; this._cards[i] = (node && node.card) || null; } catch (e) {}
     /* 出牌/上链飞行（不承重：CardAnim.play 内部吞掉一切异常） */
@@ -10787,6 +10789,19 @@ var ChainAnim = {
       a.onfinish = function () { setTimeout(kill, 170); };
       a.oncancel = kill;
     } catch (e) { try { console.error('结算动画异常（不影响结算）', e); } catch (e2) {} }
+  },
+  /* 【__UI_PHASE6·③补】效果发动主链的"结算动画"：把刚入栈的 C1 标成结算中
+     （节点脉冲 + 中央"逆结算"横幅 + ③ 里做的"卡 + C1 结算"光环再播一次），随后收尾关闭堆栈。
+     不承重：异常全吞、动画关闭/无 WAAPI 时自动降级为不动画。 */
+  activationResolve: function () {
+    try {
+      if (this._actIdx == null) return;
+      var i = this._actIdx, d = this._nodes[i], label = '';
+      try { var t = (d && d.querySelector) ? d.querySelector('.csa-txt') : null; if (t) label = String(t.textContent || ''); } catch (e) {}
+      this.resolving(i, label);
+      var self = this;
+      setTimeout(function () { try { self.done(i, false, label); self.end(); self._actIdx = null; } catch (e) {} }, 520);
+    } catch (e) { try { console.error('发动结算动画异常（不影响结算）', e); } catch (e2) {} }
   },
   end: function () {
     var self = this, b = this._el();
@@ -11891,6 +11906,22 @@ function __twLegacyResolveSimultaneous(tp, candidates, allDone) {
 }
 function resolveChainStack(effect, onDone) {
   var stack = effect._chain || [];
+  /* 【__UI_PHASE6·③补】"效果发动"这条主链原先**连动画堆栈都没开**（只有时点窗口那条路径会 begin+push）
+     ⇒ 玩家发动卡牌/永续时看不到"卡上浮出链节 C1 → 飞向堆栈 → 入链弹跳"。
+     这里在"没有响应卡（stack 为空 ⇒ 单 C1 直接结算）"时补上；有响应卡时链节由时点窗口那条路径推入，
+     这里不重复推（否则会多算一个链号）。 */
+  try {
+    if (!stack.length && typeof ChainAnim !== 'undefined' && ChainAnim.begin && ChainAnim.push) {
+      ChainAnim.begin();
+      var __anc = effect.card;
+      ChainAnim.push({
+        card: __anc,
+        label: '【' + ((__anc && __anc.name) || effect.description || '效果') + '】',
+        owner: (effect.player || effect.user || 'p1'),
+        id: 'activation'
+      });
+    }
+  } catch (e) { try { console.error('发动动画入链异常（不影响推进）', e); } catch (e2) {} }
   if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = true;
   // 规则书第十章二：连锁用卡在本链环逆结算完成时才统一进墓（发动时已从原区域移出）
   var __pgIdx = 0;
@@ -11917,7 +11948,11 @@ function resolveChainStack(effect, onDone) {
       }
     }
   }
-  function __endChain() { __flushGrave(); if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+  function __endChain() {
+    __flushGrave();
+    /* 【__UI_PHASE6·③补】链收尾 = 效果即将执行 ⇒ 播"再播一次 C1 结算动画"（无 activation 节点时是空操作） */
+    try { if (typeof ChainAnim !== 'undefined' && ChainAnim.activationResolve) ChainAnim.activationResolve(); } catch (e) { try { console.error('结算动画收尾异常（不影响结算）', e); } catch (e2) {} }
+    if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750); if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -14642,7 +14677,10 @@ function doSacrifice() {
         updateBattleUI();
       });
     }
-  }, 1);
+  /* ⚠【2026-10-01 修】这里是"玩家主动献祭"，必须给取消按钮：否则点开只能硬选一张、退不回操作页
+     （eec5156 加了 allowCancel 与按钮，但这条调用忘了传第 6 个参数 ⇒ 按钮从未渲染、上面的 null 分支是死代码）。
+     allowLess=false（必须选一张才成立）、allowCancel=true（可放弃，不消耗本回合献祭次数、不送墓）。 */
+  }, 1, false, true);
 }
 
 
@@ -25698,7 +25736,7 @@ var NetSync = {
         if (idx === null || idx === undefined || idx < 0) return;
         var c = h[idx];
         Online.sendAct({ type: 'sacrifice', idx: idx, name: c ? (c.name || '') : '' });
-      });
+      }, 1, false, true);   // 【2026-10-01】客人侧也要能取消（取消＝不发意图，见上面的 null 分支）
       return true;
     }
   };
