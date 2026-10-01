@@ -1784,18 +1784,20 @@ img,video,canvas,svg{max-width:100%}
 <script>
 // ===== 统一评级系统（全站唯一事实来源）=====
 // 新维度：角色/攻击/技能/公共卡=4维(威力/泛用/协同/稳定)；道具=5维(多一个"费用")
-const DIM_CN = {'power':'威力','cost':'费用','flex':'泛用','synergy':'协同','stable':'稳定'};
+// 【2026-10-01 作者定稿】评级口径＝费用效率 / 泛用性 / 协同性 / 稳定性（所有卡同为 4 维，旧的"威力(power)"作废）
+//   作者原话：「评级按照费用效率（伤害牌、辅助牌）、泛用性、协同性（与其他卡的配合）、稳定性来」
+//   总分 = 四维等权平均（保留一位小数）+ 等级成长加分；档位线沿用 S≥8.0／A+≥7.5／A≥7.0／B≥5.5／C≥4.0／D<4.0。
+const DIM_CN = {'cost':'费用效率','flex':'泛用性','synergy':'协同性','stable':'稳定性'};
 const DIM_DESC = {
-  'power':'威力：卡牌结算效果本身的综合强度与收益质量——数值大小、段数、覆盖目标数与附加收益。伤害只是效果的一种，增益/控制/去除/检索/资源/位移等效果同等按含金量计入，不等于直接造伤。',
-  'cost':'费用：达成该效果所需音韵值代价的效率，同等效果越省费得分越高。',
-  'flex':'泛用：能在多少构筑、局面、时机下使用；发动条件、目标、属性、位置是否挑剔。',
-  'synergy':'协同：与特定角色、标签、流派或其他卡牌联动时的放大空间与 combo 上限。',
-  'stable':'稳定：兑现效果的确定性；是否依赖骰子/判定/概率或对手配合，是否容易被打断、落空。'
+  'cost':'费用效率：每一分音韵值换来的结算价值。伤害牌按「期望伤害 ÷ 费用」并计入附加收益（破坏/降防/抽卡/回费/多段/无视防御…）；辅助牌按「同等费用下拿到的资源量或节奏优势」。0 费卡按免费收益给高档，但附带代价（如判定失败要扣同步）要扣。',
+  'flex':'泛用性：能在多少构筑、局面、时机下使用；是否挑属性、目标、位置、时机。',
+  'synergy':'协同性：与特定角色、标签、流派、其他卡牌的联动放大空间与 combo 上限。',
+  'stable':'稳定性：兑现效果的确定性；是否依赖骰子/判定/概率或对手配合，是否容易被响应打断、落空。'
 };
-const DIM_ORDER_CHAR = ['power','flex','synergy','stable'];
-const DIM_ORDER_ITEM = ['power','cost','flex','synergy','stable'];
-const W_DIM_CHAR = {'power':.35,'flex':.30,'synergy':.15,'stable':.20};
-const W_DIM_ITEM = {'power':.30,'cost':.20,'flex':.20,'synergy':.15,'stable':.15};
+const DIM_ORDER_CHAR = ['cost','flex','synergy','stable'];
+const DIM_ORDER_ITEM = ['cost','flex','synergy','stable'];
+const W_DIM_CHAR = {'cost':.25,'flex':.25,'synergy':.25,'stable':.25};
+const W_DIM_ITEM = {'cost':.25,'flex':.25,'synergy':.25,'stable':.25};
 // 统一6档（仅 S/A+/A/B/C/D，不存在 B+/S+/C+/A-）
 function gradeOf(x){ if(x>=8.0)return 'S'; if(x>=7.5)return 'A+'; if(x>=7.0)return 'A'; if(x>=5.5)return 'B'; if(x>=4.0)return 'C'; return 'D'; }
 // 由维度+成长加分自动推导总分（保留一位小数）
@@ -2031,14 +2033,14 @@ function showDetail(c){
     const gradeColors = {'S':'linear-gradient(135deg,#ff6b6b,#c0392b)','A+':'linear-gradient(135deg,#9b59b6,#6c3483)','A':'#ffd700','B':'#22c55e','C':'#00d2d3','D':'#636e72'};
     const gradeTextColor = (c.grade==='A'||c.grade==='C'||c.grade==='D')?'#1a1a2e':'#fff';
     html += `<div class="card-grade-v2">`;
-    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">强度评级</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c.score||0).toFixed(1)}分</span></div>`;
+    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">综合评级</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c.score||0).toFixed(1)}分</span></div>`;
     
     // 新维度评分（角色/战斗/公共=4维，道具=5维，按类型加权；成长为额外加分）
     if(c.dims){
       const dOrder = dimOrderOf(c);
       const dimColor = {'power':'#e94560','cost':'#f59e0b','flex':'#22c55e','synergy':'#a855f7','stable':'#06b6d4'};
       const w = ('cost' in c.dims)?W_DIM_ITEM:W_DIM_CHAR;
-      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">${dOrder.length}维强度构成</b>${c.growth?` <span style="color:#f59e0b;font-size:11px">等级成长加分 +${c.growth.toFixed(1)}</span>`:''} <span style="color:#666;font-size:11px">（加权合计+成长=总分）</span></div>`;
+      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">四维构成</b>${c.growth?` <span style="color:#f59e0b;font-size:11px">等级成长加分 +${c.growth.toFixed(1)}</span>`:''} <span style="color:#666;font-size:11px">（加权合计+成长=总分）</span></div>`;
       dOrder.forEach(k=>{
         const v=c.dims[k]; if(v===undefined) return;
         const pct=Math.round((w[k]||0)*100);
