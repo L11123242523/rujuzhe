@@ -11638,9 +11638,38 @@ var TW = {
     win.state = 'collect';
     if (win.scan) {
       try {
-        var fresh = win.scan(win) || [];
-        // 合并：保留已入链的（不能再入链，avail 会过滤），其余以重扫结果为准
-        win.candidates = fresh.filter(Boolean).concat(win.candidates.filter(function (c) { return fresh.indexOf(c) < 0; }));
+        var fresh = (win.scan(win) || []).filter(Boolean);
+        /* 【2026-10-01 修·作者报的"一张卡在连锁询问里变成两个选项"（技能卡/事件卡各占两个）】
+           原来按**对象身份**合并（fresh.indexOf(c) < 0），可 win.scan 每次重扫都会 new 一批节点对象
+           ⇒ 旧候选永远不会被认作"已在 fresh 里"，于是每扫一次就把旧候选再追加一遍（1→2→3…），
+           玩家看到的就是"1. 超频 2. 超频"。改成按**稳定键**去重：
+             owner + 卡名(或 id) + 区域(from) + 下标(index) + 座位效果(seatEffect)
+           并在 fresh 内部也去重一次（同一个窗口重扫出两条同一张卡时只留第一条）。 */
+        var __ck = function (c) {
+          try {
+            if (!c) return null;
+            if (c.key) return c.key;                       // 已入链的节点带 key，直接用
+            var p = c.pick || {}, cd = p.card || c.card;
+            var nm = (cd && (cd.name || cd.id)) || c.label || '';
+            var fr = p.from || c.from || '';
+            var ix = (p.index !== undefined) ? p.index : ((c.index !== undefined) ? c.index : '');
+            var se = p.seatEffect || c.seatEffect || '';
+            return String(c.owner || '') + '|' + String(nm) + '|' + String(fr) + '|' + String(ix) + '|' + String(se);
+          } catch (e) { return null; }
+        };
+        var __seen = {}, __fresh = [];
+        fresh.forEach(function (c) {
+          var k = __ck(c);
+          if (k) { if (__seen[k]) return; __seen[k] = 1; }
+          __fresh.push(c);
+        });
+        var __kept = win.candidates.filter(function (c) {
+          if (__fresh.indexOf(c) >= 0) return false;       // 同一对象：已被本次重扫覆盖
+          var k = __ck(c);
+          if (k && __seen[k]) return false;                // 同一张卡（对象被重建过）：也已覆盖
+          return true;
+        });
+        win.candidates = __fresh.concat(__kept);
       } catch (e) { addBattleLog('system', '【时点窗口】候选重扫异常，沿用现有候选：' + ((e && e.message) || e)); }
     }
     cb();
