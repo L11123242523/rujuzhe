@@ -15546,9 +15546,13 @@ function drawOmikuji(player, opt) {
   if (card.type === 'calibrate' || card.type === 'calibrate_risk') {
     // 校准类御神签：立即进行校准（控骰询问为异步，结算与胜负判定放进回调）
     performCalibration(player, card.difficulty, card.reduce, function (success) {
-      if (card.refund) {
+      /* 【2026-10-01 修】卡面是"和声校准≥N**成功**，降X入迷+回Y音韵" ⇒ 回音韵必须挂在**成功**上。
+         原来这里是无条件回（失败也回），实测：日志写"校准：9点，失败"而音韵 +6。 */
+      if (success && card.refund) {
         recoverCost(player, card.refund, '御神签');
         addBattleLog(player, '回复' + card.refund + '音韵值，当前' + p.cost + '音韵');
+      } else if (!success && card.refund) {
+        addBattleLog(player, '校准失败 ⇒ 不回复音韵（卡面：成功才回' + card.refund + '音韵）');
       }
       if (!success && card.type === 'calibrate_risk') {
         p.sync = Math.max(0, p.sync - card.fail_sync);
