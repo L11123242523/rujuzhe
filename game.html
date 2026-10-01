@@ -16545,6 +16545,22 @@ function nextPhase() {
   var __phaseCtx = function () {
     return { player: battleState.currentPlayer || 'p1', players: ['p1', 'p2'], turnPlayer: battleState.currentPlayer || 'p1' };
   };
+  /* 【2026-10-01】阶段结束时清掉"直到当前阶段结束前"类的限时加成（目前只有 最佳化 的 _atkPctPhase） */
+  var __clearPhaseScopedBuffs = function () {
+    try {
+      ['p1', 'p2'].forEach(function (w) {
+        var st = battleState[w]; if (!st) return;
+        /* 最佳化等"直到当前阶段结束前"的攻击力加成：只扣掉本阶段记的那一份，不动常驻/其它临时加成 */
+        if (st._tempAttackPhase) {
+          var amt = st._tempAttackPhase;
+          st._tempAttack = Math.max(0, (st._tempAttack || 0) - amt);
+          st._tempAttackPhase = 0;
+          if (w === 'p1') addBattleLog('p1', '【攻击力提升】阶段结束，临时攻击力 -' + amt);
+        }
+        if (st._atkPctPhase) st._atkPctPhase = 0;   // 旧字段（已无写入点，保留清零以防历史状态残留）
+      });
+    } catch (e) { console.error('清理阶段限时加成出错（忽略）', e); }
+  };
   var __phaseSeq = function (timing, after) {
     var __done = false;
     var __fin = function () { if (__done) return; __done = true; try { after(); } catch (e) { console.error('阶段时点回调出错 ' + timing, e); } };
@@ -16575,6 +16591,7 @@ function nextPhase() {
        统一产出候选、按 MD 口径排序、开一个窗口，**窗口本身就是"是否发动"的询问**（可 PASS）。
        【2026-10-01 P1】改为**串联**：prepare_end 的窗口结算完 → 切到 main1 → 再跑 main1_start 的窗口 → 才刷新 UI。 */
     __phaseSeq('prepare_end', function () {
+    __clearPhaseScopedBuffs();
     battleState.phase = 'main1';
     __phaseSeq('main1_start', function () {
     addBattleLog('phase', '进入主要阶段1：可使用手牌');
@@ -16599,6 +16616,7 @@ function nextPhase() {
   } else if (battleState.phase === 'main1') {
     // 主要阶段1 → 投骰阶段（补 main1_end / roll_start 时点）
     __phaseSeq('main1_end', function () {
+    __clearPhaseScopedBuffs();
     battleState.phase = 'roll';
     __phaseSeq('roll_start', function () {
     addBattleLog('phase', '进入投骰阶段');
@@ -16609,6 +16627,7 @@ function nextPhase() {
     // 投掷阶段 → 主要阶段2：玩家主动结算（已投骰且移动收尾后）
     if (battleState._diceRolledThisPhase && battleState._moveResolved) {
       __phaseSeq('roll_end', function () {
+      __clearPhaseScopedBuffs();
       battleState.phase = 'main2';
       battleState._moveResolved = false; // 复位，下一回合投骰时重新置位
       __phaseSeq('main2_start', function () {
@@ -16624,6 +16643,7 @@ function nextPhase() {
   } else if (battleState.phase === 'main2') {
     // 主要阶段2 → 结束阶段（补 main2_end / end_start 时点）
     __phaseSeq('main2_end', function () {
+    __clearPhaseScopedBuffs();
     battleState.phase = 'end';
     __phaseSeq('end_start', function () {
     addBattleLog('phase', '进入结束阶段（可发动每回合一次的角色技能，再点一次结束回合）');
@@ -17731,6 +17751,8 @@ function __wrapOptional(clause, bodyText, permanent) {
   if (innerOps && innerOps.length) return { op: 'optional', label: bodyText.trim(), inner: innerOps };
   return null;
 }
+/* 【2026-10-01】容错编译的可追溯容器：记录"编译不出来、被跳过的句子"，供自检脚本列出逐条复核 */
+var __COMPILE_DROPPED = [];
 function compileClauses(subs, permanent) {
   var all = [];
   for (var i = 0; i < subs.length; i++) {
@@ -17751,7 +17773,23 @@ function compileClauses(subs, permanent) {
     }
     if (wrapped) { all.push(wrapped); continue; }
     var ops = compileSingle(subs[i]);
-    if (ops === null) return null;
+    if (ops === null) {
+      /* 【2026-10-01 修·作者报"最佳化提升100%攻击力实际无效"的根因】
+         单句编译不出来时，原实现直接 return null ⇒ **整张卡**的效果一条都不执行
+         （实测【最佳化】：描述句"里尔亚斯调用攻击权限，提升自身攻击力"编译不出 ⇒ 连"扣4同步/攻击力+100%"也一起没了）。
+         收窄后的判据（2026-10-01 二次修正）：
+           · 该句**不含阿拉伯数字** ⇒ 视为纯描述性文字，跳过并记录（__COMPILE_DROPPED，可追溯）
+           · **含数字**（"回复自身3点同步值"这类真机制）却编译不出 ⇒ 维持原样 return null（整卡不执行）
+             —— 宁可不动，也不要半截错误执行（上一版对任何 null 都跳过，导致【小试身手！堆沙堡】的
+                "2次以上回6音韵"档在配对 0 次时被错误执行，newcards_expect 3 条红）。 */
+      var __clauseTxt = String(subs[i]);
+      if (/\d/.test(__clauseTxt)) return null;
+      try {
+        if (__COMPILE_DROPPED) __COMPILE_DROPPED.push(__clauseTxt.slice(0, 80));
+        console.warn('[效果编译] 跳过无法编译的描述句（不含数字）：' + __clauseTxt.slice(0, 80));
+      } catch (e) {}
+      continue;
+    }
     all = all.concat(ops);
   }
   return all;
@@ -19825,6 +19863,9 @@ function __opsBuff(op, ctx, next, env) {
       if (!__pvBase && (op.pct || 0) >= 100) { __pvBase = 1; window.__pvFloorHit = true; }   // 保底：+100% 至少 +1
       var __pvAdd = Math.floor(__pvBase * (op.pct || 0) / 100);
       p._tempAttack = (p._tempAttack || 0) + __pvAdd;
+      /* 【2026-10-01】卡面是"直到当前**阶段**结束前" ⇒ 单独记一份阶段档，阶段结束时只扣这一份
+         （_tempAttack 统一在回合结束清零，若只依赖它，最佳化会错误地持续到回合结束）。 */
+      p._tempAttackPhase = (p._tempAttackPhase || 0) + __pvAdd;
       addBattleLog(user, '攻击力+' + (op.pct || 0) + '%（攻击力基数' + __pvBase + (window.__pvFloorHit ? '·保底' : '') + ' ⇒ 实际+' + __pvAdd + '，直到当前阶段结束）');
       window.__pvFloorHit = false;
       break;
