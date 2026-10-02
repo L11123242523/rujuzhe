@@ -9128,8 +9128,8 @@ function rlPlayCard(handIndex) {
   p1.cost -= cost;
   p1.hand.splice(handIndex, 1);
   
-  // 处理卡牌效果
-  rlProcessCardEffect(card, 'p1', 'p2');
+  // 处理卡牌效果（把实际支付的音韵值传进去：红宝之杖·运 等要按支付量结算）
+  rlProcessCardEffect(card, 'p1', 'p2', cost);
   
   // 永续卡放入永续区，其他送入墓地
   if (card._category === 'item_permanent' || (card.type && card.type.indexOf('永续') >= 0)) {
@@ -9143,22 +9143,148 @@ function rlPlayCard(handIndex) {
   rlCheckBattleEnd();
 }
 
-function rlProcessCardEffect(card, user, target) {
+/* ===== 肉鸽效果结算工具（2026-10 加：支持骰子式/公式/范围随机）===== */
+function rlRollDice(expr) {                      // '1d12' '2d6' 'd6' → 点数和
+  var m = String(expr).trim().match(/^(\d*)d(\d+)$/i);
+  if (!m) return parseInt(expr, 10) || 0;
+  var n = m[1] ? parseInt(m[1], 10) : 1, sides = parseInt(m[2], 10), sum = 0;
+  for (var i = 0; i < n; i++) sum += 1 + Math.floor(Math.random() * sides);
+  return sum;
+}
+
+/* 把效果文本里的一段「数值描述」算成数字：
+   支持 1d12 / 2d6 / 1～3（范围随机）/ 「3+当前手卡数量」/ 「1+当前墓地中X属性卡的数量」/
+   「等同于当前攻击力」/ 「当前攻击力×此卡发动时所消耗的音韵值」/ 纯数字 */
+function rlAmount(expr, ctx) {
+  var s = String(expr || '').replace(/[（）()]/g, '').replace(/点随机|点|的/g, '').trim();
+  var m;
+  if ((m = s.match(/^(\d*)d(\d+)$/i))) return rlRollDice(s);
+  if ((m = s.match(/^(\d+)[～~](\d+)$/))) {
+    var lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
+    return lo + Math.floor(Math.random() * (hi - lo + 1));
+  }
+  if ((m = s.match(/(\d+)\s*\+\s*当前手卡数量/))) return parseInt(m[1], 10) + ctx.p.hand.length;
+  if ((m = s.match(/(\d+)\s*\+\s*当前墓地中(.+?)属性卡的数量/))) {
+    return parseInt(m[1], 10) + ctx.graveCount(m[2]);
+  }
+  if (s.indexOf('当前攻击力×') >= 0 || s.indexOf('当前攻击力*') >= 0) {
+    return ctx.attack() * (ctx.paid || 0);
+  }
+  if (s.indexOf('当前攻击力') >= 0) return ctx.attack();
+  if ((m = s.match(/^(\d+)$/))) return parseInt(m[1], 10);
+  return 0;
+}
+
+/* 需要特殊机制的卡：显式写死（不靠文本正则猜） */
+var RL_FX = {
+  '来自地狱的盒子': function (c) { c.draw(2); },                  // 简化：抽两张
+  '惊吓礼盒': function (c) { c.damage(rlAmount('1～3', c)); },
+  '极夜君王之冕': function (c) { c.damage(rlRollDice('1d12')); c.markJudged(); },
+  '蓝宝之杖·命': function (c) { c.damage(rlRollDice('2d6')); c.markJudged(); c.coin(2); },
+  '破损电子设备': function (c) { c.damage(rlRollDice('1d6')); },
+  '某女士爱用球棒': function (c) { c.damage(rlRollDice('2d4')); },
+  '音叉': function (c) { c.draw(2); if (rlRollDice('1d20') >= 10) c.healCost(1); },
+  '制裁之刃': function (c) { c.damage(3 + c.p.hand.length); },
+  '搜查令': function (c) { c.damage(1 + c.graveCount('理智')); },
+  '红宝之杖·运': function (c) { c.damageRaw(c.attack() * (c.paid || 0)); },
+  '风纪委员臂章': function (c) { c.damageRaw(c.attack()); },
+  '经文': function (c) { c.heal(6 + c.tagBonus('圣女', 3)); },
+  '神乐铃': function (c) { c.damage(1 + (c.p._bellStacks || 0)); },
+  '猎手爪链': function (c) { c.damage(4 + c.tagBonus('猎手', 2)); },
+  '镇定药片': function (c) { if (c.p.sync > 1) c.heal(3); else { c.heal(3); } },
+  '底牌': function (c) { c.healCost(c.p.maxCost); c.draw(Math.floor(c.p.maxCost / 3)); },
+  '柔软枕头': function (c) { c.heal(4); if (c.p.grave.length === 4 || c.p.grave.length === 6) c.draw(3); },
+  '能量饮料': function (c) { c.p._nextDamageUp = (c.p._nextDamageUp || 0) + 3; },
+  '崩塌之乌托邦': function (c) { c.healCost(2); },
+  '共鸣者': function (c) { c.noop(); },
+  '四叶草发卡': function (c) { c.noop(); },
+  '核心的供给者': function (c) { c.noop(); },
+  '执勤证明': function (c) { c.noop(); },
+  '侦探放大镜': function (c) { c.noop(); },
+  'Twice': function (c) { c.noop(); },
+  '颠倒骰子': function (c) { c.noop(); },
+  '20面骰': function (c) { c.noop(); },
+  '碰碰冰茶': function (c) { c.noop(); },
+  '遥控骰子': function (c) { c.noop(); },
+  '拦路者': function (c) { c.summon(4); },
+  '魔法蓝图': function (c) { c.noop(); },
+  '魔法清点名单': function (c) { c.search(); },
+  '特制手套': function (c) { c.search(); },
+  '再来一次招待券': function (c) { c.search(); },
+  '幸运护符': function (c) { c.p.shield += 3; c.draw(1); },
+  '怪怪幽灵吊坠': function (c) { c.p.shield += 3; c.healCost(4); },
+  '镌刻的艺术': function (c) { c.draw(1); },
+  '智能手机': function (c) { c.mill(1); },
+  '善意面具': function (c) { c.p.attackBuff += 2; },
+  '结晶碎弧': function (c) { c.p._nextDamageUp = (c.p._nextDamageUp || 0) + 4; },
+  '先哲之馈赠': function (c) { c.draw(2); c.mill(1); },
+  '绿色宝杖': function (c) { c.noop(); },
+  '绿宝之杖·择': function (c) { c.draw(2); c.p.sync = Math.max(0, c.p.sync - 4); },
+  '鸣奏之“圣音”': function (c) { c.recall(); },
+  '永奏进行曲': function (c) { c.draw(2); c.mill(1); },
+  '妖刀五月雨': function (c) { c.damage(5); },
+  '血之佑戒·红泪拉克莎': function (c) { c.healCost(3); },
+  '贪欲者的烙印': function (c) { c.p.sync = Math.max(0, c.p.sync - 3); c.draw(1); },
+  '黑色卡片': function (c) { c.draw(1); },
+  '钢笔': function (c) { c.search(); },
+  '“巧匠之手”': function (c) { c.mill(1); }
+};
+
+function rlProcessCardEffect(card, user, target, paidCost) {
   if (!rlState) return;
   var p = rlState[user];
   var t = rlState[target];
   var eff = card.effect || card.text || '';
-  
-  // 造成伤害（支持"造成X点XX属性伤害"和"扣除X点同步值"）
-  var dmgMatch = eff.match(/造成(\d+)点/) || eff.match(/扣除(\d+)点同步/);
-  if (dmgMatch) {
-    var dmg = parseInt(dmgMatch[1]) + (p.attackBuff || 0);
-    if (t.shield > 0) {
-      var sd = Math.min(t.shield, dmg);
-      t.shield -= sd;
-      dmg -= sd;
-    }
-    t.sync = Math.max(0, t.sync - dmg);
+
+  var ctx = {
+    p: p, t: t, card: card, eff: eff, paid: paidCost || 0,
+    attack: function () { return p.attackBuff || 0; },
+    graveCount: function (attr) {
+      return (p.grave || []).filter(function (c) {
+        return !attr || (c && (c.attribute || '') === attr);
+      }).length;
+    },
+    tagBonus: function (tag, per) {          // 队伍中每有一名[某标签]角色
+      var n = (p.chars || []).filter(function (ch) {
+        return (ch.tags || '').indexOf(tag) >= 0 || (ch.roles || []).indexOf(tag) >= 0;
+      }).length;
+      return n * per;
+    },
+    damage: function (n) { return ctx._hit((parseInt(n, 10) || 0) + (p.attackBuff || 0)); },
+    damageRaw: function (n) { return ctx._hit(parseInt(n, 10) || 0); },   // 数值本身已按攻击力算过时用（避免重复加成）
+    _hit: function (base) {
+      base += (p._nextDamageUp || 0);          // 一次性增伤（能量饮料 / 结晶碎弧）
+      p._nextDamageUp = 0;
+      if (t.shield > 0) { var sd = Math.min(t.shield, base); t.shield -= sd; base -= sd; }
+      t.sync = Math.max(0, t.sync - base);
+      if (p._onDealJudge) p._onDealJudge();
+      return base;
+    },
+    coin: function (n) {                      // 硬币判定伤害
+      if (Math.random() < 0.5) ctx.damage(n);
+    },
+    markJudged: function () { if (p._afterJudgeDraw) ctx.draw(1); },
+    heal: function (n) { p.sync = Math.min(p.maxSync, p.sync + (parseInt(n, 10) || 0)); },
+    healCost: function (n) { p.cost = Math.min(p.maxCost, p.cost + (parseInt(n, 10) || 0)); },
+    draw: function (n) { for (var i = 0; i < (n || 1); i++) rlDrawCard(user); },
+    mill: function (n) { for (var i = 0; i < (n || 1) && p.deck.length; i++) p.grave.push(p.deck.pop()); },
+    search: function () { ctx.draw(1); },
+    recall: function () { if (t.grave && t.grave.length) t.deck.unshift(t.grave.pop()); },
+    summon: function (hp) { p.summons = p.summons || []; p.summons.push({ name: '召唤物', sync: hp, taunt: true }); },
+    noop: function () {}
+  };
+
+  // ① 显式效果表（特殊机制）
+  if (typeof RL_FX[card.name] === 'function') { RL_FX[card.name](ctx); rlRenderUI(); return; }
+
+  // ② 通用解析：支持 1d12 / 2d6 / 范围 / 公式
+  var dmgM = eff.match(/造成\s*([^，。；\n]*?)\s*(?:的)?\s*(?:判定|热忱|理智|混沌|无序|丰沛|声乐)?\s*(?:属性)?\s*伤害/);
+  if (dmgM) {
+    var amt = rlAmount(dmgM[1], ctx);
+    if (amt > 0) ctx.damage(amt);
+  } else {
+    var syncM = eff.match(/扣除(?:其|自身)?\s*([0-9d～~+（）()×\u4e00-\u9fa5]*?)\s*点同步/);
+    if (syncM) ctx.damage(rlAmount(syncM[1], ctx));
   }
   
   // 回复同步值
@@ -11610,6 +11736,11 @@ function __editPresetDecks() {
 /* ⚠ 2026-10-01：盒子（来自地狱的盒子）新卡面改成「因卡的效果而被送入墓地的**场合**」——
      「场合」不会错过时点 ⇒ 从本名单移除（作者明确指出"盒子的时机变了"）。
      名单里保留的 3 条仍是「～时可以发动」写法。 */
+/* 【2026-10-01 作者裁决】错时点的适用范围：
+     · **只有这 3 条按「～した時」处理**（会被后续处理卡掉时点、不能发动）——都是"因**代价**离开原区域"的选发：
+         toma-sp-leave（现实间冬马·SP）/ liuli-hw-sp-leave（琉璃(万圣祭)·SP）/ yunai-past-ask（羽奈(往昔)·憧憬的正义）
+     · **其余一切按「～した場合」处理**（不受错过时点影响）。
+   将来若还要增减，只改这个白名单即可。 */
 var __WHEN_TIMED_IDS = { 'toma-sp-leave': 1, 'liuli-hw-sp-leave': 1, 'yunai-past-ask': 1 };
 function __missTiming(id, ctx) {
   try {
