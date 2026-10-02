@@ -23177,12 +23177,18 @@ function applyJudgeChain(side, pick, je, done) {
   if (kind === 'reroll_judge' || name === 'Twice') {
     __pay();
     addBattleLog(side, '连锁发动【' + name + '】，重新进行本次判定');
+    /* 【2026-10-01 修】重判是**异步**的（要播动画/等控骰）⇒ 判定收尾必须等它出结果，
+       否则会先按旧值结算（实测日志顺序：先"校准：6点，失败"，之后才"重判新结果 = 12"）。 */
+    je._rerollPending = true;
     // 被判定者重新掷一次（走动画+控骰），替换待结算结果，双方重新获得连锁机会
     judgeAnimate(je.judgeUser, je.spec, function (nv) {
       je.val = nv; je.description = (je.spec.label || '判定') + ' → 结果 ' + nv + '（重判，确定前可连锁）';
       addBattleLog('system', '重判新结果 = ' + nv);
       if (typeof renderChainBar === 'function') renderChainBar(je);
+      je._rerollPending = false;
       done();
+      /* 收尾若因"重判进行中"被推迟，现在补做（此时 je.val 已是新点数） */
+      try { if (typeof je._deferredClose === 'function') { var __f = je._deferredClose; je._deferredClose = null; __f(); } } catch (e) { console.error('兑现推迟的判定收尾出错', e); }
     });
     return;
   }
@@ -23212,15 +23218,18 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
     val: initVal, _chain: [], cancelled: false
   };
   rwOpen('rand', je);
-  function __close() {
-    rwClose('rand');
+  function __settleNow() {
     if (je.cancelled) { addBattleLog(user, '本次判定被连锁无效，不适用结果'); applyFn(null, true); return; }
-    /* 【2026-10-01 修】重判类连锁（Twice 等）把**新点数**写在 effect._newDiceResult 上（见 applyJudgeChain 的 reroll 分支），
-       但判定收尾原来只读 je.val ⇒ 重判白做（对判定伤害、御神签校准同样失效；实测日志："重判新结果 = 12" 出现在按旧值结算之后）。
-       这里统一取"最终点数"：有 _newDiceResult 就用它。 */
+    /* "最终点数"以 je.val 为准（重判落地时已写回）；_newDiceResult 只是某些路径的兜底 */
     var __finalVal = (je._newDiceResult !== undefined && je._newDiceResult !== null) ? je._newDiceResult : je.val;
     if (__finalVal !== je.val) addBattleLog(user, '【重判生效】本次判定最终点数 ' + je.val + ' → ' + __finalVal);
     applyFn(__finalVal, false);
+  }
+  function __close() {
+    rwClose('rand');
+    /* 【2026-10-01 修】重判（Twice 等）是异步的：进行中就先别结算，等它的回调把 je.val 写好后兑现本函数 */
+    if (je._rerollPending) { je._deferredClose = __settleNow; return; }
+    __settleNow();
   }
   var __q1 = collectChainable('p1', je), __q2 = collectChainable('p2', je);
   if (!__q1.length && !__q2.length) { __close(); return; } // 快速路径：双方都无可连锁卡，不打扰
