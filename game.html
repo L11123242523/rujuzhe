@@ -11275,6 +11275,42 @@ registerTrigger({
 function __runTimingTriggers(timing, ctx, next) {
   try {
     var cands = (typeof __scanTriggers === 'function') ? __scanTriggers(timing, ctx) : [];
+    /* 【2026-10-01 ①-1 作者口径：阶段切换也会弹"是否发动效果"】
+       在 9 个阶段边界，把"该时点可发动的**卡**"也列进候选：
+         · 技能卡＝全时点（作者 2026-09-13 口径）· 事件卡＝全时点
+         · 连锁专用卡不列（它们要在自己的时点、有作用对象时才能发动）
+       卡的发动语义与"触发"不同 ⇒ 用 fire 走 applyChainCard（付费+移出原区域+入 effect._chain）
+       → resolveChainStack 结算，与响应窗口完全同构，不新增任何机制。 */
+    try {
+      if (/^(prepare_end|main1_start|main1_end|roll_start|roll_end|main2_start|main2_end|end_start|end_end)$/.test(String(timing))) {
+        var __pcSides = (ctx && ctx.players) || [(ctx && ctx.player) || (battleState && battleState.currentPlayer) || 'p1'];
+        __pcSides.forEach(function (side) {
+          var __pcPicks = [];
+          try { __pcPicks = (typeof collectChainable === 'function') ? (collectChainable(side, null) || []) : []; } catch (e) { __pcPicks = []; }
+          __pcPicks.forEach(function (pk) {
+            var c = pk && pk.card; if (!c) return;
+            if (c._category !== 'skill_cards' && pk.from !== 'event') return;      // 只列全时点类
+            if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
+            cands.push({
+              owner: side, mandatory: false, id: 'phasecard|' + side + '|' + (c.name || ''),
+              label: '发动【' + (c.name || '') + '】（' + (c.cost || 0) + '费）',
+              fire: function (nx) {
+                var fin = (typeof nx === 'function') ? nx : function () {};
+                try {
+                  var stub = { _chain: [], _stage: timing, player: side, description: '阶段时点发动：' + (c.name || ''), card: c };
+                  applyChainCard(side, pk, stub, function () {
+                    try {
+                      if (stub._chain && stub._chain.length && typeof resolveChainStack === 'function') resolveChainStack(stub, function () { fin(); });
+                      else fin();
+                    } catch (e) { console.error('阶段时点卡结算出错（忽略）', e); fin(); }
+                  });
+                } catch (e) { console.error('阶段时点发动卡出错（忽略）', e); fin(); }
+              }
+            });
+          });
+        });
+      }
+    } catch (e) { console.error('阶段时点补卡候选出错（忽略）', e); }
     if (cands.length && typeof resolveSimultaneous === 'function') {
       var tp = (ctx && (ctx.player || ctx.attacker)) || (battleState && battleState.currentPlayer) || 'p1';
       resolveSimultaneous(tp, cands, next);
