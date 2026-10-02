@@ -3699,6 +3699,19 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
     <div class="battle-log-toolbar">
       <span class="battle-log-title">📜 战斗日志</span>
       <span class="battle-log-tools">
+        <!-- 【2026-10-01】搜索 + 分类筛选：出问题时不用再靠肉眼翻长日志 -->
+        <input id="logSearch" type="text" placeholder="🔍 搜索日志…" oninput="applyLogFilter()"
+               style="width:120px;margin-right:6px;padding:2px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.25);color:#e8eefc;font-size:12px;">
+        <select id="logTypeFilter" onchange="applyLogFilter()"
+                style="margin-right:6px;padding:2px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.25);color:#e8eefc;font-size:12px;">
+          <option value="all">全部</option>
+          <option value="chain">连锁/时点</option>
+          <option value="judge">判定/骰</option>
+          <option value="dmg">伤害/同步</option>
+          <option value="phase">阶段</option>
+          <option value="p1">我</option>
+          <option value="p2">对手</option>
+        </select>
         <button type="button" onclick="copyBattleLog()">复制</button>
         <button type="button" onclick="clearBattleLog()">清空</button>
         <button type="button" onclick="toggleBattleLog()">收起</button>
@@ -16885,7 +16898,12 @@ var ENV = {
     var log = null;
     try { log = document.getElementById('battleLog'); } catch (e) { log = null; }
     if (!log) { if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length; return; }
-    __appendLogEntry(rec);
+    /* 【2026-10-01】筛选激活时：新日志也按筛选规则重绘（否则会插进被过滤的列表里） */
+    if (typeof __logFilterActive === 'function' && __logFilterActive()) {
+      try { applyLogFilter(); } catch (e) { __appendLogEntry(rec); }
+    } else {
+      __appendLogEntry(rec);
+    }
     if (battleState && battleState._logs) __logRenderedCount = battleState._logs.length;
     // 用户上翻阅读旧日志时不抢滚动；贴近底部才自动跟随
     var __nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 70;
@@ -16946,6 +16964,51 @@ function logDelta(type, label, fromV, toV, unit) {
   if (diff === 0) return;
   var sign = diff > 0 ? '+' : '';
   addBattleLog(type, label + '：' + fromV + unit + ' → ' + toV + unit + '（' + sign + diff + unit + '）');
+}
+/* 【2026-10-01】日志筛选：关键字 + 分类。筛选激活时从 battleLogs 重绘；未激活时保持原有增量渲染。 */
+var __logFilter = { kw: '', type: 'all' };
+function __logFilterActive() { return !!(__logFilter.kw || (__logFilter.type && __logFilter.type !== 'all')); }
+function __logPass(rec) {
+  try {
+    if (!rec) return false;
+    var t = __logFilter.type || 'all';
+    if (t !== 'all') {
+      var m = String(rec.msg || '');
+      if (t === 'chain' && !/连锁|时点窗口|入链|PASS|逆结算/.test(m)) return false;
+      if (t === 'judge' && !/判定|校准|骰|硬币|改点|重判/.test(m)) return false;
+      if (t === 'dmg' && !/伤害|受伤|同步值|护盾/.test(m)) return false;
+      if (t === 'phase' && rec.type !== 'phase') return false;
+      if (t === 'p1' && rec.type !== 'p1' && rec.actor !== 'p1') return false;
+      if (t === 'p2' && rec.type !== 'p2' && rec.actor !== 'p2') return false;
+    }
+    if (__logFilter.kw) {
+      var k = __logFilter.kw.toLowerCase();
+      var hay = (String(rec.msg || '') + ' ' + String(rec.type || '')).toLowerCase();
+      if (hay.indexOf(k) < 0) return false;
+    }
+    return true;
+  } catch (e) { return true; }
+}
+function applyLogFilter() {
+  try {
+    var kw = document.getElementById('logSearch');
+    var ty = document.getElementById('logTypeFilter');
+    __logFilter.kw = kw ? String(kw.value || '').trim() : '';
+    __logFilter.type = ty ? String(ty.value || 'all') : 'all';
+    var log = document.getElementById('battleLog'); if (!log) return;
+    log.innerHTML = '';
+    var all = (typeof battleLogs !== 'undefined' && battleLogs) ? battleLogs : ((battleState && battleState._logs) || []);
+    var shown = 0;
+    for (var i = 0; i < all.length; i++) { if (__logPass(all[i])) { __appendLogEntry(all[i]); shown++; } }
+    try { __logRenderedCount = (battleState && battleState._logs) ? battleState._logs.length : all.length; } catch (e) {}
+    log.scrollTop = log.scrollHeight;
+    /* 给个反馈：筛掉了多少条 */
+    try {
+      var tip = document.getElementById('logFilterTip');
+      if (!tip) { tip = document.createElement('span'); tip.id = 'logFilterTip'; tip.style.cssText = 'margin-left:8px;font-size:11px;color:#9fb3d9;'; document.querySelector('.battle-log-tools').appendChild(tip); }
+      tip.textContent = __logFilterActive() ? ('筛出 ' + shown + '/' + all.length + ' 条') : '';
+    } catch (e) {}
+  } catch (e) { try { console.error('日志筛选出错', e); } catch (e2) {} }
 }
 function clearBattleLog() {
   battleLogs = [];
