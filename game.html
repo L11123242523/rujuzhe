@@ -15414,9 +15414,42 @@ function __pilePop(kind, allNames, opt) {
   return pile.splice(ix, 1)[0] || null;
 }
 
-function drawGiftCard(player) {
+/* 【2026-10-01 作者要求】抽取页面：御神签 / 馈赠卡 由玩家自己点选抽取（点哪格就取卡堆里哪一张）。
+   设计：AI 侧不弹页面（随机取一格）；已选过（pickName）或自动结算时直接走原流程；联机 p1 复用 showChoiceModal（自带答案广播）。 */
+function __drawPickPage(kind, player, cb) {
+  try {
+    var pile = (typeof __pileGet === 'function') ? __pileGet(kind) : null;
+    var n = (pile && pile.length) ? pile.length : (kind === 'omikuji' ? 7 : 6);
+    if (n <= 1) { cb(null); return; }
+    var label = (kind === 'omikuji') ? '抽取御神签' : '抽取馈赠卡';
+    var opts = [];
+    for (var i = 0; i < n; i++) opts.push('第 ' + (i + 1) + ' 张（背面向下）');
+    var pick = function (idx) {
+      if (idx === null || idx === undefined || idx < 0 || idx >= n) idx = 0;
+      var nm = null;
+      /* ⚠ 不在这里 splice：取走交给 __pilePop（它按名字找并移除）；先删会导致它找不到 → 退化成堆序第一张 */
+      try { if (pile && typeof pile[idx] === 'string') nm = pile[idx]; } catch (e) {}
+      addBattleLog(player, '【' + label + '】选择了第 ' + (idx + 1) + ' 张（共 ' + n + ' 张）');
+      cb(nm);
+    };
+    if (player === 'p1' && typeof showChoiceModal === 'function') {
+      showChoiceModal(label, '从 ' + n + ' 张中选一张翻开', (kind === 'omikuji' ? '御神签是放回抽取（抽空自动重洗）' : '馈赠卡抽完即用'), opts, function (i) { pick(i); });
+      return;
+    }
+    pick((typeof GameRNG !== 'undefined' && GameRNG.int) ? GameRNG.int(n) : 0);   // AI：随机一格
+  } catch (e) { try { console.error('抽取页面出错（回退自动抽）', e); } catch (e2) {} cb(null); }
+}
+function drawGiftCard(player, pickName) {
   if (!battleState) return;
   var p = battleState[player];
+  /* 【2026-10-01 抽取页面】玩家侧先点选（AI / 已选过 / 自动结算 跳过） */
+  if (!pickName && player === 'p1' && !(typeof effectEngine !== 'undefined' && effectEngine && effectEngine.autoResolve)) {
+    var __gp0 = (typeof __pileGet === 'function') ? __pileGet('gifts') : null;
+    if (__gp0 && __gp0.length > 1) {
+      __drawPickPage('gifts', player, function (nm) { drawGiftCard(player, nm || '__auto__'); });
+      return;
+    }
+  }
   function __doDraw(remove2) {
     // 馈赠卡池：200$, 500$, 1000$, Noise(>10), Noise(≤10), 和声
     var giftPool = [
@@ -15458,7 +15491,10 @@ function drawGiftCard(player) {
     var __giftExclude = [];
     if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('共鸣者') >= 0; })) __giftExclude.push('200$');
     if (p._ioriPassive) __giftExclude.push('500$');
-    var __giftName = (typeof __pilePop === 'function') ? __pilePop('gifts', __giftNames, { name: __rioFirst ? '和声' : null, exclude: __giftExclude }) : null;
+    /* 【2026-10-01 修】点选到的名字若在"本次奖池排除名单"里（共鸣者剔除200$/伊织剔除500$…）则视为未点选：
+   __pilePop 按名取牌时不看 exclude，直接传进去会把被剔除的卡抽出来（batchC 因此红 1 条）。 */
+var __pickedGift = (pickName && pickName !== '__auto__' && (__giftExclude || []).indexOf(pickName) < 0) ? pickName : null;
+var __giftName = (typeof __pilePop === 'function') ? __pilePop('gifts', __giftNames, { name: __rioFirst ? '和声' : __pickedGift, exclude: __giftExclude }) : null;
     var card = null;
     for (var __gi = 0; __gi < giftPool.length; __gi++) { if (giftPool[__gi].name === __giftName) { card = giftPool[__gi]; break; } }
     if (!card) card = __rioFirst ? (giftPool.filter(function (c) { return c.name === '和声'; })[0] || GameRNG.pick(giftPool)) : GameRNG.pick(giftPool);
@@ -15513,7 +15549,16 @@ function drawGiftCard(player) {
 // 抽取御神签（opt.shrine=true 表示因“到达神社”抽取——里绪(水着)首次神社必中大吉仅在此生效）
 function drawOmikuji(player, opt) {
   if (!battleState) return;
+  opt = opt || {};
   var p = battleState[player];
+  /* 【2026-10-01 抽取页面】玩家侧先点选（AI / 已选过 / 自动结算 跳过） */
+  if (!opt.pickName && !opt.__picked && player === 'p1' && !(typeof effectEngine !== 'undefined' && effectEngine && effectEngine.autoResolve)) {
+    var __op0 = (typeof __pileGet === 'function') ? __pileGet('omikuji') : null;
+    if (__op0 && __op0.length > 1) {
+      __drawPickPage('omikuji', player, function (nm) { opt.__picked = true; opt.pickName = nm || null; drawOmikuji(player, opt); });
+      return;
+    }
+  }
   
   // 御神签池
   var omikujiPool = [
@@ -15534,7 +15579,7 @@ function drawOmikuji(player, opt) {
   }
   /* 【卡堆模型】御神签也是"一个堆"：从堆顶抽；里绪(水着)首次神社 ⇒ 指定抽【大吉】；抽空了自动重洗。 */
   var __omNames = omikujiPool.map(function (c) { return c.name; });
-  var __omName = (typeof __pilePop === 'function') ? __pilePop('omikuji', __omNames, { name: __rioDaikichi ? '大吉' : null }) : null;
+  var __omName = (typeof __pilePop === 'function') ? __pilePop('omikuji', __omNames, { name: __rioDaikichi ? '大吉' : (opt.pickName || null) }) : null;
   var card = null;
   for (var __oi = 0; __oi < omikujiPool.length; __oi++) { if (omikujiPool[__oi].name === __omName) { card = omikujiPool[__oi]; break; } }
   if (!card) card = __rioDaikichi ? omikujiPool.filter(function (c) { return c.name === '大吉'; })[0] : GameRNG.pick(omikujiPool);
@@ -15736,26 +15781,16 @@ function performCalibration(player, difficulty, reduce, cb) {
   
   // 校准投骰属「普通投掷」：控骰最多适用 100%（每 20% = 点数 ±1，最多 ±5）
   // cb 存在时改为异步回调：先让玩家决定控骰档位，再结算成功/失败并回调 cb(success)
-  /* 【2026-10-01 作者要求：校准让玩家进行（结果可被效果修改）】
-     以前：自己 GameRNG.dice(20) 掷 + 只问控骰档位，**不开判定连锁窗** ⇒ 改点/重判类卡连锁不进来。
-     现在：走统一判定入口 judgePerform：
-       · 掷骰 + **玩家手动控骰**（spec.ctrlFull ⇒ 非伤害类判定上限 100%，与"御神签校准"的口径一致）；
-       · judgeSettleWindow 打开 rand_result 窗口 ⇒ 双方可用【遥控骰子/特制手套/Twice…】连锁改点或重判；
-       · 连续 PASS 后才以（可能被改过的）点数结算成功/失败。 */
-  function __settle(roll, cancelled) {
+  function __settle(roll) {
     var success = false;
-    if (cancelled) {
-      addBattleLog(player, '🎵 20面骰校准被连锁无效 ⇒ 本次结果不适用');
-      if (cb) cb(false);
-      return false;
-    }
-    if (roll === null || roll === undefined) success = false;
-    else if (difficulty === '>10') success = roll > 10;
+    if (difficulty === '>10') success = roll > 10;
     else if (difficulty === '≤10') success = roll <= 10;
     else if (difficulty === '≥14') success = roll >= 14;
     else if (difficulty === '≥17') success = roll >= 17;
     else if (difficulty === '≥12') success = roll >= 12;
     else if (difficulty === '>13') success = roll > 13;
+    // 播放20面骰校准动画（结果已同步确定，动画仅作过程展示，不改变返回值）
+    if (player === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'dice', sides: 20, fixed: roll, label: '20面骰校准(' + difficulty + ')' }, function () {});
 
     if (success) {
       p.fascination = Math.max(0, p.fascination - reduce);
@@ -15766,14 +15801,12 @@ function performCalibration(player, difficulty, reduce, cb) {
     if (cb) cb(success);
     return success;
   }
-  if (typeof judgePerform === 'function') {
-    /* 评定口径传给 judgeAnimate：'≤N' 类点数越低越好（控骰方向取低） */
-    var __cmp = (difficulty === '≤10') ? '<=' : '>=';
-    judgePerform(player, { kind: 'dice', sides: 20, ctrlFull: true, cmp: __cmp, label: '20面骰校准(' + difficulty + ')' },
-      function (finalVal, cancelled) { __settle(finalVal, cancelled); });
-    return undefined;   // 已转为异步：结果只通过 cb 交付
+  var __calRaw = GameRNG.dice(20);
+  if (typeof __diceControlAsk === 'function') {
+    __diceControlAsk(player, __calRaw, 20, '20面骰校准(' + difficulty + ')', __settle, { capPct: __CTRL_PCT_NORMAL, prefer: (difficulty === '≤10' ? 'low' : 'high') });
+    return undefined; // 已转为异步：结果只通过 cb 交付
   }
-  return __settle(GameRNG.dice(20), false);
+  return __settle(__calRaw);
 }
 
 // 触发事件卡
