@@ -11964,6 +11964,8 @@ var TW = {
     // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
     try { if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('TW.close'); } catch (e) {}
     addBattleLog('system', '【时点窗口】关闭（' + win.type + '，共 ' + win.chain.length + ' 环）');
+    /* 【2026-10-01】时点窗口关闭 = 一段流程收尾 ⇒ 把"效果中产生、被排队"的询问放出来 */
+    try { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('TW.close'); } catch (e) {}
     /* 【2026-10-01 修】关窗 = "忙"的来源少一个 ⇒ 若之前因忙链豁免过"同步归零判负"，这里立刻补判 */
     try { if (typeof checkBattleEnd === 'function' && battleState && !battleState._over) checkBattleEnd(); }
     catch (e) { try { console.error('关窗补判出错（不影响收尾）', e); } catch (e2) {} }
@@ -12050,7 +12052,9 @@ function resolveChainStack(effect, onDone) {
     if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainLock = false; if (typeof popEffect === 'function') popEffect(effect); if (typeof hideChainBar === 'function') setTimeout(hideChainBar, 750);
     /* 【2026-10-01 修】连锁收尾 = 这一轮走完了 ⇒ 补判"同步归零"（原来这里没人判，导致要等下一次伤害） */
     try { if (typeof checkBattleEnd === 'function' && battleState && !battleState._over) checkBattleEnd(); }
-    catch (e) { try { console.error('连锁收尾补判出错（不影响结算）', e); } catch (e2) {} } if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+    catch (e) { try { console.error('连锁收尾补判出错（不影响结算）', e); } catch (e2) {} }
+    /* 【2026-10-01】连锁收尾 ⇒ 同样把排队的询问放出来（"效果执行中产生的新效果"最常卡在这里） */
+    try { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('连锁收尾'); } catch (e) {} if (typeof onDone === 'function') onDone(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   if (!stack.length) { __endChain(); return; }
   var hasNum = (effect.moveAmount !== undefined && effect.moveAmount !== null);
   var cur = hasNum ? effect.moveAmount : null;
@@ -15634,6 +15638,8 @@ function __askChoiceLocal(spec, callback) {
   // 已有弹窗在等待回答：新询问入队，当前弹窗回答后再依次弹出，避免全局单槽回调被覆盖
   if (pendingChoiceCallback) {
     _choiceQueue.push({ title: title, cardName: cardName, effect: effect, choices: choices, callback: callback });
+    /* 【2026-10-01 兜底】句柄可能已经"名存实亡"（弹窗其实已关）⇒ 延后一拍检查，空闲就把队列放出来 */
+    try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('入队兜底'); }, 0); } catch (e) {}
     addBattleLog('system', '【弹窗排队】“' + title + '”等待当前询问结束后弹出');
     return;
   }
@@ -15697,6 +15703,25 @@ function closeChoiceModal() {
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
   pendingChoiceCallback = null;
+  /* 【2026-10-01 修】关窗后必须把队列里排着的询问放出来（原来只清句柄 ⇒ 效果中产生的询问永久卡住） */
+  try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('closeChoiceModal'); }, 0); } catch (e) {}
+}
+/* 【2026-10-01 新增】空闲补弹：没有待答句柄、且弹窗确实不可见时，把队列里的下一条放出来。
+   用于"效果执行中产生新询问"的各种收尾路径（关窗 / 连锁收尾 / 时点窗口关闭 / 入队兜底）。 */
+function __drainChoiceQueueWhenIdle(tag) {
+  try {
+    if (typeof _choiceQueue === 'undefined' || !_choiceQueue || !_choiceQueue.length) return false;
+    if (battleState && battleState._over) { _choiceQueue = []; return false; }
+    if (pendingChoiceCallback) return false;                 // 真有弹窗在等：等它被回答后再排
+    var modal = document.getElementById('choiceModal');
+    var vis = !!(modal && modal.classList && modal.classList.contains('active'));
+    if (vis) return false;                                   // 弹窗还开着：不抢
+    var q = _choiceQueue.shift();
+    if (!q) return false;
+    try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) {}
+    _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+    return true;
+  } catch (e) { try { console.error('补弹队列出错（忽略）', e); } catch (e2) {} return false; }
 }
 function __dequeueChoice() {
   if (battleState && battleState._over) { _choiceQueue = []; return; } // 对局结束：丢弃剩余询问
@@ -15857,6 +15882,8 @@ function getActiveBuffs(user) {
   if (p._sacrificeBonus || p._megumiSacBonusThisTurn) P('stat','🔥','献祭次数','+' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)),'每回合可额外献祭 ' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)) + ' 次','fire');
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
   if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加'+p._shenleStack+'层（上限9，使用不消耗，每次使用最终伤害+'+p._shenleStack+'）','san');
+  /* 【2026-10-01 作者要求】贪欲者的烙印：状态栏标记（每枚：获音韵+1 / 受最终伤害+1，上限 7） */
+  if (p._greedMark > 0) P('stat','🩸','贪欲烙印', p._greedMark + '/7', '贪欲者的烙印：每持有一枚 ⇒ 每次获取音韵值+1、每次受到的最终伤害+1（可叠加，上限7）','san');
   if (p._overload) P('stat','🎼','过载',(p._overload.until===-1?'永久':('剩'+p._overload.until+'行动')),'过载：持续期间内每因使用而让卡进入墓地的场合抽1张','fire');
   if (typeof StatusSys !== 'undefined' && StatusSys.has(user, 'overclock')) {
     var __ocs = StatusSys.all(user).filter(function (s) { return s.type === 'overclock'; });
