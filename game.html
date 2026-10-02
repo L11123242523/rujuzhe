@@ -9003,6 +9003,19 @@ function rlInitBattle() {
     }
   };
   
+  // 布阵前排：每名出战角色各自一份同步值（= sync × 2.5 向上取整），队伍同步值 = 各角色之和
+  rlState.p1.units = p1Chars.map(function (c) {
+    var hp = Math.ceil((c.sync || 5) * 2.5);
+    return { name: c.name, full: c.name, sync: hp, maxSync: hp, alive: true };
+  });
+  if (rlState.p1.units.length) rlState.p1.units[0].isLeader = true;
+  rlState.p1.summons = [];
+  rlState.p1.maxSync = rlState.p1.sync = rlSumSync(rlState.p1);
+
+  // 背包被动（存在于背包中即生效）
+  rlApplyBackpack(rlState.p1);
+  rlApplyBackpack(rlState.p2);
+
   // 初始抽牌
   for (var i=0;i<4;i++) rlDrawCard('p1');
   for (var i=0;i<4;i++) rlDrawCard('p2');
@@ -9030,14 +9043,64 @@ function rlDrawCard(player) {
   }
 }
 
+/* ===== 布阵前排：每名出战角色各自一份同步值（作者 2026-10 规则）===== */
+function rlSumSync(p) {
+  return (p.units || []).reduce(function (s, u) { return s + Math.max(0, u.sync); }, 0);
+}
+function rlAliveUnit(p) {
+  return (p.units || []).filter(function (u) { return u.alive; })[0] || null;
+}
+/* 把一次伤害分配给前排：嘲讽召唤物优先 → 否则第一个存活角色；角色掉光即倒下（不补位） */
+function rlDamageSide(p, dmg) {
+  var taunt = (p.summons || []).filter(function (u) { return u && u.taunt && u.sync > 0; })[0];
+  if (taunt) {
+    taunt.sync = Math.max(0, taunt.sync - dmg);
+    showToast('🛡️ 嘲讽：召唤物承受 ' + dmg + ' 点伤害（剩余 ' + taunt.sync + '）', 'warn');
+    if (taunt.sync <= 0) {
+      p.summons = (p.summons || []).filter(function (u) { return u !== taunt; });
+      showToast('召唤物被击破', 'warn');
+    }
+    return;
+  }
+  var tgt = rlAliveUnit(p);
+  if (!tgt) { p.sync = Math.max(0, p.sync - dmg); return; }
+  tgt.sync = Math.max(0, tgt.sync - dmg);
+  if (tgt.sync <= 0) {
+    tgt.alive = false;
+    showToast('💔 ' + tgt.name + ' 倒下了（其被动与携带卡失效）', 'warn');
+  }
+  p.sync = p.units ? rlSumSync(p) : Math.max(0, p.sync - dmg);
+}
+/* 携带卡是否可用：卡所属角色必须在前排且未倒下 */
+function rlCarryUsable(p, card) {
+  if (!card || (!card.character && !card.character_full)) return true;   // 非携带卡
+  var full = card.character_full || card.character;
+  var short = String(full).split('·')[0].split('（')[0];
+  var u = (p.units || []).filter(function (x) {
+    return x.name === full || x.name === short || (x.full && (x.full === full || x.full === short));
+  })[0];
+  return u ? u.alive : false;
+}
+
+/* 背包被动：只要卡「存在于背包中」就生效（作者 2026-10 规则；不占后排格） */
+function rlApplyBackpack(p) {
+  var bag = (roguelikeState && roguelikeState.deck && roguelikeState.deck.items) || [];
+  var has = function (n) { return bag.some(function (c) { return c && c.name === n; }); };
+  if (has('四叶草发卡')) p.luck = (p.luck || 0) + 10;                     // 运气+10（每 10 点 ⇒ 判定骰 +1）
+  if (has('共鸣者')) p.costRefillBonus = (p.costRefillBonus || 0) + 2;    // 每回合回复的音韵值+2
+  if (has('执勤证明')) p.chaosBonus = (p.chaosBonus || 0) + 3;            // 自身造成的混沌属性伤害+3
+  if (has('核心的供给者')) p.expBonus = (p.expBonus || 0) + 4;            // 战斗胜利经验+4（结算见 onRoguelikeBattleEnd）
+  return p;
+}
+
 function rlStartTurn(player) {
   if (!rlState) return;
   rlState.currentPlayer = player;
   rlState.phase = 'prepare';
   var p = rlState[player];
   
-  // 回费
-  p.cost = Math.min(p.cost + 5, p.maxCost);
+  // 回费（背包被动「共鸣者」：每回合回复音韵值+2）
+  p.cost = Math.min(p.cost + 5 + (p.costRefillBonus || 0), p.maxCost);
   // 抽牌
   rlDrawCard(player);
   // 重置每回合一次的效果
@@ -9097,12 +9160,9 @@ function rlEnemyAction() {
   setTimeout(function() {
     if (intent.type === 'attack') {
       var dmg = intent.value;
-      if (p1.shield > 0) {
-        var shieldDmg = Math.min(p1.shield, dmg);
-        p1.shield -= shieldDmg;
-        dmg -= shieldDmg;
-      }
-      p1.sync = Math.max(0, p1.sync - dmg);
+      if (p1.shield > 0) { var shieldDmg = Math.min(p1.shield, dmg); p1.shield -= shieldDmg; dmg -= shieldDmg; }
+      // 按布阵分配：嘲讽召唤物优先，其次前排第一位存活角色（掉光即倒下，战前编队不补位）
+      rlDamageSide(p1, dmg);
     } else if (intent.type === 'defend') {
       p2.shield += intent.value;
     } else if (intent.type === 'buff') {
@@ -9120,6 +9180,10 @@ function rlPlayCard(handIndex) {
   if (!card) return;
   
   var cost = card.cost || 0;
+  if (!rlCarryUsable(p1, card)) {
+    showToast('该角色不在场或已倒下，无法打出它的携带卡', 'warn');
+    return;
+  }
   if (p1.cost < cost) {
     showToast('费用不足！需要' + cost + '，当前' + p1.cost, 'warn');
     return;
@@ -9158,7 +9222,7 @@ function rlRollDice(expr) {                      // '1d12' '2d6' 'd6' → 点数
 function rlAmount(expr, ctx) {
   var s = String(expr || '').replace(/[（）()]/g, '').replace(/点随机|点|的/g, '').trim();
   var m;
-  if ((m = s.match(/^(\d*)d(\d+)$/i))) return rlRollDice(s);
+  if ((m = s.match(/^(\d*)d(\d+)$/i))) return rlRollDice(s) + Math.floor((ctx.p.luck || 0) / 10);   // 运气：每 10 点判定骰 +1
   if ((m = s.match(/^(\d+)[～~](\d+)$/))) {
     var lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
     return lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -9190,7 +9254,7 @@ var RL_FX = {
   '风纪委员臂章': function (c) { c.damageRaw(c.attack()); },
   '经文': function (c) { c.heal(6 + c.tagBonus('圣女', 3)); },
   '神乐铃': function (c) { c.damage(1 + (c.p._bellStacks || 0)); },
-  '猎手爪链': function (c) { c.damage(4 + c.tagBonus('猎手', 2)); },
+  '猎手爪链': function (c) { c.damage(4 + c.tagBonus('猎手', 2), '混沌'); },
   '镇定药片': function (c) { if (c.p.sync > 1) c.heal(3); else { c.heal(3); } },
   '底牌': function (c) { c.healCost(c.p.maxCost); c.draw(Math.floor(c.p.maxCost / 3)); },
   '柔软枕头': function (c) { c.heal(4); if (c.p.grave.length === 4 || c.p.grave.length === 6) c.draw(3); },
@@ -9222,7 +9286,7 @@ var RL_FX = {
   '绿宝之杖·择': function (c) { c.draw(2); c.p.sync = Math.max(0, c.p.sync - 4); },
   '鸣奏之“圣音”': function (c) { c.recall(); },
   '永奏进行曲': function (c) { c.draw(2); c.mill(1); },
-  '妖刀五月雨': function (c) { c.damage(5); },
+  '妖刀五月雨': function (c) { c.damage(5, '混沌'); },
   '血之佑戒·红泪拉克莎': function (c) { c.healCost(3); },
   '贪欲者的烙印': function (c) { c.p.sync = Math.max(0, c.p.sync - 3); c.draw(1); },
   '黑色卡片': function (c) { c.draw(1); },
@@ -9250,9 +9314,10 @@ function rlProcessCardEffect(card, user, target, paidCost) {
       }).length;
       return n * per;
     },
-    damage: function (n) { return ctx._hit((parseInt(n, 10) || 0) + (p.attackBuff || 0)); },
-    damageRaw: function (n) { return ctx._hit(parseInt(n, 10) || 0); },   // 数值本身已按攻击力算过时用（避免重复加成）
-    _hit: function (base) {
+    damage: function (n, attr) { return ctx._hit((parseInt(n, 10) || 0) + (p.attackBuff || 0), attr); },
+    damageRaw: function (n, attr) { return ctx._hit(parseInt(n, 10) || 0, attr); },   // 数值已按攻击力算过时用（避免重复加成）
+    _hit: function (base, attr) {
+      if (attr === '混沌' && p.chaosBonus) base += p.chaosBonus;   // 背包被动「执勤证明」
       base += (p._nextDamageUp || 0);          // 一次性增伤（能量饮料 / 结晶碎弧）
       p._nextDamageUp = 0;
       if (t.shield > 0) { var sd = Math.min(t.shield, base); t.shield -= sd; base -= sd; }
@@ -9278,10 +9343,10 @@ function rlProcessCardEffect(card, user, target, paidCost) {
   if (typeof RL_FX[card.name] === 'function') { RL_FX[card.name](ctx); rlRenderUI(); return; }
 
   // ② 通用解析：支持 1d12 / 2d6 / 范围 / 公式
-  var dmgM = eff.match(/造成\s*([^，。；\n]*?)\s*(?:的)?\s*(?:判定|热忱|理智|混沌|无序|丰沛|声乐)?\s*(?:属性)?\s*伤害/);
+  var dmgM = eff.match(/造成\s*([^，。；\n]*?)\s*(?:的)?\s*(判定|热忱|理智|混沌|无序|丰沛|声乐)?\s*(?:属性)?\s*伤害/);
   if (dmgM) {
     var amt = rlAmount(dmgM[1], ctx);
-    if (amt > 0) ctx.damage(amt);
+    if (amt > 0) ctx.damage(amt, dmgM[2] || '');
   } else {
     var syncM = eff.match(/扣除(?:其|自身)?\s*([0-9d～~+（）()×\u4e00-\u9fa5]*?)\s*点同步/);
     if (syncM) ctx.damage(rlAmount(syncM[1], ctx));
@@ -10708,6 +10773,44 @@ function __setAiSeat(s) {
 function aiSeat() { return __setAiSeat(); }
 function aiMe() { return stateOf(aiSeat()); }
 function aiFoe() { return stateOf(foeOf(aiSeat())); }
+/* ============================================================
+   【②-2 AI 收益评估：净收益 = 我方收益 − 我方代价/自伤 − 对方收益】（作者 2026-10-01 队列②）
+   原来 aiDecideChain 只看"格子价值"这一项收益，于是：
+     · 自伤/透支类（最佳化"扣除自身4点同步"、镌刻的艺术"支付4点同步"）与不花钱的卡同分；
+     · 改点卡（遥控骰子/特制手套）"能改成几点"完全没算 —— 自己回合里恒等，AI 从不发动；
+     · 费用、多段收益也不进分。
+   这两个助手把"节点 → 真正的卡"与"卡面自伤代价"统一抽出来，供连锁决策与同时点决策共用。
+   ============================================================ */
+function __aiCardOfNode(node) {
+  try { return (node && (node.card || (node.pick && node.pick.card))) || null; } catch (e) { return null; }
+}
+/** 卡面里的"自伤同步值"代价合计（扣除自身/失去/支付/自身受到） */
+function __aiSelfHarmOf(card) {
+  try {
+    if (!card) return 0;
+    var t = String((card.effect || '') + ' ' + (card.sp || ''));
+    var n = 0, m;
+    if ((m = t.match(/扣除自身\s*([0-9]+)\s*点同步/))) n += parseInt(m[1], 10) || 0;
+    if ((m = t.match(/失去\s*([0-9]+)\s*点同步/))) n += parseInt(m[1], 10) || 0;
+    if ((m = t.match(/支付\s*([0-9]+)\s*点同步/))) n += parseInt(m[1], 10) || 0;
+    if ((m = t.match(/(?:自身|自己)受到\s*([0-9]+)\s*点/))) n += parseInt(m[1], 10) || 0;
+    return n;
+  } catch (e) { return 0; }
+}
+/** 净收益修正：把费用与自伤从"我方收益"里扣掉；会当场把自己扣死的卡直接判为不发动 */
+function __aiNetOf(gain, card, me, bits) {
+  var s = gain;
+  try {
+    var cost = parseInt((card && card.cost), 10) || 0;
+    if (cost > 0) { s -= cost * 1.5; if (bits) bits.push('费用-' + cost); }
+    var sh = __aiSelfHarmOf(card);
+    if (sh > 0) {
+      s -= sh * 8; if (bits) bits.push('自伤-' + sh + '同步');
+      if (me && sh >= (me.sync || 0)) { s = -1; if (bits) bits.push('会自杀⇒不发动'); }
+    }
+  } catch (e) {}
+  return s;
+}
 function aiDecideChain(list, effect, seat){
   __setAiSeat(seat);            // 响应驱动：座位由调用方给（人类回合里 AI 应战时 currentPlayer 不是它）
   if(!list.length) return null;
@@ -10744,7 +10847,27 @@ function aiDecideChain(list, effect, seat){
     return tileScore(((foe.position + mv) % 42 + 42) % 42);
   }
   var best = null, bestScore = 0;
-  function consider(c, s, reason) { if (s > bestScore) { bestScore = s; best = c; best._aiReason = reason; } }
+  /* 【②-2】考虑候选时统一走"净收益"：我方收益 gain 先扣费用与自伤，再比大小；
+     命中时把构成写进 _aiReason，战斗日志与探针都能查证"为什么发动/为什么不发动"。 */
+  function consider(c, gain, reason) {
+    var bits = [reason];
+    var s = __aiNetOf(gain, c, me, bits);
+    if (s > bestScore) { bestScore = s; best = c; best._aiReason = bits.join('，'); }
+  }
+  /* 改点卡（遥控骰子/特制手套类）：能自己挑点数 ⇒ 收益按"最优落点"算 */
+  function __isDiceSetCard(c) {
+    try { return !!(typeof RJEngine !== 'undefined' && RJEngine.classifyChainCard && RJEngine.classifyChainCard(c) === 'dice_set'); }
+    catch (e) { return false; }
+  }
+  /* 在 1..20 里挑一个使落点格价值最高的骰点（上限 20 = 单次位移上限） */
+  function __bestDiceLanding() {
+    var bv = 0, bp = -1;
+    for (var v = 1; v <= 20; v++) {
+      var sv = tileScore(((me.position + v) % 42 + 42) % 42);
+      if (sv > bp) { bp = sv; bv = v; }
+    }
+    return { value: bv, score: bp };
+  }
 
   for (var i = 0; i < list.length; i++) {
     var it = list[i], c = it.card, eff = (c.effect || '') + (c.sp || '');
@@ -10772,8 +10895,15 @@ function aiDecideChain(list, effect, seat){
       } else {
         // 自己移动：若新落点更好才用（避免白费一张卡）
         var before = tileScore(((me.position + ((effect && effect.moveAmount) || 0)) % 42 + 42) % 42);
-        var after = landingScore(c, eff);
-        if (after > before) consider(it, 60 + (after - before) * 8, '优化自己落点');
+        /* 【②-2】改点卡能"自己挑点数" ⇒ 按**最优落点**给收益（旧写法 landingScore 对改点卡恒等于原落点
+           ⇒ after === before ⇒ 自己回合永远不发动，等于这张卡白拿）。 */
+        if (__isDiceSetCard(c)) {
+          var bl = __bestDiceLanding();
+          if (bl.score > before) consider(it, 60 + (bl.score - before) * 8, '改点至' + bl.value + '点（落点价值' + before + '→' + bl.score + '）');
+        } else {
+          var after = landingScore(c, eff);
+          if (after > before) consider(it, 60 + (after - before) * 8, '优化自己落点');
+        }
       }
       continue;
     }
@@ -10786,6 +10916,12 @@ function aiDecideChain(list, effect, seat){
     // 5) 骰子结果窗口（改点卡）
     if (stage === 'dice_result' || stage === 'dice') {
       if (!isMine) consider(it, 45, '修改对手骰点');
+      else if (__isDiceSetCard(c)) {
+        /* 【②-2】自己回合的骰子窗口：同样是"自己挑点数 ⇒ 按最优落点算" */
+        var bl2 = __bestDiceLanding();
+        var cur2 = tileScore(((me.position + ((effect && effect.moveAmount) || 0)) % 42 + 42) % 42);
+        if (bl2.score > cur2) consider(it, 60 + (bl2.score - cur2) * 8, '改点至' + bl2.value + '点（落点价值' + cur2 + '→' + bl2.score + '）');
+      }
       continue;
     }
   }
@@ -10821,6 +10957,11 @@ globalThis.__aiChainDecide = function (who, pool, chain) {
       if (c && c.mandatory) s += 200;
       // 已经很长的一条链上，选发收益递减，避免拖时长
       s -= chainLen * 5;
+      /* 【②-2】净收益：扣掉音韵费用与卡面自伤（会当场把自己扣死的直接判不发动） */
+      var __card = __aiCardOfNode(c);
+      var __bits = [];
+      s = __aiNetOf(s, __card, me, __bits);
+      if (__bits.length) { try { c._aiNetBits = __bits.join('，'); } catch (e) {} }
       return s;
     }
     var best = -1, bestScore = 0;
@@ -12515,16 +12656,38 @@ function __chainIsBusy() {
     return false;
   } catch (e) { return false; }
 }
-/* 【MD 口径 P3：咒文速度】（2026-09-30）
-   1速＝触发效果（含本引擎注册表里的各条触发）；2速＝技能卡/速攻类；3速＝反击（无效类）。
-   规则：**低速不能接高速**（可以同级或更高速接链）。卡数据里若有显式 `speed` 字段则以它为准。 */
-function __cardSpeed(card) {
+/* 【MD 口径 P3：咒文速度】（2026-09-30；2026-10-01 D 组「逐类核查」修订）
+   1速＝触发效果（含本引擎注册表里的各条触发）；2速＝技能卡/道具/事件/乐谱/馈赠/御神签类；
+   3速＝反击（无效类）——**只有「崩塌之乌托邦」**（作者 2026-10-01 裁决，判据与它的连锁分类 negate_effect 同源）。
+   规则：**低速不能接高速**（可以同级或更高速接链）。卡数据里若有显式 `speed` 字段则以它为准。
+
+   ⚠ 逐类核查查出的两个缺陷（本次一并修好）：
+     ① 本函数在接链处拿到的是**候选节点**而不是卡本身 —— 旧写法直接读 `card._category`，
+        而 collectChainable/时点窗口产出的节点是 `{card,…}`、`{owner,pick,…}` 形状 ⇒ 读到的永远是 undefined，
+        "哪些类是 2 速"其实是靠最后那句兜底 `return 2` 蒙对的（分类分支等于没生效）；
+     ② 节点带 `id` 就被判成 1 速 ⇒ 阶段时点候选（id = 'phasecard|座位|卡名'）里的**技能卡/事件卡被误判为 1 速触发**，
+        接在 2 速链环之后会被"低速不能接高速"错误地挡掉。现在先取回真正的卡再分类。 */
+function __cardSpeed(node) {
   try {
-    if (!card) return 2;
+    if (!node) return 2;
+    if (typeof node.speed === 'number' && node.speed > 0) return node.speed;
+    /* 取回真正的卡：候选节点三种形状 —— 卡本身 / {card} / {pick:{card}} */
+    var card = node.card || (node.pick && node.pick.card) || node;
     if (typeof card.speed === 'number' && card.speed > 0) return card.speed;
-    if (card._category === 'skill_cards') return 2;
-    if (card._category === 'attack_cards' || card._category === 'item_single' || card._category === 'item_permanent') return 2;
-    if (card._isTrigger || card.id) return 1;          // 注册表产出的触发节点：1 速
+    var cat = card && card._category;
+    /* 3 速＝反击（无效类）。【作者 2026-10-01 裁决】「崩塌之乌托邦」定为 3 速反击。
+       判据与该卡的连锁分类同源（RJEngine.classifyChainCard === 'negate_effect'，
+       卡名兜底写在 classifyChainCard 里）⇒ 以后改文案也不会掉出分类。 */
+    try {
+      if (card && typeof RJEngine !== 'undefined' && RJEngine.classifyChainCard &&
+          RJEngine.classifyChainCard(card) === 'negate_effect') return 3;
+    } catch (e) { console.error('反击卡识别出错（按常规分类）', e); }
+    if (cat === 'skill_cards') return 2;                  // 技能卡＝速攻类
+    if (cat === 'attack_cards' || cat === 'item_single' || cat === 'item_permanent' ||
+        cat === 'event_cards' || cat === 'music_cards' || cat === 'gift_cards' || cat === 'omikuji') return 2;
+    /* 注册表产出的触发节点（{owner,id,label,fire}，没有 card/pick）＝1 速；
+       注意：只有当节点自己就是"卡"时，节点上的 id 才代表触发。 */
+    if (card && (card._isTrigger || (card === node && node.id))) return 1;
     return 2;
   } catch (e) { console.error('取咒文速度出错（按2速处理）', e); return 2; }
 }
@@ -14212,6 +14375,34 @@ function __decideWaitGate(tag, retryFn) {
   } catch (e) { return false; }
 }
 
+/* 【2026-10-01 ①-2（作者裁决 1.b）】AI 回合的阶段时点：与玩家侧 nextPhase 完全同构 ——
+   8 个阶段边界（main1_start / main1_end / roll_start / roll_end / main2_start / main2_end / end_start / end_end）
+   各跑一次 __runTimingTriggers，且**双方都问**（ctx.players 含 p1/p2）：
+   轮到 AI 座位时由时点窗口的 aiDecideChain / "触发自动接受"分支应答，轮到玩家座位时照旧弹连锁窗。
+   窗口结算完才调 after()（回调串联），修掉"窗口还在问、阶段已经切走"。 */
+function aiTurnPhase(seat, timing, after) {
+  var __done = false;
+  var __fin = function () {
+    if (__done) return; __done = true;
+    try { after(); } catch (e) { console.error('AI 阶段时点回调出错 ' + timing, e); }
+  };
+  if (typeof __runTimingTriggers !== 'function') { __fin(); return; }
+  var __seat = seat || aiSeat();
+  try { __runTimingTriggers(timing, { player: __seat, players: ['p1', 'p2'], turnPlayer: __seat }, __fin); }
+  catch (e) { console.error('AI 阶段时点 ' + timing + ' 出错（继续推进）', e); __fin(); return; }
+  /* 兜底（与玩家侧同款）：窗口机器若既不开窗也不回调（异常路径），1.5 秒静默后强制推进，
+     避免 AI 阶段边界卡死。真正在等玩家决策时 TW.active 非空，不会误触发。 */
+  var __tries = 0, __quiet = 0;
+  var __iv = setInterval(function () {
+    if (__done) { clearInterval(__iv); return; }
+    var __busy = false;
+    try { __busy = !!(typeof TW !== 'undefined' && TW && TW.active); } catch (e) {}
+    if (__busy) { __quiet = 0; }
+    else if (++__quiet >= 6) { clearInterval(__iv); console.warn('AI 阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
+    if (++__tries > 200) clearInterval(__iv);
+  }, 250);
+}
+
 function aiTurn(seat) {
   if (!battleState || battleState._over) return;
   /* 【时点转交必须等对方决断（作者 2026-09-27 反馈）】若正在等玩家（对手）就"是否发动/是否连锁"作答，
@@ -14228,6 +14419,7 @@ function aiTurn(seat) {
   battleState.phase = 'main1';
   updateBattleUI();
   
+  aiTurnPhase(seat, 'main1_start', function() {
   aiMaybeUseEvent(function() {
   aiMaybeUseMusic(function() {
   aiUseActiveSP(aiSeat(), function() {
@@ -14236,6 +14428,7 @@ function aiTurn(seat) {
     if (checkBattleEnd()) return;
     updateBattleUI();
     
+    aiTurnPhase(seat, 'main1_end', function() {
     // 投骰阶段
     setTimeout(function() {
       battleState.phase = 'roll';
@@ -14243,6 +14436,7 @@ function aiTurn(seat) {
       addBattleLog('phase', '进入投骰阶段（AI）');
       updateBattleUI();
       
+      aiTurnPhase(seat, 'roll_start', function() {
       setTimeout(function() {
         var __aip = aiMe();
         aiRioPreRoll(aiSeat());
@@ -14259,12 +14453,14 @@ function aiTurn(seat) {
           if (checkBattleEnd()) return;
           updateBattleUI();
           
+          aiTurnPhase(seat, 'roll_end', function() {
           // 主要阶段2：AI继续使用卡牌
           setTimeout(function() {
             battleState.phase = 'main2';
             addBattleLog('phase', '进入主要阶段2（AI）：可继续使用手牌');
             updateBattleUI();
             
+            aiTurnPhase(seat, 'main2_start', function() {
             aiMaybeUseEvent(function() {
             aiMaybeUseMusic(function() {
             aiUseActiveSP(aiSeat(), function() {
@@ -14273,28 +14469,42 @@ function aiTurn(seat) {
               if (checkBattleEnd()) return;
               updateBattleUI();
               
-              // 结束回合
+              aiTurnPhase(seat, 'main2_end', function() {
+              // 结束阶段 → 结束回合（补 end_start / end_end 两个时点，与玩家侧一致）
               setTimeout(function() {
+                battleState.phase = 'end';
+                addBattleLog('phase', '进入结束阶段（AI）');
+                updateBattleUI();
+                aiTurnPhase(seat, 'end_start', function() {
+                aiTurnPhase(seat, 'end_end', function() {
                 aiEndTurn();
+                });
+                });
               }, 600);
               });
               });
+              });   // ← main2_end 时点窗口结束
+            });
             });
             });
             });
           }, 600);
+          });   // ← roll_end 时点窗口结束
         });
         }
         if (typeof playDiceRollAnim === 'function') playDiceRollAnim(aiSeat(), dice, __aip._nextDiceSides || 6, (__aip._lastRolls && __aip._lastRolls.length) || 1, __aiMoveNow);
         else __aiMoveNow();
         })();
       }, 500);
+      });   // ← roll_start 时点窗口结束
     }, 600);
+    });   // ← main1_end 时点窗口结束
     });
     });
   });
   });
   });
+  });   // ← main1_start 时点窗口结束
 }
 
 // AI 真实伤害估值：卡面基础值走统一伤害公式（含攻击力÷2/防御/克制/最终增伤），不再只取卡面第一个数字
@@ -19190,12 +19400,17 @@ const TIMING = {
   ON_APPLY: 'on_apply',                            // 玩家发动的效果进入适用时点（无连锁）
   ON_EFFECT_DONE: 'on_effect_done',                // 玩家适用的效果结算完成后
   ON_MOVE_PENDING: 'on_move_pending',              // 玩家的移动产生但还未适用
+  /* 【2026-10-01 D 组·作者裁决 3「补上」】MD 的伤害步骤首尾两段（傷害ステップ開始時／終了時）。
+     引擎原先只有 造成伤害前/时/后 + 受到伤害前/时/后 六段，缺"步骤开始/结束"这两个**边界**时点
+     ⇒ 现在补齐并接进注册表扫描器（见下方 onTiming 桥）；池中暂无卡声明它们，所以对现行为是零改变。 */
+  DAMAGE_STEP_START: 'damage_step_start',          // 伤害步骤开始
   BEFORE_DAMAGE: 'before_damage',                  // 玩家造成伤害前
   ON_DAMAGE: 'on_damage',                          // 玩家造成伤害时
   AFTER_DAMAGE: 'after_damage',                    // 玩家造成伤害后
   BEFORE_HURT: 'before_hurt',                      // 玩家受到伤害前
   ON_HURT: 'on_hurt',                              // 玩家受到伤害时
   AFTER_HURT: 'after_hurt',                        // 玩家受到伤害后
+  DAMAGE_STEP_END: 'damage_step_end',              // 伤害步骤结束
   ON_RECOVER_COST: 'on_recover_cost'               // 玩家回复音韵值
 };
 function frostImmune(u){ var __q=battleState[u]; return !!(__q&&__q._frostPassive&&(__q.sync||0)>26); }
@@ -19292,6 +19507,10 @@ function __syncRecoverTiming() {
 onTiming(TIMING.ON_DRAW, function (ctx, next) { __runTimingTriggers('on_draw', ctx, next); });
 onTiming(TIMING.ON_ADD_HAND, function (ctx, next) { __runTimingTriggers('on_add_hand', ctx, next); });
 onTiming(TIMING.ON_REMOVE_TO_HAND, function (ctx, next) { __runTimingTriggers('on_remove_to_hand', ctx, next); });
+/* 【D 组】伤害步骤 开始／结束 两个边界时点也接进统一时点扫描器：
+   "伤害步骤开始时"在伤害计算前、"伤害步骤结束时"在伤害计算后 ⇒ 语义＝包住整套伤害时点。 */
+onTiming(TIMING.DAMAGE_STEP_START, function (ctx, next) { __runTimingTriggers('damage-step-start', ctx, next); });
+onTiming(TIMING.DAMAGE_STEP_END, function (ctx, next) { __runTimingTriggers('damage-step-end', ctx, next); });
 // ============================================================
 // 新卡角色/道具时点钩子（2026-09-16 加入的 7 张卡）
 // ============================================================
@@ -23818,12 +24037,14 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     p.shield = __sh;
     if (bd > 0) {
       var __jc = { attacker: attacker, target: target, amount: bd, source: label, attr: null };
+      runTiming(TIMING.DAMAGE_STEP_START, __jc);   // 【D 组】伤害步骤开始
       runTiming(TIMING.BEFORE_DAMAGE, __jc); runTiming(TIMING.BEFORE_HURT, __jc);
       runTiming(TIMING.ON_DAMAGE, __jc); runTiming(TIMING.ON_HURT, __jc);
       p.sync = Math.max(0, p.sync - bd);
       addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + label + '伤害' + bd + '点，剩余同步值' + p.sync, target);
       if (typeof uiHit === 'function') uiHit(target);
       runTiming(TIMING.AFTER_DAMAGE, __jc); runTiming(TIMING.AFTER_HURT, __jc);
+      runTiming(TIMING.DAMAGE_STEP_END, __jc);     // 【D 组】伤害步骤结束
     }
     return bd;
   }
@@ -23889,6 +24110,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var __dmgCtx = { attacker: attacker, target: target, amount: actualDamage, source: source, attr: (__dmgCalc && __dmgCalc.attr) || attackerAttr || null,
       judge: !!(__dmgCalc && __dmgCalc.judge), value: (__dmgCalc && __dmgCalc.value) || actualDamage };
     if (actualDamage > 0) {
+      runTiming(TIMING.DAMAGE_STEP_START, __dmgCtx);  // 【D 组】伤害步骤开始（MD：傷害ステップ開始時）
       runTiming(TIMING.BEFORE_DAMAGE, __dmgCtx); // 造成伤害前（攻击者视角）
       runTiming(TIMING.BEFORE_HURT, __dmgCtx);   // 受到伤害前
       runTiming(TIMING.ON_DAMAGE, __dmgCtx);     // 造成伤害时（攻击者视角）
@@ -23901,6 +24123,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       }
       runTiming(TIMING.AFTER_DAMAGE, __dmgCtx);  // 造成伤害后
       runTiming(TIMING.AFTER_HURT, __dmgCtx);    // 受到伤害后
+      runTiming(TIMING.DAMAGE_STEP_END, __dmgCtx);    // 【D 组】伤害步骤结束（MD：傷害ステップ終了時）
     }
     p._lastHitTaken = actualDamage; // 记录本次实际（护盾后扣到同步的）伤害，供“造成N点以上后可以…”类条件读取
     __afterHitSettle(actualDamage); // 附带判定/胜负判定统一在伤害链收尾处理
