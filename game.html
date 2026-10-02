@@ -8714,6 +8714,16 @@ function startBattle(__sandbox) {
 // ===== 肉鸽模式 =====
 var roguelikeState = null;
 
+/* 取某角色的携带卡（攻击卡 + 技能卡）：按 character_full / character 精确匹配，禁止模糊匹配 */
+function __rlCarriesOf(ch, pool) {
+  if (!ch) return [];
+  var full = ch.name || '';
+  var short = full.split('·')[0].split('（')[0];
+  return (pool || []).filter(function(c) {
+    return c.character_full === full || c.character === full || c.character === short;
+  });
+}
+
 function startRoguelike() {
   // 初始化肉鸽状态
   roguelikeState = {
@@ -8748,10 +8758,17 @@ function startRoguelike() {
   shuffleArray(allItems);
   shuffleArray(allCarries);
   
-  // 肉鸽初始精简卡组：1队长+2基础角色，4道具，2携带（通过奖励逐步扩充）
-  roguelikeState.deck.chars = allChars.slice(0, 3).map(function(c) { return JSON.parse(JSON.stringify(c)); });
-  roguelikeState.deck.items = allItems.slice(0, 4).map(function(c) { return JSON.parse(JSON.stringify(c)); });
-  roguelikeState.deck.carries = allCarries.slice(0, 2).map(function(c) { return JSON.parse(JSON.stringify(c)); });
+  // 肉鸽初始：开局仅 1 名角色，并自动附送它的攻击卡与技能卡各 1 张（作者 2026-10 口径）
+  var __clone = function(o) { return JSON.parse(JSON.stringify(o)); };
+  roguelikeState.deck.chars = allChars.slice(0, 1).map(__clone);
+  roguelikeState.deck.carries = __rlCarriesOf(roguelikeState.deck.chars[0], allCarries).map(__clone);
+  roguelikeState.deck.items = allItems.slice(0, 2).map(__clone);
+  // 出战编组（战前）：默认与背包一致；接了「卡组编组」界面后从这里改（战斗读 battleDeck）
+  roguelikeState.battleDeck = {
+    chars: roguelikeState.deck.chars.map(__clone),
+    items: roguelikeState.deck.items.map(__clone),
+    carries: roguelikeState.deck.carries.map(__clone)
+  };
   
   generateRoguelikeMap();
   showScreen('roguelikeMap');
@@ -8907,10 +8924,11 @@ function checkRoguelikeLevelUp() {
 var rlState = null;
 
 function rlInitBattle() {
-  // 初始化战斗状态
-  var p1Chars = roguelikeState.deck.chars;
-  var p1Items = roguelikeState.deck.items.slice();
-  var p1Carries = roguelikeState.deck.carries.slice();
+  // 初始化战斗状态（出战编组优先；没有编组时退回背包）
+  var __bd = roguelikeState.battleDeck || roguelikeState.deck;
+  var p1Chars = __bd.chars;
+  var p1Items = __bd.items.slice();
+  var p1Carries = __bd.carries.slice();
   
   // 补齐卡组
   var allItems = (window.cardData && window.cardData.item_single) ? window.cardData.item_single.concat(window.cardData.item_permanent || []) : [];
@@ -8933,6 +8951,9 @@ function rlInitBattle() {
   for (var i=0;i<p1Carries.length;i++) p1Deck.push(JSON.parse(JSON.stringify(p1Carries[i])));
   shuffleArray(p1Deck);
   
+  // 队伍同步值：出战角色同步值之和 × 2.5（向上取整，作者口径）
+  var __rlMaxSync = Math.ceil(p1Chars.reduce(function(s,c){return s+(c.sync||5);},0) * 2.5);
+
   // 敌人（根据层数生成）
   var enemyChars = (window.cardData && window.cardData.characters) ? window.cardData.characters.slice() : [];
   shuffleArray(enemyChars);
@@ -8951,8 +8972,8 @@ function rlInitBattle() {
     p1: {
       chars: p1Chars,
       leader: p1Chars[0],
-      sync: p1Chars.reduce(function(s,c){return s+(c.sync||5);},0) * 2,
-      maxSync: p1Chars.reduce(function(s,c){return s+(c.sync||5);},0) * 2,
+      sync: __rlMaxSync,
+      maxSync: __rlMaxSync,
       fascination: 6,
       cost: 0,
       maxCost: 12,
@@ -11272,6 +11293,53 @@ registerTrigger({
 
 /* 【时点扫描器通用件（结构性核心）】任何时点都只做一件事：问注册表有没有触发；有就开一个窗口，
    窗口完成后回调 next() —— 各时点不再各写一套"收集 + 弹窗 + 排序"。 */
+/* 【2026-10-01 作者口径①·卡时点】按卡限定"允许发动的时点"。
+   timing 命名约定：prepare_end / main1_start / main1_end / roll_start / roll_end / main2_start / main2_end / end_start / end_end
+   判定顺序：显式数据 > 卡面阶段字样 > 卡面回合字样 > 默认（技能卡/事件卡＝全时点，其余＝主要阶段） */
+function __phaseOfTiming(timing) {
+  var t = String(timing || '');
+  if (t.indexOf('prepare') === 0) return 'prepare';
+  if (t.indexOf('main1') === 0) return 'main1';
+  if (t.indexOf('main2') === 0) return 'main2';
+  if (t.indexOf('roll') === 0) return 'roll';
+  if (t.indexOf('end') === 0) return 'end';
+  return '';
+}
+function __cardTimingAllowed(card, side, timing) {
+  try {
+    if (!card) return false;
+    /* ① 显式数据优先 */
+    var ex = card.activation_timings;
+    if (ex && ex.length) {
+      var hit = false;
+      for (var i = 0; i < ex.length; i++) { var e = String(ex[i]); if (e === timing || (e.charAt(e.length - 1) === '*' && String(timing).indexOf(e.slice(0, -1)) === 0)) { hit = true; break; } }
+      return hit;
+    }
+    var txt = String((card.effect || '') + ' ' + (card.sp || '') + ' ' + (card.text || '')) + ' ' + String(card.name || '');
+    var ph = __phaseOfTiming(timing);
+    /* ② 卡面阶段字样 → 允许的阶段集合（写了几种就只允许那几种） */
+    var allowed = null;
+    if (/投掷阶段|投骰阶段/.test(txt)) allowed = ['roll'];
+    if (/结束阶段/.test(txt)) allowed = (allowed || []).concat(['end']);
+    if (/主要阶段/.test(txt)) allowed = (allowed || []).concat(['main1', 'main2']);
+    if (/准备阶段/.test(txt)) allowed = (allowed || []).concat(['prepare']);
+    /* 只写"主要阶段"的卡：主要阶段1/2 都允许；写"主要阶段1/2"的按需细分 */
+    if (allowed && /主要阶段s*1/.test(txt) && !/主要阶段s*2/.test(txt)) allowed = allowed.filter(function (x) { return x !== 'main2'; });
+    if (allowed && /主要阶段s*2/.test(txt) && !/主要阶段s*1/.test(txt)) allowed = allowed.filter(function (x) { return x !== 'main1'; });
+    if (allowed && allowed.indexOf(ph) < 0) return false;
+    /* ③ 回合方字样 */
+    var isTurn = !!(battleState && battleState.currentPlayer === side);
+    if (/自己回合|自己的回合|我方回合/.test(txt) && !/对手回合|对方回合|任意|任何/.test(txt) && !isTurn) return false;
+    if (/对手回合|对方回合/.test(txt) && !/自己回合|自己的回合|任意|任何/.test(txt) && isTurn) return false;
+    /* ④ 没写阶段：技能卡/事件卡＝全时点；其余默认主要阶段 */
+    if (!allowed) {
+      var fullTime = (card._category === 'skill_cards') || /全时点|任意时点|任何时候|任意时机/.test(txt);
+      if (fullTime) return true;
+      return ph === 'main1' || ph === 'main2';
+    }
+    return true;
+  } catch (e) { return false; }
+}
 function __runTimingTriggers(timing, ctx, next) {
   try {
     var cands = (typeof __scanTriggers === 'function') ? __scanTriggers(timing, ctx) : [];
@@ -11290,6 +11358,7 @@ function __runTimingTriggers(timing, ctx, next) {
           __pcPicks.forEach(function (pk) {
             var c = pk && pk.card; if (!c) return;
             if (c._category !== 'skill_cards' && pk.from !== 'event') return;      // 只列全时点类
+            if (!__cardTimingAllowed(c, side, timing)) return;                     // 【卡时点】按卡面限定可发动的时点
             if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
             cands.push({
               owner: side, mandatory: false, id: 'phasecard|' + side + '|' + (c.name || ''),
