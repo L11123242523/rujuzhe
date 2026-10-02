@@ -15781,16 +15781,26 @@ function performCalibration(player, difficulty, reduce, cb) {
   
   // 校准投骰属「普通投掷」：控骰最多适用 100%（每 20% = 点数 ±1，最多 ±5）
   // cb 存在时改为异步回调：先让玩家决定控骰档位，再结算成功/失败并回调 cb(success)
-  function __settle(roll) {
+  /* 【2026-10-01 作者要求：校准让玩家进行（结果可被效果修改）】
+     以前：自己 GameRNG.dice(20) 掷 + 只问控骰档位，**不开判定连锁窗** ⇒ 改点/重判类卡连锁不进来。
+     现在：走统一判定入口 judgePerform：
+       · 掷骰 + **玩家手动控骰**（spec.ctrlFull ⇒ 非伤害类判定上限 100%，与"御神签校准"的口径一致）；
+       · judgeSettleWindow 打开 rand_result 窗口 ⇒ 双方可用【遥控骰子/特制手套/Twice…】连锁改点或重判；
+       · 连续 PASS 后才以（可能被改过的）点数结算成功/失败。 */
+  function __settle(roll, cancelled) {
     var success = false;
-    if (difficulty === '>10') success = roll > 10;
+    if (cancelled) {
+      addBattleLog(player, '🎵 20面骰校准被连锁无效 ⇒ 本次结果不适用');
+      if (cb) cb(false);
+      return false;
+    }
+    if (roll === null || roll === undefined) success = false;
+    else if (difficulty === '>10') success = roll > 10;
     else if (difficulty === '≤10') success = roll <= 10;
     else if (difficulty === '≥14') success = roll >= 14;
     else if (difficulty === '≥17') success = roll >= 17;
     else if (difficulty === '≥12') success = roll >= 12;
     else if (difficulty === '>13') success = roll > 13;
-    // 播放20面骰校准动画（结果已同步确定，动画仅作过程展示，不改变返回值）
-    if (player === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'dice', sides: 20, fixed: roll, label: '20面骰校准(' + difficulty + ')' }, function () {});
 
     if (success) {
       p.fascination = Math.max(0, p.fascination - reduce);
@@ -15801,12 +15811,14 @@ function performCalibration(player, difficulty, reduce, cb) {
     if (cb) cb(success);
     return success;
   }
-  var __calRaw = GameRNG.dice(20);
-  if (typeof __diceControlAsk === 'function') {
-    __diceControlAsk(player, __calRaw, 20, '20面骰校准(' + difficulty + ')', __settle, { capPct: __CTRL_PCT_NORMAL, prefer: (difficulty === '≤10' ? 'low' : 'high') });
-    return undefined; // 已转为异步：结果只通过 cb 交付
+  if (typeof judgePerform === 'function') {
+    /* 评定口径传给 judgeAnimate：'≤N' 类点数越低越好（控骰方向取低） */
+    var __cmp = (difficulty === '≤10') ? '<=' : '>=';
+    judgePerform(player, { kind: 'dice', sides: 20, ctrlFull: true, cmp: __cmp, label: '20面骰校准(' + difficulty + ')' },
+      function (finalVal, cancelled) { __settle(finalVal, cancelled); });
+    return undefined;   // 已转为异步：结果只通过 cb 交付
   }
-  return __settle(__calRaw);
+  return __settle(GameRNG.dice(20), false);
 }
 
 // 触发事件卡
