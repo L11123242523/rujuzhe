@@ -23292,7 +23292,12 @@ function applyJudgeChain(side, pick, je, done) {
         __set(Math.min(Math.max(1, __vi + 1), __js));
       });
     }
-    else __set(__js);
+    else {
+      /* 【2026-10-01 修】AI 的判定改点必须按"哪个方向有利"来：'<N' / '≤N' 类判定点数越低越有利 ⇒ 取 1；
+         其余（'≥N'、'>N'）取最大面。原来一律取最大面 ⇒ 会把"≤10 成功"这种判定改成必败。 */
+      var __lowBetter = !!(je.spec && (je.spec.cmp === '<' || je.spec.cmp === '<='));
+      __set(__lowBetter ? 1 : __js);
+    }
     return;
   }
   __pay(); done();
