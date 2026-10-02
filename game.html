@@ -15433,7 +15433,9 @@ function __drawPickPage(kind, player, cb) {
       cb(nm);
     };
     if (player === 'p1' && typeof showChoiceModal === 'function') {
-      showChoiceModal(label, '从 ' + n + ' 张中选一张翻开', (kind === 'omikuji' ? '御神签是放回抽取（抽空自动重洗）' : '馈赠卡抽完即用'), opts, function (i) { pick(i); });
+      /* 【2026-10-01】让选择弹窗以"卡背点选"呈现（应答口径不变，仍是下标） */
+      try { window.__choiceCardBacks = n; window.__choiceCardBacksKind = kind; } catch (e) {}
+      showChoiceModal(label, '从 ' + n + ' 张中选一张翻开', (kind === 'omikuji' ? '御神签是放回抽取（抽空自动重洗）' : '馈赠卡抽完即用'), opts, function (i) { try { window.__choiceCardBacks = 0; } catch (e) {} pick(i); });
       return;
     }
     pick((typeof GameRNG !== 'undefined' && GameRNG.int) ? GameRNG.int(n) : 0);   // AI：随机一格
@@ -15726,11 +15728,33 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
   buttonsDiv.innerHTML = '';
   pendingChoiceCallback = callback;
   
+  /* 【2026-10-01 抽取页面】卡背模式：N 张背面向下的卡，点哪张就回哪张的下标（与文字选项同一套应答口径） */
+  var __cbMode = 0;
+  try { __cbMode = (typeof window !== 'undefined' && window.__choiceCardBacks) ? window.__choiceCardBacks : 0; } catch (e) {}
+  if (__cbMode && choices.length) {
+    buttonsDiv.style.display = 'flex';
+    buttonsDiv.style.flexDirection = 'row';   /* ⚠ 默认是 column，不覆盖会竖成一列（截图实测） */
+    buttonsDiv.style.flexWrap = 'wrap';
+    buttonsDiv.style.justifyContent = 'center';
+    buttonsDiv.style.alignItems = 'center';
+    buttonsDiv.style.gap = '12px';
+  }
   choices.forEach(function(choice, index) {
     var btn = document.createElement('button');
     btn.className = 'modal-btn modal-btn-confirm';
-    btn.style.width = '100%';
-    btn.textContent = choice;
+    if (__cbMode) {
+      btn.className = 'modal-btn draw-card-back';
+      btn.style.cssText = 'width:56px;height:80px;border-radius:9px;'
+        + 'border:1px solid rgba(242,207,130,.55);'
+        + 'background:repeating-linear-gradient(45deg,#2b3654,#2b3654 6px,#222e48 6px,#222e48 12px);'
+        + 'box-shadow:0 4px 12px -4px rgba(0,0,0,.85), inset 0 0 0 2px rgba(255,255,255,.05);'
+        + 'color:#f2cf82;font-size:24px;line-height:1;cursor:pointer;';
+      btn.textContent = '◇';   // 常见字形，避免缺字方框
+      btn.title = choice;
+    } else {
+      btn.style.width = '100%';
+      btn.textContent = choice;
+    }
     btn.onclick = function() {
       var cb = pendingChoiceCallback;   // 先捕获：closeChoiceModal 会清空全局回调
       closeChoiceModal();
