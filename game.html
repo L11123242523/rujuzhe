@@ -3571,6 +3571,46 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 }
 #choiceModal.bus-chooser .card-modal h3{ font-size:15px; }
 #choiceModal.bus-chooser .modal-btn{ padding:7px 10px; font-size:13px; text-align:left; }
+
+/* ================= __UI_PHASE9 · 手牌完整卡面（作者 2026-10-03 清单①：手牌改成游戏王式全卡展示）=================
+   卡面比例 663:974 ≈ 0.681 ⇒ 88×129（高度与原来的 128 基本一致 ⇒ 不挤压地图行）；
+   卡图铺满整张卡，名字压成底部渐变条，悬浮抬起放大便于看清（出牌/右键看效果逻辑不动）。 */
+@media screen and (min-width: 769px){
+  body:not(.ui-classic) #battleScreen .hand-card{
+    width:74px !important; height:109px !important;
+    padding:0 !important; overflow:hidden !important;
+    border-radius:8px !important;
+    transition:transform .18s cubic-bezier(.22,.75,.3,1), box-shadow .18s ease !important;
+    position:relative !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card-img{
+    width:100% !important; height:100% !important;
+    object-fit:cover !important; object-position:center top !important;
+    border-radius:7px !important; display:block !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card-name{
+    position:absolute !important; left:0 !important; right:0 !important; bottom:0 !important;
+    margin:0 !important; padding:3px 2px !important; font-size:9.5px !important; line-height:1.15 !important;
+    background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.86)) !important;
+    border-radius:0 0 7px 7px !important; text-align:center !important;
+    white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card .hand-card-cost{
+    width:20px !important; height:20px !important; font-size:12px !important;
+    box-shadow:0 2px 6px rgba(0,0,0,.6) !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card .card-type-badge{
+    font-size:8px !important; padding:0 5px !important; bottom:3px !important;
+  }
+  /* 悬浮抬起放大（看清卡面；不改变占位，松开即回落） */
+  body:not(.ui-classic) #battleScreen .hand-card:hover{
+    transform:translateY(-16px) scale(1.5) !important;
+    z-index:9 !important;
+    box-shadow:0 18px 40px -12px rgba(0,0,0,.85), 0 0 0 1px rgba(255,226,150,.5) !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card:hover .hand-card-name{ font-size:12px !important; }
+  body:not(.ui-classic) #battleScreen .hand-card.playable:hover{ border-color:var(--gold,#ffe39a) !important; }
+}
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
