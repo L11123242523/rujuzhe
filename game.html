@@ -3543,6 +3543,19 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #battleScreen .battle-map-container,
   body:not(.ui-classic) #battleScreen .map3d-wrap{ max-height:min(52vh, 460px) !important; }
 }
+
+/* ================= 新卡背（作者 2026-10-03）=================
+   战斗界面双方卡组用"携带卡卡背"（携带卡 = 角色携带卡 + 道具卡，也就是主卡组那张）；
+   抽取页面/抽卡动画里的背面也用它（角色卡卡背留给角色卡场景）。 */
+.deck-pile .pile-layer{
+  background:url(assets/images/ui2/cardback_carry.webp?v=1) center/100% 100% no-repeat !important;
+  border:1px solid rgba(242,207,130,.35) !important;
+}
+.deck-pile .pile-top{
+  background:url(assets/images/ui2/cardback_carry.webp?v=1) center/100% 100% no-repeat;
+  border:1px solid rgba(242,207,130,.45);
+}
+.deck-pile .pile-top:not(.revealed) .pile-top-label{ display:none; }   /* 卡背盖住"牌组"小字（区名在外面） */
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
@@ -10561,8 +10574,10 @@ function playPrepDrawAnim(player, card) {
     if (!a || !a.width || !b || !b.width) return false;   // 无头/未布局：直接不播（不影响任何流程）
     var fly = document.createElement('div');
     fly.className = 'prep-draw-fly';
-    if (card.image_url) fly.innerHTML = '<img src="' + card.image_url + '" alt="">';
-    else fly.innerHTML = '<div class="prep-draw-name">' + (card.name || '') + '</div>';
+    /* 【2026-10-03】抽卡动画里**对手的卡只显示卡背**（原来无论谁抽都亮卡面 ⇒ 玩家能看到 AI 抽到什么） */
+    if (player === 'p1' && card.image_url) fly.innerHTML = '<img src="' + card.image_url + '" alt="">';
+    else if (player === 'p1') fly.innerHTML = '<div class="prep-draw-name">' + (card.name || '') + '</div>';
+    else fly.innerHTML = '<img src="assets/images/ui2/cardback_carry.webp?v=1" alt="">';
     document.body.appendChild(fly);
     var x0 = a.left + a.width / 2 - 39, y0 = a.top + a.height / 2 - 52;
     var x1 = b.left + b.width / 2 - 39, y1 = b.top + b.height / 2 - 52;
@@ -11123,10 +11138,9 @@ function collectChainable(player, effect){
 }
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
 // 会话级记忆（刷新页面即失效，避免永久改变规则）
-/* 【2026-10-03 修·作者实测"我还在思考要不要连锁，AI 就直接结束回合了"】
-   原来默认 8 秒 —— 玩家还在想就被自动 PASS，AI 随即继续行动。默认改成**关闭**（0）；
-   想开倒计时仍可用 setChainAutoPass(秒)（0 = 关闭）。 */
-var __chainAutoPassSec = 0;          // 倒计时秒数（0 = 关闭自动 PASS）
+/* 【2026-10-03】作者口径：连锁窗**要有倒计时**（原来 8 秒太短，玩家还在想就被自动 PASS、
+   AI 随即继续行动）。默认 20 秒；要改 setChainAutoPass(秒)，0 = 关闭自动放弃。 */
+var __chainAutoPassSec = 20;         // 倒计时秒数（0 = 关闭自动 PASS）
 var __chainNeverAsk = false;         // 本会话自动放弃连锁
 function setChainAutoPass(sec) { __chainAutoPassSec = sec; showToast('连锁窗口自动放弃倒计时：' + (sec ? sec + '秒' : '关闭'), 'info'); }
 function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); }
@@ -15596,14 +15610,26 @@ function __busLabel(anchorIdx) {
   return '锚点#' + anchorIdx + (g.length ? '（挨着第' + g.map(function (x) { return x.id; }).join('/') + '格）' : '（中转锚点，不能下车）');
 }
 function __busOffNetwork(p) { if (p && p._onAnchor) p._onAnchor = 0; }
-/** 公交/地铁乘车主流程（付车票 → 上锚点 → 投 d4 → 走锚点网络） */
+/** 公交/地铁：**先问是否上车**（作者 2026-10-03 口径），确认后才付车票、上站台锚点、投四面骰 */
 function __busRide(player, tile) {
   var p = battleState[player]; if (!p || !tile) return;
   var __kasumi = !!p._kasumiSP;
   if (!p.gold) p.gold = 0;
   if (!__kasumi && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); return; }
-  if (__kasumi) addBattleLog(player, '【小仓霞SP】乘坐' + tile.name + '免支付、免判定');
-  else { p.gold -= __goldPrice(p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
+  var __yes = function () { __busBoard(player, tile, __kasumi); };
+  var __no = function () { addBattleLog(player, '【' + tile.name + '】不乘车'); if (typeof updateBattleUI === 'function') updateBattleUI(); };
+  if (__kasumi) { addBattleLog(player, '【小仓霞SP】' + tile.name + '：免支付、免判定（全网任选下车点）'); __yes(); return; }
+  var __opts = ['🚌 支付200金币车票并上车', '不乘车'];
+  var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+  if (__OL && player === 'p2') { onlineDecideModal('p2', tile.name + '（对手）', '是否支付 200 金币车票乘车？', '', __opts, function (i) { (i === 0) ? __yes() : __no(); }); return; }
+  if (!__OL && player !== 'p1') { (p.gold >= 200) ? __yes() : __no(); return; }   // 单机 AI：买得起就上车（后面挑收益最高的下车点）
+  if (typeof showChoiceModal === 'function') showChoiceModal(tile.name, '是否支付 200 金币车票乘车？', '上车后投 1 枚四面骰在锚点间移动（转乘不掉步），可在挨着格子的锚点下车', __opts, function (i) { (i === 0) ? __yes() : __no(); });
+  else __no();
+}
+/** 确认上车后：付车票 → 上站台锚点 → 投四面骰（小仓霞免判定） */
+function __busBoard(player, tile, __kasumi) {
+  var p = battleState[player]; if (!p) return;
+  if (!__kasumi) { if (!p.gold) p.gold = 0; p.gold -= __goldPrice(p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
   p._ridingThisAction = true;   // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
   var st = BUS_STATION_ANCHOR[tile.id];
   if (!st) { addBattleLog(player, '【' + tile.name + '】缺少站台锚点数据，本次不移动'); return; }
@@ -15627,19 +15653,36 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
     var p = battleState[player]; if (!p || !p._onAnchor) return;
     var cur = p._onAnchor;
     var opts = [], acts = [];
-    if (left > 0) {
-      (__busAdj()[cur] || []).forEach(function (n) {
-        opts.push('移动到 ' + __busLabel(n) + '（剩 ' + left + ' 步）');
-        acts.push({ kind: 'move', anchor: n });
+    if (__kasumiMode) {
+      /* 【2026-10-03 作者口径】小仓霞 SP = **全网任选**下车点：免支付、免判定，
+         直接从"任意一个挨着格子的锚点"里挑一个下车，不必一步步走。 */
+      var __seen = {};
+      BUS_ANCHORS.forEach(function (a) {
+        __busGoodTilesOf(a.i).forEach(function (g) {
+          if (__excludeTile != null && g.id === __excludeTile) return;
+          var __k = a.i + '-' + g.id;
+          if (__seen[__k]) return; __seen[__k] = 1;
+          opts.push('直达 锚点#' + a.i + ' 下车：第' + g.id + '格【' + g.name + '】');
+          acts.push({ kind: 'off', tile: g.id, anchor: a.i });
+        });
       });
+      opts.push('不下车（留在锚点上）');
+      acts.push({ kind: 'stay' });
+    } else {
+      if (left > 0) {
+        (__busAdj()[cur] || []).forEach(function (n) {
+          opts.push('移动到 ' + __busLabel(n) + '（剩 ' + left + ' 步）');
+          acts.push({ kind: 'move', anchor: n });
+        });
+      }
+      __busGoodTilesOf(cur).forEach(function (g) {
+        if (__excludeTile != null && g.id === __excludeTile) return;   // 不把"刚上车的那个站"当下车点（否则下车即重新上车、再付一次车票）
+        opts.push('下车：落到第' + g.id + '格【' + g.name + '】');
+        acts.push({ kind: 'off', tile: g.id });
+      });
+      opts.push('停在锚点上（不算在任何格上）');
+      acts.push({ kind: 'stay' });
     }
-    __busGoodTilesOf(cur).forEach(function (g) {
-      if (__excludeTile != null && g.id === __excludeTile) return;   // 不把"刚上车的那个站"当下车点（否则下车即重新上车、再付一次车票）
-      opts.push('下车：落到第' + g.id + '格【' + g.name + '】');
-      acts.push({ kind: 'off', tile: g.id });
-    });
-    opts.push('停在锚点上（不算在任何格上）');
-    acts.push({ kind: 'stay' });
     var title = '公交/地铁 · ' + __busLabel(cur);
     var desc = __kasumiMode ? '【小仓霞SP】免判定免支付：直接选一个下车点' :
       ('剩余 ' + left + ' 步' + (left > 0 ? '；可在交点锚点免费转乘其他颜色线路' : '（已走完，请下车或停在锚点）'));
@@ -16931,7 +16974,7 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
       btn.className = 'modal-btn draw-card-back';
       btn.style.cssText = 'width:56px;height:80px;border-radius:9px;'
         + 'border:1px solid rgba(242,207,130,.55);'
-        + 'background:repeating-linear-gradient(45deg,#2b3654,#2b3654 6px,#222e48 6px,#222e48 12px);'
+        + 'background:url(assets/images/ui2/cardback_carry.webp?v=1) center/100% 100% no-repeat;'   /* 卡背图（抽取页面） */
         + 'box-shadow:0 4px 12px -4px rgba(0,0,0,.85), inset 0 0 0 2px rgba(255,255,255,.05);'
         + 'color:#f2cf82;font-size:24px;line-height:1;cursor:pointer;';
       btn.textContent = '◇';   // 常见字形，避免缺字方框
@@ -20946,21 +20989,69 @@ function __animOverlay() {
   ov.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,10,26,0.6);z-index:99999;pointer-events:none;';
   return ov;
 }
+/* 【2026-10-03 作者要求】抽卡动画改成"像 MD 那样从卡组飞到手上"，并且**对手抽卡只展示卡背**
+   （原来无论谁抽都把卡面亮出来 ⇒ 玩家能直接看到 AI 抽到什么）。 */
+function __drawFlyFromDeck(user, n, cb) {
+  try {
+    if (typeof document === 'undefined' || !document.body) { cb && cb(); return; }
+    var pile = document.getElementById(user === 'p1' ? 'p1DeckPile' : 'p2DeckPile') ||
+               document.querySelector(user === 'p1' ? '.deck-zone' : '.opp-side .deck-zone') ||
+               document.getElementById('p1DeckPile');
+    var handEl = document.getElementById('battleHand');
+    if (!pile || !handEl || typeof pile.getBoundingClientRect !== 'function') { cb && cb(); return; }
+    var a = pile.getBoundingClientRect(), b = handEl.getBoundingClientRect();
+    if (!a || !a.width || !b || !b.width) { cb && cb(); return; }   // 无头/未布局：直接跳过，不影响流程
+    var n2 = Math.max(1, Math.min(5, n || 1));
+    var done = 0, fins = [];
+    for (var i = 0; i < n2; i++) {
+      (function (k) {
+        var fly = document.createElement('div');
+        fly.style.cssText = 'position:fixed;z-index:99998;width:56px;height:82px;border-radius:7px;pointer-events:none;'
+          + 'background:url(assets/images/ui2/cardback_carry.webp?v=1) center/100% 100% no-repeat;'
+          + 'box-shadow:0 8px 20px -6px rgba(0,0,0,.8);border:1px solid rgba(242,207,130,.45);';
+        var x0 = a.left + a.width / 2 - 28, y0 = a.top + a.height / 2 - 41;
+        var x1 = b.left + b.width / 2 - 28 + (k - (n2 - 1) / 2) * 26, y1 = b.top + b.height / 2 - 41;
+        fly.style.left = x0 + 'px'; fly.style.top = y0 + 'px';
+        document.body.appendChild(fly);
+        function fin() { try { if (fly.parentNode) fly.parentNode.removeChild(fly); } catch (e) {} if (++done >= n2) { cb && cb(); } }
+        if (typeof fly.animate === 'function') {
+          var an = fly.animate([
+            { transform: 'translate(0,0) scale(.82) rotate(' + ((k % 2) ? -8 : 8) + 'deg)', opacity: .2 },
+            { transform: 'translate(' + ((x1 - x0) * .55) + 'px,' + ((y1 - y0) * .55 - 24) + 'px) scale(1.06)', opacity: 1, offset: .6 },
+            { transform: 'translate(' + (x1 - x0) + 'px,' + (y1 - y0) + 'px) scale(1)', opacity: .95 }
+          ], { duration: 520 + k * 90, easing: 'cubic-bezier(.22,.75,.3,1)' });
+          try { an.onfinish = fin; } catch (e) { setTimeout(fin, 700 + k * 90); }
+          try { an.oncancel = fin; } catch (e) {}
+          fins.push(an);
+        } else { fin(); }
+      })(i);
+    }
+    /* 兜底：动画层绝不承重 —— 到点一定回调（不依赖 onfinish） */
+    setTimeout(function () { if (done < n2) { done = n2; cb && cb(); } }, 900 + n2 * 90);
+  } catch (e) { console.error('抽卡飞行动画出错（忽略）', e); cb && cb(); }
+}
 function playDrawAnim(user, cards, cb) {
   try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
   // AI 回合也播放抽卡动画（联机远端位仍跳过，避免双机时序分叉；无界面环境同步继续）
   var __ol = (typeof Online !== 'undefined' && Online.active);
   var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || __ol || (typeof document === 'undefined');
   if (auto) { cb && cb(); return; } // 自动结算/联机/无界面：同步继续，不等动画
-  var ov = __animOverlay();
-  var inner = cards.map(function (c) {
-    return '<div style="background:linear-gradient(135deg,#2c3e50,#34495e);border:2px solid #feca57;border-radius:8px;padding:8px;margin:0 6px;width:118px;text-align:center;animation:pop .3s ease;">' +
-      (c.image_url ? '<img src="' + c.image_url + '" style="width:100px;height:120px;object-fit:cover;border-radius:6px;display:block;margin:0 auto;">' : '') +
-      '<div style="color:#fff;font-size:12px;font-weight:bold;margin-top:4px;word-break:break-all;">' + (c.name || '') + '</div></div>';
-  }).join('');
-  ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">' + (user === 'p2' ? '🤖 对手抽到 ' : '✨ 抽到 ') + cards.length + ' 张卡</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
-  ov.style.display = 'flex';
-  setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 640);
+  var __isMine = (user === 'p1');
+  var __cards = cards || [];
+  __drawFlyFromDeck(user, __cards.length, function () {
+    var ov = __animOverlay();
+    var inner = __cards.map(function (c) {
+      var face = __isMine && c.image_url;
+      return '<div style="background:linear-gradient(135deg,#2c3e50,#34495e);border:2px solid #feca57;border-radius:8px;padding:8px;margin:0 6px;width:118px;text-align:center;animation:pop .3s ease;">' +
+        '<img src="' + (face ? c.image_url : 'assets/images/ui2/cardback_carry.webp?v=1') + '" style="width:100px;height:120px;object-fit:cover;border-radius:6px;display:block;margin:0 auto;">' +
+        (__isMine ? '<div style="color:#fff;font-size:12px;font-weight:bold;margin-top:4px;word-break:break-all;">' + (c.name || '') + '</div>' : '') + '</div>';
+    }).join('');
+    ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">'
+      + (__isMine ? ('✨ 抽到 ' + __cards.length + ' 张卡') : ('🂠 对手抽了 ' + __cards.length + ' 张卡（背面）'))
+      + '</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
+    ov.style.display = 'flex';
+    setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 640);
+  });
 }
 function playSearchAnim(user, cb) {
   var __ol2 = (typeof Online !== 'undefined' && Online.active);
@@ -23298,6 +23389,23 @@ function activateGraveSP(zone, idx) {
   def.run(card, zone, function () { showGraveList(zone); });
 }
 var __graveZoneTab = 'grave';
+/* 【2026-10-03】墓地/移出区/对手区域的卡"点开看这张卡"：把 zone 里的卡对象补成详情弹窗要用的形状
+   （zone 里的卡是精简对象，缺 image_url/effect 时回卡池按名字补齐）。 */
+function __openGraveCardDetail(card) {
+  try {
+    if (!card) return;
+    var full = null;
+    try {
+      if (typeof allCards !== 'undefined' && allCards) {
+        for (var i = 0; i < allCards.length; i++) { if (allCards[i] && allCards[i].name === card.name) { full = allCards[i]; break; } }
+      }
+    } catch (e) {}
+    var merged = {};
+    try { for (var k in (full || {})) merged[k] = full[k]; } catch (e) {}
+    try { for (var k2 in card) if (card[k2] !== undefined && card[k2] !== null && card[k2] !== '') merged[k2] = card[k2]; } catch (e) {}
+    if (typeof showCardDetail === 'function') showCardDetail(merged); 
+  } catch (e) { console.error('查看墓地/移出区卡片出错（忽略）', e); }
+}
 function showGraveList(zone) {
   if (!battleState) return;
   if (zone) __graveZoneTab = zone;
@@ -23337,7 +23445,11 @@ function showGraveList(zone) {
         var __spTxt = '';
         if (def) { __spTxt = canSP ? ('⚡ '+def.label) : (zcur!=='grave' ? '◇ 已移出游戏，无法再发动' : ('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）')); }
         var spBtn = def ? ('<button data-sp="1" style="width:100%;margin-top:6px;padding:5px;font-size:11px;border:none;border-radius:4px;cursor:'+(canSP?'pointer':'not-allowed')+';'+(canSP?'background:#feca57;color:#2d3436;font-weight:bold;':'background:#555;color:#aaa;')+'">'+__spTxt+'</button>') : '';
-        div.innerHTML='<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
+        /* 【2026-10-03 作者实测】墓地和移出区的卡原来点不开、也看不到卡图 ⇒ 显示卡图 + 点击看详情 */
+        div.style.cursor='pointer';
+        div.onclick=function(ev){ try { ev.stopPropagation(); } catch(e){} __openGraveCardDetail(card); };
+        div.innerHTML='<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
+          '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">'+(card.effect||'').substring(0,50)+'...</div>'+spBtn;
         div.title=card.name+'\n费用:'+(card.cost||0)+'\n'+(card.effect||'');
@@ -23434,8 +23546,11 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
         } else {
           div.onmouseover = function() { this.style.borderColor = '#feca57'; };
           div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
+          /* 【2026-10-03】纯查看（对手墓地/移出区等）也要能点开看这张卡 */
+          div.onclick = function() { __openGraveCardDetail(card); };
         }
-        div.innerHTML = '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
+        div.innerHTML = '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
+          '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +
           '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">' + (card.effect || '').substring(0, 50) + '...</div>';
         div.title = card.name + '\n费用:' + (card.cost || 0) + '\n' + (card.effect || '');
@@ -25038,7 +25153,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       runTiming(TIMING.ON_DAMAGE, __dmgCtx);     // 造成伤害时（攻击者视角）
       runTiming(TIMING.ON_HURT, __dmgCtx);       // 受到伤害时（受击者视角）
       p.sync = Math.max(0, p.sync - actualDamage);
-      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + actualDamage + '点伤害，剩余同步值' + p.sync, target);
+      addBattleLog('damage', (target==='p1'?'你':'AI') + '受到' + actualDamage + '点伤害' + (source ? ('（来自【' + source + '】）') : '') + '，剩余同步值' + p.sync, target);
       if (typeof uiHit === 'function') uiHit(target);
       if ((p.permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) {
         /* 卡面 2026-09-25 版已删除「受到伤害后回复1点音韵」——旧实现随之移除（不再回费） */
@@ -25069,7 +25184,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   function __goResponse() {
   // 玩家受伤：可视化询问抵消方式（手牌/盖伏护符每张分别列出、墓地移出抵消）或承受
   if (target === 'p1' && (hasCharm || __graveNegIdx >= 0)) {
-    rwOpen('damage', { amount: damage, target: target });
+    rwOpen('damage', { amount: damage, target: target, source: source });
     var __negOpts = [], __negActs = [];
     __charmList.forEach(function (o) { __negOpts.push('🛡️ 发动手牌【' + o.card.name + '】抵消（消耗并前进2格）'); __negActs.push(function () { __useCharm(false, o.idx); }); });
     __fdCharmList.forEach(function (o) { __negOpts.push('🛡️ 发动盖伏【' + o.card.name + '】抵消（消耗并前进2格）'); __negActs.push(function () { __useCharm(true, o.idx); }); });
@@ -25077,12 +25192,12 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     __negOpts.push('承受本次伤害'); __negActs.push(function () { addBattleLog('p1', '选择承受' + damage + '点伤害'); rwClose('damage'); __normalHit(); });
     // 联机：本机玩家受伤响应显式按 p1 归属弹窗并广播（对手回合的远端流程内同样如此）
     if (typeof Online !== 'undefined' && Online.active) {
-      onlineDecideModal('p1', '受伤响应', '即将受到' + damage + '点伤害', '可选择抵消方式，或承受本次伤害', __negOpts, function(o) {
+      onlineDecideModal('p1', '受伤响应', '即将受到' + damage + '点伤害' + (source ? ('（来自【' + source + '】）') : ''), '可选择抵消方式，或承受本次伤害', __negOpts, function(o) {
         if (o >= 0 && o < __negActs.length) __negActs[o](); else { rwClose('damage'); __normalHit(); }
       });
       return;
     }
-    showChoiceModal('受伤响应', '即将受到' + damage + '点伤害', '可选择抵消方式，或承受本次伤害', __negOpts, function(o) {
+    showChoiceModal('受伤响应', '即将受到' + damage + '点伤害' + (source ? ('（来自【' + source + '】）') : ''), '可选择抵消方式，或承受本次伤害', __negOpts, function(o) {
       if (o >= 0 && o < __negActs.length) __negActs[o](); else { rwClose('damage'); __normalHit(); }
     });
     return;
@@ -25094,7 +25209,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       __fdCharmList.forEach(function (o) { __p2Opts.push('🛡️ 发动盖伏【' + o.card.name + '】抵消（消耗并前进2格）'); __p2Acts.push(function () { __useCharm(true, o.idx); }); });
       if (__graveNegIdx >= 0) { __p2Opts.push('⚡ 发动墓地【' + __graveNegCard.name + '】并移出游戏来抵消'); __p2Acts.push(function () { __useGraveNeg(__graveNegIdx); }); }
       __p2Opts.push('承受本次伤害'); __p2Acts.push(function () { addBattleLog(target, '选择承受' + damage + '点伤害'); rwClose('damage'); __normalHit(); });
-      onlineDecideModal('p2', '受伤响应（对手）', '即将受到' + damage + '点伤害', '可选择抵消方式，或承受本次伤害', __p2Opts, function(o) {
+      onlineDecideModal('p2', '受伤响应（对手）', '即将受到' + damage + '点伤害' + (source ? ('（来自【' + source + '】）') : ''), '可选择抵消方式，或承受本次伤害', __p2Opts, function(o) {
         if (o >= 0 && o < __p2Acts.length) __p2Acts[o](); else { rwClose('damage'); __normalHit(); }
       });
       return;
