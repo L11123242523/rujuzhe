@@ -3875,6 +3875,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
           <option value="p2">对手</option>
         </select>
         <button type="button" onclick="__replayShowLast()">🕘 回看上一回合</button>
+        <button type="button" id="sfxBtn" onclick="__sfxToggle()" oncontextmenu="__sfxVolUp();return false;" title="左键开关音效；右键调整音量（记忆在本机）" style="margin-right:6px;">🔊 音效：开 50%</button>
         <button type="button" id="chainAskBtn" onclick="__chainAskToggle()" title="连锁询问开关：关闭后所有连锁都会自动放弃（点一下即恢复）" style="margin-right:6px;">🔗 连锁询问：开</button>
         <button type="button" id="pendingAsks" onclick="__pendingAsksToggle()" style="margin-right:6px;">⏳ 待处理 0</button>
         <button type="button" onclick="copyBattleLog()">复制</button>
@@ -10661,6 +10662,7 @@ function drawCard(player) {  var __p = battleState[player];
   var card = (__p._lilyPassive && __p._lilyDrawFrom === 'bottom') ? __p.deck.pop() : takeTopCard(player);
   /* 【2026-10-03 加固·"显示与实际不符"这一类】抽到空/undefined **绝不入手**：
      旧实现会把 undefined 塞进 hand ⇒ 手牌"多一张看不见的卡"、界面显示"无"（作者报过"显示无、实际抽了"）。 */
+  try { if (typeof __sfx !== 'undefined') __sfx.play('draw'); } catch (e) {}
   if (!card) {
     addBattleLog(player, '牌库抽卡失败（牌库与墓地皆空），本次不抽卡（手牌不变）');
     try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
@@ -13399,7 +13401,10 @@ function queueOrRunTrigger(desc) {
       /* 【2026-10-03 修·作者实测"贪欲者的烙印标记又不显示了"】direct 是"结算中就地执行"，
          原来执行完**没有刷新界面**（旧的连锁路径收尾会刷）⇒ 标记/数值要等下一次别的刷新才出现。
          这里执行完立刻刷一次，保证界面与实际同步。 */
-      try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+      /* 【2026-10-03 修·作者实测"效果结算完毕连锁结算框不消失"】这里是"结算中就地执行"，
+         同步调用整屏渲染可能与"连锁收尾隐藏结算框"的顺序打架（渲染把框又画回来）⇒ **延后一拍**刷新，
+         既不丢"执行完就刷界面"（标记/数值照常显示），也不干扰收尾。 */
+      try { setTimeout(function () { try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {} }, 0); } catch (e) {}
       return 'ran-direct';
     }
     /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃（仅窗口类触发） */
@@ -17250,6 +17255,7 @@ function __pendingAsksToggle() {
   __pendingAsksRefresh();
 }
 try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 700); } catch (e) {}
+try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) {}
 
 function closeChoiceModal() {
   var modal = document.getElementById('choiceModal');
@@ -18462,6 +18468,11 @@ var ENV = {
   rng: function () { return (typeof GameRNG !== 'undefined' && GameRNG && typeof GameRNG.next === 'function') ? GameRNG.next() : Math.random(); }
 };
 function addBattleLog(type, msg, actor) {
+  /* 【2026-10-03 音效】受伤与时点窗口打开各给一声（挂在这里最省事、不会漏；异常一律忽略） */
+  try {
+    if (type === 'damage' && typeof __sfx !== 'undefined') __sfx.play('damage');
+    else if (typeof msg === 'string' && msg.indexOf('时点窗口】打开') >= 0 && typeof __sfx !== 'undefined') __sfx.play('chain');
+  } catch (e) {}
   // 效果活动心跳：任何一条战斗日志都说明"效果还在推进"，看门狗据此判断锁是否真的僵住了
   if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._stuckSince = 0;
   var rec = { turn: (battleState && battleState.turn) || 0,
@@ -21211,6 +21222,77 @@ function sacrificeCards(user, picks, thenDraw, next) {
 }
 
 // ===== 抽卡/检索动画：先单独呈现抽卡/检索过程，结束回调后才继续后续段落（自带“那之后”隔断）=====
+/* ============================================================
+   【2026-10-03 清单②·音效】WebAudio 现场合成（无外部素材 ⇒ 本地化、体积极小、绝不阻塞）
+   · 首次用户手势时解锁 AudioContext（浏览器自动播放策略），失败一律静默
+   · 音量/开关记忆在 localStorage('dsh_sfx')；左键开关、右键调音量（工具栏按钮）
+   · 用法：__sfx.play('draw'|'damage'|'judge'|'chain'|'turn'|'click'|'win'|'lose')
+   ============================================================ */
+var __sfx = (function () {
+  var ctx = null, master = null;
+  var cfg = { on: true, vol: 0.5 };
+  try { var raw = localStorage.getItem('dsh_sfx'); if (raw) { var o = JSON.parse(raw); cfg.on = (o && o.on !== false); cfg.vol = (o && typeof o.vol === 'number') ? o.vol : 0.5; } } catch (e) {}
+  function save() { try { localStorage.setItem('dsh_sfx', JSON.stringify(cfg)); } catch (e) {} }
+  function ensure() {
+    if (ctx) return ctx;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC();
+      master = ctx.createGain();
+      master.gain.value = cfg.vol;
+      master.connect(ctx.destination);
+    } catch (e) { ctx = null; }
+    return ctx;
+  }
+  function tone(freq, dur, type, gain, delay, slideTo) {
+    try {
+      var c = ensure(); if (!c || !cfg.on) return;
+      if (c.state === 'suspended') { try { c.resume(); } catch (e) {} }
+      var t0 = c.currentTime + (delay || 0);
+      var osc = c.createOscillator(), g = c.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+      if (slideTo) { try { osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), t0 + dur); } catch (e) {} }
+      var peak = Math.max(0.0001, (gain == null ? 0.2 : gain));
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(g); g.connect(master);
+      osc.start(t0); osc.stop(t0 + dur + 0.02);
+    } catch (e) {}
+  }
+  var PRESETS = {
+    draw:   function () { tone(880, 0.10, 'triangle', 0.18, 0); tone(1320, 0.10, 'triangle', 0.12, 0.05); },
+    click:  function () { tone(520, 0.05, 'square', 0.09); },
+    damage: function () { tone(160, 0.22, 'sawtooth', 0.24, 0, 70); tone(90, 0.26, 'sine', 0.18, 0.02, 55); },
+    judge:  function () { for (var i = 0; i < 4; i++) tone(1000 + i * 120, 0.06, 'square', 0.09, i * 0.05); },
+    chain:  function () { tone(420, 0.14, 'triangle', 0.16, 0, 900); },
+    turn:   function () { tone(523, 0.18, 'sine', 0.14, 0); tone(784, 0.20, 'sine', 0.12, 0.09); },
+    win:    function () { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.18, 'triangle', 0.16, i * 0.1); }); },
+    lose:   function () { [440, 370, 294].forEach(function (f, i) { tone(f, 0.26, 'sine', 0.16, i * 0.14); }); }
+  };
+  return {
+    play: function (name) { try { if (!cfg.on) return; var f = PRESETS[name]; if (f) f(); } catch (e) {} },
+    toggle: function () { cfg.on = !cfg.on; save(); if (cfg.on) { try { PRESETS.click(); } catch (e) {} } try { this.refresh(); } catch (e) {} return cfg.on; },
+    setVolume: function (v) { cfg.vol = Math.max(0, Math.min(1, Number(v) || 0)); if (master) { try { master.gain.value = cfg.vol; } catch (e) {} } save(); try { this.refresh(); } catch (e) {} },
+    isOn: function () { return !!cfg.on; },
+    volume: function () { return cfg.vol; },
+    refresh: function () {
+      try {
+        var b = document.getElementById('sfxBtn');
+        if (!b) return;
+        b.textContent = cfg.on ? ('🔊 音效：开 ' + Math.round(cfg.vol * 100) + '%') : '🔇 音效：关';
+        b.style.color = cfg.on ? '' : '#ffd166';
+      } catch (e) {}
+    }
+  };
+})();
+function __sfxToggle() { try { var on = __sfx.toggle(); showToast(on ? ('音效已开启（' + Math.round(__sfx.volume() * 100) + '%，右键按钮调音量）') : '音效已关闭', 'info'); } catch (e) {} }
+function __sfxVolUp() { try { var v = __sfx.volume() + 0.1; if (v > 1.001) v = 0; __sfx.setVolume(v); showToast('音效音量 ' + Math.round(__sfx.volume() * 100) + '%', 'info'); } catch (e) {} }
+try { if (typeof document !== 'undefined' && document.addEventListener) { document.addEventListener('pointerdown', function __sfxUnlock() { try { __sfx.play('click'); } catch (e) {} try { document.removeEventListener('pointerdown', __sfxUnlock); } catch (e) {} }, { once: true }); } } catch (e) {}
+/* 底栏按钮点击音（事件委托，只认底栏里的按钮，避免影响别处） */
+try { if (typeof document !== 'undefined' && document.addEventListener) { document.addEventListener('click', function (ev) { try { var t = ev && ev.target; if (!t) return; var b = (typeof t.closest === 'function') ? t.closest('.battle-bottom-bar button') : null; if (b) __sfx.play('click'); } catch (e) {} }, true); } } catch (e) {}
 function __animOverlay() {
   if (typeof document === 'undefined') return null;
   var ov = document.getElementById('drawAnimOverlay');
@@ -25025,6 +25107,7 @@ function __ruriMaxJudgeSP(user, diceKind, roll) {
   } catch(e) { return false; }
 }
 function judgePerform(user, spec, applyFn) {
+  try { if (typeof __sfx !== 'undefined') __sfx.play('judge'); } catch (e) {}
   judgeAnimate(user, spec, function (initVal) { judgeSettleWindow(user, spec, initVal, applyFn); });
 }
 function judgeAnimate(user, spec, cb) {
