@@ -927,7 +927,7 @@ body.map3d-on .minimap-container { display: none !important; }
   top: 0; left: 0;
   width: 100%; height: 100%;
   background: rgba(0,0,0,0.85);
-  z-index: 2000;
+  z-index: 2600;   /* 【2026-10-03】高于列表弹窗（.modal-overlay = 1000），确保从墓地/牌组/移出区点开的详情一定盖在上面 */
   justify-content: center;
   align-items: center;
 }
@@ -3556,6 +3556,21 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   border:1px solid rgba(242,207,130,.45);
 }
 .deck-pile .pile-top:not(.revealed) .pile-top-label{ display:none; }   /* 卡背盖住"牌组"小字（区名在外面） */
+
+/* ================= 公交/地铁选目的地：弹窗透明贴底（作者 2026-10-03）=================
+   目的：选目的地时能一边看地图一边选。只在这个弹窗上生效（.bus-chooser），不影响其它弹窗。 */
+#choiceModal.bus-chooser{
+  background:rgba(6,8,18,.16) !important;
+  backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+  align-items:flex-end !important; justify-content:center !important;
+}
+#choiceModal.bus-chooser .card-modal{
+  background:rgba(16,20,36,.92) !important;
+  max-height:50vh !important; overflow-y:auto !important;
+  margin:0 0 8px 0 !important;
+}
+#choiceModal.bus-chooser .card-modal h3{ font-size:15px; }
+#choiceModal.bus-chooser .modal-btn{ padding:7px 10px; font-size:13px; text-align:left; }
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
@@ -14450,7 +14465,7 @@ function drawByCost() {
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
   var card = drawCard('p1');
   if (!card) return;
-  addBattleLog('支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'), 'p1');
+  addBattleLog('p1', '支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'));
   updateBattleUI();
   checkHandLimit();
 }
@@ -15648,6 +15663,14 @@ function __busBoard(player, tile, __kasumi) {
   else settle((typeof applyDiceControl === 'function') ? applyDiceControl(player, raw, 4, __CTRL_PCT_NORMAL) : raw);
 }
 /** 锚点网络上一步步走：每步选"相邻锚点"；随时可在挨着格子的锚点下车；走完可停在锚点 */
+/* 【2026-10-03 作者要求】公交/地铁在选目的地时：弹窗要**半透明并贴底**，让玩家能盯着地图确认要去哪一格。 */
+function __busSetChooserUi(on) {
+  try {
+    var m = (typeof document !== 'undefined') ? document.getElementById('choiceModal') : null;
+    if (!m || !m.classList) return;
+    if (on) m.classList.add('bus-chooser'); else m.classList.remove('bus-chooser');
+  } catch (e) {}
+}
 function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
   try {
     var p = battleState[player]; if (!p || !p._onAnchor) return;
@@ -15671,7 +15694,12 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
     } else {
       if (left > 0) {
         (__busAdj()[cur] || []).forEach(function (n) {
-          opts.push('移动到 ' + __busLabel(n) + '（剩 ' + left + ' 步）');
+          /* 【2026-10-03】目的地写详细：把"这个锚点能下到哪些格"直接列出来（并排除刚上车的那个站） */
+          var __gs = __busGoodTilesOf(n).filter(function (g) { return !(__excludeTile != null && g.id === __excludeTile); });
+          var __reach = __gs.length
+            ? ('　→ 可下车：' + __gs.map(function (g) { return '第' + g.id + '格【' + g.name + '】'; }).join('、'))
+            : '　→（中转锚点，这一格不能下车）';
+          opts.push('移动到 锚点#' + n + __reach + '（剩 ' + left + ' 步）');
           acts.push({ kind: 'move', anchor: n });
         });
       }
@@ -15687,6 +15715,7 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
     var desc = __kasumiMode ? '【小仓霞SP】免判定免支付：直接选一个下车点' :
       ('剩余 ' + left + ' 步' + (left > 0 ? '；可在交点锚点免费转乘其他颜色线路' : '（已走完，请下车或停在锚点）'));
     var apply = function (i) {
+      __busSetChooserUi(false);   /* 选完就把透明样式摘掉（常态弹窗恢复原样） */
       var a = acts[i]; if (!a) a = { kind: 'stay' };
       if (a.kind === 'move' && left > 0) {
         p._onAnchor = a.anchor;
@@ -15706,6 +15735,7 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
       if (typeof updateBattleUI === 'function') updateBattleUI();
     };
     var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+    if (!__OL) __busSetChooserUi(true);   /* 【2026-10-03】单机：弹窗透明贴底，方便对照地图 */
     if (__OL && player === 'p2') { onlineDecideModal('p2', title + '（对手）', desc, '', opts, apply); return; }
     if (!__OL && player !== 'p1') {
       // 单机 AI：能走就继续走（去更远的下车点），走完时挑一个格子价值最高的下车点
@@ -18128,6 +18158,30 @@ function __logMsgForViewer(rec) {
               .replace(new RegExp(SENT, 'g'), oppName);
   } catch (e) { return msg; }
 }
+/* 【2026-10-03 作者口径】对手**抽到**的卡名在战斗日志里隐藏 —— 只有"抽"是暗信息；
+   送墓/弃舍/破坏/展示等进入公开区域的信息照常显示。真实卡名仍保留在 battleState._logs 里（排查用）。 */
+function __viewerSeat() {
+  try {
+    if (typeof Online !== 'undefined' && Online.active) {
+      if (typeof Online._isServerAuthority === 'function' && Online._isServerAuthority()) return (Online.mySeat === 'p2') ? 'p2' : 'p1';
+      return Online.isGuest ? 'p2' : 'p1';
+    }
+  } catch (e) {}
+  return 'p1';
+}
+function __hideOppDraw(msg, who) {
+  try {
+    var s = String(msg == null ? '' : msg);
+    if (!s || !who) return s;
+    if (who === __viewerSeat()) return s;                       // 自己抽的照常显示
+    var m = s.match(/抽(?:到|取|了|\d|牌)/);                    // 第一个"抽"动作的位置
+    if (!m) return s;                                          // 跟抽卡无关（送墓/弃舍等一律不动）
+    var head = s.slice(0, m.index), tail = s.slice(m.index);
+    tail = tail.replace(/【[^】]*】/g, '【？？？】')
+               .replace(/(抽了\s*\d+\s*张卡：)([^，。；\s]+)/g, '$1？？？');
+    return head + tail;
+  } catch (e) { return String(msg == null ? '' : msg); }
+}
 function __appendLogEntry(rec) {
   var log = document.getElementById('battleLog');
   if (!log) return false;
@@ -18139,7 +18193,10 @@ function __appendLogEntry(rec) {
     meta = { icon: '🕹️', label: Online.oppDisplayName() };
   }
   var ico = document.createElement('span'); ico.className = 'log-ico'; ico.textContent = meta.icon || '';
-  var body = document.createElement('span'); body.className = 'log-msg'; body.textContent = __logMsgForViewer(rec);
+  var body = document.createElement('span'); body.className = 'log-msg';
+  /* 【2026-10-03】面板显示也隐藏"对手抽到的卡名"（自己抽的照常） */
+  var __who = rec.actor || ((rec.type === 'p1' || rec.type === 'p2') ? rec.type : null);
+  body.textContent = __hideOppDraw(__logMsgForViewer(rec), __who);
   entry.appendChild(ico); entry.appendChild(body);
   log.appendChild(entry);
   // 长局性能：DOM 条目上限，超出丢弃最旧（结构化 battleLogs 保留全量供复制导出）
@@ -18315,7 +18372,8 @@ function clearBattleLog() {
 function copyBattleLog() {
   var text = battleLogs.map(function(r){
     var m = LOG_META[r.type] ? LOG_META[r.type].label : r.type;
-    return '[T' + r.turn + '/' + (r.phase || '') + '][' + m + '] ' + r.msg;
+    var __w = r.actor || ((r.type === 'p1' || r.type === 'p2') ? r.type : null);   /* 【2026-10-03】复制的日志同样隐藏对手抽到的卡名 */
+    return '[T' + r.turn + '/' + (r.phase || '') + '][' + m + '] ' + __hideOppDraw(r.msg, __w);
   }).join('\n');
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(function(){ addBattleLog('system','战斗日志已复制到剪贴板'); },
@@ -23271,13 +23329,17 @@ function showDeckList() {
       var card = sortedDeck[i];
       var div = document.createElement('div');
       div.className = 'card-list-item';
+      div.setAttribute('data-list-card', card.name || '');
       div.style.cssText = 'width:120px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;transition:all 0.2s;';
       div.onmouseover = function() { this.style.borderColor = '#feca57'; };
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
-      div.innerHTML = '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
+      /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
+      div.onclick = function() { __openGraveCardDetail(card); };
+      div.innerHTML = '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
+        '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">' + (card.effect || '').substring(0, 50) + '...</div>';
-      div.title = card.name + '\n费用:' + (card.cost || 0) + '\n' + (card.effect || '');
+      div.title = card.name + '\n费用:' + (card.cost || 0) + '\n' + (card.effect || '') + '\n（点击查看完整效果）';
       content.appendChild(div);
     }
   }
@@ -23441,6 +23503,7 @@ function showGraveList(zone) {
         var def = __graveSPDef(card), canSP = def && zcur==='grave' && __graveSPAllowed() && def.ok(p);
         var div=document.createElement('div');
         div.className='card-list-item';
+        div.setAttribute('data-list-card', card.name || '');   /* 【2026-10-03】标记"这是卡片项"，与标签按钮区分 */
         div.style.cssText='width:130px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid '+(def?'#feca57':'rgba(255,255,255,0.2)')+';border-radius:6px;';
         var __spTxt = '';
         if (def) { __spTxt = canSP ? ('⚡ '+def.label) : (zcur!=='grave' ? '◇ 已移出游戏，无法再发动' : ('SP：'+def.label+'（需自己主要阶段'+(def.ok(p)?'':'，'+def.reason)+'）')); }
@@ -23535,6 +23598,7 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
       (function(card, idx) {
         var div = document.createElement('div');
         div.className = 'card-list-item';
+        div.setAttribute('data-list-card', card.name || '');   /* 【2026-10-03】标记"这是卡片项"，与标签按钮区分 */
         div.style.cssText = 'width:120px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;transition:all 0.2s;';
         if (selectable) {
           div.onmouseover = function() { this.style.borderColor = '#feca57'; this.style.background = 'rgba(254,202,87,0.1)'; };
@@ -26101,7 +26165,7 @@ function onlineDrawByCostP2(done) {
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2');
   var card = drawCard('p2');
   if (!card) { if (done) done(); return; }
-  addBattleLog('支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'), 'p2');
+  addBattleLog('p2', '支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'));
   updateBattleUI();
   if (typeof checkHandLimit === 'function') checkHandLimit();
   if (done) done();
