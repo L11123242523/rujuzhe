@@ -10618,6 +10618,13 @@ function drawCard(player) {  var __p = battleState[player];
   // 莉莉被动·逝者之眼：抽卡前可观看牌组最下方一张(牌顶=deck[0]，最下方=末位)，并可选择从最上/最下抽（_lilyDrawFrom=bottom 时从底=末位抽）
   if (__p._lilyPassive && __p.deck.length) { var __botCard = __p.deck[__p.deck.length-1]; addBattleLog(player, '【莉莉被动】牌组最下方为【' + (__botCard ? __botCard.name : '空') + '】'); }
   var card = (__p._lilyPassive && __p._lilyDrawFrom === 'bottom') ? __p.deck.pop() : takeTopCard(player);
+  /* 【2026-10-03 加固·"显示与实际不符"这一类】抽到空/undefined **绝不入手**：
+     旧实现会把 undefined 塞进 hand ⇒ 手牌"多一张看不见的卡"、界面显示"无"（作者报过"显示无、实际抽了"）。 */
+  if (!card) {
+    addBattleLog(player, '牌库抽卡失败（牌库与墓地皆空），本次不抽卡（手牌不变）');
+    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    return null;
+  }
   __p.hand.push(card);
   // 抽卡时点时点：真正抽到卡后再发，ctx 携带卡牌（修复原"抽前发、不带卡、空抽也发"）
   runTiming(TIMING.ON_DRAW, { player: player, card: card });
@@ -20624,6 +20631,7 @@ function __yunaiPastAsk(owner, card) {
 registerTrigger({
   id: 'yunai-past-ask',
   timing: 'leave-field',
+  direct: true,   // B3 SP：羽奈(往昔)（SP/效果文本都不含"发动/使用" ⇒ 伴随结算、不开窗）
   ownerOf: function (ctx) {
     var hit = null;
     playerIds().forEach(function (w) {
