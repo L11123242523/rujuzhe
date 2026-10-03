@@ -16030,18 +16030,26 @@ function doSacrifice() {
     checkGraveTrigger('p1', sacCard, __kotaroEff ? 'effect' : 'sacrifice');
     p._sacrificeUsedThisTurn = usedSac + 1;
 
-    var recover = 2, isFirst = usedSac === 0;
-    if (isFirst && p._kotaroPassive) { recover += 2; addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
+    var isFirst = usedSac === 0;
+    /* 【2026-10-03 作者口径】献祭的每一段回复**各自走一次 recoverCost**：
+         · 默认规则"献祭回2"是一段；
+         · 【鸣奏之"圣音"】这类卡的 SP 回2 是**另一段**（它在 checkGraveTrigger 里已单独执行一次 recoverCost）；
+         · 光太郎被动·千金之势 的额外2、黑色卡片 的额外1 各有各的一段；
+       这样每一段都能各自吃到"获取音韵值增加"类效果（例：贪欲者的烙印 每枚 +1）。
+       旧实现把这些**加总成一次** recoverCost ⇒ 增加类效果只吃到一次（作者实测口径：两段各自吃才对）。 */
+    var __recSegs = [{ n: 2, why: '献祭（默认回2）' }];
+    if (isFirst && p._kotaroPassive) { __recSegs.push({ n: 2, why: '光太郎被动·千金之势' }); addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
     if (isFirst && p.permanent) {
       for (var pi = 0; pi < p.permanent.length; pi++) {
         if (p.permanent[pi].name && p.permanent[pi].name.indexOf('黑色卡片') >= 0) {
-          recover += 1; addBattleLog('p1', '【黑色卡片】首次献祭额外回复1点音韵值'); break;
+          __recSegs.push({ n: 1, why: '黑色卡片' }); addBattleLog('p1', '【黑色卡片】首次献祭额外回复1点音韵值'); break;
         }
       }
     }
     /* 【2026-10-01 修·队列②】走 recoverCost：先把"回音韵时点"发完（烙印每枚+1 等）再打日志，
        否则日志里的"当前N/上限"是补发前的值、与界面显示的实时值对不上（作者实测：显示 8、日志写 5）。 */
-    recoverCost('p1', recover, '献祭');
+    var recover = 0;
+    __recSegs.forEach(function (sg) { recover += sg.n; recoverCost('p1', sg.n, sg.why); });
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
     // 立即刷新界面：回费/手牌变化即时可见，不再等到后续询问窗关闭（修复献祭后回费延迟感）
     updateBattleUI();
