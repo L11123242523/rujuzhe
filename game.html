@@ -7936,6 +7936,17 @@ function __deckModeUI() {
 }
 /** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
 function openDeckBuilder(mode) {
+  /* 【2026-10-03 清单③】卡组配置页顶部注入"我的卡组"存档条 */
+  try {
+    var __scr = document.getElementById('deckBuilder');
+    if (__scr && !document.getElementById('deckLibBar')) {
+      var bar = document.createElement('div');
+      bar.id = 'deckLibBar';
+      bar.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;gap:4px;justify-content:center;margin:6px 0 2px;';
+      __scr.insertBefore(bar, __scr.firstChild);
+      __deckLibRenderBar();
+    }
+  } catch (e) {}
   setDeckMode(mode);
   showScreen('deckBuilder');
   __deckModeUI();
@@ -8445,6 +8456,112 @@ function showViewerCardDetail(idx) {
 }
 
 // ========== 卡组配置 ==========
+/* ============================================================
+   【2026-10-03 清单③·本地先行的"多套卡组存档"】账号后端未接之前的可用版本
+   · 存储：localStorage('ruzju_deck_library') = [{ id, name, mode, chars[], items[], carries[], ts }]
+     —— **按卡名存**（卡表改了也不会错位），读取时再按名字回卡池取卡
+   · API：__deckLibAll() / __deckLibSaveCurrent(name) / __deckLibApply(id) / __deckLibDelete(id) / __deckLibRename(id, name)
+   ============================================================ */
+var __deckLibKey = 'ruzju_deck_library';
+function __deckLibAll() { try { var a = JSON.parse(localStorage.getItem(__deckLibKey) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function __deckLibWrite(arr) { try { localStorage.setItem(__deckLibKey, JSON.stringify(arr)); return true; } catch (e) { return false; } }
+function __deckLibNewId() { try { return 'd' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); } catch (e) { return 'd' + Date.now(); } }
+/** 按名字回卡池取一张卡（依次找 allCards / cardData 各分区 / 肉鸽数据） */
+function __deckCardByName(name) {
+  try {
+    if (!name) return null;
+    var pools = [];
+    try { if (typeof allCards !== 'undefined' && allCards && allCards.length) pools.push(allCards); } catch (e) {}
+    try { if (window.cardData) { ['characters','attack_cards','skill_cards','item_permanent','item_single','gift_cards','music_cards','event_cards','omikuji'].forEach(function (k) { if (Array.isArray(window.cardData[k])) pools.push(window.cardData[k]); }); } } catch (e) {}
+    try { if (window.rogueCardData) { Object.keys(window.rogueCardData).forEach(function (k) { if (Array.isArray(window.rogueCardData[k])) pools.push(window.rogueCardData[k]); }); } } catch (e) {}
+    for (var i = 0; i < pools.length; i++) {
+      for (var j = 0; j < pools[i].length; j++) { if (pools[i][j] && pools[i][j].name === name) return JSON.parse(JSON.stringify(pools[i][j])); }
+    }
+  } catch (e) {}
+  return null;
+}
+function __deckLibCurrentConfig() {
+  try {
+    if (typeof deckConfig === 'undefined' || !deckConfig) return null;
+    return deckConfig.p1 || null;
+  } catch (e) { return null; }
+}
+function __deckLibSaveCurrent(name) {
+  try {
+    var cfg = __deckLibCurrentConfig(); if (!cfg) return null;
+    var rec = {
+      id: __deckLibNewId(), name: String(name || ('卡组 ' + new Date().toLocaleString())), mode: 'local', ts: Date.now(),
+      chars: (cfg.chars || []).map(function (c) { return c && c.name || null; }),
+      items: (cfg.items || []).map(function (c) { return c && c.name || null; }),
+      carries: (cfg.carries || []).map(function (c) { return c && c.name || null; })
+    };
+    var arr = __deckLibAll(); arr.unshift(rec); __deckLibWrite(arr);
+    try { addBattleLog('system', '【卡组存档】已保存「' + rec.name + '」（本机共 ' + arr.length + ' 套）'); } catch (e) {}
+    try { showToast('已保存卡组「' + rec.name + '」', 'info'); } catch (e) {}
+    __deckLibRenderBar();
+    return rec.id;
+  } catch (e) { console.error('保存卡组出错', e); return null; }
+}
+function __deckLibApply(id) {
+  try {
+    var arr = __deckLibAll(), rec = null;
+    for (var i = 0; i < arr.length; i++) if (arr[i].id === id) { rec = arr[i]; break; }
+    if (!rec) { try { showToast('找不到这套卡组', 'warn'); } catch (e) {} return false; }
+    var cfg = __deckLibCurrentConfig(); if (!cfg) return false;
+    var fill = function (names, n) {
+      var out = [];
+      for (var k = 0; k < n; k++) { out.push(names && names[k] ? __deckCardByName(names[k]) : null); }
+      return out;
+    };
+    cfg.chars = fill(rec.chars, 3);
+    cfg.items = fill(rec.items, 8);
+    cfg.carries = fill(rec.carries, 4);
+    try { if (typeof renderDeckBuilder === 'function') renderDeckBuilder(); } catch (e) {}
+    try { if (typeof __saveDeckSets === 'function') { try { __saveDeckSets(); } catch (e2) {} } } catch (e) {}
+    try { addBattleLog('system', '【卡组存档】已套用「' + rec.name + '」'); } catch (e) {}
+    try { showToast('已套用卡组「' + rec.name + '」', 'info'); } catch (e) {}
+    return true;
+  } catch (e) { console.error('套用卡组出错', e); return false; }
+}
+function __deckLibDelete(id) {
+  try {
+    var arr = __deckLibAll(), out = arr.filter(function (r) { return r.id !== id; });
+    __deckLibWrite(out);
+    try { showToast('已删除该卡组存档', 'info'); } catch (e) {}
+    __deckLibRenderBar();
+    return true;
+  } catch (e) { return false; }
+}
+function __deckLibRename(id, name) {
+  try {
+    var arr = __deckLibAll();
+    for (var i = 0; i < arr.length; i++) if (arr[i].id === id) { arr[i].name = String(name || arr[i].name); arr[i].ts = Date.now(); }
+    __deckLibWrite(arr); __deckLibRenderBar(); return true;
+  } catch (e) { return false; }
+}
+/* —— 配置页顶部的一排按钮 —— */
+function __deckLibSavePrompt() {
+  try {
+    var cur = '';
+    try { cur = (__deckLibAll()[0] && __deckLibAll()[0].name) || ''; } catch (e) {}
+    var nm = (typeof prompt === 'function') ? prompt('给这套卡组起个名字：', cur || ('卡组 ' + new Date().toLocaleDateString())) : ('卡组 ' + Date.now());
+    if (nm === null || nm === undefined || !String(nm).trim()) return;
+    __deckLibSaveCurrent(String(nm).trim());
+  } catch (e) {}
+}
+function __deckLibRenderBar() {
+  try {
+    var host = document.getElementById('deckLibBar'); if (!host) return;
+    var arr = __deckLibAll();
+    var opts = arr.map(function (r) { return '<option value="' + r.id + '">' + String(r.name).replace(/[<>&]/g, '') + '</option>'; }).join('');
+    host.innerHTML =
+      '<span style="font-size:12px;color:#cde;margin-right:6px;">📚 我的卡组（' + arr.length + '）</span>' +
+      '<select id="deckLibSel" style="max-width:190px;padding:3px 6px;border-radius:6px;background:#1b2237;color:#e8eefc;border:1px solid rgba(255,255,255,.2);">' + (opts || '<option value="">（还没有存档）</option>') + '</select>' +
+      '<button type="button" onclick="__deckLibSavePrompt()" style="margin-left:6px;">💾 存为…</button>' +
+      '<button type="button" onclick="var s=document.getElementById(\'deckLibSel\'); if(s&&s.value)__deckLibApply(s.value);" style="margin-left:4px;">📂 读取</button>' +
+      '<button type="button" onclick="var s=document.getElementById(\'deckLibSel\'); if(s&&s.value){if(confirm(\'删除这套卡组存档？\'))__deckLibDelete(s.value);}" style="margin-left:4px;">🗑 删除</button>';
+  } catch (e) {}
+}
 function renderDeckBuilder() {
   renderDeckSide('p1');
   renderDeckSide('p2');
@@ -11953,19 +12070,17 @@ function __scanTriggers(timing, ctx) {
 registerTrigger({
   id: 'yongzou-grave-hit',
   timing: 'leave-field',
+  direct: true,   // 不进连锁：伴随结算（作者 2026-10-03：「永奏进行曲的卡面效果应该套用不进连锁的效果」）
   ownerOf: function () { return (battleState && battleState.currentPlayer) || null; },
   cond: function (ctx, owner) {
     if (typeof __yongzouGraveApplies !== 'function' || !__yongzouGraveApplies(ctx)) return false;
     /* 【2026-10-03 作者口径】卡面写的是"可以"⇒ 选发；**每次触发都要问一次**（多次触发多次询问）。
        同一件事（同一次离场的那张卡）不重复排队 —— 与琉璃(万圣祭)SP 同款："哪张卡触发过"当键。 */
-    var q = owner && battleState[owner];
-    if (q && q._yongzouQueuedFor === ctx.card) return false;
-    return true;
+    return true;   // 不进连锁 ⇒ 每次满足条件都直接执行（不再需要"同事件只排一次"的排队键）
   },
   mandatory: false,   // 选发：每次触发弹窗询问"是否发动"（原来错标成必发、不问就执行）
   label: function (ctx) { return '【永奏进行曲】' + ((ctx && ctx.how) ? ('有卡' + ctx.how) : '本回合有卡进墓') + '·造无序伤害'; },
-  fire: function (ctx, owner) {
-    try { var q = owner && battleState[owner]; if (q) q._yongzouQueuedFor = (ctx && ctx.card) || null; } catch (e) {}
+  fire: function (ctx) {
     if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit();
   }
 });
