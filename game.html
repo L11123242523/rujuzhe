@@ -12905,6 +12905,8 @@ var TW = {
     function step() {
       if (i < 0) {
         addBattleLog('system', '═══ 连锁全部结算完成 ═══');
+    /* 【2026-10-03】连锁全部结算完成 ⇒ 执行被挂起的格子效果（因效果到达格子的那一类） */
+    try { if (typeof __flushDeferredTileEffects === 'function') __flushDeferredTileEffects(); } catch (e) {}
   /* 【收尾：把两个覆盖层收干净（作者 2026-09-27 反馈："连锁处理完成后还有一个连锁结算框挡在对手状态栏那里"）】
      原因：结算时间线只会"折叠"（表头与按钮仍压着状态栏），连锁栏的 hideChainBar() 定义了却没人调用。
      这里统一延迟收：先给玩家时间看最终状态，再收连锁栏，最后整体隐藏时间线（也可随时手动"关闭"）。
@@ -15775,8 +15777,52 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
   } catch (e) { console.error('公交/地铁锚点移动出错（停在锚点）', e); }
 }
 
+/* 【2026-10-03 作者口径】格子效果**不进连锁**，分两种情形：
+     · 投掷阶段到达格子 ⇒ 直接执行（交互格照常询问）；
+     · 因效果到达格子 ⇒ **等所有效果都结算完毕**再执行格子效果（这里先把这次结算挂起）。
+   做法：入口判断"是否正在结算效果"，是就挂起；在"连锁全部结算完成"的出口统一 flush。 */
+function __effectsResolving() {
+  try {
+    if (typeof __chainIsBusy === 'function' && __chainIsBusy()) return true;
+    if (typeof effectEngine !== 'undefined' && effectEngine) {
+      if ((effectEngine._resolveDepth || 0) > 0) return true;
+      if (effectEngine._chainLock) return true;
+      if (effectEngine._inNewChain) return true;
+    }
+    if (typeof TW !== 'undefined' && TW && TW.active) return true;
+  } catch (e) {}
+  return false;
+}
+/** 把挂起的格子效果依次执行（只在"确实没有效果在结算"时执行；否则留到下次出口） */
+function __flushDeferredTileEffects() {
+  try {
+    var bs = (typeof battleState !== 'undefined') ? battleState : null;
+    if (!bs || !bs._deferredTileEffects || !bs._deferredTileEffects.length) return 0;
+    if (__effectsResolving()) return 0;                       // 还在结算：下次出口再来
+    var n = 0;
+    while (bs._deferredTileEffects.length && !__effectsResolving()) {
+      var w = bs._deferredTileEffects.shift();
+      n++;
+      try {
+        addBattleLog(w, '【格子效果】效果结算完毕 ⇒ 现在结算所在格子的效果');
+        triggerTileEffect(w);
+      } catch (e) { console.error('挂起的格子效果执行出错', e); }
+    }
+    return n;
+  } catch (e) { return 0; }
+}
 function triggerTileEffect(player) {
   if (!battleState) return;
+  /* 【2026-10-03】因效果到达格子 ⇒ 先挂起，等所有效果结算完毕再执行（投掷阶段到达不受影响：那时不在结算中） */
+  try {
+    if (__effectsResolving()) {
+      battleState._deferredTileEffects = battleState._deferredTileEffects || [];
+      if (battleState._deferredTileEffects.indexOf(player) < 0) battleState._deferredTileEffects.push(player);
+      var __t = MAP_TILES[battleState[player].position] || {};
+      addBattleLog(player, '【格子效果】因效果到达第' + battleState[player].position + '格【' + (__t.name || '') + '】⇒ 等本次效果全部结算完毕后再结算格子效果');
+      return;
+    }
+  } catch (e) { console.error('格子效果挂起判断出错（按直接执行处理）', e); }
   var p = battleState[player];
   /* 【2026-10-03】人停在公交/地铁锚点上时**不算在任何格上** ⇒ 不结算格子效果 */
   if (p && p._onAnchor) { addBattleLog(player, '当前在公交/地铁锚点上（不算任何格），不结算格子效果'); return; }
