@@ -14926,6 +14926,29 @@ function __decideWaitGate(tag, retryFn) {
    各跑一次 __runTimingTriggers，且**双方都问**（ctx.players 含 p1/p2）：
    轮到 AI 座位时由时点窗口的 aiDecideChain / "触发自动接受"分支应答，轮到玩家座位时照旧弹连锁窗。
    窗口结算完才调 after()（回调串联），修掉"窗口还在问、阶段已经切走"。 */
+/* 【阶段推进的"忙"判据】（2026-10-03 修作者实测"AI 抢跑不让我连锁"）
+   阶段时点的兜底（"窗口机器既不开窗也不回调就强行推进"）原来只看 TW.active —— 漏了**非连锁的询问**：
+   SP 三选一 / 献祭选卡 / 目标选择 / 排队询问，以及"效果正在结算中"。实测：玩家弹窗还开着，
+   1.5 秒后阶段就被推走、AI 继续行动 ⇒ 抢跑。这里把"还在等玩家/还在结算"的判据一次收全，
+   aiTurnPhase（AI 回合）与 __phaseSeq（玩家回合）两处兜底共用。 */
+function __phaseWaitBusy() {
+  try {
+    if (typeof TW !== 'undefined' && TW && TW.active) return true;                       // 连锁/时点窗口开着
+    if (typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision) return true;
+    if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true;   // 弹窗在等回答
+    if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) return true;
+    if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return true;
+    if (typeof _targetSelectOpen !== 'undefined' && _targetSelectOpen) return true;
+    if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue && _targetSelectQueue.length) return true;
+    if (typeof effectEngine !== 'undefined' && effectEngine) {
+      if ((effectEngine._resolveDepth || 0) > 0) return true;                            // 效果正在结算
+      if (effectEngine.pendingTargetCallback) return true;
+    }
+    var m = (typeof document !== 'undefined') ? document.getElementById('choiceModal') : null;
+    if (m && m.classList && m.classList.contains('active')) return true;                  // 弹窗还开着
+  } catch (e) { console.error('阶段等待判据出错（按不忙处理）', e); }
+  return false;
+}
 function aiTurnPhase(seat, timing, after) {
   var __done = false;
   var __fin = function () {
@@ -14941,8 +14964,7 @@ function aiTurnPhase(seat, timing, after) {
   var __tries = 0, __quiet = 0;
   var __iv = setInterval(function () {
     if (__done) { clearInterval(__iv); return; }
-    var __busy = false;
-    try { __busy = !!(typeof TW !== 'undefined' && TW && TW.active); } catch (e) {}
+    var __busy = (typeof __phaseWaitBusy === 'function') ? __phaseWaitBusy() : false;
     if (__busy) { __quiet = 0; }
     else if (++__quiet >= 6) { clearInterval(__iv); console.warn('AI 阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
     if (++__tries > 200) clearInterval(__iv);
@@ -17773,8 +17795,7 @@ function nextPhase() {
     var __tries = 0, __quiet = 0;
     var __iv = setInterval(function () {
       if (__done) { clearInterval(__iv); return; }
-      var __busy = false;
-      try { __busy = !!(typeof TW !== 'undefined' && TW && TW.active); } catch (e) {}
+      var __busy = (typeof __phaseWaitBusy === 'function') ? __phaseWaitBusy() : false;
       if (__busy) { __quiet = 0; }
       else if (++__quiet >= 6) { clearInterval(__iv); console.warn('阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
       if (++__tries > 200) clearInterval(__iv);
