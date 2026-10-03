@@ -3611,6 +3611,39 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #battleScreen .hand-card:hover .hand-card-name{ font-size:12px !important; }
   body:not(.ui-classic) #battleScreen .hand-card.playable:hover{ border-color:var(--gold,#ffe39a) !important; }
 }
+
+/* ================= __UI_PHASE10 · 配置页整卡显示（作者 2026-10-03：卡组配置界面的卡都显示整张卡）=================
+   卡面真实比例 663:974 ≈ 0.681 ⇒ 插槽 66×97（原来 70×90 比例不符、卡面被裁）；卡图铺满不裁切，
+   名字压成底部渐变条；选卡列表同款处理；✕ 删除按钮提高层级。 */
+@media screen and (min-width: 769px){
+  body:not(.ui-classic) #deckBuilder .deck-slot{
+    width:66px !important; height:97px !important; padding:0 !important;
+    overflow:hidden !important; border-radius:8px !important; position:relative !important;
+  }
+  body:not(.ui-classic) #deckBuilder .deck-slot img{
+    width:100% !important; height:100% !important;
+    object-fit:cover !important; object-position:center top !important;
+    border-radius:7px !important; display:block !important;
+  }
+  body:not(.ui-classic) #deckBuilder .deck-slot-name{
+    position:absolute !important; left:0 !important; right:0 !important; bottom:0 !important; margin:0 !important;
+    padding:2px 3px !important; font-size:9px !important; line-height:1.1 !important; text-align:center !important;
+    background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.86)) !important;
+    border-radius:0 0 7px 7px !important;
+    white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important;
+  }
+  body:not(.ui-classic) #deckBuilder .deck-slot-remove{ z-index:3 !important; }
+  /* 选卡列表：整卡显示（按同一比例，宽度自适应高度） */
+  body:not(.ui-classic) #deckBuilder .card-item{ width:80px !important; padding:0 !important; overflow:hidden !important; border-radius:8px !important; }
+  body:not(.ui-classic) #deckBuilder .card-item img{
+    width:100% !important; height:118px !important;
+    object-fit:cover !important; object-position:center top !important;
+    border-radius:7px 7px 0 0 !important; display:block !important;
+  }
+  body:not(.ui-classic) #deckBuilder .card-item-name,
+  body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:9.5px !important; padding:2px 3px !important; }
+  body:not(.ui-classic) #deckBuilder .card-item-cost{ z-index:3 !important; }
+}
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
