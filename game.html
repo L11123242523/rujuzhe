@@ -11882,10 +11882,20 @@ registerTrigger({
   id: 'yongzou-grave-hit',
   timing: 'leave-field',
   ownerOf: function () { return (battleState && battleState.currentPlayer) || null; },
-  cond: function (ctx) { return (typeof __yongzouGraveApplies === 'function') && __yongzouGraveApplies(ctx); },
-  mandatory: true,
-  label: function () { return '【永奏进行曲】本回合有卡进墓·造无序伤害'; },
-  fire: function (ctx) { if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit(); }
+  cond: function (ctx, owner) {
+    if (typeof __yongzouGraveApplies !== 'function' || !__yongzouGraveApplies(ctx)) return false;
+    /* 【2026-10-03 作者口径】卡面写的是"可以"⇒ 选发；**每次触发都要问一次**（多次触发多次询问）。
+       同一件事（同一次离场的那张卡）不重复排队 —— 与琉璃(万圣祭)SP 同款："哪张卡触发过"当键。 */
+    var q = owner && battleState[owner];
+    if (q && q._yongzouQueuedFor === ctx.card) return false;
+    return true;
+  },
+  mandatory: false,   // 选发：每次触发弹窗询问"是否发动"（原来错标成必发、不问就执行）
+  label: function (ctx) { return '【永奏进行曲】' + ((ctx && ctx.how) ? ('有卡' + ctx.how) : '本回合有卡进墓') + '·造无序伤害'; },
+  fire: function (ctx, owner) {
+    try { var q = owner && battleState[owner]; if (q) q._yongzouQueuedFor = (ctx && ctx.card) || null; } catch (e) {}
+    if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit();
+  }
 });
 registerTrigger({
   id: 'liuli-hw-sp-leave',
@@ -13308,15 +13318,17 @@ function __chainOnceReset() {
 function queueOrRunTrigger(desc) {
   try {
     if (!desc || typeof desc.fire !== 'function') return 'ran';
-    /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃 */
+    /* 【2026-10-03 作者口径】SP 效果**伴随主效果一起结算**：标了 direct 的触发立即执行、
+       不排进"待处理触发"队列（排进去 = 本次连锁结束后另开新连锁 = 开窗询问）。
+       ⚠ 且这一支**放在"同链一次"去重之前、也不消耗去重键** —— 作者口径：
+       「同链重复触发，触发几次就生效几次」（如星奈(水着)多段伤害每段各一次）。 */
+    if (desc.direct) { desc.fire(); return 'ran-direct'; }
+    /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃（仅窗口类触发） */
     if (!desc.key) desc.key = String(desc.id || desc.label || '?') + '|' + String((desc.card && desc.card.name) || '');
     if (!__chainOnce(desc.key)) {
       addBattleLog(desc.owner || 'system', '【连锁·MD口径】「' + (desc.label || desc.key) + '」本连锁已排过 ⇒ 丢弃重复');
       return 'dup';
     }
-    /* 【2026-10-03 作者口径】SP 效果**伴随主效果一起结算**：标了 direct 的触发立即执行，
-       不排进"待处理触发"队列（排进去 = 本次连锁结束后另开新连锁 = 开窗询问）。 */
-    if (desc.direct) { desc.fire(); return 'ran-direct'; }
     if (!__chainIsBusy()) { desc.fire(); return 'ran'; }
     effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
     effectEngine._pendingTriggers.push(desc);
