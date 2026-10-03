@@ -15087,6 +15087,8 @@ function aiTurn(seat) {
     aiTurnPhase(seat, 'main1_end', function() {
     // 投骰阶段
     setTimeout(function() {
+      /* 【2026-10-03 C2】AI 阶段切换同样清"直到当前阶段结束前"的攻击加成（与玩家侧对称） */
+      try { __clearPhaseScopedBuffsImpl(); } catch (e) {}
       battleState.phase = 'roll';
       battleState._diceRolledThisPhase = false;
       addBattleLog('phase', '进入投骰阶段（AI）');
@@ -15112,6 +15114,8 @@ function aiTurn(seat) {
           aiTurnPhase(seat, 'roll_end', function() {
           // 主要阶段2：AI继续使用卡牌
           setTimeout(function() {
+            /* 【2026-10-03 C2】同上：AI 进入主要阶段2 前清阶段档加成 */
+            try { __clearPhaseScopedBuffsImpl(); } catch (e) {}
             battleState.phase = 'main2';
             addBattleLog('phase', '进入主要阶段2（AI）：可继续使用手牌');
             updateBattleUI();
@@ -15128,6 +15132,8 @@ function aiTurn(seat) {
               aiTurnPhase(seat, 'main2_end', function() {
               // 结束阶段 → 结束回合（补 end_start / end_end 两个时点，与玩家侧一致）
               setTimeout(function() {
+                /* 【2026-10-03 C2】同上：AI 进入结束阶段前清阶段档加成 */
+                try { __clearPhaseScopedBuffsImpl(); } catch (e) {}
                 battleState.phase = 'end';
                 addBattleLog('phase', '进入结束阶段（AI）');
                 updateBattleUI();
@@ -18064,6 +18070,23 @@ function __tomaDeclare(player) {
    （候选可选 / 可 PASS），必发选发按卡面"可以/可选"在注册表里声明，"等谁决断"的标记也由窗口统一维护。
    所有调用点（予/冬马/莉莉SP/露璐缇雅SP/葵·福音雅颂/回收离场…）都已迁到注册表。 */
 
+/* 【2026-10-03 C2 修】"直到当前阶段结束前"类攻击加成的**阶段档**清理（全局实现）：
+   原来这段只定义在玩家侧 nextPhase 内部（局部 var），AI 的阶段推进拿不到它 ⇒ AI 拿到阶段档加成后
+   会一直留到回合结束（跨过投骰/主要2/结束阶段），比卡面写的更久。现在提为全局，玩家侧与 AI 侧共用。 */
+function __clearPhaseScopedBuffsImpl() {
+  try {
+    ['p1', 'p2'].forEach(function (w) {
+      var st = battleState[w]; if (!st) return;
+      if (st._tempAttackPhase) {
+        var amt = st._tempAttackPhase;
+        st._tempAttack = Math.max(0, (st._tempAttack || 0) - amt);
+        st._tempAttackPhase = 0;
+        addBattleLog(w, '【攻击力提升】阶段结束，临时攻击力 -' + amt);
+      }
+      if (st._atkPctPhase) st._atkPctPhase = 0;
+    });
+  } catch (e) { console.error('清理阶段限时加成出错（忽略）', e); }
+}
 function nextPhase() {
   if (battleState.currentPlayer !== 'p1') return;
   /* 【2026-10-01 P1：阶段时点串联（作者口径："阶段切换其实也是会弹是否发动效果的"）】
@@ -18071,11 +18094,14 @@ function nextPhase() {
      __runTimingTriggers 的 next 是在时点窗口**结算完毕**后才触发的（无候选时立即触发）
      ⇒ 修掉"窗口还在问、阶段已经切走"的问题。
      ctx.players = ['p1','p2']：同一窗口里双方座席的时点触发都能被扫到（ownerOf 返回数组）。 */
+
   var __phaseCtx = function () {
     return { player: battleState.currentPlayer || 'p1', players: ['p1', 'p2'], turnPlayer: battleState.currentPlayer || 'p1' };
   };
   /* 【2026-10-01】阶段结束时清掉"直到当前阶段结束前"类的限时加成（目前只有 最佳化 的 _atkPctPhase） */
-  var __clearPhaseScopedBuffs = function () {
+  /* 【2026-10-03】委托给全局实现（AI 侧阶段切换也用它）；原函数体保留但不再被调用。 */
+  var __clearPhaseScopedBuffs = function () { try { return __clearPhaseScopedBuffsImpl(); } catch (e) {} };
+  var __clearPhaseScopedBuffs_UNUSED = function () {
     try {
       ['p1', 'p2'].forEach(function (w) {
         var st = battleState[w]; if (!st) return;
