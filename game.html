@@ -11840,6 +11840,8 @@ function __scanTriggers(timing, ctx) {
         owner: owner,
         mandatory: (typeof d.mandatory === 'function') ? !!d.mandatory(ctx, owner) : (d.mandatory !== false),
         id: d.id,
+        /* 【2026-10-03】SP 类效果"伴随主效果一起结算"⇒ 标了 direct 的一律立即执行、不入队不开窗 */
+        direct: !!d.direct,
         label: (typeof d.label === 'function') ? String(d.label(ctx, owner)) : String(d.label || d.id),
         fire: function (next) { try { d.fire(ctx, owner); } finally { if (typeof next === 'function') next(); } }
       };
@@ -11977,6 +11979,7 @@ registerTrigger({
 registerTrigger({
   id: 'sakura-heal-sync',
   timing: 'after-damage',
+  direct: true,   // B3 SP：伴随主效果一起结算（不开窗、不排队）
   ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
   cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._sakuraHealSync && ctx.hit); },
   mandatory: true,   // 卡面"造成伤害后回1同步"（无"可以"）⇒ 必发
@@ -13311,6 +13314,9 @@ function queueOrRunTrigger(desc) {
       addBattleLog(desc.owner || 'system', '【连锁·MD口径】「' + (desc.label || desc.key) + '」本连锁已排过 ⇒ 丢弃重复');
       return 'dup';
     }
+    /* 【2026-10-03 作者口径】SP 效果**伴随主效果一起结算**：标了 direct 的触发立即执行，
+       不排进"待处理触发"队列（排进去 = 本次连锁结束后另开新连锁 = 开窗询问）。 */
+    if (desc.direct) { desc.fire(); return 'ran-direct'; }
     if (!__chainIsBusy()) { desc.fire(); return 'ran'; }
     effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
     effectEngine._pendingTriggers.push(desc);
