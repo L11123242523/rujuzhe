@@ -20048,7 +20048,14 @@ function applyMove(user, signedN) {
     addBattleLog(user, '大风影响：本次位移-2');
   }
   p._lastMoveFrom = oldPos; p._lastMoveSteps = n; // 记录移动前位置/步数，供“路径上”类效果（风纪委员Lv7）使用
-  if (n === 0) { addBattleLog(user, '本次位移为0，不触发格子效果'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
+  /* 【2026-10-03 作者口径】位移 0 = **原地跳一下**：位置不变，但照常结算当前格子的效果
+     （负数位移＝反方向移动，本来就走下面的通用路径）。 */
+  if (n === 0) {
+    addBattleLog(user, '位移为 0：原地跳一下（位置不变，照常结算第' + p.position + '格效果）');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    try { if (typeof triggerTileEffect === 'function') triggerTileEffect(user); } catch (e) { console.error('原地跳结算格子效果出错', e); }
+    return;
+  }
   var __dest = ((p.position + n) % 42 + 42) % 42;
   p.position = resolveBarrierOnMove(user, oldPos, __dest, __dir);
   addBattleLog(user, (n >= 0 ? '前进' : '后退') + Math.abs(n) + '格，第' + oldPos + '格→第' + p.position + '格');
