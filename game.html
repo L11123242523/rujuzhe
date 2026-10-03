@@ -24445,7 +24445,7 @@ function __graveSelfApplies(player, card, reason) {
     if (!card) return false;
     var nm = card.name || '', sp = card.sp || '', eff = card.effect || '';
     var effReason = (reason === 'sacrifice' || reason === 'effect' || reason === 'destroy');
-    if (nm.indexOf('神乐铃') >= 0) return true;
+    /* 【2026-10-03】神乐铃已改成"满足条件直接执行"（见 __graveDirectPassive）⇒ 不再作为链节点收集。 */
     /* 【2026-10-01】"被献祭/因效果送墓回复音韵"这类纯数值被动改为不进链直接执行（见 __graveDirectPassive）
        ⇒ 不再靠它开链；其余分支（神乐铃/盒子/破损/共鸣/认真起来了）不动。 */
     if (nm.indexOf('来自地狱的盒子') >= 0 && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时|因(为)?卡的效果而被送入墓地|因卡效果送墓/.test(sp)) return true;
@@ -24517,6 +24517,14 @@ function __graveDirectPassive(player, card, reason) {
     var key = String((card && (card.name || '?')) || '') + '|' + String(reason || '') + '|' + String(battleState.turn);
     if (battleState._graveDirectKey === key) return false;   // 同一次事件的重入调用：不重复执行
     battleState._graveDirectKey = key;
+    /* 【2026-10-03 作者口径】神乐铃也属"类似 SP"⇒ 满足条件（进入墓地）就**直接执行、不进连锁**：
+       原来是走送墓批次 → 时点窗口 → C1 逆结算（作者日志里就是这个）。 */
+    if (String(card.name || '').indexOf('神乐铃') >= 0) {
+      p._shenleStack = Math.min(9, (p._shenleStack || 0) + 1);
+      addBattleLog(player, '【神乐铃·SP（不进链）】进入墓地，叠加至' + p._shenleStack + '层（上限9，使用不消耗，之后每次使用最终伤害+' + p._shenleStack + '）');
+      try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+      return true;
+    }
     var sp = card.sp || '';
     var effReason = (reason === 'sacrifice' || reason === 'effect' || reason === 'destroy');
     if (!(effReason && sp && __DIRECT_GRAVE_SP.test(sp))) return false;
@@ -24621,11 +24629,8 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   // 所以这里**不再就地打**（原来 !skipYongzou 时在这里直接 __yongzouGraveHit() ⇒ 链上只 1 条却打了 2 次 ✗）；
   // 它一律由批次里的"独立链节点"负责（__buildLeaveBatch / 忙碌分支各自入队一次）。
 
-  // 神乐铃 SP：每进入墓地一次，永久+1层（上限9层，使用不消耗；之后每次使用最终伤害+当前层数）
-  if (cardName.indexOf('神乐铃') >= 0) {
-    p._shenleStack = Math.min(9, (p._shenleStack || 0) + 1);
-    addBattleLog(player, '【神乐铃·SP】进入墓地，叠加至' + p._shenleStack + '层（上限9，使用不消耗，之后每次使用最终伤害+' + p._shenleStack + '）');
-  }
+  /* 【2026-10-03】神乐铃的叠层已移到 __graveDirectPassive（满足条件直接执行、不进连锁）——
+     这里若再叠一次会叠两层，故删除。 */
   // 【2026-10-01 迁移】"通用送墓回复音韵"（如【鸣奏之"圣音"】）已改为**不进链、就地执行**，
   // 由 checkGraveTrigger 开头的 __graveDirectPassive 负责（原来在这里跑 ⇒ 逆结算时才回费、界面滞后）。
 
