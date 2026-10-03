@@ -3835,6 +3835,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
           <option value="p2">对手</option>
         </select>
         <button type="button" onclick="__replayShowLast()">🕘 回看上一回合</button>
+        <button type="button" id="chainAskBtn" onclick="__chainAskToggle()" title="连锁询问开关：关闭后所有连锁都会自动放弃（点一下即恢复）" style="margin-right:6px;">🔗 连锁询问：开</button>
         <button type="button" id="pendingAsks" onclick="__pendingAsksToggle()" style="margin-right:6px;">⏳ 待处理 0</button>
         <button type="button" onclick="copyBattleLog()">复制</button>
         <button type="button" onclick="clearBattleLog()">清空</button>
@@ -11165,7 +11166,25 @@ function collectChainable(player, effect){
 var __chainAutoPassSec = 20;         // 倒计时秒数（0 = 关闭自动 PASS）
 var __chainNeverAsk = false;         // 本会话自动放弃连锁
 function setChainAutoPass(sec) { __chainAutoPassSec = sec; showToast('连锁窗口自动放弃倒计时：' + (sec ? sec + '秒' : '关闭'), 'info'); }
-function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); }
+function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); try { __chainAskRefresh(); } catch (e) {} }
+/* 【2026-10-03】连锁询问开关：一眼看到当前状态、随时恢复（避免"本会话不再询问"静默丢掉自己的触发） */
+function __chainAskToggle() {
+  try {
+    __chainNeverAsk = !__chainNeverAsk;
+    __chainAskRefresh();
+    showToast(__chainNeverAsk ? '本会话已关闭连锁询问（此后所有连锁都会自动放弃）' : '已恢复连锁询问', __chainNeverAsk ? 'warn' : 'info');
+  } catch (e) {}
+}
+function __chainAskRefresh() {
+  try {
+    var b = document.getElementById('chainAskBtn');
+    if (!b) return;
+    b.textContent = __chainNeverAsk ? '🔗 连锁询问：已关闭' : '🔗 连锁询问：开';
+    b.style.color = __chainNeverAsk ? '#ffd166' : '';
+    b.style.borderColor = __chainNeverAsk ? '#ffd166' : '';
+  } catch (e) {}
+}
+
 /* 弹出连锁选择窗（带倒计时自动放弃）。choices 末项为 PASS；超时按 PASS 处理。 */
 function showChainChoice(title, cardName, effectText, choices, onPick) {
   if (__chainNeverAsk) {
@@ -11184,6 +11203,10 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
   var buttonsDiv = document.getElementById('choiceButtons');
   buttonsDiv.innerHTML = '';
   var settled = false, timer = null, left = __chainAutoPassSec;
+  /* 【2026-10-03 作者实测"实战根本就没弹窗询问"】窗口里若有**你自己的触发**（选项形如"↧ 连锁发动：【X】…"），
+     就不启动自动放弃 —— 否则倒计时到点会静默替你把这张卡的触发丢掉（盒子SP 这类就是这样丢的）。 */
+  var __hasOwnTriggerInWindow = (choices || []).some(function (c) { return /连锁发动|发动【|置于效果处理区/.test(String(c)); });
+  if (__hasOwnTriggerInWindow) left = 0;   // 0 = 不自动放弃
   function finish(idx) {
     if (settled) return; settled = true;
     if (timer) clearInterval(timer);
@@ -11205,7 +11228,7 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
   var bar = document.createElement('div');
   bar.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px;color:#9fb0d0;';
   var cd = document.createElement('span');
-  cd.textContent = __chainAutoPassSec > 0 ? ('自动放弃：' + left + 's') : '（自动放弃已关闭）';
+  cd.textContent = (left > 0) ? ('自动放弃：' + left + 's') : (__hasOwnTriggerInWindow ? '（等你决定：这是你自己的触发，不会自动放弃）' : '（自动放弃已关闭）');
   bar.appendChild(cd);
   var never = document.createElement('button');
   never.className = 'modal-btn';
@@ -11221,7 +11244,7 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
   };
   bar.appendChild(never);
   buttonsDiv.appendChild(bar);
-  if (__chainAutoPassSec > 0) {
+  if (left > 0) {
     timer = setInterval(function () {
       left--;
       if (left <= 0) { finish(choices.length - 1); return; }
@@ -12912,8 +12935,6 @@ var TW = {
     function step() {
       if (i < 0) {
         addBattleLog('system', '═══ 连锁全部结算完成 ═══');
-    /* 【2026-10-03】连锁全部结算完成 ⇒ 执行被挂起的格子效果（因效果到达格子的那一类） */
-    try { if (typeof __flushDeferredTileEffects === 'function') __flushDeferredTileEffects(); } catch (e) {}
   /* 【收尾：把两个覆盖层收干净（作者 2026-09-27 反馈："连锁处理完成后还有一个连锁结算框挡在对手状态栏那里"）】
      原因：结算时间线只会"折叠"（表头与按钮仍压着状态栏），连锁栏的 hideChainBar() 定义了却没人调用。
      这里统一延迟收：先给玩家时间看最终状态，再收连锁栏，最后整体隐藏时间线（也可随时手动"关闭"）。
@@ -13333,7 +13354,14 @@ function queueOrRunTrigger(desc) {
        不排进"待处理触发"队列（排进去 = 本次连锁结束后另开新连锁 = 开窗询问）。
        ⚠ 且这一支**放在"同链一次"去重之前、也不消耗去重键** —— 作者口径：
        「同链重复触发，触发几次就生效几次」（如星奈(水着)多段伤害每段各一次）。 */
-    if (desc.direct) { desc.fire(); return 'ran-direct'; }
+    if (desc.direct) {
+      desc.fire();
+      /* 【2026-10-03 修·作者实测"贪欲者的烙印标记又不显示了"】direct 是"结算中就地执行"，
+         原来执行完**没有刷新界面**（旧的连锁路径收尾会刷）⇒ 标记/数值要等下一次别的刷新才出现。
+         这里执行完立刻刷一次，保证界面与实际同步。 */
+      try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+      return 'ran-direct';
+    }
     /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃（仅窗口类触发） */
     if (!desc.key) desc.key = String(desc.id || desc.label || '?') + '|' + String((desc.card && desc.card.name) || '');
     if (!__chainOnce(desc.key)) {
@@ -15826,16 +15854,9 @@ function __flushDeferredTileEffects() {
 }
 function triggerTileEffect(player) {
   if (!battleState) return;
-  /* 【2026-10-03】因效果到达格子 ⇒ 先挂起，等所有效果结算完毕再执行（投掷阶段到达不受影响：那时不在结算中） */
-  try {
-    if (__effectsResolving()) {
-      battleState._deferredTileEffects = battleState._deferredTileEffects || [];
-      if (battleState._deferredTileEffects.indexOf(player) < 0) battleState._deferredTileEffects.push(player);
-      var __t = MAP_TILES[battleState[player].position] || {};
-      addBattleLog(player, '【格子效果】因效果到达第' + battleState[player].position + '格【' + (__t.name || '') + '】⇒ 等本次效果全部结算完毕后再结算格子效果');
-      return;
-    }
-  } catch (e) { console.error('格子效果挂起判断出错（按直接执行处理）', e); }
+  /* 【2026-10-03 撤回】原来这里会把"结算中到达"的格子效果挂起，但投掷阶段的移动也在结算上下文里
+     ⇒ 正常移动到达的格子效果被挂起后没人执行（作者实测：投掷到卡牌格完全没有效果）。
+     现在恢复"到达即直接执行"；"因效果到达才延后"要按"这次移动是不是卡效果造成"精准判断，另行实现。 */
   var p = battleState[player];
   /* 【2026-10-03】人停在公交/地铁锚点上时**不算在任何格上** ⇒ 不结算格子效果 */
   if (p && p._onAnchor) { addBattleLog(player, '当前在公交/地铁锚点上（不算任何格），不结算格子效果'); return; }
@@ -16109,26 +16130,21 @@ function doSacrifice() {
     checkGraveTrigger('p1', sacCard, __kotaroEff ? 'effect' : 'sacrifice');
     p._sacrificeUsedThisTurn = usedSac + 1;
 
-    var isFirst = usedSac === 0;
-    /* 【2026-10-03 作者口径】献祭的每一段回复**各自走一次 recoverCost**：
-         · 默认规则"献祭回2"是一段；
-         · 【鸣奏之"圣音"】这类卡的 SP 回2 是**另一段**（它在 checkGraveTrigger 里已单独执行一次 recoverCost）；
-         · 光太郎被动·千金之势 的额外2、黑色卡片 的额外1 各有各的一段；
-       这样每一段都能各自吃到"获取音韵值增加"类效果（例：贪欲者的烙印 每枚 +1）。
-       旧实现把这些**加总成一次** recoverCost ⇒ 增加类效果只吃到一次（作者实测口径：两段各自吃才对）。 */
-    var __recSegs = [{ n: 2, why: '献祭（默认回2）' }];
-    if (isFirst && p._kotaroPassive) { __recSegs.push({ n: 2, why: '光太郎被动·千金之势' }); addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
+    var recover = 2, isFirst = usedSac === 0;
+    /* 【2026-10-03 作者口径修正】光太郎被动·千金之势 的 +2 与 黑色卡片 的 +1 属于
+       "**在基础献祭回费值上增加**" ⇒ 与基础 2 合并成**同一段**（例：2 + 1 + 2 = 5），
+       所以"每段增加"类效果（贪欲者的烙印：每段+1）在这上面只加一次。
+       而【鸣奏之"圣音"】这类卡的 SP 回2 是**另一段**（它在 checkGraveTrigger 里单独执行 recoverCost）
+       ⇒ 两段各自吃一次"每段+1"（作者原话：所以圣音才能是 2+1+2+1）。 */
+    if (isFirst && p._kotaroPassive) { recover += 2; addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
     if (isFirst && p.permanent) {
       for (var pi = 0; pi < p.permanent.length; pi++) {
         if (p.permanent[pi].name && p.permanent[pi].name.indexOf('黑色卡片') >= 0) {
-          __recSegs.push({ n: 1, why: '黑色卡片' }); addBattleLog('p1', '【黑色卡片】首次献祭额外回复1点音韵值'); break;
+          recover += 1; addBattleLog('p1', '【黑色卡片】首次献祭额外回复1点音韵值'); break;
         }
       }
     }
-    /* 【2026-10-01 修·队列②】走 recoverCost：先把"回音韵时点"发完（烙印每枚+1 等）再打日志，
-       否则日志里的"当前N/上限"是补发前的值、与界面显示的实时值对不上（作者实测：显示 8、日志写 5）。 */
-    var recover = 0;
-    __recSegs.forEach(function (sg) { recover += sg.n; recoverCost('p1', sg.n, sg.why); });
+    recoverCost('p1', recover, '献祭');
     addBattleLog('p1', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值（当前' + p.cost + '/' + p.maxCost + '）');
     // 立即刷新界面：回费/手牌变化即时可见，不再等到后续询问窗关闭（修复献祭后回费延迟感）
     updateBattleUI();
