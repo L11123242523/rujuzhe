@@ -10852,6 +10852,8 @@ function startTurn() {
   // 清掉残留在手牌/盖伏/永续区技能卡实例上的“本回合已用”标记（进墓时已清，此处为跨回合保险）
   ['hand','faceDownCards','permanent'].forEach(function(zn){ (battleState[player][zn]||[]).forEach(function(c){ if(c) delete c._skillUsedThisTurn; }); });
   battleState[player]._sacrificeUsedThisTurn = 0; // 重置每回合一次的技能使用记录
+  battleState[player]._busRolledThisAction = false;   // 【2026-10-03】公交/地铁：每次自己行动期间只能投 1 次四面骰
+  if (battleState[player]._onAnchor) { addBattleLog(player, '回合开始：从公交/地铁锚点回到第' + battleState[player].position + '格'); battleState[player]._onAnchor = 0; }
   battleState[player]._koharuTimesThisTurn = 0; // 小春SP先机每回合递增加成重置
   battleState[player]._rioMizugiFirstRoll = false; battleState[player]._rioMizugiFirstMove = false; // 里绪(水着)首次投掷/移动每回合重置
   // 自然回复音韵：基础5；枫(水着)/葵SP各+50%（5×1.5=7.5→7，与成员数无关，用户口径）；予每名无序成员+1；霜烬+1；里尔亚斯被动+2(随等级)
@@ -11121,13 +11123,22 @@ function collectChainable(player, effect){
 }
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
 // 会话级记忆（刷新页面即失效，避免永久改变规则）
-var __chainAutoPassSec = 8;          // 倒计时秒数（0 = 关闭自动 PASS）
+/* 【2026-10-03 修·作者实测"我还在思考要不要连锁，AI 就直接结束回合了"】
+   原来默认 8 秒 —— 玩家还在想就被自动 PASS，AI 随即继续行动。默认改成**关闭**（0）；
+   想开倒计时仍可用 setChainAutoPass(秒)（0 = 关闭）。 */
+var __chainAutoPassSec = 0;          // 倒计时秒数（0 = 关闭自动 PASS）
 var __chainNeverAsk = false;         // 本会话自动放弃连锁
 function setChainAutoPass(sec) { __chainAutoPassSec = sec; showToast('连锁窗口自动放弃倒计时：' + (sec ? sec + '秒' : '关闭'), 'info'); }
 function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); }
 /* 弹出连锁选择窗（带倒计时自动放弃）。choices 末项为 PASS；超时按 PASS 处理。 */
 function showChainChoice(title, cardName, effectText, choices, onPick) {
-  if (__chainNeverAsk) { onPick(choices.length - 1); return; }
+  if (__chainNeverAsk) {
+    /* 【2026-10-03】这个开关很容易误点，一旦打开所有连锁问都瞬间自动放弃 ⇒ 每次留一条日志，
+       玩家在战斗日志里能看到"是因为本会话关闭了连锁询问"，而不是以为"AI 抢跑不让我连锁"。
+       恢复：控制台 setChainNeverAsk(false)。 */
+    try { addBattleLog('system', '【连锁】本会话已关闭连锁询问 ⇒ 自动放弃：「' + (title || '') + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
+    onPick(choices.length - 1); return;
+  }
   var modal = document.getElementById('choiceModal');
   if (!modal) { onPick(choices.length - 1); return; }
   // 复用现有弹窗 DOM，但加一行倒计时与快捷按钮
@@ -11164,7 +11175,14 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
   never.className = 'modal-btn';
   never.style.cssText = 'padding:5px 10px;font-size:12px;';
   never.textContent = '本会话不再询问';
-  never.onclick = function (ev) { ev.stopPropagation(); __chainNeverAsk = true; finish(choices.length - 1); };
+  never.onclick = function (ev) {
+    ev.stopPropagation();
+    /* 【2026-10-03】二次确认：一点就静默关掉所有连锁询问，很容易误触成"AI 抢跑"。 */
+    try {
+      if (typeof confirm === 'function' && !confirm('确定本会话内不再弹出连锁询问？\n（此后所有连锁都会自动放弃；可随时用 setChainNeverAsk(false) 恢复）')) return;
+    } catch (e) {}
+    __chainNeverAsk = true; finish(choices.length - 1);
+  };
   bar.appendChild(never);
   buttonsDiv.appendChild(bar);
   if (__chainAutoPassSec > 0) {
@@ -14910,6 +14928,18 @@ function __decideWaitGate(tag, retryFn) {
   try {
     var ad = battleState && battleState._awaitingDecision;
     if (!ad) return false;
+    /* 【2026-10-03 修·作者实测】只要玩家**真的**有询问在等（弹窗回调 / 连锁窗 / 排队询问 / 弹窗可见），
+       就绝不因"超时"放行 —— 原来 20 秒无条件放行，玩家认真思考时会被夺走决定权。
+       只有标记泄漏（没有任何询问在等）时才清理，避免整局卡死。 */
+    var __realWait = false;
+    try {
+      if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) __realWait = true;
+      if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) __realWait = true;
+      if (typeof TW !== 'undefined' && TW && TW.active) __realWait = true;
+      var __m = document.getElementById('choiceModal');
+      if (__m && __m.classList && __m.classList.contains('active')) __realWait = true;
+    } catch (e) {}
+    if (__realWait) return true;
     var age = Date.now() - (ad.since || 0);
     if (age > 20000) {
       try { console.error('【等待决断·超时】' + (ad.label || '') + ' 已等待 ' + Math.round(age / 1000) + 's，自动放行（' + tag + '）'); } catch (e) {}
@@ -15518,9 +15548,145 @@ function actCalibrate() {
 
 
 // 触发地图格子效果
+/* ============================================================
+   【公交/地铁网络：锚点 + 连线 + 站台】（作者 2026-10-03 口径，替换旧的"沿 42 格环前进 d4 格"）
+   规则：到达公交/地铁格 ⇒ 支付 200 金币车票 ⇒ 移动到该格"上方的锚点" ⇒ 投 1 枚四面骰得 N 步
+        ⇒ 在锚点之间移动（同线或转乘其他颜色线路；**转乘不消耗步数**）⇒ 在"挨着某个格子"的锚点可以下车。
+        每次自己行动期间只能投 1 次四面骰。
+   作者补充口径：任何"挨着某格"的锚点都能下车；走满步数没下车就停在锚点上、**不算在任何格上**。
+   数据来源：棋盘美术图 assets/images/map3d_board.png 逐点量出（脚本 port-old/read_board_anchors.py +
+     read_board_graph.py；坐标与 MAP_TILES 的 x/y 同一百分比坐标系）。**显式写死，不做模糊匹配**（铁律#5）。
+   ============================================================ */
+var BUS_ANCHORS = [
+  { i: 1, x: 35.01, y: 17.32 }, { i: 2, x: 46.85, y: 17.32 }, { i: 3, x: 53.86, y: 17.32 },
+  { i: 4, x: 59.81, y: 17.32 }, { i: 5, x: 65.82, y: 17.32 }, { i: 6, x: 71.97, y: 17.32 },
+  { i: 7, x: 84.38, y: 17.32 }, { i: 8, x: 12.26, y: 23.67 }, { i: 9, x: 12.26, y: 40.66 },
+  { i: 10, x: 46.85, y: 40.66 }, { i: 11, x: 84.38, y: 40.66 }, { i: 12, x: 12.26, y: 59.30 },
+  { i: 13, x: 59.67, y: 59.30 }, { i: 14, x: 87.55, y: 59.30 }, { i: 15, x: 84.38, y: 69.51 },
+  { i: 16, x: 34.72, y: 81.00 }, { i: 17, x: 46.85, y: 81.00 }, { i: 18, x: 59.67, y: 81.00 },
+  { i: 19, x: 84.28, y: 81.00 }
+];
+var BUS_EDGES = [[1, 2], [1, 16], [2, 3], [2, 10], [3, 4], [4, 13], [5, 6], [6, 7], [7, 11], [8, 9], [9, 10],
+  [9, 12], [10, 11], [10, 17], [11, 15], [12, 13], [13, 14], [13, 18], [15, 19], [16, 17], [17, 18], [18, 19]];
+var BUS_STATION_ANCHOR = { 5: 18, 7: 17, 16: 12, 18: 9, 27: 2, 30: 5, 37: 11, 40: 15 };
+var BUS_GETOFF_DIST = 14;     // 锚点与格子的棋盘距离 ≤ 14（%）算"挨着这个格" ⇒ 可以下车
+function __busAnchor(i) { for (var k = 0; k < BUS_ANCHORS.length; k++) if (BUS_ANCHORS[k].i === i) return BUS_ANCHORS[k]; return null; }
+var __busAdjCache = null;
+function __busAdj() {
+  if (__busAdjCache) return __busAdjCache;
+  var m = {};
+  BUS_ANCHORS.forEach(function (a) { m[a.i] = []; });
+  BUS_EDGES.forEach(function (e) { if (m[e[0]] && m[e[1]]) { m[e[0]].push(e[1]); m[e[1]].push(e[0]); } });
+  __busAdjCache = m; return m;
+}
+/** 这个锚点"挨着"的格子（可下车点），按距离近→远 */
+function __busGoodTilesOf(anchorIdx) {
+  var a = __busAnchor(anchorIdx); if (!a) return [];
+  var out = [];
+  for (var i = 0; i < MAP_TILES.length; i++) {
+    var t = MAP_TILES[i];
+    var d = Math.sqrt(Math.pow(t.x - a.x, 2) + Math.pow(t.y - a.y, 2));
+    if (d <= BUS_GETOFF_DIST) out.push({ id: t.id, name: t.name, type: t.type, d: d });
+  }
+  out.sort(function (p, q) { return p.d - q.d; });
+  return out;
+}
+function __busLabel(anchorIdx) {
+  var g = __busGoodTilesOf(anchorIdx);
+  return '锚点#' + anchorIdx + (g.length ? '（挨着第' + g.map(function (x) { return x.id; }).join('/') + '格）' : '（中转锚点，不能下车）');
+}
+function __busOffNetwork(p) { if (p && p._onAnchor) p._onAnchor = 0; }
+/** 公交/地铁乘车主流程（付车票 → 上锚点 → 投 d4 → 走锚点网络） */
+function __busRide(player, tile) {
+  var p = battleState[player]; if (!p || !tile) return;
+  var __kasumi = !!p._kasumiSP;
+  if (!p.gold) p.gold = 0;
+  if (!__kasumi && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); return; }
+  if (__kasumi) addBattleLog(player, '【小仓霞SP】乘坐' + tile.name + '免支付、免判定');
+  else { p.gold -= __goldPrice(p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
+  p._ridingThisAction = true;   // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
+  var st = BUS_STATION_ANCHOR[tile.id];
+  if (!st) { addBattleLog(player, '【' + tile.name + '】缺少站台锚点数据，本次不移动'); return; }
+  p._onAnchor = st;
+  addBattleLog(player, '【' + tile.name + '】上车：移动到站台 ' + __busLabel(st));
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+  if (p._busRolledThisAction) { addBattleLog(player, '本次行动已经投过四面骰 ⇒ 只能停在锚点上'); return; }
+  if (__kasumi) { p._busRolledThisAction = true; __busChooseStep(player, 1, true, tile.id); return; }   // 免判定：直接选下车点
+  var raw = GameRNG.dice(4);
+  var settle = function (v) {
+    p._busRolledThisAction = true;
+    addBattleLog(player, '【' + tile.name + '】四面骰 ' + v + ' 点 ⇒ 可以在锚点间移动 ' + v + ' 格（转乘不消耗步数）');
+    __busChooseStep(player, v, false, tile.id);
+  };
+  if (typeof __diceControlAsk === 'function') __diceControlAsk(player, raw, 4, tile.name + '·四面骰', settle, { capPct: __CTRL_PCT_NORMAL });
+  else settle((typeof applyDiceControl === 'function') ? applyDiceControl(player, raw, 4, __CTRL_PCT_NORMAL) : raw);
+}
+/** 锚点网络上一步步走：每步选"相邻锚点"；随时可在挨着格子的锚点下车；走完可停在锚点 */
+function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
+  try {
+    var p = battleState[player]; if (!p || !p._onAnchor) return;
+    var cur = p._onAnchor;
+    var opts = [], acts = [];
+    if (left > 0) {
+      (__busAdj()[cur] || []).forEach(function (n) {
+        opts.push('移动到 ' + __busLabel(n) + '（剩 ' + left + ' 步）');
+        acts.push({ kind: 'move', anchor: n });
+      });
+    }
+    __busGoodTilesOf(cur).forEach(function (g) {
+      if (__excludeTile != null && g.id === __excludeTile) return;   // 不把"刚上车的那个站"当下车点（否则下车即重新上车、再付一次车票）
+      opts.push('下车：落到第' + g.id + '格【' + g.name + '】');
+      acts.push({ kind: 'off', tile: g.id });
+    });
+    opts.push('停在锚点上（不算在任何格上）');
+    acts.push({ kind: 'stay' });
+    var title = '公交/地铁 · ' + __busLabel(cur);
+    var desc = __kasumiMode ? '【小仓霞SP】免判定免支付：直接选一个下车点' :
+      ('剩余 ' + left + ' 步' + (left > 0 ? '；可在交点锚点免费转乘其他颜色线路' : '（已走完，请下车或停在锚点）'));
+    var apply = function (i) {
+      var a = acts[i]; if (!a) a = { kind: 'stay' };
+      if (a.kind === 'move' && left > 0) {
+        p._onAnchor = a.anchor;
+        addBattleLog(player, '锚点间移动：#' + cur + ' → #' + a.anchor + '（剩 ' + (left - 1) + ' 步）');
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+        __busChooseStep(player, left - 1, __kasumiMode, __excludeTile);
+        return;
+      }
+      if (a.kind === 'off') {
+        p._onAnchor = 0; p.position = a.tile;
+        addBattleLog(player, '下车：落到第' + a.tile + '格【' + ((MAP_TILES[a.tile] || {}).name || '') + '】');
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+        triggerTileEffect(player);
+        return;
+      }
+      addBattleLog(player, '停在锚点#' + cur + '上（不算在任何格上）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    };
+    var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+    if (__OL && player === 'p2') { onlineDecideModal('p2', title + '（对手）', desc, '', opts, apply); return; }
+    if (!__OL && player !== 'p1') {
+      // 单机 AI：能走就继续走（去更远的下车点），走完时挑一个格子价值最高的下车点
+      var GOOD = { shrine: 3, inspire: 3, gift: 2, story: 2, read: 3, card: 1, again: 2, start: 1 };
+      var best = -1, bestScore = -2;
+      acts.forEach(function (a, i) {
+        var sc = -1;
+        if (a.kind === 'off') { var t = MAP_TILES[a.tile] || {}; sc = (GOOD[t.type] || 0) + 1; }
+        else if (a.kind === 'move') { sc = 0.5; }
+        if (sc > bestScore) { bestScore = sc; best = i; }
+      });
+      apply(best >= 0 ? best : acts.length - 1);
+      return;
+    }
+    if (typeof showChoiceModal === 'function') showChoiceModal(title, desc, '', opts, apply);
+    else apply(acts.length - 1);
+  } catch (e) { console.error('公交/地铁锚点移动出错（停在锚点）', e); }
+}
+
 function triggerTileEffect(player) {
   if (!battleState) return;
   var p = battleState[player];
+  /* 【2026-10-03】人停在公交/地铁锚点上时**不算在任何格上** ⇒ 不结算格子效果 */
+  if (p && p._onAnchor) { addBattleLog(player, '当前在公交/地铁锚点上（不算任何格），不结算格子效果'); return; }
   var tile = MAP_TILES[p.position];
   if (!tile) return;
   
@@ -15588,24 +15754,10 @@ function triggerTileEffect(player) {
       break;
     case 'bus':
     case 'subway': {
-      // 公交/地铁（权威）：支付200金币车票，投1枚四面骰决定锚点间前进格数（每次行动仅1次）
-      var __kasumiRide = !!p._kasumiSP;
-      if (!p.gold) p.gold = 0;
-      if (!__kasumiRide && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); break; }
-      if (__kasumiRide) addBattleLog(player, '【小仓霞SP】乘坐' + tile.name + '免支付、免判定');
-      else p.gold -= __goldPrice(p, 200);
-      var __busSettle = function (busDice) {
-        p._ridingThisAction = true; // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
-        var oldPos2 = p.position;
-        p.position = (p.position + busDice) % 42;
-        addBattleLog(player, '【' + tile.name + '】支付200金币，四面骰' + busDice + '点，前进' + busDice + '格到第' + p.position + '格');
-        if (typeof updateBattleUI === 'function') updateBattleUI();
-        triggerTileEffect(player);
-      };
-      // 四面骰乘车属「普通投掷」：控骰最多适用 100% 控骰（每20%=±1，受骰面1~4限制）
-      var __busRaw = GameRNG.dice(4);
-      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __busRaw, 4, tile.name + '·四面骰', __busSettle, { capPct: __CTRL_PCT_NORMAL });
-      else __busSettle((typeof applyDiceControl === 'function') ? applyDiceControl(player, __busRaw, 4, __CTRL_PCT_NORMAL) : __busRaw);
+      /* 【2026-10-03 重写·作者口径】不再是"沿 42 格环前进 d4 格"，而是走**锚点网络**（BUS_ANCHORS / BUS_EDGES）：
+         支付 200 金币车票 → 移动到该格的站台锚点 → 投 1 枚四面骰 → 在锚点间移动（交点处免费转乘）
+         → 在"挨着某个格子"的锚点可以下车（落到那格并触发格子效果）；走满步数未下车就停在锚点上。 */
+      __busRide(player, tile);
       break; }
     case 'power': {
       // 配电室（权威）：可关闭1个非四角格（每人限1），到达也可重新开启自己已关闭的格
@@ -19786,6 +19938,8 @@ function resolveBarrierOnMove(user, oldPos, newPos, dir) {
 // 统一移动底层
 function applyMove(user, signedN) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
+  /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
+  try { if (typeof __busOffNetwork === 'function') __busOffNetwork(p); } catch (e) {}
   // 大风影响：下次位移-2（用后即清）
   if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) {
     p.moveDebuff.nextMoveMinus2 = false;
