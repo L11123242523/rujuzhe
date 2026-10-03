@@ -12003,6 +12003,7 @@ registerTrigger({
 registerTrigger({
   id: 'ruri-mizugi-sp',
   timing: 'after-damage',
+  direct: true,   // B3 SP：热忱造伤回音韵（伴随主效果一起结算，不开窗）
   ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
   cond: function (ctx, owner) {
     var q = battleState[owner]; if (!q) return false;
@@ -12144,6 +12145,7 @@ registerTrigger({
 registerTrigger({
   id: 'greed-mark-accumulate',
   timing: 'leave-field',
+  direct: true,   // B3 SP：每次进入墓地累积1个（伴随结算，不开窗）
   ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
   /* 【2026-10-01 同步加固·同一类缺陷】卡面是"每次**进入墓地**累积1个" ⇒ 回收/移出游戏不算
      （与进行曲同一个坑：通用 leave-field 时点会把"回收进手牌"也扫进来）。 */
