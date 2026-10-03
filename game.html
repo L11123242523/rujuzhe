@@ -3644,6 +3644,28 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:9.5px !important; padding:2px 3px !important; }
   body:not(.ui-classic) #deckBuilder .card-item-cost{ z-index:3 !important; }
 }
+
+/* ================= __UI_PHASE11 · 大视口/全屏适配（作者 2026-10-03：F11 全屏/大屏适配）=================
+   实测 1920×1080：地图容器只有 920 宽（两侧大片空白）、手牌还是 1440 档的小卡。
+   ≥1500px：地图容器放宽到 1200、最大高度抬到 min(58vh,560px)，手牌按卡面比例放大到 92×135，
+   永续插槽/状态栏同步放大一档；小屏与 1440 档完全不受影响。 */
+@media screen and (min-width: 1500px){
+  body:not(.ui-classic) #battleScreen .map3d-wrap,
+  body:not(.ui-classic) #battleScreen .battle-map-container{
+    max-width:1200px !important;
+    max-height:min(58vh, 560px) !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card{
+    width:92px !important; height:135px !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-card-name{ font-size:10.5px !important; }
+  body:not(.ui-classic) #battleScreen .permanent-slot{ width:66px !important; height:82px !important; }
+  body:not(.ui-classic) #battleScreen .permanent-slot .slot-img{ width:48px !important; height:50px !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .permanent-slot{ width:56px !important; height:70px !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .permanent-slot .slot-img{ width:40px !important; height:40px !important; }
+  body:not(.ui-classic) #battleScreen .deck-zone,
+  body:not(.ui-classic) #battleScreen .grave-zone{ width:72px !important; height:88px !important; }
+}
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
