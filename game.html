@@ -12103,17 +12103,21 @@ function __scanTriggers(timing, ctx) {
 registerTrigger({
   id: 'yongzou-grave-hit',
   timing: 'leave-field',
-  direct: true,   // 不进连锁：伴随结算（作者 2026-10-03：「永奏进行曲的卡面效果应该套用不进连锁的效果」）
   ownerOf: function () { return (battleState && battleState.currentPlayer) || null; },
   cond: function (ctx, owner) {
     if (typeof __yongzouGraveApplies !== 'function' || !__yongzouGraveApplies(ctx)) return false;
+    /* 【2026-10-03 作者口径】**选发**：每次触发都要问一次（多次触发多次询问）；
+       但同一件事（同一次离场的那张卡）不重复排队 —— 与琉璃(万圣祭)SP 同款"哪张卡触发过"键。 */
+    var q0 = owner && battleState[owner];
+    if (q0 && q0._yongzouQueuedFor === ctx.card) return false;
     /* 【2026-10-03 作者口径】卡面写的是"可以"⇒ 选发；**每次触发都要问一次**（多次触发多次询问）。
        同一件事（同一次离场的那张卡）不重复排队 —— 与琉璃(万圣祭)SP 同款："哪张卡触发过"当键。 */
-    return true;   // 不进连锁 ⇒ 每次满足条件都直接执行（不再需要"同事件只排一次"的排队键）
+    return true;
   },
-  mandatory: false,   // 选发：每次触发弹窗询问"是否发动"（原来错标成必发、不问就执行）
+  mandatory: false,   // 【2026-10-03 作者最终口径】选发：每次触发弹窗询问"是否发动"（仍走正常连锁路径）
   label: function (ctx) { return '【永奏进行曲】' + ((ctx && ctx.how) ? ('有卡' + ctx.how) : '本回合有卡进墓') + '·造无序伤害'; },
-  fire: function (ctx) {
+  fire: function (ctx, owner) {
+    try { var q1 = owner && battleState[owner]; if (q1) q1._yongzouQueuedFor = (ctx && ctx.card) || null; } catch (e) {}
     if (typeof __yongzouGraveHit === 'function') __yongzouGraveHit();
   }
 });
