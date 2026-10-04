@@ -25563,6 +25563,11 @@ function __judgeAnimPlay(user, spec, isCoin, finalVal, cb) {
 
 function dealDamageWithResponse(target, damage, source, callback, attackerAttr, attacker, opts) {
   opts = opts || {};
+  /* 【2026-10-03 作者反馈·中心修法】判定伤害统一补齐 judge 标记：
+     来源名里含"判定"（硬币判定 / 面骰判定 / 判定伤害 …）的一律按**判定伤害**处理
+     ⇒ 琉璃被动（累计"造成判定伤害次数"）等依赖 ctx.judge 的效果都能吃到期。
+     原来该标记靠每个调用点自己传 { judge: true }，漏传就丢计数（作者实测：硬币判定伤害不计入琉璃）。 */
+  try { if (!opts.judge && typeof source === 'string' && source.indexOf('判定') >= 0) opts.judge = true; } catch (e) {}
   if (!battleState) {
     if (callback) callback(damage);
     return;
