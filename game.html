@@ -8199,6 +8199,8 @@ function showScreen(id) {
      正在结算的窗口反而会把结算弄坏。 */
   if (id === 'mainMenu' || id === 'onlineLobby') {
     try { __clearTransientBattleState('离开战斗界面'); } catch (e) {}
+    /* 【2026-10-03】离开战斗 ⇒ 立刻停掉 BGM（作者实测：退到主界面还在放） */
+    try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) {}
   }
   // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
   if (id === 'battleScreen' && typeof Map3D !== 'undefined') {
@@ -21643,9 +21645,21 @@ var __sfx = (function () {
       bgmSetTrack(__bgmWantLow() ? (__bgmLowUrl() ? 'low' : 'main') : null);   /* 不满足 ⇒ 静音 */
     } catch (e) { bgmTimerStart(); }
   }
-  /* 是否该放残血曲：自己（p1）同步值低于最大同步值一半 */
+  /* 【2026-10-03 修】是否**在战斗界面里**（主菜单/加载/结算后回菜单都不算）——
+     作者实测："一进游戏就放残血 BGM，退到主界面还在放" 就是因为少了这个判断。 */
+  function __bgmInBattle() {
+    try {
+      if (typeof battleState === 'undefined' || !battleState) return false;
+      if (battleState._over) return false;
+      var el = (typeof document !== 'undefined') ? document.getElementById('battleScreen') : null;
+      if (!el || !el.classList) return false;
+      return !!el.classList.contains('active');
+    } catch (e) { return false; }
+  }
+  /* 是否该放残血曲：**在战斗界面** 且 自己（p1）同步值 ≤ 最大同步值一半 */
   function __bgmWantLow() {
     try {
+      if (!__bgmInBattle()) return false;      /* 不在战斗里 ⇒ 一律不放 */
       var p = (typeof battleState !== 'undefined' && battleState) ? battleState.p1 : null;
       if (!p) return false;
       var maxS = p.maxSync || 40, cur = (p.sync == null ? maxS : p.sync);
