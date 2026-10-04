@@ -19418,22 +19418,27 @@ function __inBattleScreen() {
 function __playerDeciding() {
   try { return !!(typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision); } catch (e) { return false; }
 }
-function __busyNow() {
+/* 语义①：**引擎锁** —— 效果正在结算/连锁锁/正在组新连锁（"能不能插入新效果"看这个） */
+function __engineLocked() {
   try {
     var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
-    if (ee) {
-      if ((ee._resolveDepth || 0) > 0) return true;
-      if (ee._chainLock) return true;
-      if (ee._inNewChain) return true;
-    }
+    if (!ee) return false;
+    if ((ee._resolveDepth || 0) > 0) return true;
+    if (ee._chainLock) return true;
+    if (ee._inNewChain) return true;
+    return false;
+  } catch (e) { return false; }
+}
+/* 语义②：**忙（含玩家正在决策）** = 引擎锁 ∨ 有窗口开着（"要不要等"看这个） */
+function __busyNow() {
+  try {
+    if (typeof __engineLocked === 'function' ? __engineLocked() : false) return true;
     try { if (typeof TW !== 'undefined' && TW && TW.active) return true; } catch (e) {}
     return false;
   } catch (e) { return false; }
 }
 function __eeLocked() {
   try {
-    /* 【目标③】并入并集（原来漏了"有窗口开着/正在组新连锁"）——更保守、更正确 */
-    if (typeof __busyNow === 'function' && __busyNow()) return true;
     if (typeof effectEngine === 'undefined' || !effectEngine) return false;
     var ee = effectEngine;
     var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
