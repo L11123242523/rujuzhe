@@ -11408,6 +11408,8 @@ function __chainAskRefresh() {
 
 /* 弹出连锁选择窗（带倒计时自动放弃）。choices 末项为 PASS；超时按 PASS 处理。 */
 function showChainChoice(title, cardName, effectText, choices, onPick) {
+  /* 【2026-10-05】连锁窗本来就会设置 _awaitingDecision；这里再包一层保证"应答即清" */
+  try { onPick = __decideWrapped(onPick, 'chainChoice'); } catch (e) {}
   if (__chainNeverAsk) {
     /* 【2026-10-03】这个开关很容易误点，一旦打开所有连锁问都瞬间自动放弃 ⇒ 每次留一条日志，
        玩家在战斗日志里能看到"是因为本会话关闭了连锁询问"，而不是以为"AI 抢跑不让我连锁"。
@@ -17382,7 +17384,36 @@ __defEngineState('_choiceQueue', function () { return []; }); // 弹窗队列：
    浏览器 ENV.ask(seat='p1') → 本机弹窗（并像以前一样把本机玩家的答案广播出去）；
    服务器 ENV.ask(seat) → 把问题发给那个座位并等回答（大师决斗/三国杀就是这么做的）。
    下面的 __askChoiceLocal 就是原来的 showChoiceModal 身体，逐字保留。 */
+/* 【2026-10-05 AI 抢跑·第 7 次·统一口径】"玩家正在决策"的唯一权威计数。
+   所有玩家决策入口成对调用 enter/leave；闸门 __decideWaitGate / __phaseWaitBusy 只看它。
+   原来只有连锁窗会设置它 ⇒ 选项弹窗/选卡时 AI 以为玩家空闲 ⇒ 抢跑。 */
+function __decideEnter(why) {
+  try {
+    if (typeof battleState === 'undefined' || !battleState) return;
+    battleState._awaitingDecision = (battleState._awaitingDecision || 0) + 1;
+    battleState._awaitingWhy = why || '';
+  } catch (e) {}
+}
+function __decideLeave(why) {
+  try {
+    if (typeof battleState === 'undefined' || !battleState) return;
+    var n = (battleState._awaitingDecision || 0) - 1;
+    battleState._awaitingDecision = n > 0 ? n : null;
+    if (!battleState._awaitingDecision) battleState._awaitingWhy = '';
+  } catch (e) {}
+}
+function __decideWrapped(cb, why) {
+  /* 把"应答回调"包一层：玩家做出选择时立刻 leave（避免靠 close 才清） */
+  __decideEnter(why);
+  var done = false;
+  return function () {
+    if (!done) { done = true; __decideLeave(why); }
+    try { if (typeof cb === 'function') return cb.apply(this, arguments); } catch (e) { throw e; }
+  };
+}
 function showChoiceModal(title, cardName, effect, choices, callback) {
+  /* 【2026-10-05】选项弹窗 = 玩家决策 ⇒ 必须让闸门看见 */
+  try { callback = __decideWrapped(callback, 'choiceModal'); } catch (e) {}
   return ENV.ask('p1', { kind: 'choice', label: title, cardName: cardName, effect: effect, choices: choices }, callback);
 }
 function __askChoiceLocal(spec, callback) {
@@ -17422,6 +17453,8 @@ function __guestPlayVerdict(i, card) {
   return (typeof Online !== 'undefined' && Online && typeof Online.playableOf === 'function') ? Online.playableOf(i) : { ok: true, reason: '' };
 }
 function onlineDecideModal(side, title, cardName, effect, choices, callback) {
+  /* 【2026-10-05】联机远端决策同样算"有人在决策" */
+  try { callback = __decideWrapped(callback, 'onlineDecide'); } catch (e) {}
   var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
   // 本地决策，或客人侧（客人不跑规则，理论上到不了这里）：直接弹窗
   if (!__OL || side !== 'p2' || Online.isGuest) {
@@ -17573,6 +17606,8 @@ try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 7
 try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) {}
 
 function closeChoiceModal() {
+  /* 【2026-10-05】弹窗被关闭（含点遮罩/超时）⇒ 也要清，避免标记残留把 AI 卡死 */
+  try { __decideLeave('closeChoiceModal'); } catch (e) {}
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
   pendingChoiceCallback = null;
@@ -18903,6 +18938,8 @@ __defEngineState('_cardPickerStack', function () { return []; });      // 待应
 // 通用选卡弹窗：needCount 缺省/1 = 单选(回调 idx)；needCount>=2 = 多选(回调 idx 数组)
 // C 阶段·第 2 步：同 showChoiceModal —— 调用点不改，只把"身体"搬到环境层（浏览器=弹窗，服务器=问座位）
 function showCardPickerMulti(cards, title, callback, needCount, allowLess, allowCancel) {
+  /* 【2026-10-05】选卡 = 玩家决策 ⇒ 让闸门看见 */
+  try { callback = __decideWrapped(callback, 'cardPicker'); } catch (e) {}
   /* allowCancel（2026-10-01）：允许玩家点"取消"放弃这次选卡（如献祭，防止误触浪费每回合次数）。
      默认 false ⇒ 其它"必须选卡"的效果流程完全不受影响。 */
   return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess, allowCancel: !!allowCancel }, callback);
