@@ -9022,7 +9022,9 @@ function importDeckCode(player) {
 // ========== 对战 ==========
 var __pendingSandbox = false;   // 【测试卡组·沙盒】由菜单按钮置位，startTurn 首次进入时落到 battleState._sandbox
 function startBattle(__sandbox) {
-  try { if (typeof __sfx !== 'undefined' && __sfx.bgmStart) __sfx.bgmStart(); } catch (e) {}   /* 【2026-10-03】进对局起播 BGM */
+  /* 【2026-10-03】进对局起播 BGM：**延后一拍**，等战斗状态（同步值/上限）初始化完再判断，
+     避免开局读到未初始化的数值而误播残血曲（作者实测："一开局就放"）。 */
+  try { setTimeout(function () { try { if (typeof __sfx !== 'undefined' && __sfx.bgmStart) __sfx.bgmStart(); } catch (e) {} }, 400); } catch (e) {}
   __pendingSandbox = !!__sandbox;   // 不包 try（审计：不得新增静默吞；这行也不可能抛）
   /* ⚠ 这里**必须**区分单机与联机（作者 2026-09-16 报："联机对战使用的卡组还是单机对战的卡组"）：
      联机房主开局走的也是 startBattle()（见 Online._onGameStart 里的 startBattle() 调用），
@@ -21662,8 +21664,14 @@ var __sfx = (function () {
       if (!__bgmInBattle()) return false;      /* 不在战斗里 ⇒ 一律不放 */
       var p = (typeof battleState !== 'undefined' && battleState) ? battleState.p1 : null;
       if (!p) return false;
-      var maxS = p.maxSync || 40, cur = (p.sync == null ? maxS : p.sync);
-      return cur <= maxS / 2;   /* 作者口径：一半**及以下** */
+      /* 【2026-10-03 保险】maxSync 还没初始化（== null / <= 0）⇒ 一律不放：
+         否则会把"未初始化"当成"40 满血"，再配上"sync 默认 0 ≤ 一半"就变成一开局就播（作者实测）。 */
+      if (!(p.maxSync > 0)) return false;
+      var maxS = p.maxSync, cur = (p.sync == null ? maxS : p.sync);
+      /* 【2026-10-03 作者口径修正】"同步值**降低到**最大同步值的一半及以下的时候再放" ——
+         强调"降低到"：必须先出现过高位（> 一半），之后掉到 ≤ 一半才算；开局同步值本就是 0，不算"降低到"。 */
+      if (cur > maxS / 2) { battleState._bgmAboveHalf = true; return false; }
+      return !!battleState._bgmAboveHalf;
     } catch (e) { return false; }
   }
   /* 界面刷新时顺带检查是否要换曲（只在需要换时才动，代价极小） */
