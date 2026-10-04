@@ -16167,7 +16167,24 @@ function __flushPendingTileEffects() {
     if (__tileQueueFlushing) return;
     var q = (battleState && battleState._pendingTileEffects) || [];
     if (!q.length) return;
-    if (typeof __effectsResolving === 'function' && __effectsResolving()) return;   // 还在结算 ⇒ 继续等
+    if (typeof __effectsResolving === 'function' && __effectsResolving()) {
+      /* 【2026-10-03 端到端实测修】"排了队但没人处理"：收尾那一刻结算上下文可能还没退干净
+         ⇒ 安排一次**延后重试**（上限 40 次 ≈ 6 秒，防死循环），等结算真正结束再处理。 */
+      try {
+        if (!window.__tileFlushRetry) {
+          window.__tileFlushRetry = 0;
+          var __try = function () {
+            window.__tileFlushRetry++;
+            if (window.__tileFlushRetry > 40) { window.__tileFlushRetry = 0; return; }
+            try { if (typeof __effectsResolving === 'function' && __effectsResolving()) { setTimeout(__try, 150); return; } } catch (e) {}
+            window.__tileFlushRetry = 0;
+            __flushPendingTileEffects();
+          };
+          setTimeout(__try, 150);
+        }
+      } catch (e) {}
+      return;
+    }
     __tileQueueFlushing = true;
     var player = q.shift();
     try { addBattleLog(player, '【格子效果】本次连锁已全部结算完成 ⇒ 现在处理排队的格子效果'); } catch (e) {}
@@ -21534,7 +21551,7 @@ var __sfx = (function () {
   /* 【2026-10-03】真实 BGM 两轨：常驻 / 残血（ncm2audio.py 从 .ncm 解密） */
   /* 【2026-10-03 作者口径】BGM **只在同步值 ≤ 最大同步值一半时**才放（高于一半静音）。
      作者给的 Convergence 即"半血以下"曲目；若另外提供 bgm_low.mp3 则优先用它。 */
-  var BGM_MAIN = 'assets/audio/bgm_main.mp3?v=1';   /* 半血以下播放（作者给的曲） */
+  var BGM_MAIN = BGM_LOW;   /* 【2026-10-03】不再单独指向任何文件：残血曲才是唯一要放的（作者给的 Convergence） */
   var BGM_LOW  = 'assets/audio/bgm_low.mp3?v=1';    /* 残血专用（可选，存在则优先） */
   try { var raw = localStorage.getItem('dsh_sfx'); if (raw) { var o = JSON.parse(raw); cfg.on = (o && o.on !== false); cfg.vol = (o && typeof o.vol === 'number') ? o.vol : 0.5; } } catch (e) {}
   function save() { try { localStorage.setItem('dsh_sfx', JSON.stringify(cfg)); } catch (e) {} }
@@ -21714,7 +21731,9 @@ var __sfx = (function () {
   }
   /* 界面刷新时顺带检查是否要换曲（只在需要换时才动，代价极小） */
   function __bgmSync() {
-    try { if (!bgm.on) return; bgmSetTrack(__bgmWantLow() ? 'low' : 'main'); } catch (e) {}
+    /* 【2026-10-03 根因修】不满足条件（不在战斗界面 / 未降到一半）⇒ **静音**（原来是 'main'，
+       而 BGM_MAIN 就是作者给的残血曲 ⇒ 一进游戏/在主菜单刷新界面就会响）。与 bgmStart 保持一致。 */
+    try { if (!bgm.on) return; bgmSetTrack(__bgmWantLow() ? 'low' : null); } catch (e) {}
   }
   function bgmStop() { try { if (bgm.el && bgm.el.pause) bgm.el.pause(); } catch (e) {} bgmTimerStop(); }
   function bgmToggle() {
@@ -25746,7 +25765,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
   var __releasedD=false;
-  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) {} }   /* 【2026-10-03】结算退干净 ⇒ 处理排队中的格子效果 */
   try {
   var p = battleState[target];
   if (p) p._lastHitTaken = 0; // C16 “命中且造成N点以上伤害后可以打落”类条件：每次伤害结算前先清零本次实际伤害记录
