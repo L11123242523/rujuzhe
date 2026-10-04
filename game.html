@@ -13525,6 +13525,8 @@ function __executeCardEffectBody(player, card, done) {
    ============================================================ */
 function __chainIsBusy() {
   try {
+    /* 【目标③】统一：委托唯一权威（原来自己写一遍 depth/lock/inNewChain/窗口） */
+    if (typeof __busyNow === 'function') return __busyNow();
     if (!effectEngine) return false;
     if ((effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock || !!effectEngine._inNewChain) return true;
     /* S2（2026-09-27）：**TW 正在结算也算"链中"**。
@@ -16134,6 +16136,8 @@ function __busChooseStep(player, left, __kasumiMode, __excludeTile) {
    做法：入口判断"是否正在结算效果"，是就挂起；在"连锁全部结算完成"的出口统一 flush。 */
 function __effectsResolving() {
   try {
+    /* 【目标③】统一：委托唯一权威（原来"先调 chainIsBusy 再重复查一遍"） */
+    if (typeof __busyNow === 'function') return __busyNow();
     if (typeof __chainIsBusy === 'function' && __chainIsBusy()) return true;
     if (typeof effectEngine !== 'undefined' && effectEngine) {
       if ((effectEngine._resolveDepth || 0) > 0) return true;
@@ -19388,8 +19392,26 @@ function __eeForceUnlock(whyTag, idleMs) {
   } catch (e) { return false; }
 }
 /** 玩家可见的"还能不能动"的唯一判据：过期锁不再拦人（并当场放掉，不只放行这一次） */
+/* 【2026-10-05 目标③·唯一权威】"是否处于效果结算/连锁处理中"= 四者并集：
+     _resolveDepth>0（正在结算） ∨ _chainLock（连锁锁） ∨ _inNewChain（正在组新连锁） ∨ TW.active（有窗口开着）
+   等价性探针 probe-busy-equivalence.cjs 实测：原来三个判据各自只覆盖一部分（21/24 一致）
+   ⇒ 这里统一成一个函数，三者全部委托它，探针应变为 24/24 一致。 */
+function __busyNow() {
+  try {
+    var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    if (ee) {
+      if ((ee._resolveDepth || 0) > 0) return true;
+      if (ee._chainLock) return true;
+      if (ee._inNewChain) return true;
+    }
+    try { if (typeof TW !== 'undefined' && TW && TW.active) return true; } catch (e) {}
+    return false;
+  } catch (e) { return false; }
+}
 function __eeLocked() {
   try {
+    /* 【目标③】并入并集（原来漏了"有窗口开着/正在组新连锁"）——更保守、更正确 */
+    if (typeof __busyNow === 'function' && __busyNow()) return true;
     if (typeof effectEngine === 'undefined' || !effectEngine) return false;
     var ee = effectEngine;
     var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
