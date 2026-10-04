@@ -15320,7 +15320,8 @@ function aiResourceStep(done) {
    超过 20 秒就**有声地**清掉并继续（宁可漏等一次，也不能整局卡死）。 */
 function __decideWaitGate(tag, retryFn) {
   try {
-    var ad = battleState && battleState._awaitingDecision;
+    /* 【目标③】委托唯一权威（玩家是否在决策） */
+    var ad = (typeof __playerDeciding === 'function') ? __playerDeciding() : (battleState && battleState._awaitingDecision);
     if (!ad) return false;
     /* 【2026-10-03 修·作者实测】只要玩家**真的**有询问在等（弹窗回调 / 连锁窗 / 排队询问 / 弹窗可见），
        就绝不因"超时"放行 —— 原来 20 秒无条件放行，玩家认真思考时会被夺走决定权。
@@ -15358,7 +15359,8 @@ function __decideWaitGate(tag, retryFn) {
 function __phaseWaitBusy() {
   try {
     if (typeof TW !== 'undefined' && TW && TW.active) return true;                       // 连锁/时点窗口开着
-    if (typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision) return true;
+    /* 【目标③】委托唯一权威（玩家是否在决策） */
+    if (typeof __playerDeciding === 'function' ? __playerDeciding() : (typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision)) return true;
     if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true;   // 弹窗在等回答
     if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) return true;
     if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return true;
@@ -19396,6 +19398,23 @@ function __eeForceUnlock(whyTag, idleMs) {
      _resolveDepth>0（正在结算） ∨ _chainLock（连锁锁） ∨ _inNewChain（正在组新连锁） ∨ TW.active（有窗口开着）
    等价性探针 probe-busy-equivalence.cjs 实测：原来三个判据各自只覆盖一部分（21/24 一致）
    ⇒ 这里统一成一个函数，三者全部委托它，探针应变为 24/24 一致。 */
+/* ================= 【2026-10-05 目标③】三类判断，各只留一个权威函数 =================
+   ① 是否在战斗界面：__inBattleScreen()
+   ② 玩家是否正在决策：__playerDeciding()
+   ③ 是否处于效果结算中：__busyNow()
+   其它地方一律委托这三个，不许再各写一份（AI 抢跑反复 7 次、BGM 结束不停，根因都是各写一份）。 */
+function __inBattleScreen() {
+  try {
+    if (typeof battleState === 'undefined' || !battleState) return false;
+    if (battleState._over) return false;
+    var el = (typeof document !== 'undefined') ? document.getElementById('battleScreen') : null;
+    if (!el || !el.classList) return false;
+    return !!el.classList.contains('active');
+  } catch (e) { return false; }
+}
+function __playerDeciding() {
+  try { return !!(typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision); } catch (e) { return false; }
+}
 function __busyNow() {
   try {
     var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
@@ -21810,15 +21829,8 @@ var __sfx = (function () {
   }
   /* 【2026-10-03 修】是否**在战斗界面里**（主菜单/加载/结算后回菜单都不算）——
      作者实测："一进游戏就放残血 BGM，退到主界面还在放" 就是因为少了这个判断。 */
-  function __bgmInBattle() {
-    try {
-      if (typeof battleState === 'undefined' || !battleState) return false;
-      if (battleState._over) return false;
-      var el = (typeof document !== 'undefined') ? document.getElementById('battleScreen') : null;
-      if (!el || !el.classList) return false;
-      return !!el.classList.contains('active');
-    } catch (e) { return false; }
-  }
+  /* 【目标③】委托唯一权威 __inBattleScreen（原来 BGM 自己写了一份同样的判断） */
+  function __bgmInBattle() { return (typeof __inBattleScreen === 'function') ? __inBattleScreen() : false; }
   /* 是否该放残血曲：**在战斗界面** 且 自己（p1）同步值 ≤ 最大同步值一半 */
   function __bgmWantLow() {
     try {
