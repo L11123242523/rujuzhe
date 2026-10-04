@@ -11067,6 +11067,7 @@ function startTurn() {
   }
   if (battleState) {
     battleState[__rs]._lanzhangUsed = false;
+    battleState[__rs]._lanzhangActiveUsed = false;   /* 【2026-10-03】新版主动效果：每回合一次 */
     battleState[__rs]._yaodaoTriggered = false;
     battleState[__rs]._megumiSacBonusThisTurn = 0; // 惠δ本回合临时献祭次数加成（每回合开始清零）
     battleState[__rs]._rollCountTurn = 0;            // 葵·福音雅颂/予被动：本回合投掷次数
@@ -12224,6 +12225,9 @@ registerTrigger({
   timing: 'after-damage',
   ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
   cond: function (ctx, owner) {
+    /* 【2026-10-03】旧版停用：新版改成"每个自己回合主要阶段主动发动"（见 PERMANENT_ACTIVE_HANDLERS.lanzhangCoin），
+       旧的"判定伤害后追加硬币判定"不再触发，避免新旧两套同时生效。 */
+    return false;
     var q = battleState[owner]; if (!q) return false;
     if (q._lanzhangUsed || !ctx.judge) return false;
     return (q.permanent || []).some(function (c) { return c.name && /蓝宝|蓝杖/.test(c.name); });
@@ -14889,6 +14893,7 @@ function endTurn() {
   
   // 重置蓝宝之杖每回合首次标记
   if (battleState.p1._lanzhangUsed) battleState.p1._lanzhangUsed = false;
+  battleState.p1._lanzhangActiveUsed = false;   /* 【2026-10-03】新版主动效果：每回合一次 */
   // 单回合移动累计：回合结束立即归零（里绪/直尺）
   battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
   battleState.p1._kaedeMizugiMove = 0; battleState.p1._kaedeMizugiRecycledTurn = false;
@@ -26270,7 +26275,9 @@ var PERMANENT_STRUCT = [
   { match: ['镌刻'],
     onPlay: ['从牌组或移出游戏的卡中选一张[侵略]标签的卡加入手卡'],
     active: { once: 'turn', flag: '_juanUsedTurn', handler: 'juanKe' } },
-  { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'], active: null },
+  { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
+      /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
+      active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
   { match: ['善意面具', '笑意面具'], onPlayHandler: 'kindMask', active: null },
   { match: ['智能手机'], onPlay: ['获得2000金币'],
     active: { once: 'turn', flag: '_phoneUsedThisTurn', handler: 'phone', noAutoFlag: true } },
@@ -26461,6 +26468,34 @@ var PERMANENT_ONPLAY_HANDLERS = {
 
 // ---------- 主动发动（玩家在效果处理区点击）----------
 var PERMANENT_ACTIVE_HANDLERS = {
+  /* 【2026-10-03 新版·蓝宝之杖·命】每个自己回合主要阶段主动发动：
+     选一名玩家 → 硬币判定 → 正面造成 2 点判定伤害、反面不造成伤害（每回合一次由 active.flag 闸门管）。 */
+  lanzhangCoin: function (card, user) {
+    var p = battleState[user]; if (!p) return false;
+    var foes = (typeof othersOf === 'function') ? othersOf(user) : ['p2'];
+    var opts = foes.map(function (k) { return '对' + (k === 'p1' ? '我方' : '对手' + k.slice(1)) + '造成硬币判定伤害'; });
+    function __settle(target) {
+      function __done() { if (typeof updateBattleUI === 'function') updateBattleUI(); }
+      function __after(face, __cancelled) {
+        if (__cancelled || face == null) { addBattleLog(user, '【蓝宝之杖·命】硬币判定被连锁无效，不造成伤害'); __done(); return; }
+        var ok = (face === '正面' || face === true || face === 1);
+        addBattleLog(user, '【蓝宝之杖·命】主动发动硬币判定：' + (ok ? '正面，对' + target + '造成2点判定伤害' : '反面，不造成伤害'));
+        if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命·硬币判定', function () { __done(); }, null, user, { judge: true, segment: true });
+        else __done();
+      }
+      if (user === 'p1' && typeof judgePerform === 'function') judgePerform('p1', { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
+      else if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
+      else if (typeof Online !== 'undefined' && Online.active && typeof judgePerform === 'function') judgePerform(user, { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
+      else __after(GameRNG.coin() ? '正面' : '反面');
+    }
+    function __pick(i) {
+      if (i == null || i < 0) { if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
+      __settle(foes[i] || 'p2');
+    }
+    if (typeof Online !== 'undefined' && Online.active && user === 'p2') onlineDecideModal('p2', '蓝宝之杖·命（对手）', '每个自己回合的主要阶段可以发动：对一名玩家造成一次硬币判定伤害', '正面2点判定伤害／反面不造成', opts, __pick);
+    else if (typeof showChoiceModal === 'function') showChoiceModal('蓝宝之杖·命', '每个自己回合的主要阶段可以发动：对一名玩家造成一次硬币判定伤害', '正面2点判定伤害／反面不造成', opts, __pick);
+    return true;
+  },
   // 镌刻：付4同步回2音韵（同步低于50%回4）
   juanKe: function (card, user) {
     var p = battleState[user], maxS = p.maxSync || p.sync;
