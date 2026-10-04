@@ -13210,6 +13210,10 @@ var TW = {
     try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
+    /* 【2026-10-03 P0·作者反馈 6 次】关窗必收起连锁框：残留都发生在"非标准结算"的收尾路径
+       （判定结果窗口 / 双方 PASS 直接关窗 / 异常路径）⇒ 在唯一收尾点强制收起（幂等，没显示时无副作用）。 */
+    try { if (typeof hideChainBar === 'function') hideChainBar(); }
+    catch (e) { try { console.error('收起连锁框失败（不影响收尾）', e); } catch (e2) {} }
     if (this.active === win) this.active = null;
     // S5：关窗 = 没有窗口在跑 —— **顺序很重要**：必须先把 active 置空，
     // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
