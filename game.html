@@ -13228,12 +13228,9 @@ var TW = {
        原来只排空了格子效果那条 ⇒ 待处理触发要等下一个连锁才被带出来 ✗ */
     /* 【2026-10-05 修回归】这里**不能同步排空** —— 收尾中途拉队列会把送墓触发（如盒子SP）吞掉
        （作者实测"盒子的SP效果又被吞了"）⇒ 延后一拍，等本次收尾彻底跑完再排空。 */
-    try {
-      setTimeout(function () { try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {} }, 0);
-    } catch (e) { try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e2) {} }
+    try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('TW.close'); } catch (e) {}
     /* 【2026-10-03 作者口径】当前连锁**全部结算完成** ⇒ 才处理排队中的格子效果（新流程 = 新连锁） */
-    try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); }
-    catch (e) { try { console.error('处理排队格子效果失败（不影响收尾）', e); } catch (e2) {} }
+    /* （格子效果已由上面的 __drainAllWhenIdle 统一排空，这里不再单独调，避免两套时机） */
     if (this.active === win) this.active = null;
     // S5：关窗 = 没有窗口在跑 —— **顺序很重要**：必须先把 active 置空，
     // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
@@ -16179,6 +16176,34 @@ function __queueTileEffect(player) {
     addBattleLog(player, '【格子效果】结算中产生（第' + battleState[player].position + '格【' + (t.name || '') + '】）⇒ 排队，等本次连锁全部结算完成后再处理');
     return true;
   } catch (e) { return false; }
+}
+/* 【2026-10-05 治本·统一排空】一个函数管两条队列：
+     · effectEngine._pendingTriggers        —— 本次连锁中产生、排队的触发（会另开新连锁）
+     · battleState._pendingTileEffects      —— 本次连锁中产生的格子效果
+   关键：**不空闲就重试**（上限 40 次 × 200ms）。原来是一次性 setTimeout(0) 排空，落空后没人再试
+   ⇒ 送墓触发（盒子 SP）被延后到"下一次连锁/窗口"才被带出来（作者实测的两句话就是这个）。 */
+var __drainRetryTimer = null;
+function __drainAllWhenIdle(reason) {
+  try {
+    var tries = 0;
+    function __idle() {
+      try {
+        if (typeof __effectsResolving === 'function' && __effectsResolving()) return false;
+        if (typeof TW !== 'undefined' && TW && TW.active) return false;
+        return true;
+      } catch (e) { return true; }
+    }
+    function __step() {
+      __drainRetryTimer = null;
+      try {
+        if (!__idle()) { if (++tries <= 40) { __drainRetryTimer = setTimeout(__step, 200); } return; }
+        try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
+        try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) {}
+      } catch (e) {}
+    }
+    if (__drainRetryTimer) { try { clearTimeout(__drainRetryTimer); } catch (e) {} __drainRetryTimer = null; }
+    __step();
+  } catch (e) {}
 }
 function __flushPendingTileEffects() {
   try {
@@ -25849,7 +25874,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
   var __releasedD=false;
-  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) {} }   /* 【2026-10-03】结算退干净 ⇒ 处理排队中的格子效果 */
+  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('release'); } catch (e) {} }   /* 【2026-10-05】结算退干净 ⇒ 统一排空（带重试） */
   try {
   var p = battleState[target];
   if (p) p._lastHitTaken = 0; // C16 “命中且造成N点以上伤害后可以打落”类条件：每次伤害结算前先清零本次实际伤害记录
