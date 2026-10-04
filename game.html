@@ -13580,6 +13580,39 @@ function __chainOnceReset() {
   try { if (typeof effectEngine !== 'undefined' && effectEngine) effectEngine._chainOnceSet = {}; } catch (e) { console.error('清空"同链一次"集合失败', e); }
 }
 /** 结算中 → 入队；否则立即执行 */
+/* 【2026-10-03 作者口径·文本判据】发动语含"可/可以" ⇒ 必须**询问是否发动**，发动就进连锁。
+   本函数按触发来源卡名去 cardData 取原文判断（排除"可叠加/可叠/可重复"这类非发动语）。
+   测试：node port-old/probe-keyi-text-rule.cjs */
+var __optTextCache = {};
+function __cardTextByName(name) {
+  try {
+    if (!name) return '';
+    if (__optTextCache[name] != null) return __optTextCache[name];
+    var pools = [];
+    try { if (window.cardData) Object.keys(window.cardData).forEach(function (k) { if (Array.isArray(window.cardData[k])) pools.push(window.cardData[k]); }); } catch (e) {}
+    try { if (typeof allCards !== 'undefined' && allCards && allCards.length) pools.push(allCards); } catch (e) {}
+    var t = '';
+    for (var i = 0; i < pools.length && !t; i++) {
+      for (var j = 0; j < pools[i].length; j++) {
+        var c = pools[i][j];
+        if (c && c.name === name) { t = [c.effect, c.sp, c.passive].filter(Boolean).join(' '); break; }
+      }
+    }
+    __optTextCache[name] = t;
+    return t;
+  } catch (e) { return ''; }
+}
+function __triggerTextOptional(desc) {
+  try {
+    if (!desc) return false;
+    var nm = (desc.card && desc.card.name) || '';
+    if (!nm && typeof desc.label === 'string') { var m = desc.label.match(/【([^】]+)】/); if (m) nm = m[1]; }
+    if (!nm) return false;
+    var t = __cardTextByName(nm);
+    if (!t) return false;
+    return /(可以|可)(?!叠加|叠|重复)/.test(t);
+  } catch (e) { return false; }
+}
 function queueOrRunTrigger(desc) {
   try {
     if (!desc || typeof desc.fire !== 'function') return 'ran';
@@ -13587,7 +13620,12 @@ function queueOrRunTrigger(desc) {
        不排进"待处理触发"队列（排进去 = 本次连锁结束后另开新连锁 = 开窗询问）。
        ⚠ 且这一支**放在"同链一次"去重之前、也不消耗去重键** —— 作者口径：
        「同链重复触发，触发几次就生效几次」（如星奈(水着)多段伤害每段各一次）。 */
-    if (desc.direct) {
+    /* 【2026-10-03 作者口径】含"可/可以"发动语的卡 ⇒ **不走 direct**，回到常规路径（询问 ⇒ 进连锁） */
+    if (desc.direct && __triggerTextOptional(desc)) {
+      desc.mandatory = false;
+      try { addBattleLog(desc.owner || 'system', '【连锁·文本判据】「' + (desc.label || desc.id || '?') + '」卡面写"可/可以" ⇒ 改为询问是否发动（进连锁）'); } catch (e) {}
+    }
+    if (desc.direct && !__triggerTextOptional(desc)) {
       desc.fire();
       /* 【2026-10-03 修·作者实测"贪欲者的烙印标记又不显示了"】direct 是"结算中就地执行"，
          原来执行完**没有刷新界面**（旧的连锁路径收尾会刷）⇒ 标记/数值要等下一次别的刷新才出现。
