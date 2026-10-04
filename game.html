@@ -3652,7 +3652,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 @media screen and (min-width: 1500px){
   body:not(.ui-classic) #battleScreen .map3d-wrap,
   body:not(.ui-classic) #battleScreen .battle-map-container{
-    max-width:1200px !important;
+    max-width:1200px !important;   /* 【2026-10-05】恢复线上现状：地图尺寸这块先不动（作者：算了你别管） */
     max-height:min(58vh, 560px) !important;
   }
   body:not(.ui-classic) #battleScreen .hand-card{
@@ -15827,6 +15827,10 @@ var __syncZeroRecheck = (function () {
   return { arm: arm };
 })();
 function checkBattleEnd() {
+  /* 【2026-10-05 作者实测"游戏结束了 BGM 还不停"】本函数是唯一的"对局结束"判定入口：
+     跑完它之后（下一拍）同步一次 BGM 状态 ⇒ 结束时自动淡出停曲（没结束则什么都不做）。 */
+  var __bgmEndHook = function () { try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) {} };
+  try { setTimeout(__bgmEndHook, 0); } catch (e) { __bgmEndHook(); }
   if (battleState._over) return true; // 已判定过：不再重复弹窗/重复推进
   var isRL = (roguelikeState && roguelikeState._isRoguelike);
   var __ol = (typeof Online !== 'undefined' && Online.active);
@@ -16193,8 +16197,14 @@ function __flushPendingTileEffects() {
   } catch (e) { __tileQueueFlushing = false; }
 }
 function triggerTileEffect(player) {
-  /* 结算中 ⇒ 只排队，绝不插队（作者口径） */
-  try { if (typeof __effectsResolving === 'function' && __effectsResolving()) { __queueTileEffect(player); return; } } catch (e) {}
+  /* 【2026-10-05 作者口径修】分两种到达原因：
+       · **投掷阶段**到达（走格子走到的）⇒ **直接执行**（交互格该问就问）；
+       · **因效果**到达（卡效果把你送过去）⇒ 效果结算中先排队，等当前连锁全部结算完再处理。
+     上一版用"是否在结算中"一刀切，把投掷阶段也排队了 ⇒ 作者实测：走到馈赠格不给卡、还拖到主要阶段二 ✗ */
+  try {
+    var __tileInRoll = !!(typeof battleState !== 'undefined' && battleState && battleState.phase === 'roll');
+    if (!__tileInRoll && typeof __effectsResolving === 'function' && __effectsResolving()) { __queueTileEffect(player); return; }
+  } catch (e) {}
   if (!battleState) return;
   /* 【2026-10-03 撤回】原来这里会把"结算中到达"的格子效果挂起，但投掷阶段的移动也在结算上下文里
      ⇒ 正常移动到达的格子效果被挂起后没人执行（作者实测：投掷到卡牌格完全没有效果）。
