@@ -13665,7 +13665,13 @@ function queueOrRunTrigger(desc) {
       addBattleLog(desc.owner || 'system', '【连锁·MD口径】「' + (desc.label || desc.key) + '」本连锁已排过 ⇒ 丢弃重复');
       return 'dup';
     }
-    if (!__chainIsBusy()) { desc.fire(); return 'ran'; }
+    /* 【口径 (a)(d)(e) 2026-10-05·窄修复】正在等玩家选牌/作决定时也**不许当场执行**：
+       否则"当前卡效果体已跑完、正等玩家从列表选一张"期间产生的送墓触发会插队结算，
+       把当前卡还没走完的分支顶掉（作者实测：绿杖③ ⇒ 盒子触发当场结算 ⇒ 绿杖留在效果处理区）。
+       ⚠ 只拦这一个直达分支；**不动 __busyNow**（放宽全局判据会把排空闸门堵死，套件已证明 ⇒ 已回滚）。 */
+    var __decidingNow = false;
+    try { __decidingNow = !!(typeof __playerDeciding === 'function' && __playerDeciding()); } catch (e) {}
+    if (!__chainIsBusy() && !__decidingNow) { desc.fire(); return 'ran'; }
     effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
     effectEngine._pendingTriggers.push(desc);
     addBattleLog(desc.owner || 'system', '【连锁】结算中产生新效果：' + (desc.label || '效果') + ' → 等本次连锁处理完另开新连锁');
