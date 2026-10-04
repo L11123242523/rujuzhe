@@ -13224,7 +13224,7 @@ var TW = {
     /* 【2026-10-05 统一收尾·作者实测"结算完也不处理/要等下一个连锁才跳出来"】
        关窗 = 当前连锁确实结束 ⇒ **在这里统一排空两条队列**：
          · effectEngine._pendingTriggers（本次连锁中产生、排队的触发）⇒ __tryDrainTriggers 会另开新连锁
-         · battleState._pendingTileEffects（本次连锁中产生的格子效果）
+         · battleState._pendingAfterChain（本次连锁中产生的格子效果）
        原来只排空了格子效果那条 ⇒ 待处理触发要等下一个连锁才被带出来 ✗ */
     /* 【2026-10-05 修回归】这里**不能同步排空** —— 收尾中途拉队列会把送墓触发（如盒子SP）吞掉
        （作者实测"盒子的SP效果又被吞了"）⇒ 延后一拍，等本次收尾彻底跑完再排空。 */
@@ -16175,9 +16175,9 @@ var __tileQueueFlushing = false;
 function __queueTileEffect(player) {
   try {
     if (typeof battleState === 'undefined' || !battleState) return false;
-    battleState._pendingTileEffects = battleState._pendingTileEffects || [];
-    if (battleState._pendingTileEffects.indexOf(player) >= 0) return false;   // 同一玩家同批只排一次
-    battleState._pendingTileEffects.push(player);
+    battleState._pendingAfterChain = battleState._pendingAfterChain || [];
+    if (battleState._pendingAfterChain.indexOf(player) >= 0) return false;   // 同一玩家同批只排一次
+    battleState._pendingAfterChain.push(player);
     var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES[battleState[player].position]) || {};
     addBattleLog(player, '【格子效果】结算中产生（第' + battleState[player].position + '格【' + (t.name || '') + '】）⇒ 排队，等本次连锁全部结算完成后再处理');
     return true;
@@ -16185,9 +16185,12 @@ function __queueTileEffect(player) {
 }
 /* 【2026-10-05 治本·统一排空】一个函数管两条队列：
      · effectEngine._pendingTriggers        —— 本次连锁中产生、排队的触发（会另开新连锁）
-     · battleState._pendingTileEffects      —— 本次连锁中产生的格子效果
+     · battleState._pendingAfterChain      —— 本次连锁中产生的格子效果
    关键：**不空闲就重试**（上限 40 次 × 200ms）。原来是一次性 setTimeout(0) 排空，落空后没人再试
    ⇒ 送墓触发（盒子 SP）被延后到"下一次连锁/窗口"才被带出来（作者实测的两句话就是这个）。 */
+/* 【2026-10-05 目标②】"连锁结束后要处理的工作"的**自有容器只有一个**：battleState._pendingAfterChain
+   （格子效果等）。引擎标准的 effectEngine._pendingTriggers 属引擎核心，暂时并存；
+   但**排空点只有一个**（__drainAllWhenIdle），顺序固定：先引擎触发、后自有容器。 */
 var __drainRetryTimer = null;
 function __drainAllWhenIdle(reason) {
   try {
@@ -16214,7 +16217,7 @@ function __drainAllWhenIdle(reason) {
 function __flushPendingTileEffects() {
   try {
     if (__tileQueueFlushing) return;
-    var q = (battleState && battleState._pendingTileEffects) || [];
+    var q = (battleState && battleState._pendingAfterChain) || [];
     if (!q.length) return;
     if (typeof __effectsResolving === 'function' && __effectsResolving()) {
       /* 【2026-10-03 端到端实测修】"排了队但没人处理"：收尾那一刻结算上下文可能还没退干净
