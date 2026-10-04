@@ -11071,7 +11071,8 @@ function startTurn() {
   }
   if (battleState) {
     battleState[__rs]._lanzhangUsed = false;
-    battleState[__rs]._lanzhangActiveUsed = false;   /* 【2026-10-03】新版主动效果：每回合一次 */
+    /* 【2026-10-05 统一】每回合一次：一律清**永续卡上的标记**（原来清玩家字段 ⇒ 卡上标记永不清 ⇒ 蓝杖用一次就锁死） */
+    try { if (typeof __resetPermanentActiveFlags === 'function') __resetPermanentActiveFlags(__rs); } catch (e) {}
     battleState[__rs]._yaodaoTriggered = false;
     battleState[__rs]._megumiSacBonusThisTurn = 0; // 惠δ本回合临时献祭次数加成（每回合开始清零）
     battleState[__rs]._rollCountTurn = 0;            // 葵·福音雅颂/予被动：本回合投掷次数
@@ -14951,7 +14952,8 @@ function endTurn() {
   
   // 重置蓝宝之杖每回合首次标记
   if (battleState.p1._lanzhangUsed) battleState.p1._lanzhangUsed = false;
-  battleState.p1._lanzhangActiveUsed = false;   /* 【2026-10-03】新版主动效果：每回合一次 */
+  /* 【2026-10-05 统一】每回合一次：清永续卡上的标记（同 AI 侧） */
+  try { if (typeof __resetPermanentActiveFlags === 'function') __resetPermanentActiveFlags('p1'); } catch (e) {}
   // 单回合移动累计：回合结束立即归零（里绪/直尺）
   battleState.p1._rioMoveCount = 0; battleState.p1._zhichiMoveCount = 0; battleState.p1._koharuMoveCount = 0;
   battleState.p1._kaedeMizugiMove = 0; battleState.p1._kaedeMizugiRecycledTurn = false;
@@ -26979,6 +26981,8 @@ function executePermanentActiveFor(user, index, done) {
     if (done) done();
     return;
   }
+  /* 【2026-10-05 统一】"每回合一次"的标记一律打在**卡对象**上（见下面 card[act.flag] = true），
+     所以重置也必须**遍历永续区的卡**来清 —— 这同时修好 直尺/智能手机/蓝宝之杖 等所有同类永续卡。 */
   var fn = PERMANENT_ACTIVE_HANDLERS[act.handler];
   if (!fn) { if (done) done(); return; }
   addBattleLog(user, '发动永续卡【' + card.name + '】主动效果');
@@ -26988,6 +26992,28 @@ function executePermanentActiveFor(user, index, done) {
   if (done) done();
 }
 // 单机 p1 入口（保持旧 API）
+/* 【2026-10-05 统一】清掉某玩家**永续区每张卡**上"每回合一次"的主动标记（只清 once==='turn' 的）。 */
+function __resetPermanentActiveFlags(player) {
+  try {
+    var p = (typeof battleState !== 'undefined' && battleState) ? battleState[player] : null;
+    if (!p || !p.permanent) return 0;
+    var n = 0;
+    /* 按**命名约定**清卡上的"每回合一次"标记（不依赖内部解析器）：
+         UsedThisTurn / PaidThisTurn / ActiveUsed；**不动** UsedThisGame（一局一次）。 */
+    p.permanent.forEach(function (card) {
+      if (!card) return;
+      try {
+        Object.keys(card).forEach(function (k) {
+          if (!/UsedThisTurn$|PaidThisTurn$|ActiveUsed$|_activeUsed$/i.test(k)) return;
+          if (card[k]) { card[k] = false; n++; }
+        });
+      } catch (e) {}
+    });
+    /* 兼容早期误写在玩家字段上的标记（蓝杖那版） */
+    try { if (p._lanzhangActiveUsed) { p._lanzhangActiveUsed = false; n++; } } catch (e) {}
+    return n;
+  } catch (e) { return 0; }
+}
 function executePermanentActive(index) {
   executePermanentActiveFor('p1', index, null);
 }
