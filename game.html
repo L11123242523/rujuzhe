@@ -3572,7 +3572,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 #choiceModal.bus-chooser .card-modal h3{ font-size:15px; }
 #choiceModal.bus-chooser .modal-btn{ padding:7px 10px; font-size:13px; text-align:left; }
 
-/* ================= __UI_PHASE9 · 手牌完整卡面（作者 2026-10-03 清单①：手牌改成游戏王式全卡展示）=================
+/* ================= __UI_PHASE9-11 · 合并块（原 PHASE9/10/11，仅搬位置不改数值）（作者 2026-10-03 清单①：手牌改成游戏王式全卡展示）=================
    卡面比例 663:974 ≈ 0.681 ⇒ 88×129（高度与原来的 128 基本一致 ⇒ 不挤压地图行）；
    卡图铺满整张卡，名字压成底部渐变条，悬浮抬起放大便于看清（出牌/右键看效果逻辑不动）。 */
 @media screen and (min-width: 769px){
@@ -3611,10 +3611,6 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #battleScreen .hand-card:hover .hand-card-name{ font-size:12px !important; }
   body:not(.ui-classic) #battleScreen .hand-card.playable:hover{ border-color:var(--gold,#ffe39a) !important; }
 }
-
-/* ================= __UI_PHASE10 · 配置页整卡显示（作者 2026-10-03：卡组配置界面的卡都显示整张卡）=================
-   卡面真实比例 663:974 ≈ 0.681 ⇒ 插槽 66×97（原来 70×90 比例不符、卡面被裁）；卡图铺满不裁切，
-   名字压成底部渐变条；选卡列表同款处理；✕ 删除按钮提高层级。 */
 @media screen and (min-width: 769px){
   body:not(.ui-classic) #deckBuilder .deck-slot{
     width:66px !important; height:97px !important; padding:0 !important;
@@ -3644,11 +3640,6 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:9.5px !important; padding:2px 3px !important; }
   body:not(.ui-classic) #deckBuilder .card-item-cost{ z-index:3 !important; }
 }
-
-/* ================= __UI_PHASE11 · 大视口/全屏适配（作者 2026-10-03：F11 全屏/大屏适配）=================
-   实测 1920×1080：地图容器只有 920 宽（两侧大片空白）、手牌还是 1440 档的小卡。
-   ≥1500px：地图容器放宽到 1200、最大高度抬到 min(58vh,560px)，手牌按卡面比例放大到 92×135，
-   永续插槽/状态栏同步放大一档；小屏与 1440 档完全不受影响。 */
 @media screen and (min-width: 1500px){
   body:not(.ui-classic) #battleScreen .map3d-wrap,
   body:not(.ui-classic) #battleScreen .battle-map-container{
@@ -3666,6 +3657,10 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #battleScreen .deck-zone,
   body:not(.ui-classic) #battleScreen .grave-zone{ width:72px !important; height:88px !important; }
 }
+
+
+
+
 </style>
 
   <button class="back-btn" onclick="Online.leave();showScreen('mainMenu')">← 返回主菜单</button>
