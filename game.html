@@ -13218,6 +13218,13 @@ var TW = {
        （判定结果窗口 / 双方 PASS 直接关窗 / 异常路径）⇒ 在唯一收尾点强制收起（幂等，没显示时无副作用）。 */
     try { if (typeof hideChainBar === 'function') hideChainBar(); }
     catch (e) { try { console.error('收起连锁框失败（不影响收尾）', e); } catch (e2) {} }
+    /* 【2026-10-05 统一收尾·作者实测"结算完也不处理/要等下一个连锁才跳出来"】
+       关窗 = 当前连锁确实结束 ⇒ **在这里统一排空两条队列**：
+         · effectEngine._pendingTriggers（本次连锁中产生、排队的触发）⇒ __tryDrainTriggers 会另开新连锁
+         · battleState._pendingTileEffects（本次连锁中产生的格子效果）
+       原来只排空了格子效果那条 ⇒ 待处理触发要等下一个连锁才被带出来 ✗ */
+    try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); }
+    catch (e) { try { console.error('排空待处理触发出错（不影响收尾）', e); } catch (e2) {} }
     /* 【2026-10-03 作者口径】当前连锁**全部结算完成** ⇒ 才处理排队中的格子效果（新流程 = 新连锁） */
     try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); }
     catch (e) { try { console.error('处理排队格子效果失败（不影响收尾）', e); } catch (e2) {} }
