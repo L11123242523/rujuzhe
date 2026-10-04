@@ -23903,7 +23903,7 @@ function useEventCardFor(player, index, name, done) {
   if (!battleState) return;
   var __ecFoe = foeOf(player);
   var __ecOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
   var __oppTurn = battleState.currentPlayer !== player;
   
   var card = battleState[player].eventCards ? battleState[player].eventCards[index] : null;
@@ -24071,7 +24071,7 @@ function useMusicCardFor(player, index, name, done) {
   if (!battleState) return;
   var __muOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
   if (battleState.currentPlayer !== player) { if (done) done(); return; }
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能使用乐谱卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能使用乐谱卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
   if (battleState.phase !== 'main1' && battleState.phase !== 'main2') {
     if (player === 'p1') showToast('当前阶段不能使用乐谱卡', 'warn');
     if (done) done();
@@ -26289,7 +26289,7 @@ function uiActivateFaceDown(idx) {
 // 联机：盖伏翻开远端位重放（与 p1 的 activateFaceDown+proceedCardUse 同一流程/决策序列）
 function onlineActivateFaceDownP2(index, name, done) {
   if (!battleState || battleState._over) { if (done) done(); return; }
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能翻开盖伏卡'); if (done) done(); return; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能翻开盖伏卡'); if (done) done(); return; }
   var p = battleState.p2;
   if (!p.faceDownCards || !p.faceDownCards[index]) { if (done) done(); return; }
   var card = p.faceDownCards[index];
@@ -26427,7 +26427,7 @@ function aiPickFaceDownForWindow(effect, seat) {
 function aiActivateFaceDown(index, done, seat) {
   __setAiSeat(seat);
   if (!battleState) { if (done) done(); return false; }
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { if (done) done(); return false; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { if (done) done(); return false; }
   var p = aiMe(), card = p.faceDownCards && p.faceDownCards[index];
   if (!card) { if (done) done(); return false; }
   // 盖伏当回合不可发动（自己回合内）
@@ -26447,7 +26447,7 @@ function aiActivateFaceDown(index, done, seat) {
 
 function activateFaceDown(index, player) {
   if (!battleState) return false;
-  if (typeof effectEngine !== 'undefined' && effectEngine && (typeof __eeLocked === 'function' ? __eeLocked() : (effectEngine._resolveDepth > 0 || effectEngine._chainLock))) { addBattleLog('system', '效果结算中，暂时不能翻开盖伏卡'); return false; }
+  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能翻开盖伏卡'); return false; }
   var p = battleState[player];
   if (!p.faceDownCards || !p.faceDownCards[index]) return false;
 
