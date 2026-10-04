@@ -12296,6 +12296,9 @@ function __ruriJudgeAfterDamage(owner) {
     rp._ruriJudgeCount = (rp._ruriJudgeCount || 0) + 1;
     var TH = [3, 6, 11, 14];
     if (TH.indexOf(rp._ruriJudgeCount) < 0) return;
+    /* 【口径 (b) 2026-10-05】阶梯段（抽2选1弃 + 全队判定+1）必须先**谈窗询问发动**；
+       "判定伤害后回1音韵"已在上方直接结算（作者口径：回音韵=直接，阶梯=谈窗）。 */
+    var __ruriTierBody = function () {
     // 到达累计阈值：抽两张卡，然后选一张卡送入墓地，那之后全队造成的判定伤害+1
     if (typeof drawCard === 'function') { drawCard(owner); drawCard(owner); }
     function __ruriTier() {
@@ -12318,6 +12321,15 @@ function __ruriJudgeAfterDamage(owner) {
       if (ix >= 0) { arr.splice(ix, 1); rp.grave.push(pk.card); }
       __ruriTier();
     }
+    };
+    /* 谈窗询问：选"发动"才执行阶梯段；没有弹窗机制时按原样执行（兜底） */
+    try {
+      if (typeof showChoiceModal === 'function') {
+        showChoiceModal('琉璃被动·累计' + rp._ruriJudgeCount + '次', '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？', null, ['发动', '不发动'], function (pick) {
+          if (pick === 0) { try { __ruriTierBody(); } catch (e) {} }
+        });
+      } else { __ruriTierBody(); }
+    } catch (e) { try { __ruriTierBody(); } catch (e2) {} }
   } catch (e) { console.error('琉璃被动·判定后处理出错', e); }
 }
 
