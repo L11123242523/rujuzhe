@@ -21076,6 +21076,41 @@ try {
     setTimeout(function () { try { Online.tryEnableAuthoritativeFromUrl(); } catch (e) {} }, 0);
   }
 } catch (e) {}
+/* 【S3/S4 大厅入口 2026-10-05】"权威服"输入框 + 「启用权威模式」按钮的接线。
+   不侵入现有联机流程：元素不在（或没有 document）就**静默跳过**；留空点按钮 = 关闭并回到房主权威。 */
+try {
+  if (typeof document !== 'undefined' && typeof Online !== 'undefined' && Online) {
+    setTimeout(function () {
+      try {
+        var box = document.getElementById('olAuthority');
+        var btn = document.getElementById('olAuthGo');
+        if (!box || !btn) return;
+        var __sayAuth = function (s) { try { if (typeof Online.status === 'function') Online.status(s); } catch (e) {} };
+        btn.addEventListener('click', function () {
+          var base = String(box.value || '').trim();
+          if (!base) {                                   /* 留空 ⇒ 关闭，回到房主权威 */
+            try { Online.stopAuthoritativeLoop(); Online.disableAuthoritative(); } catch (e) {}
+            __sayAuth('已关闭服务器权威模式（回到房主权威）。');
+            return;
+          }
+          try {
+            var seat = (typeof Online.mySeat === 'string' && Online.mySeat) ? Online.mySeat : (Online.mySide || 'p1');
+            Online.enableAuthoritative(base, seat);
+            Online.startAuthoritativeLoop(Online.roomId || 'default', {
+              onSnapshot: null,
+              onPending: (typeof Online._renderAsk === 'function') ? function (spec, answerFn) { Online._renderAsk(spec, answerFn); } : null,
+              onError: function () {                     /* 连不上 ⇒ **自动回退**（降级路径） */
+                try { Online.stopAuthoritativeLoop(); Online.disableAuthoritative(); } catch (e) {}
+                __sayAuth('权威服连不上 ⇒ 已自动回退房主权威。');
+              }
+            });
+            __sayAuth('已启用服务器权威模式：' + base + '\n（规则跑在服务器里；连不上会自动回退）');
+          } catch (e) { __sayAuth('启用失败：' + (e && e.message)); }
+        });
+      } catch (e) {}
+    }, 0);
+  }
+} catch (e) {}
 try { window.__onlineDiverge = __onlineDiverge; } catch (e) {}
 try { window.onlineSurrender = onlineSurrender; } catch (e) {}
 try { window.__showSurrenderResult = __showSurrenderResult; } catch (e) {}
