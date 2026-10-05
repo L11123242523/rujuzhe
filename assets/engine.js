@@ -19151,7 +19151,11 @@ var PERMANENT_STRUCT = [
   { match: ['供给者'], onPlay: ['获取1点引导核心'],
     active: { once: 'turn', flag: '_supplyUsedThisTurn', handler: 'supplier' } },
   { match: ['极夜君王'],
-    onPlay: ['对一名玩家造成一次硬币判定伤害：正面的场合造成2点判定伤害，背面则不造成伤害'],
+    /* 【task2 补齐 2026-10-05】卡面写的是「对一名玩家造成一次四面骰判定伤害」，
+       旧注册表却是硬币判定（0/2）⇒ 与卡面不是同一条规则。此处改为**卡面原文**：
+       结构修复（apply-permanent-text-authority.mjs）会让"卡面从句与注册表等价 ⇒ 采用卡面"，
+       而编译层/执行层本来就支持 d4 判定伤害（13839 / 16232-16233，含控骰与琉璃SP钩子）。 */
+    onPlay: ['对一名玩家造成一次四面骰判定伤害'],
     active: null },
   { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } }
 ];
