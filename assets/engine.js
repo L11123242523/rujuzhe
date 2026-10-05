@@ -14796,6 +14796,15 @@ function computeDamageValue(user, target, opt) {
   if (__lhwOk) { final += 1; logs.push('琉璃(万圣祭)被动·费用≤3最终+1'); }
   // XHZD被动·"这是我的招式"：自己使用的攻击卡最终伤害+1
   if (ap._xhzdPassive && isAtk) { final += 1; logs.push('XHZD被动·攻击卡最终+1'); }
+  /* 【task2 补齐 2026-10-05】Huginn&Muninn（福金与穆宁）卡面第 2 句：
+     「使用混沌属性的卡造成的最终伤害+1，属性克制伤害+1。」
+     ——"属性克制伤害+1"无需新增代码（混沌克制规则见 __attrBeats 14327-14331）；
+        这里只补"使用**混沌属性**的卡造成的最终伤害+1"（卡面属性以 card.attribute === '混沌' 为准）。
+     位置选在**统一伤害公式的最终加算区**：所有伤害路径共用，不会只对某一条路径生效。 */
+  if (sc && String(sc.attribute || '') === '混沌' && (ap.permanent || []).some(function (c) { return c && /Huginn|穆宁|福金/.test(String(c.name || '')); })) {
+    final += 1;
+    logs.push('Huginn&Muninn·混沌卡最终+1');
+  }
   // 羽奈(往昔)SP：自己每有一张公开的卡，全队造成的最终伤害+1（公开的卡=正面朝上留在牌组顶/墓地/效果处理区的卡）
   if (ap._yunaiPastSP) {
     var __pubN = (typeof __publicCardCount === 'function') ? __publicCardCount(ap) : 0;
