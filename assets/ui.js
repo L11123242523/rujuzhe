@@ -1,6 +1,8 @@
 /* assets/ui.js —— 由 game.html 的 UI 类顶层函数**原样外移**而成（只搬位置、不改函数体/函数名）
    导出：文件末尾用 window.<name> 挂回全局，供 game.html 内联代码继续直接调用。 */
 function showScreen(id) {
+  /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
+  try { if (typeof window !== 'undefined') window.__screenId = id; } catch (e) {}
   var screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) {
     screens[i].classList.remove('active');
@@ -19,6 +21,9 @@ function showScreen(id) {
     try { __clearTransientBattleState('离开战斗界面'); } catch (e) {}
     /* 【2026-10-03】离开战斗 ⇒ 立刻停掉 BGM（作者实测：退到主界面还在放） */
     try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) {}
+    /* BGM 双保险【批次3】：上方判据已改状态权威 ⇒ bgmSync 会正确判"不在战斗"并停 ✓；
+       这里再直接暂停当前元素（模块内引用丢了也不怕 ✓） */
+    try { if (typeof window !== 'undefined' && window.__bgmEl && window.__bgmEl.pause && !window.__bgmEl.paused) window.__bgmEl.pause(); } catch (e) {}
   }
   // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
   if (id === 'battleScreen' && typeof Map3D !== 'undefined') {

@@ -13015,8 +13015,25 @@ function __inBattleScreen() {
   try {
     if (typeof battleState === 'undefined' || !battleState) return false;
     if (battleState._over) return false;
+    /* 【批次3·状态权威·优先】界面切换的唯一出口 showScreen 记了 __screenId ⇒ 首选它 ✓
+       （不依赖 DOM 查询 ⇒ 假 DOM / 真浏览器都稳 ✓；作者实测"回主界面 BGM 不停"就是旧判据被 DOM 骗住 ✗） */
+    try {
+      if (typeof window !== 'undefined' && window.__screenId) return window.__screenId === 'battleScreen';
+    } catch (e0) {}
     var el = (typeof document !== 'undefined') ? document.getElementById('battleScreen') : null;
     if (!el || !el.classList) return false;
+    /* 兜底一：有别的 .screen 亮着 ⇒ 绝不算在战斗（主菜单/联机大厅亮着就是离开了战斗 ✓） */
+    try {
+      var list = (typeof document.querySelectorAll === 'function') ? document.querySelectorAll('.screen') : null;
+      if (list && list.length) {
+        for (var i = 0; i < list.length; i++) {
+          var e = list[i];
+          if (!e || !e.classList || e === el) continue;
+          if (e.classList.contains('active')) return false;
+        }
+      }
+    } catch (e2) {}
+    /* 兜底二：旧判据（仅在没有 .screen 结构时才会走到这里 ✓） */
     return !!el.classList.contains('active');
   } catch (e) { return false; }
 }
