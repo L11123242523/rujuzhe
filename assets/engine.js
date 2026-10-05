@@ -460,6 +460,35 @@ var Online = {
     var self=this;
     /* 进联机必须先切到"联机那套卡组"（否则会用上一次编辑的单机卡组） */
     try{ if(typeof enterOnlineDeckMode==='function') enterOnlineDeckMode(); }catch(e){}
+    /* 【服务器权威 2026-10-05】本套走 **HTTP 权威接口**：不申请房号、不连 WS ——
+       房号本地生成，POST /join 入座，之后靠轮询 /snapshot 渲染、/pending 应答。
+       （下面那条旧路是"方案 C"，它要中继提供 /newroom 与 WS 的 engine 支持，现已不存在。） */
+    if(this.serverAuthoritative){
+      this.role='guest'; this.isGuest=true;      /* 服务器权威：**没有"本机权威"**，双方都只是客户端 */
+      var __a=self.authoritativeEndpoint||'';
+      var __seat=self.serverSeat||'p1';
+      var __code='';
+      try{
+        var __cs='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        for(var __i=0;__i<4;__i++) __code+=__cs.charAt(Math.floor(Math.random()*__cs.length));
+      }catch(e){ __code='AAAA'; }
+      this.roomId=__code;
+      this.mySeat=__seat;
+      this.status('【服务器权威】房号 '+__code+'（你是 '+__seat+'）\n正在向权威服登记…\n'+__a);
+      this._authFetch('/join', { method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ room:__code, seat:__seat }) }, function(j){
+          if(!j){ self.status('【服务器权威】登记失败：连不上 '+__a+'\n已回退房主权威 —— 请改用「服务器」栏走原来的建房流程。'); try{ self.disableAuthoritative(); }catch(e){} return; }
+          self.status('【服务器权威】已登记：房号 '+__code+'（'+__seat+'）\n把房号发给对手（他也要填同一个权威服地址）。\n双方到齐后服务器**自动开局**…');
+          try{ showToast('服务器权威房间已创建：'+__code+'\n把房号发给对手（他也要填同一个权威服地址）','ok'); }catch(e){}
+          try{
+            self.startAuthoritativeLoop(__code, {
+              onPending: (typeof self._renderAsk==='function') ? function(spec, answerFn){ self._renderAsk(spec, answerFn); } : null,
+              onError: function(){ try{ self.stopAuthoritativeLoop(); self.disableAuthoritative(); }catch(e){} self.status('【服务器权威】**连不上权威服，已自动回退房主权威**。'); }
+            });
+          }catch(e){}
+        });
+      return;
+    }
     this.role='host'; this.isGuest=false;      // 建房者 = 权威方（跑规则并把状态同步给对手）
     /* C 阶段批次 3：勾了"服务器权威"就不再有人当权威 —— 建房者也只发意图（isGuest 由 _onGameStart 按模式置位） */
     this.authority=this._engineOpt()?'server':'host';
@@ -491,6 +520,27 @@ var Online = {
     var self=this;
     /* 进联机必须先切到"联机那套卡组"（否则会把单机卡组带进联机对局） */
     try{ if(typeof enterOnlineDeckMode==='function') enterOnlineDeckMode(); }catch(e){}
+    /* 【服务器权威 2026-10-05】同 createRoom：走 HTTP 权威接口，**不连 WS、不申请房号**。 */
+    if(this.serverAuthoritative){
+      this.role='guest'; this.isGuest=true;
+      var __a=self.authoritativeEndpoint||'';
+      var __seat=self.serverSeat||'p2';
+      this.mySeat=__seat;
+      this.roomId=id;
+      this.status('【服务器权威】加入房间 '+id+'（你是 '+__seat+'）\n正在向权威服登记…\n'+__a);
+      this._authFetch('/join', { method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({ room:id, seat:__seat }) }, function(j){
+          if(!j){ self.status('【服务器权威】加入失败：连不上 '+__a+'\n已回退房主权威 —— 请改用「服务器」栏走原来的加入流程。'); try{ self.disableAuthoritative(); }catch(e){} return; }
+          self.status('【服务器权威】已加入 '+id+'（'+__seat+'）\n双方到齐后服务器**自动开局**…');
+          try{
+            self.startAuthoritativeLoop(id, {
+              onPending: (typeof self._renderAsk==='function') ? function(spec, answerFn){ self._renderAsk(spec, answerFn); } : null,
+              onError: function(){ try{ self.stopAuthoritativeLoop(); self.disableAuthoritative(); }catch(e){} self.status('【服务器权威】**连不上权威服，已自动回退房主权威**。'); }
+            });
+          }catch(e){}
+        });
+      return;
+    }
     this.role='guest'; this.isGuest=true;      // 加入者 = 客人（不跑规则，只按房主快照绘制）
     this.authority=this._engineOpt()?'server':'host';
     this.mySeat='';
