@@ -14025,6 +14025,13 @@ function __compileBody(t) {
     var rc = __matchNum(new RegExp('[费用花费]\\s*-\\s*' + __NUM), t);
     ops.push({ op: 'next_cost_down', amount: (rc == null ? 1 : rc), alsoTarget: true });
   }
+  /* 【task2 补齐 2026-10-05】"获得**那张卡**音韵值×N 的金币"（黑色卡片①后半句）：
+     字面数字那条抓不到它 ⇒ 过去编译为 []（这就是"发动时该给金币却没给"的直接原因）。
+     执行时读 search op 记下的 p._lastSearchCard（见 executeStepOps 的 search 分支）。 */
+  if (t.indexOf('那张卡') >= 0 && (t.indexOf('音韵') >= 0 || t.indexOf('费用') >= 0) && (t.indexOf('金币') >= 0 || t.indexOf('＄') >= 0)) {
+    var __lgm = t.match(/[×x*]\s*(\d+)/);
+    ops.push({ op: 'gain_gold_from_last_search', mult: __lgm ? parseInt(__lgm[1], 10) : 500 });
+  }
   if ((has('金币') || /[$＄]/.test(t)) && !has('支付') && !has('消耗') && !has('花费')) {
     var gm = __matchNum(new RegExp('(?:获得|得到|\\+)\\s*' + __NUM + '\\s*(?:金币|[$＄])'), t);
     if (gm != null) ops.push({ op: 'gain_gold', amount: gm });
@@ -15554,6 +15561,21 @@ function __opsResource(op, ctx, next, env) {
       }
       p.sync = Math.min(p.sync + op.amount, p.maxSync || 999); break;
     case 'gain_gold': p.gold = (p.gold || 0) + op.amount; break;
+    /* 【task2 补齐 2026-10-05】按**上一步检索到的卡**的音韵值×N 给金币（黑色卡片①）。
+       search op 已把所选卡记在 p._lastSearchCard ⇒ 直接读，不改执行链；
+       没有 _lastSearchCard（如牌组无可选道具卡）时**不凭空给钱**，只记日志。 */
+    case 'gain_gold_from_last_search': {
+      var __lgCard = p && p._lastSearchCard;
+      var __lgMult = Number(op.mult) || 500;
+      if (__lgCard) {
+        var __lgAdd = (Number(__lgCard.cost) || 0) * __lgMult;
+        p.gold = (p.gold || 0) + __lgAdd;
+        addBattleLog(user, '【黑色卡片】获得【' + __lgCard.name + '】音韵值×' + __lgMult + '的金币（+' + __lgAdd + '，当前' + p.gold + '）');
+      } else {
+        addBattleLog(user, '【黑色卡片】没有检索到道具卡，本次不给金币');
+      }
+      break;
+    }
     case 'gain_core': p._guideCore = (p._guideCore || 0) + op.n; addBattleLog(user, '获得' + op.n + '点引导核心'); break;
     case 'gain_motivation': { var __lm = op.n; p.motivation = (p.motivation || 0) + __lm; if (p._lilithPassive) addBattleLog(user, '【里尔亚斯被动】获取激励点数额外+1（本次共+' + __lm + '）'); if (typeof checkLevelUp === 'function') checkLevelUp(user); break; }
     case 'overload': { p._overload = { until: op.duration }; p.cost = Math.min(p.maxCost || 12, p.cost + 2); addBattleLog(user, '进入过载状态，回复2点音韵值' + (op.duration === -1 ? '（直到游戏结束）' : op.duration ? '（持续' + op.duration + '次行动）' : '')); break; }
@@ -19170,7 +19192,11 @@ var PERMANENT_STRUCT = [
        ⇒ __parseSources 只产出 ['deck','grave']。该卡**没有 handler**（本来就走文本层 search）⇒ 改文本即生效。 */
     onPlay: ['从牌组、墓地或者移出游戏的卡中将一张攻击卡或技能卡加入手卡', '那之后可以选一张手卡送入墓地然后抽一张'], active: null },
   { match: ['共鸣者'], onPlay: ['抽取一张馈赠卡'], active: null },
-  { match: ['黑色卡片'], onPlay: [], active: null },
+  /* 【task2 补齐 2026-10-05】卡面明写"发动时作为效果处理：从牌组选一张道具卡加入手卡，
+     那之后获得那张卡所需要的音韵值×500的金币。"——原先 onPlay 为空 ⇒ 发动时**什么都不发生**（实测确认）。
+     注：旧机制"消耗金币减1000"本次不动（属强度改动且被用例固化，等作者确认）。 */
+  { match: ['黑色卡片'],
+    onPlay: ['从牌组选一张道具卡加入手卡，那之后获得那张卡所需要的音韵值×500的金币'], active: null },
   { match: ['镌刻'],
     onPlay: ['从牌组或移出游戏的卡中选一张[侵略]标签的卡加入手卡'],
     active: { once: 'turn', flag: '_juanUsedTurn', handler: 'juanKe' } },
