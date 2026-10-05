@@ -19147,6 +19147,37 @@ var PERMANENT_STRUCT = [
   { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } }
 ];
 
+/* 【结构修复 2026-10-05】永久卡"发动时"从句：**从卡自己的 cardData 文本**提取（不再依赖注册表副本）。
+   为什么：注册表副本实测已 6/18 条与卡面漂移（极夜君王=硬币 vs 四面骰；黑卡/妖刀副本为空 ⇒ 卡面写的发动时效果没执行）。
+   口径：卡面即唯一真相；注册表副本只在"卡面从句编译不出等价步骤"时兜底，且差异记入 window.__permTextDrift。 */
+var __permTextDrift = (typeof window !== 'undefined') ? (window.__permTextDrift = window.__permTextDrift || []) : [];
+function __cardTextOf(card) { return String((card && (card.effect || card.text)) || ''); }
+function __permOnPlayClauseFor(card) {
+  var t = __cardTextOf(card);
+  if (!t) return '';
+  var m = t.match(/发动时(?:作为效果处理)?[：:]\s*([\s\S]*)/);
+  if (!m) return '';
+  var rest = m[1];
+  var dot = rest.indexOf('。');
+  if (dot >= 0) rest = rest.slice(0, dot);
+  return rest.trim();
+}
+/** 逐步编译等价性（只用引擎自己的解析器；比前 9 步，避免深递归与长文本抖动） */
+function __permTextEquivalent(a, b) {
+  if (!a || !b) return false;
+  try {
+    var A = parseEffect(a) || [], B = parseEffect(b) || [];
+    var N = Math.min(9, Math.max(A.length, B.length));
+    for (var i = 0; i < N; i++) {
+      var ta = A[i] ? A[i].text : '', tb = B[i] ? B[i].text : '';
+      if (ta !== tb) return false;
+      var oa = compileStepOps(ta, true), ob = compileStepOps(tb, true);
+      if (JSON.stringify(oa) !== JSON.stringify(ob)) return false;
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
 function permanentStruct(card) {
   if (!card) return null;
   var name = card.name || '';
@@ -19174,7 +19205,24 @@ function resolvePermanentOnPlay(card, user, cb) {
   var st = permanentStruct(card);
   if (!st) { if (cb) cb(); return; }
   var other = permOther(user);
-  var text = (st.onPlay || []).join('然后');
+  /* 【结构修复 2026-10-05】文本来源：**卡自己的 cardData 从句优先**（卡面=唯一权威）。
+     三种情形都写得明明白白，绝不静默：
+       · 卡面从句 与 注册表副本 **逐步编译等价** ⇒ 用卡面从句（此后卡面改动自动生效，不会再"改了没反应"）；
+       · 两者不等价 ⇒ 沿用注册表文本（**行为不变**），并把差异记入漂移表 `__permTextDrift`（门禁探针可断言）；
+       · 副本为空但卡面有从句（黑卡/妖刀这类"卡面写了、代码没做"）⇒ 同样记入漂移表，**不擅自新增行为**。 */
+  var __regText = (st.onPlay || []).join('然后');
+  var __cardClause = __permOnPlayClauseFor(card);
+  var text = __regText;
+  if (__regText && __cardClause) {
+    if (__permTextEquivalent(__cardClause, __regText)) text = __cardClause;
+    else __permTextDrift.push({ card: card && card.name, kind: 'drift', registry: __regText, cardFace: __cardClause });
+  } else if (!__regText && __cardClause) {
+    __permTextDrift.push({ card: card && card.name, kind: 'missing-in-code', registry: '', cardFace: __cardClause });
+  }
+  if (__permTextDrift.length && typeof console !== 'undefined' && console.warn) {
+    var __d = __permTextDrift[__permTextDrift.length - 1];
+    if (__d && __d.card === (card && card.name)) console.warn('【永久卡文本权威】' + __d.card + '：卡面「' + __d.cardFace + '」与注册表「' + (__d.registry || '（空）') + '」不一致 ⇒ 本局按注册表执行（已记入 __permTextDrift）');
+  }
   // 架构闸：onPlay 文本若能被结构化指令层精确编译，则优先走指令层（数值以卡面为准）；
   // 仅当指令层无法编译(null)时，才用具名 handler 兜底复杂交互，杜绝旧硬编码数值过时
   var __opsOk = false;
