@@ -1,6 +1,10 @@
-# Render Blueprint —— 入局者联机中继服（lockstep 极简 WebSocket 转发，免费档）
+# Render Blueprint —— 入局者联机「服务器权威」服（Node，免费档）
 # 首次：Render 控制台 New → Blueprint，连接 GitHub 仓库 L11123242523/rujuzhe 即可按本文件自动创建服务
-# 部署后拿到 wss://<服务名>.onrender.com，填进对战页联机大厅“服务器”栏即可异地联机；同服务也托管静态页（GET /）
+# 部署后拿到 https://<服务名>.onrender.com，把它当作权威服务器地址：
+#   游戏页加 ?auth=https://<服务名>.onrender.com
+#   （客户端会拉 /snapshot 渲染、发 /intent；决策走 /pending + /answer；连不上自动回退"房主权威"）
+# 健康检查 /health 里还带**资源指纹**，用于发现"本体改了但服务端没重启"这种漂移
+#   （当年"方案 C"就是因为服务端跑的是 game.html 的生成副本、副本漂移而退役 —— 见 engine.js 收口注释）
 services:
   - type: web
     name: rujuzhe-server
@@ -8,9 +12,12 @@ services:
     plan: free                 # 免费档；被冷启动困扰再升级
     region: singapore          # 新加坡，对国内延迟最低
     branch: main
-    rootDir: .                 # 仓库根即服务根（package.json 在根）
+    rootDir: .                 # 仓库根即服务根
     buildCommand: npm install
-    startCommand: npm start
+    # 【2026-10-05 改】原来跑的是 npm start（旧中继）；现在启动「服务器权威」：
+    #   server/authoritative-server.mjs 是**零依赖**的 Node HTTP 服（读平台注入的 PORT），
+    #   服务器持引擎跑规则，客户端只发意图/只收快照 —— 客机触发的被动收益天然归客机。
+    startCommand: node server/authoritative-server.mjs --serve
     healthCheckPath: /health
     autoDeploy: true           # main 有新提交即覆盖部署
     envVars:
