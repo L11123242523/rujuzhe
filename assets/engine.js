@@ -6607,12 +6607,20 @@ function __ruriJudgeAfterDamage(owner) {
       __ruriTier();
     }
     };
-    /* 谈窗询问：选"发动"才执行阶梯段；没有弹窗机制时按原样执行（兜底） */
+    /* 谈窗询问：选"发动"才执行阶梯段；没有弹窗机制时按原样执行（兜底）。
+       【S4 服务器权威 2026-10-05】服务器权威态下**不能**用 showChoiceModal ——
+       它弹在**服务器**上、无人应答，实测被"AI闸门等待人类决策超时 ⇒ 放行"跳过，
+       导致**客机的阶梯整个失效**（既不抽2也不弃1）。改走 ENV.ask 的**座位路由**，由该座位的客户端作答。
+       非服务器权威（单机 / 普通联机）⇒ 保持原样，行为逐字不变。 */
+    var __ruriAskTier = function (pick) { if (pick === 0) { try { __ruriTierBody(); } catch (e) {} } };
     try {
-      if (typeof showChoiceModal === 'function') {
-        showChoiceModal('琉璃被动·累计' + rp._ruriJudgeCount + '次', '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？', null, ['发动', '不发动'], function (pick) {
-          if (pick === 0) { try { __ruriTierBody(); } catch (e) {} }
-        });
+      var __saTier = (typeof Online !== 'undefined' && Online && Online.serverAuthoritative === true);
+      if (__saTier && typeof ENV !== 'undefined' && ENV && typeof ENV.ask === 'function') {
+        ENV.ask(owner, { kind: 'choice', label: '琉璃被动·累计' + rp._ruriJudgeCount + '次',
+          effect: '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？',
+          choices: ['发动', '不发动'] }, __ruriAskTier);
+      } else if (typeof showChoiceModal === 'function') {
+        showChoiceModal('琉璃被动·累计' + rp._ruriJudgeCount + '次', '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？', null, ['发动', '不发动'], __ruriAskTier);
       } else { __ruriTierBody(); }
     } catch (e) { try { __ruriTierBody(); } catch (e2) {} }
   } catch (e) { console.error('琉璃被动·判定后处理出错', e); }
@@ -12517,7 +12525,12 @@ function __envAskSeatGuard(seat, spec, kind, cb) {
   var __sa = (typeof Online !== 'undefined' && Online && Online.serverAuthoritative === true);
   if (!__sa && (!seat || seat === 'p1')) return true;                 /* 本机座位/未指定 ⇒ 原样走本地（行为不变） */
   try {
-    if (typeof Online !== 'undefined' && Online && Online.active && !Online.isGuest && typeof Online.askRemote === 'function') {
+    /* 【解耦 2026-10-05】服务器权威态用**独立标志** authoritativeAsk 走远端，
+       不必把 Online.active 设为 true —— 否则会连带激活引擎的"联机态"分支（AI 闸门等），
+       实测后果：after-damage 触发器被"等待人类决策超时 ⇒ 放行"跳过 ⇒ 客机阶梯整个失效。 */
+    var __canRemote = (typeof Online !== 'undefined' && Online && (Online.active || Online.authoritativeAsk === true)
+      && !Online.isGuest && typeof Online.askRemote === 'function');
+    if (__canRemote) {
       /* 联机房主态 / 服务器权威态：把问题发往该座位（原始 spec 一并带上）；
          **带上 seat** —— 服务器权威要按座位分发，房主也要知道问的是谁。 */
       Online.askRemote({ kind: 'prompt', origin: 'ENV.ask', specKind: kind, spec: spec, seat: seat }, cb);
