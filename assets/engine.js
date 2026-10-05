@@ -15074,8 +15074,11 @@ var __sfx = (function () {
   /* 【2026-10-03】真实 BGM 两轨：常驻 / 残血（ncm2audio.py 从 .ncm 解密） */
   /* 【2026-10-03 作者口径】BGM **只在同步值 ≤ 最大同步值一半时**才放（高于一半静音）。
      作者给的 Convergence 即"半血以下"曲目；若另外提供 bgm_low.mp3 则优先用它。 */
-  var BGM_MAIN = BGM_LOW;   /* 【2026-10-03】不再单独指向任何文件：残血曲才是唯一要放的（作者给的 Convergence） */
+  /* 【2026-10-05 修·var 提升】原写法是 `var BGM_MAIN = BGM_LOW;` 写在 `var BGM_LOW = '…'` **之前**，
+     而 var 声明会提升 ⇒ 执行到那一行时 BGM_LOW 还是 undefined ⇒ **BGM_MAIN 永久是 undefined**
+     （"主曲"这一轨实际是坏的：`new Audio(undefined)`）。作者意图是"两轨同为残血曲"⇒ 调换声明顺序即可。 */
   var BGM_LOW  = 'assets/audio/bgm_low.mp3?v=1';    /* 残血专用（可选，存在则优先） */
+  var BGM_MAIN = BGM_LOW;   /* 【2026-10-03】不再单独指向任何文件：残血曲才是唯一要放的（作者给的 Convergence） */
   try { var raw = localStorage.getItem('dsh_sfx'); if (raw) { var o = JSON.parse(raw); cfg.on = (o && o.on !== false); cfg.vol = (o && typeof o.vol === 'number') ? o.vol : 0.5; } } catch (e) {}
   function save() { try { localStorage.setItem('dsh_sfx', JSON.stringify(cfg)); } catch (e) {} }
   function ensure() {
@@ -15193,11 +15196,15 @@ var __sfx = (function () {
       if (typeof Audio !== 'function') { bgmTimerStart(); return; }
       if (which == null) {
         /* 【2026-10-03】同步值高于一半 ⇒ **不放 BGM**（静音），淡出后暂停 */
+        /* 【2026-10-05 修】把待淡出的元素**快照**到局部变量：原写法在 interval 里动态读 `bgm.el`，
+           若淡出期间发生切歌（bgm.el 被换成新实例），这个 interval 会去改**新歌**的音量并把它 pause 掉。 */
         if (bgm.el) {
-          var ov = bgm.el.volume, iv = setInterval(function () {
-            ov = Math.max(0, ov - 0.05); try { bgm.el.volume = ov; } catch (e) {}
-            if (ov <= 0) { clearInterval(iv); try { bgm.el.pause(); } catch (e) {} }
+          var __sil = bgm.el;
+          var ov = __sil.volume, iv = setInterval(function () {
+            ov = Math.max(0, ov - 0.05); try { __sil.volume = ov; } catch (e) {}
+            if (ov <= 0) { clearInterval(iv); try { __sil.pause(); } catch (e) {} }
           }, 40);
+          if (bgm.el === __sil) bgm.el = null;
         }
         bgm.track = null;
         return;
@@ -15206,14 +15213,22 @@ var __sfx = (function () {
       var np = new Audio(__bgmUrlFor(which));
       try { np.loop = true; np.volume = 0; } catch (e) {}
       var old = bgm.el;
+      /* 【2026-10-05 根因修·作者两个报障同源】把"当前元素/轨"**立即登记**，填掉 play()→then 的窗口期：
+         旧写法只在 then 里登记 ⇒ 窗口期内这个实例既不在 bgm.el、也不在 window.__bgmEl，
+           ① bgmStop() 漏掉它 ⇒ 对局结束后它才出声（作者报障"结束后 BGM 不停"）；
+           ② 窗口期内再切歌会再 new 一个 ⇒ 两个同时在播（作者报障"两首一起放"）。 */
+      bgm.el = np; bgm.track = which; try { window.__bgmEl = np; } catch (e) {}
       /* 淡入新轨 */
       np.play().then(function () {
+        /* 起播期间若已被更替（又切歌 / 被 bgmStop 停掉）⇒ 立即停掉自己，别抢回控制权 */
+        if (bgm.el !== np) { try { np.pause(); } catch (e) {} return; }
         var v = 0, iv = setInterval(function () { v = Math.min(bgm.vol, v + 0.03); try { np.volume = v; } catch (e) {} if (v >= bgm.vol) clearInterval(iv); }, 40);
-        if (old) { try { var v2 = old.volume, iv2 = setInterval(function () { v2 = Math.max(0, v2 - 0.04); try { old.volume = v2; } catch (e) {} if (v2 <= 0) { clearInterval(iv2); old.pause(); } }, 40); } catch (e) { try { old.pause(); } catch (e2) {} } }
-        bgm.el = np; bgm.track = which; try { window.__bgmEl = np; } catch (e) {}
+        if (old && old !== np) { try { var v2 = old.volume, iv2 = setInterval(function () { v2 = Math.max(0, v2 - 0.04); try { old.volume = v2; } catch (e) {} if (v2 <= 0) { clearInterval(iv2); old.pause(); } }, 40); } catch (e) { try { old.pause(); } catch (e2) {} } }
       }).catch(function () {
-        /* 半血曲文件不存在 ⇒ 标记并回退到作者给的曲 */
-        if (which === 'low') { __bgmLowOk = false; bgm.track = null; bgmSetTrack('low'); }
+        /* 半血曲文件不存在 ⇒ 标记并回退到作者给的曲；
+           同时**回滚刚才的登记**（否则会留一个指向"播不出的实例"的当前元素，后续守卫/停止都会错）。 */
+        if (bgm.el === np) { bgm.el = old || null; bgm.track = null; try { window.__bgmEl = old || null; } catch (e) {} }
+        if (which === 'low') { __bgmLowOk = false; bgmSetTrack('low'); }
         else bgmTimerStart();
       });
     } catch (e) { bgmTimerStart(); }
