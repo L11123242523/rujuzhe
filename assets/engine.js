@@ -20088,7 +20088,33 @@ function __yuMizugiSanityCard(p, card) {
   return false;
 }
 
+/* 【task3 结构修复 2026-10-05】"用卡后被动"的使用者归属守卫。
+   背景：`postUsePassiveHooks(user, card)` 过去完全信任调用方传入的 user ⇒
+   一旦把"别人打出的卡"配上"自己的被动旗标"，收益就会错记到旗标持有者身上
+   （探针实测：p1 有琉璃(水着)被动 + 传 p2 的卡 + user='p1' ⇒ **p1 白抽 1 张**，
+    正是作者实测"客机触发、房主受益"的形态，且当时不报错）。
+   口径：被使用的卡必须**属于该使用者**（在任一区域，或本次由效果加入手卡）。 */
+function __cardBelongsForUse(user, card) {
+  try {
+    if (!card) return false;
+    if (card._addedByEffect) return true;
+    var q = battleState && battleState[user];
+    if (!q) return false;
+    var zones = ['hand', 'grave', 'permanent', 'faceDownCards', 'removed', 'removedFromGame', 'deck'];
+    for (var i = 0; i < zones.length; i++) {
+      if ((q[zones[i]] || []).indexOf(card) >= 0) return true;
+    }
+    return false;
+  } catch (e) { return true; }   /* 守卫自身异常时不误伤正常流程 */
+}
+
 function postUsePassiveHooks(user, card, done) {
+  /* 【归属守卫】卡必须属于该使用者，否则不结算任何"用卡后被动"，并留下一行可查的日志 */
+  if (!__cardBelongsForUse(user, card)) {
+    try { addBattleLog('system', '【归属】' + String(user) + ' 的用卡后被动被跳过：卡【' + ((card && card.name) || '?') + '】不属于该使用者'); } catch (e) {}
+    if (done) done();
+    return;
+  }
   var p = battleState[user];
   var tp = battleState.currentPlayer || user;
   var cands = [];
