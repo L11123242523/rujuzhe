@@ -12462,11 +12462,17 @@ function __appendLogEntry(rec) {
  * ============================================================ */
 /* 【S2 结构修复 2026-10-05】ENV.ask 的座位归属守卫（返回 true=继续走本机原有分支；false=已处理/已拒绝）。 */
 function __envAskSeatGuard(seat, spec, kind, cb) {
-  if (!seat || seat === 'p1') return true;                 /* 本机座位/未指定 ⇒ 原样走本地（行为不变） */
+  /* 【S4 服务器权威 2026-10-05】若 Online 标了 serverAuthoritative ⇒ **不存在"本机座位"**：
+     所有座位（含 p1）的决策都要发往客户端。否则服务器会卡在"问 p1"的本地弹窗上
+     （实测：出牌不推进结算、费用不扣、日志不增）。
+     非服务器权威（普通联机 / 单机）⇒ 保持原语义：本机座位或未指定走本地弹窗，行为逐字不变。 */
+  var __sa = (typeof Online !== 'undefined' && Online && Online.serverAuthoritative === true);
+  if (!__sa && (!seat || seat === 'p1')) return true;                 /* 本机座位/未指定 ⇒ 原样走本地（行为不变） */
   try {
     if (typeof Online !== 'undefined' && Online && Online.active && !Online.isGuest && typeof Online.askRemote === 'function') {
-      /* 联机房主态：把问题发往该座位（原始 spec 一并带上，S3/S4 阶段由客机端渲染） */
-      Online.askRemote({ kind: 'prompt', origin: 'ENV.ask', specKind: kind, spec: spec }, cb);
+      /* 联机房主态 / 服务器权威态：把问题发往该座位（原始 spec 一并带上）；
+         **带上 seat** —— 服务器权威要按座位分发，房主也要知道问的是谁。 */
+      Online.askRemote({ kind: 'prompt', origin: 'ENV.ask', specKind: kind, spec: spec, seat: seat }, cb);
       return false;
     }
   } catch (e) {}
