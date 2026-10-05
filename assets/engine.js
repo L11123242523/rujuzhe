@@ -19181,7 +19181,12 @@ var PERMANENT_STRUCT = [
   { match: ['智能手机'], onPlay: ['获得2000金币'],
     active: { once: 'turn', flag: '_phoneUsedThisTurn', handler: 'phone', noAutoFlag: true } },
   { match: ['血之佑戒', '血戒'], onPlay: ['立即回复3点音韵值'], active: null },
-  { match: ['妖刀', '五月雨'], onPlayHandler: 'yaodaoPlay', active: null },
+  /* 【task2 对齐 2026-10-05】卡面明写「发动时：破坏场上1张卡，之后对一名玩家造5混沌伤害，自己失3同步。」
+     原先**没有 onPlay 文本**（只有 yaodaoPlay handler 兜，行为虽在，但"文本权威"账本上是缺口）。
+     对齐后编译结果已取证：destroy_pick(permanent→grave, who=target) / damage(5,混沌) / loss_sync(3,self)。 */
+  { match: ['妖刀', '五月雨'],
+    onPlay: ['破坏场上1张卡，之后对一名玩家造5混沌伤害，自己失3同步'],
+    onPlayHandler: 'yaodaoPlay', active: null },
   { match: ['直尺'], onPlay: ['前进4格'],
     active: { once: 'turn', flag: '_zhichiPaidThisTurn', handler: 'ruler' } },
   { match: ['永奏', '进行曲'], onPlay: ['立即抽2张卡', '然后选一张手卡或区域内的卡送入墓地'], onPlayHandler: 'yongzouPlay', active: null },
