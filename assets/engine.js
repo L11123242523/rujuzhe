@@ -14824,7 +14824,8 @@ function computeDamageValue(user, target, opt) {
   var tags = (typeof __cardTags === 'function' && sc) ? __cardTags(sc) : ((sc && sc.tags) || []), cat = sc && sc._category;
   var isAtk = cat === 'attack_cards', isSkill = cat === 'skill_cards', isItem = cat && /item/.test(cat);
   // 括号外④：各类“最终伤害+N”
-  if (kind === 'sanity' && hasPerm('风纪委员')) { final += 1; logs.push('风纪委员臂章·理智最终+1'); }
+  /* 【task2 补齐 2026-10-05】加"正面形式存在"前提（卡面明写）；射程"0-13格"待作者给口径，本次不动。 */
+  if (kind === 'sanity' && __armbandFaceUp(ap)) { final += 1; logs.push('风纪委员臂章·理智最终+1（正面形式存在）'); }
   if (opt.judge && hasPerm('钢笔')) { final += 1; logs.push('钢笔·判定最终+1'); }
   if (sc && sc.name && sc.name.indexOf('神乐铃') >= 0 && (ap._shenleStack || 0) > 0) { final += ap._shenleStack; logs.push('神乐铃叠加' + ap._shenleStack + '层，最终+' + ap._shenleStack); }
   if (isAtk && hasPerm('善意面具')) { final += 1; logs.push('善意面具·攻击卡最终+1'); }
@@ -17902,7 +17903,8 @@ function __diceControlPct(player) {
   if (!battleState || !battleState[player]) return 0;
   var p = battleState[player];
   var pct = (p._diceControlBonus || 0) + ((typeof StatusSys !== 'undefined') ? StatusSys.value(player, 'control_dice') / 100 : 0);
-  if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('风纪委员') >= 0; })) pct += 0.2;
+  /* 【task2 补齐 2026-10-05】加"正面形式存在"前提（卡面明写）；射程"0-13格"待作者给口径，本次不动。 */
+  if (__armbandFaceUp(p)) pct += 0.2;
   return pct;
 }
 
@@ -19229,6 +19231,14 @@ function __permTextEquivalent(a, b) {
     }
     return true;
   } catch (e) { return false; }
+}
+
+/* 【task2 补齐 2026-10-05】风纪委员臂章："只要此卡以**正面形式**存在于区域内则使用者获得效果"。
+   引擎里盖伏标记是 card._faceDown === true（见盖伏放置/发动流程）⇒ 正面形式存在 = 永续区里有该卡且 _faceDown !== true。 */
+function __armbandFaceUp(p) {
+  return !!(p && (p.permanent || []).some(function (c) {
+    return c && /风纪委员/.test(String(c.name || '')) && c._faceDown !== true;
+  }));
 }
 
 function permanentStruct(card) {
