@@ -9301,7 +9301,7 @@ function aiMaybeUseEvent(done) {
   }
   // --- 赌徒游戏：500金币3/4骰；两同2000/三同3000/全异后退1格 ---
   if (nm === '赌徒游戏') {
-    var payD = __goldPrice(p, 500);
+    var payD = (p, 500);
     if ((p.gold || 0) < payD) { __finished(); return; }
     p.gold -= payD;
     var myN = hasChar('木原') ? 4 : 3, arr = [], counts = {};
@@ -10193,7 +10193,7 @@ function __busRide(player, tile) {
 /** 确认上车后：付车票 → 上站台锚点 → 投四面骰（小仓霞免判定） */
 function __busBoard(player, tile, __kasumi) {
   var p = battleState[player]; if (!p) return;
-  if (!__kasumi) { if (!p.gold) p.gold = 0; p.gold -= __goldPrice(p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
+  if (!__kasumi) { if (!p.gold) p.gold = 0; p.gold -= (p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
   p._ridingThisAction = true;   // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
   var st = BUS_STATION_ANCHOR[tile.id];
   if (!st) { addBattleLog(player, '【' + tile.name + '】缺少站台锚点数据，本次不移动'); return; }
@@ -10460,7 +10460,7 @@ function triggerTileEffect(player) {
       // 神社：支付2000金币抽取一张御神签
       if (!p.gold) p.gold = 0;
       if (p.gold >= 2000) {
-        p.gold -= __goldPrice(p, 2000);
+        p.gold -= (p, 2000);
         addBattleLog(player, '神社：支付2000金币抽取御神签');
         drawOmikuji(player, { shrine: true });
       } else {
@@ -10475,7 +10475,7 @@ function triggerTileEffect(player) {
       // GAME格（权威）：支付500金币，先猜→播硬币动画→定格对比，猜中抽2（全程可见，区分未猜中/未执行）
       if (!p.gold) p.gold = 0;
       if (p.gold < 500) { addBattleLog(player, 'GAME格：金币不足500，无法游玩（当前' + p.gold + '金币）'); break; }
-      p.gold -= __goldPrice(p, 500);
+      p.gold -= (p, 500);
       addBattleLog(player, '到达GAME格 - 支付500金币猜硬币（剩余' + p.gold + '金币）');
       var __gamePlay = function (guess) {
         judgePerform(player, { kind: 'coin', label: 'GAME 猜硬币' }, function (coin, __cancelled) {
@@ -10627,7 +10627,7 @@ function triggerTileEffect(player) {
           if (o === 2) { addBattleLog('p1', '易物：选择不执行'); updateBattleUI(); return; }
           if (o === 1) {
             if ((battleState.p1.gold||0) < 500) { addBattleLog('p1', '易物：金币不足500'); updateBattleUI(); return; }
-            battleState.p1.gold -= __goldPrice(battleState.p1, 500); var d = drawCard('p1'); addBattleLog('p1', '易物：花费500金币抽到【' + (d?d.name:'无') + '】'); updateBattleUI(); return;
+            battleState.p1.gold -= (battleState.p1, 500); var d = drawCard('p1'); addBattleLog('p1', '易物：花费500金币抽到【' + (d?d.name:'无') + '】'); updateBattleUI(); return;
           }
           showTargetCards('p1', 'hand', '易物：选择一张手牌送入墓地', true, function(sel, idx) {
             if (sel && idx >= 0) { battleState.p1.hand.splice(idx,1); moveCardToGrave('p1', sel, 'effect'); addBattleLog('p1', '易物：【' + sel.name + '】送入墓地'); var d2 = drawCard('p1'); addBattleLog('p1', '易物：抽到【' + (d2?d2.name:'无') + '】'); }
@@ -10641,7 +10641,7 @@ function triggerTileEffect(player) {
           if (o === 2 || o == null) { addBattleLog(player, '易物：选择不执行'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
           if (o === 1) {
             if ((p.gold || 0) < 500) { addBattleLog(player, '易物：金币不足500'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
-            p.gold -= __goldPrice(p, 500); var d = drawCard(player); addBattleLog(player, '易物：花费500金币抽到【' + (d ? d.name : '无') + '】'); if (typeof updateBattleUI === 'function') updateBattleUI(); return;
+            p.gold -= (p, 500); var d = drawCard(player); addBattleLog(player, '易物：花费500金币抽到【' + (d ? d.name : '无') + '】'); if (typeof updateBattleUI === 'function') updateBattleUI(); return;
           }
           Online.awaitAnswer({ label: '易物·选择手牌送墓（对手）', cards: p.hand.map(function(c){ return c.name; }) }, function (v) {
             var ix = Array.isArray(v) ? v[0] : v;
@@ -10663,7 +10663,7 @@ function triggerTileEffect(player) {
       // 机场（权威）：支付500金币，下个主要阶段开始时可前进到地图任意1格
       if (!p.gold) p.gold = 0;
       if (p.gold < 500) { addBattleLog(player, '【机场】金币不足500，无法购票（当前' + p.gold + '）'); break; }
-      p.gold -= __goldPrice(p, 500); p._airportFreeMoveNext = true;
+      p.gold -= (p, 500); p._airportFreeMoveNext = true;
       addBattleLog(player, '【机场】支付500金币，下个主要阶段开始时可前进到任意1格');
       break; }
     case 'start':
@@ -11115,8 +11115,8 @@ function aiUsePermanentActive(player, done) {
       if ((p.gold || 0) < 700) { next(); return; }
       var wantKill = foe && (battleState[foe] ? battleState[foe].sync <= 4 : false) && (p.hand && p.hand.length);
       var doExtra = (p.gold || 0) >= 1500 && !card._phoneUsedThisTurn; // 追加一次
-      p.gold -= __goldPrice(p, 700); card._phoneUsedThisTurn = true;
-      if (doExtra) { p.gold -= __goldPrice(p, 500); card._phoneExtraThisTurn = true; L('AI【智能手机】追加发动一次（-500金币）'); }
+      p.gold -= (p, 700); card._phoneUsedThisTurn = true;
+      if (doExtra) { p.gold -= (p, 500); card._phoneExtraThisTurn = true; L('AI【智能手机】追加发动一次（-500金币）'); }
       if (!wantKill) {
         p.attackBuff = (p.attackBuff || 0) + 1; L('AI【智能手机】①攻击力+1（当前+' + p.attackBuff + '），余' + p.gold + '金币');
         syncNext(card, act); return;
@@ -11302,10 +11302,9 @@ function dataInspire(group, name, fallback) {
 }
 
 // 黑色卡片：消耗金币的场合减少1000花费（最少0）
-function __goldPrice(pp, amount) {
-  var dis = (pp && pp.permanent && pp.permanent.some(function (c) { return c.name && c.name.indexOf('黑色卡片') >= 0; })) ? 1000 : 0;
-  return Math.max(0, (amount || 0) - dis);
-}
+/* 【作者 2026-10-05 口径】黑色卡片旧机制「消耗金币的场合可以减少1000金币的花费（最少降至0）」**已删除**
+   （新卡面已无此句）。原来这里有个金币折价函数专门服务该旧机制；按结构式撤除：**删函数、调用点直接用原价**，
+   而不是把折扣常量改成 0（那会留下『第二份实现』的尾巴）。 */
 /* ============================================================
    【卡堆模型】（作者 2026-09-28 口径）
    事件卡 / 馈赠卡 / 御神签 在现实规则里各自是**一个卡堆**：每局开始时把该类型的卡洗成随机顺序，
@@ -17001,7 +17000,7 @@ function __eventCasesB(card, player, p, done, env) {
     case '赌徒游戏': {
       // 支付500金币（黑色卡片可折价），木原家族投4枚6面骰
       if (!p.gold) p.gold = 0;
-      var __pay = __goldPrice(p, 500);
+      var __pay = (p, 500);
       p.gold -= __pay;
       var __muyuan = false;
       try { __muyuan = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('木原') >= 0; }); } catch (e) {}
@@ -17157,7 +17156,7 @@ function useEventCardFor(player, index, name, done) {
   // 赌徒游戏：金币不足时不消耗卡（先检查后移除，修复原吞卡）
   if (card.name === '赌徒游戏') {
     var __gp = battleState[player].gold || 0;
-    if (__gp < __goldPrice(battleState[player], 500)) { if (player === 'p1') showToast('金币不足，无法进行赌徒游戏', 'warn'); if (done) done(); return; }
+    if (__gp < (battleState[player], 500)) { if (player === 'p1') showToast('金币不足，无法进行赌徒游戏', 'warn'); if (done) done(); return; }
   }
 
   // 从eventCards或hand中移除事件卡
@@ -17926,7 +17925,9 @@ function __diceControlPct(player) {
   var p = battleState[player];
   var pct = (p._diceControlBonus || 0) + ((typeof StatusSys !== 'undefined') ? StatusSys.value(player, 'control_dice') / 100 : 0);
   /* 【task2 补齐 2026-10-05】加"正面形式存在"前提（卡面明写）；射程"0-13格"待作者给口径，本次不动。 */
-  if (__armbandFaceUp(p)) pct += 0.2;
+  /* 【作者 2026-10-05 口径】「0-13格范围内」按**使用者自身所在格**判定 ⇒ 臂章持有者位置在 0..13 时才有这 20%。
+     （位置是 0 基的环形格号；作者口径『自己的位置』，故不看目标、不看距离。） */
+  if (__armbandFaceUp(p) && __armbandInOwnRange(p)) pct += 0.2;
   return pct;
 }
 
@@ -19271,6 +19272,12 @@ function __armbandFaceUp(p) {
     return c && /风纪委员/.test(String(c.name || '')) && c._faceDown !== true;
   }));
 }
+/* 【作者 2026-10-05 口径】臂章 20% 控骰的「0-13格范围内」= **使用者自身所在格**在 0..13。 */
+function __armbandInOwnRange(p) {
+  var pos = (p && typeof p.position === 'number') ? p.position : null;
+  if (pos === null) return false;
+  return pos >= 0 && pos <= 13;
+}
 
 function permanentStruct(card) {
   if (!card) return null;
@@ -19546,12 +19553,12 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var OL2 = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2');
     if (card._phoneUsedThisTurn && !card._phoneExtraThisTurn) {
       if (p.gold < 500) { if (user === 'p1') showToast('【智能手机】本回合已发动，金币不足500，无法追加。', 'warn'); return false; }
-      p.gold -= __goldPrice(p, 500); card._phoneExtraThisTurn = true;
+      p.gold -= (p, 500); card._phoneExtraThisTurn = true;
       addBattleLog(user, '【智能手机】扣500金币追加一次发动次数，剩余' + p.gold);
     } else if (card._phoneUsedThisTurn) { if (user === 'p1') showToast('【智能手机】本回合已追加过一次。', 'warn'); return false; }
     if (p.gold < 700) { if (user === 'p1') showToast('【智能手机】金币不足700。', 'warn'); return false; }
     function __phonePick(ci) {
-      p.gold -= __goldPrice(p, 700); card._phoneUsedThisTurn = true;
+      p.gold -= (p, 700); card._phoneUsedThisTurn = true;
       if (ci === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog(user, '【智能手机】①攻击力+1（+' + p.attackBuff + '），余' + p.gold); updateBattleUI(); }
       else {
         if (!p.hand.length) { addBattleLog(user, '【智能手机】②无手卡可送，效果不适用'); updateBattleUI(); return; }
@@ -21208,7 +21215,6 @@ try { window.aiUsePermanentActive = aiUsePermanentActive; } catch (e) {}
 try { window.useGuideCore = useGuideCore; } catch (e) {}
 try { window.checkLevelUp = checkLevelUp; } catch (e) {}
 try { window.dataInspire = dataInspire; } catch (e) {}
-try { window.__goldPrice = __goldPrice; } catch (e) {}
 try { window.__pileGet = __pileGet; } catch (e) {}
 try { window.__pileShuffleIn = __pileShuffleIn; } catch (e) {}
 try { window.__pilePeek = __pilePeek; } catch (e) {}
