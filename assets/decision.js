@@ -23,7 +23,7 @@
   var STALE_MS = 8000;      /* 心跳超过 8 秒没续 ⇒ 判为泄漏 */
   var TICK_MS = 500;
 
-  var S = { count: 0, tags: {}, timer: null };
+  var S = { count: 0, tags: {}, seats: {}, timer: null };
 
   function now() { return Date.now(); }
   function keys() { var a = [], k; for (k in S.tags) if (S.tags[k]) a.push(k); return a; }
@@ -48,9 +48,10 @@
 
   var Decision = {
     STALE_MS: STALE_MS,
-    enter: function (tag) {
+    enter: function (tag, seat) {
       tag = String(tag || '?');
       S.tags[tag] = now();
+      S.seats[tag] = (seat == null) ? null : seat;      /* 记"是谁在决策"✓（区分人类/AI，避免循环等待 ✗） */
       S.count++;
       startWatch();
       mirror();
@@ -58,7 +59,12 @@
     },
     leave: function (tag) {
       tag = String(tag || '?');
-      if (S.tags[tag]) delete S.tags[tag];
+      /* 【关键修正】计数**以 count 为准**（与旧计数器同语义 ✓）：即使 tag 不匹配（enter('A')/leave('B')）
+         也必须减计数 ✓ —— 否则一处配对错名就会永久泄漏 ✗（这正是我在治的病 ✗）。
+         tag 仅用于诊断：命中就删掉它；没命中就记一笔"配对错名"，便于排查 ✓ */
+      var had = !!S.tags[tag];
+      if (had) delete S.tags[tag];
+      else if (S.count > 0) { try { log('【决策·配对提醒】leave("' + tag + '") 未匹配到同名 enter（当前开着：' + keys().join('、') + '）'); } catch (e) {} }
       S.count = Math.max(0, S.count - 1);
       if (!S.count) { S.tags = {}; stopWatch(); }
       mirror();
@@ -68,6 +74,21 @@
     touch: function (tag) { if (tag != null) { if (S.tags[String(tag)]) S.tags[String(tag)] = now(); } else { Object.keys(S.tags).forEach(function (k) { S.tags[k] = now(); }); } },
     /** 唯一判据 ✓ */
     isOpen: function () { return S.count > 0; },
+    /** 【批次2 关键】只统计"**人类**正在决策" ⇒ 供 AI 闸门用 ✓
+     *  为什么：若 AI 也在等某个由 AI 自己推进才能关闭的决策，就是**循环等待 ⇒ 卡死** ✗
+     *  isAISeatFn(seat) 由调用方提供（引擎里的 isAISeat ✓）；seat 未知的按"人类"处理（保守，防抢跑 ✓），
+     *  但闸门另有"延后上限"兜底，绝不会无限等 ✗ */
+    isHumanOpen: function (isAISeatFn) {
+      var k, n = 0;
+      for (k in S.tags) {
+        if (!S.tags[k]) continue;
+        var seat = S.seats[k];
+        var isAI = false;
+        try { isAI = (seat != null && typeof isAISeatFn === 'function') ? !!isAISeatFn(seat) : false; } catch (e) { isAI = false; }
+        if (!isAI) n++;
+      }
+      return n > 0;
+    },
     /** 全清（异常收尾/回主界面用 ✓） */
     reset: function (why) {
       if (!S.count && !keys().length) return;

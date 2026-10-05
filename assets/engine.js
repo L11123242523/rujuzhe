@@ -5482,7 +5482,7 @@ function startTurn() {
     if (typeof __tomaDeclare === 'function') __tomaDeclare(player);     // 冬马被动：主要阶段发动一次
     battleState.phase = 'main1';
     updateBattleUI();
-    setTimeout(aiTurn, 600);
+    setTimeout(__aiGuard(aiTurn), 600);
   } else if (isRemoteSeat(player)) {
     // 联机远端位回合：由对方 p1 操作广播的意图流逐条驱动（onlineApplyIntent）
     battleState.phase = 'prepare';
@@ -7399,7 +7399,7 @@ var TW = {
         if (fired) return; fired = true;
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); }
         catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
-        setTimeout(step, 170);
+        setTimeout(__aiGuard(step), 170);
       }
       try {
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
@@ -7407,7 +7407,7 @@ var TW = {
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          setTimeout(step, 170); return;
+          setTimeout(__aiGuard(step), 170); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
         if (typeof node.fire === 'function') node.fire(next); else next();
@@ -8995,7 +8995,7 @@ function promptDiscardToLimit(player, done) {
         addBattleLog(player, '手牌超限，弃置【' + d2.name + '】（剩余手牌' + p.hand.length + '张）');
       }
       if (typeof updateBattleUI === 'function') updateBattleUI();
-      setTimeout(step, 120);
+      setTimeout(__aiGuard(step), 120);
     }
     // 联机：p2 是活人（客人），必须由他自己选并把候选卡名发过去
     if (typeof Online !== 'undefined' && Online.active && !Online.isGuest && player !== 'p1') {
@@ -9425,6 +9425,33 @@ function aiResourceStep(done) {
 /* 【等待决断的读门 + 超时兜底】AI 的回合驱动用它判断"是否该停下等玩家作答"。
    兜底很重要：若某个异常路径漏清了标记（弹窗被外部逻辑跳过、对局结束…），AI 会**永久等待** ⇒
    超过 20 秒就**有声地**清掉并继续（宁可漏等一次，也不能整局卡死）。 */
+/* 【治本 2026-10-06】AI 定时续跑的**唯一闸门**：每次 tick 都复查"玩家是否正在决策"，
+   忙 ⇒ 延后 200ms 再来（上限 150 次 ≈ 30 秒），绝不越过玩家的决策抢跑 ✓。
+   ⚠ 所有 AI 的 setTimeout 都必须用本包装器（否则就是又开了一条绕过闸门的路 ✗）。 */
+function __aiGuard(fn) {
+  return function () {
+    var args = arguments, self = this;
+    try {
+      /* 【批次2·关键】只等"**人类**正在决策" ⇒ 绝不等 AI 自己在等的决策（那是循环等待 ⇒ 卡死 ✗） */
+      var busy = false;
+      try {
+        if (typeof Decision !== 'undefined' && Decision && Decision.isHumanOpen) busy = !!Decision.isHumanOpen(typeof isAISeat === 'function' ? isAISeat : null);
+        else if (typeof __playerDeciding === 'function') busy = !!__playerDeciding();
+        else busy = !!(battleState && battleState._awaitingDecision);
+      } catch (e) { busy = false; }
+      __aiGuard._DEFER = __aiGuard._DEFER || 0;   /* 延后上限兜底：最多 12 次（≈2.4s）⇒ 记录并放行 ✓ 绝不无限等 ✗ */
+      if (busy && __aiGuard._DEFER < 12) { __aiGuard._DEFER++; } else { if (busy) { try { addBattleLog('system', '【AI闸门】等待人类决策超时 ⇒ 放行本次 AI 步骤（避免卡死 ✓）'); } catch (e) {} } busy = false; }
+      if (busy) {
+        __aiGuard._tries = (__aiGuard._tries || 0) + 1;
+        if (__aiGuard._tries > 150) { __aiGuard._tries = 0; return; }
+        setTimeout(function () { __aiGuard(fn).apply(self, args); }, 200);
+        return;
+      }
+      __aiGuard._tries = 0;
+    } catch (e) {}
+    return fn.apply(self, args);
+  };
+}
 function __decideWaitGate(tag, retryFn) {
   try {
     /* 【目标③】委托唯一权威（玩家是否在决策） */
@@ -21254,3 +21281,5 @@ try { window.getSpecialHandler = getSpecialHandler; } catch (e) {}
 try { window.isSpecialInteractiveCard = isSpecialInteractiveCard; } catch (e) {}
 try { window.settleSpecialCard = settleSpecialCard; } catch (e) {}
 try { window.continueCardUse = continueCardUse; } catch (e) {}
+
+try { window.__aiGuard = __aiGuard; } catch (e) {}
