@@ -19164,7 +19164,9 @@ var PERMANENT_STRUCT = [
   { match: ['Huginn', '穆宁', '福金'], onPlay: ['对一名其他玩家造成3点混沌属性伤害并让自身攻击力+3'], onPlayHandler: 'huginnPlay',
     active: { once: 'game', flag: '_huginnUsedGame', handler: 'huginn' } },
   { match: ['钢笔'],
-    onPlay: ['从牌组、墓地将一张攻击卡或技能卡加入手卡', '那之后可以选一张手卡送入墓地然后抽一张'], active: null },
+    /* 【task2 对齐 2026-10-05】卡面写「从牌组、墓地**或者移出游戏的卡中**…」，原注册表漏了"移出游戏"
+       ⇒ __parseSources 只产出 ['deck','grave']。该卡**没有 handler**（本来就走文本层 search）⇒ 改文本即生效。 */
+    onPlay: ['从牌组、墓地或者移出游戏的卡中将一张攻击卡或技能卡加入手卡', '那之后可以选一张手卡送入墓地然后抽一张'], active: null },
   { match: ['共鸣者'], onPlay: ['抽取一张馈赠卡'], active: null },
   { match: ['黑色卡片'], onPlay: [], active: null },
   { match: ['镌刻'],
