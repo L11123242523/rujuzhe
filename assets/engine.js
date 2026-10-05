@@ -15066,17 +15066,22 @@ var __sfx = (function () {
       if (typeof Audio !== 'function') { bgmTimerStart(); return; }
       if (which == null) {
         /* 【2026-10-03】同步值高于一半 ⇒ **不放 BGM**（静音），淡出后暂停 */
-        if (bgm.el) {
-          var ov = bgm.el.volume, iv = setInterval(function () {
-            ov = Math.max(0, ov - 0.05); try { bgm.el.volume = ov; } catch (e) {}
-            if (ov <= 0) { clearInterval(iv); try { bgm.el.pause(); } catch (e) {} }
-          }, 40);
-        }
+        /* 【2026-10-06 修·BGM 停不掉】三处根因：
+           ① 先把 bgm.track 清成 null，再淡出 —— 旧顺序下若淡出定时器先把元素 pause 了，
+              等 track 清空后再来一次 bgmSetTrack(low)，"同一首就不动"的判断就会失效 ✗
+           ② 淡出定时器必须闭包**当时的那个元素**，不能每次读 bgm.el
+              —— 晚到的定时器会去操作**新元素**，把刚起播的新轨误停 ✗（探针场景⑥⑦就是这么红的）
+           ③ 补硬兜底：定时器被节流/丢失也一定会在约 0.84 秒后停 */
         bgm.track = null;
+        var __oe = bgm.el;
+        bgm.el = null;
+        try { window.__bgmEl = null; } catch (e) {}
+        if (__oe) { try { __bgmFadeOut(__oe, 0.05); } catch (e) { try { __oe.pause(); } catch (e2) {} } }
         return;
       }
       if (bgm.track === which && bgm.el && !bgm.el.paused) return;          // 同一首就不动
       var np = new Audio(__bgmUrlFor(which));
+      try { if (!bgm._els) bgm._els = []; bgm._els.push(np); } catch (e) {}
       try { np.loop = true; np.volume = 0; } catch (e) {}
       var old = bgm.el;
       /* 淡入新轨 */
@@ -15096,6 +15101,9 @@ var __sfx = (function () {
       if (!bgm.on) return;
       if (typeof Audio !== 'function') { bgmTimerStart(); return; }
       bgmSetTrack(__bgmWantLow() ? (__bgmLowUrl() ? 'low' : 'main') : null);   /* 不满足 ⇒ 静音 */
+      /* 【2026-10-06 修·BGM 停不掉】"不该放"时**直接停**（不走淡出尾巴）：作者实测"回主界面还在响"，
+         就是这段约 1 秒的淡出 + 看门狗最长 1 秒的叠加。战斗内换轨仍走 track 分支里的短淡出。 */
+      if (!__bgmWantLow()) { try { bgmStop(); } catch (e) {} }
     } catch (e) { bgmTimerStart(); }
   }
   /* 【2026-10-03 修】是否**在战斗界面里**（主菜单/加载/结算后回菜单都不算）——
@@ -15122,12 +15130,50 @@ var __sfx = (function () {
   function __bgmSync() {
     /* 【2026-10-03 根因修】不满足条件（不在战斗界面 / 未降到一半）⇒ **静音**（原来是 'main'，
        而 BGM_MAIN 就是作者给的残血曲 ⇒ 一进游戏/在主菜单刷新界面就会响）。与 bgmStart 保持一致。 */
-    try { if (!bgm.on) return; bgmSetTrack(__bgmWantLow() ? 'low' : null); } catch (e) {}
+    try {
+      if (!bgm.on) return;
+      bgmSetTrack(__bgmWantLow() ? 'low' : null);
+      /* 【2026-10-06 修·BGM 停不掉】同 bgmStart：不该放就直接停，不留淡出尾巴 */
+      if (!__bgmWantLow()) { try { bgmStop(); } catch (e) {} }
+    } catch (e) {}
+  }
+  /* 【2026-10-06】BGM 元素台账：凡是我们自己创建的循环轨都记下来，
+     这样"停止"时能一次全停（旧实现只认 bgm.el / window.__bgmEl 两个引用，漏一个就响不停）。 */
+  function __bgmAllEls() {
+    var out = [];
+    try {
+      if (bgm.el) out.push(bgm.el);
+      if (window.__bgmEl && out.indexOf(window.__bgmEl) < 0) out.push(window.__bgmEl);
+      if (bgm._els) bgm._els.forEach(function (a) { if (a && out.indexOf(a) < 0) out.push(a); });
+    } catch (e) {}
+    return out;
+  }
+  /* 淡出：**闭包传入的那个元素**（绝不能读 bgm.el —— 晚到的定时器会误停新元素 ✗），
+     带硬兜底（约 0.84 秒后无条件 pause）。 */
+  function __bgmFadeOut(el, step, ms) {
+    try {
+      if (!el) return;
+      var v = (typeof el.volume === "number") ? el.volume : 1;
+      var ticks = 0;
+      var iv = setInterval(function () {
+        ticks++;
+        v = Math.max(0, v - (step || 0.05));
+        try { el.volume = v; } catch (e) {}
+        if (v <= 0 || ticks > 40) { clearInterval(iv); try { el.pause(); } catch (e) {} }
+      }, ms || 40);
+    } catch (e) { try { el.pause(); } catch (e2) {} }
   }
   function bgmStop() {
-    try { if (bgm.el && bgm.el.pause) bgm.el.pause(); } catch (e) {}
-    try { if (window.__bgmEl && window.__bgmEl !== bgm.el && window.__bgmEl.pause) window.__bgmEl.pause(); } catch (e) {}
+    /* 【2026-10-06 修·BGM 停不掉】唯一的"停"收尾点（离开战斗 / 对局结束 / 开关音乐 / 看门狗都走它）：
+       ① 清 bgm.track（否则残留 low 会让"同一首就不动"判断误判，下次进战斗可能不起播）
+       ② **立即**暂停所有 BGM 元素（不再等淡出尾巴 —— 作者体感"回主界面还在响"就是这段尾巴）
+       ③ 幂等：重复调用无副作用 */
+    var cur = bgm.el, list = __bgmAllEls();
+    bgm.el = null; bgm.track = null;
+    try { window.__bgmEl = null; } catch (e) {}
     bgmTimerStop();
+    if (cur && list.indexOf(cur) < 0) list.push(cur);
+    list.forEach(function (a) { try { if (a && a.pause) a.pause(); } catch (e2) {} });
   }
   function bgmToggle() {
     try { bgm.on = !bgm.on; bgmSave(); if (bgm.on) bgmStart(); else bgmStop(); try { this.refresh(); } catch (e) {} return bgm.on; } catch (e) { return false; }
@@ -15161,6 +15207,8 @@ var __sfx = (function () {
     bgmToggle: bgmToggle,
     bgmStart: bgmStart,
     bgmStop: bgmStop,
+    /* 【2026-10-06】当前"还在播"的 BGM 元素数（作者/探针自查用：回主界面后应为 0） */
+    bgmPlaying: function () { try { return __bgmAllEls().filter(function (a) { return a && !a.paused; }).length; } catch (e) { return -1; } },
     bgmSync: __bgmSync,
     volume: function () { return cfg.vol; },
     refresh: function () {
