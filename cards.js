@@ -2730,7 +2730,7 @@ window.__CARD_DATA__ = {
     "破损电子设备"
    ],
    "combo_notes": "臂章落场对一名对手打3点理智，此后全队理智最终伤害+1，0-13格内常驻20%控骰，正压判定段。配蓝宝之杖·命时，它的d6判定与硬币判定每段都吃这+1；小沙香琉璃判定后回1音韵、累计3次再给全队判定+1，燃料就续上了。予(水着)把队伍伤害转成理智后，破损电子设备这类d4也被推高。",
-   "image_url": "assets/images/ui2/img_WRw1FlKIMG.webp?v=3",
+   "image_url": "assets/images/ui2/img_WRw1FlKIMG.webp?v=4",
    "_category": "item_permanent",
    "dims": {
     "cost": 8,
@@ -2760,7 +2760,7 @@ window.__CARD_DATA__ = {
     "宫樱子"
    ],
    "combo_notes": "落场对一名对手打3点混沌、自己攻击力抬3（约+1伤害），再用一局一次的3音韵从墓地或移出区捞回[侵略]卡，此后终伤再+1。神乐铃最顺：每进墓一次下次伤害+1，配祓禊再从墓地捞一张[侵略]卡，同一张铃反复喂大；镌刻的艺术补移出区[侵略]卡，宫樱子队伍攻击+2让那3点攻击换成伤害。",
-   "image_url": "assets/images/ui2/img_d6WbOr2gL9.webp?v=3",
+   "image_url": "assets/images/ui2/img_d6WbOr2gL9.webp?v=4",
    "_category": "item_permanent",
    "card_type": "道具/永续",
    "tags": [
@@ -2796,7 +2796,7 @@ window.__CARD_DATA__ = {
     "宁雨清"
    ],
    "combo_notes": "7费落地先检索一张攻击卡或技能卡，顺手丢1抽1，此后攻击卡技能卡永久-1费、判定伤害+1。检索首选人格修正拳！或破损电子设备这类判定卡，配小沙香琉璃判定回1音韵、累计3次给全队判定+1，段数越多回费越多，费用压力自己就抹平。宁雨清让检索进手的卡再-1费，还扣对手3同步值。",
-   "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=3",
+   "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=5",
    "_category": "item_permanent",
    "dims": {
     "cost": 8.5,
@@ -2854,7 +2854,7 @@ window.__CARD_DATA__ = {
     "入间枫"
    ],
    "combo_notes": "黑卡管三条线：回合开始多抽一张、首次献祭额外回1音韵、消耗金币时每次少花1000。它最放大智能手机——等价交换扣700金币，减掉1000后等于白送一次丢手卡打3点理智；善意面具每500金币换1点最终伤害也变成零成本。再叠巧匠之手每回合献祭+1，献祭回音韵与抽牌就转成净赚循环。",
-   "image_url": "assets/images/ui2/img_uDJ22RFVA7.webp?v=3",
+   "image_url": "assets/images/ui2/img_uDJ22RFVA7.webp?v=4",
    "_category": "item_permanent",
    "dims": {
     "cost": 8.5,
@@ -2919,7 +2919,7 @@ window.__CARD_DATA__ = {
     "现实间里绪"
    ],
    "combo_notes": "杖是每回合稳定的两段判定：落场d6，此后主要阶段硬币正面再补2点判定伤害。段数就是它的上限——钢笔的判定+1与攻击技能卡减费、风纪委员臂章的理智最终伤害+1，每段都吃；小沙香琉璃判定后回1音韵、累计3次再给全队判定+1，把它从单发火力变成能自养的循环。硬币背面空过，稳定性是短板。",
-   "image_url": "assets/images/ui2/img_aGVPDZCwUr.webp?v=3",
+   "image_url": "assets/images/ui2/img_aGVPDZCwUr.webp?v=4",
    "_category": "item_permanent",
    "dims": {
     "cost": 7.5,
@@ -3195,7 +3195,7 @@ window.__CARD_DATA__ = {
    "attribute": "混沌",
    "type": "永续",
    "card_type": "道具/永续",
-   "image_url": "assets/images/ui2/img_iTclHZs9kb.webp?v=3",
+   "image_url": "assets/images/ui2/img_iTclHZs9kb.webp?v=5",
    "effect": "振聋发聩的轰鸣声是为了迎接神的到来。发动时作为效果处理：获取1点引导核心。每个自己回合可以发动一次：获得3点激励点数。每次提升等级后可以从以下效果中选择一项适用：①队伍攻击力+1②选移出游戏的一张卡加入手卡（限一次）③对一名玩家造成一次四面骰判定伤害。",
    "tags": [
     "丰沛"
@@ -3235,7 +3235,7 @@ window.__CARD_DATA__ = {
    "tags": [
     "丰沛"
    ],
-   "image_url": "assets/images/ui2/card_jiye.webp?v=3",
+   "image_url": "assets/images/ui2/card_jiye.webp?v=5",
    "_category": "item_permanent",
    "dims": {
     "cost": 6,
@@ -3732,7 +3732,7 @@ window.__CARD_DATA__ = {
     "蓝宝之杖·命"
    ],
    "combo_notes": "判定伤害队最便宜的起爆：2费打一次4面骰判定伤害，配钢笔（判定伤害+1）或极夜君王之冕（首次判定后再补一段）垫稳骰点，小沙香琉璃每段判定后回1音韵、累计3次给全队判定+1。SP能花2音韵把它从墓地收回手，被回收的这张用完回牌组最下方，自带复用线；代价是每次用完后退2格。",
-   "image_url": "assets/images/ui2/img_5oo6fhAIO6.webp?v=3",
+   "image_url": "assets/images/ui2/img_5oo6fhAIO6.webp?v=5",
    "_category": "item_single",
    "dims": {
     "cost": 8,
