@@ -19808,12 +19808,20 @@ function onlineDrawByCostP2(done) {
   if (done) done();
 }
 
-function useCardComplete(handIndex) {
+function useCardComplete(handIndex) { return useCardCompleteFor('p1', handIndex); }
+
+/* 【S3/S4 结构件 2026-10-05】按座位的出牌入口：服务器权威下由服务器以该座位身份执行。
+   原 useCardComplete 写死 p1；这里参数化成 seat，useCardComplete 退化为 'p1' 的薄包装 ⇒ 现有调用点零改动、行为逐字不变。
+   ⚠ 对手座位：2 人局 = 另一方；1v1v1（p3）需另行扩展（当前保持 2 人局语义不变）。 */
+function useCardCompleteFor(seat, handIndex) {
+  var __me = battleState && battleState[seat];
+  if (!__me) return;
+  var __foe = (seat === 'p1') ? 'p2' : 'p1';
   if (__resolveLocked()) return;
   // 对手回合：手牌一律不能手发（含角色技能卡——技能卡"全时点"限于自己回合）；
   // 对手回合能用的只有：响应窗口内的连锁卡、已盖伏的卡、在场永续的主动效果、满足条件的墓地效果。
-  if (battleState.currentPlayer !== 'p1') {
-    var __oppCard = battleState.p1.hand[handIndex];
+  if (battleState.currentPlayer !== seat) {
+    var __oppCard = __me.hand[handIndex];
     if (!__oppCard) return;
     if (!(typeof isChainOnlyCard === 'function' && isChainOnlyCard(__oppCard) && typeof hasChainTarget === 'function' && hasChainTarget(__oppCard))) {
       showToast('对手回合不能从手牌发动【' + __oppCard.name + '】——请在连锁询问中响应，或先盖伏/等自己回合', 'warn');
@@ -19821,21 +19829,21 @@ function useCardComplete(handIndex) {
     }
   }
   
-  var card = battleState.p1.hand[handIndex];
+  var card = __me.hand[handIndex];
   if (!card) return;
 
   // 玩家在永续卡弹窗选择了“盖伏放置”：盖伏不付费、不发动、不进连锁，直接背面进盖伏区（翻开时才付费发动）
   var __wantFaceDown = pendingFaceDown; pendingFaceDown = false;
   if (__wantFaceDown) {
     if (!canCardBeFaceDown(card)) { showToast('这张卡不能盖伏', 'warn'); return; }
-    var __fdp = battleState.p1;
+    var __fdp = __me;
     if ((__fdp.permanent||[]).length + (__fdp.faceDownCards||[]).length >= 3) { showToast('效果处理区已满（3格），无法盖伏', 'warn'); return; }
     // 联机：盖伏放置也要广播（这条入口走不到下面的出牌广播，否则对手看不到这次盖伏）
     if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
       Online.sendIntent({ type: 'fdPlace', idx: handIndex, name: card.name });
     }
     __fdp.hand.splice(handIndex, 1);
-    placeFaceDown(card, 'p1');
+    placeFaceDown(card, seat);
     updateBattleUI();
     return;
   }
@@ -19844,7 +19852,7 @@ function useCardComplete(handIndex) {
   var cardName = card.name || '';
   
   // 统一发动合法性校验（连锁对象/阶段/技能一次/费用/攻击范围/特例条件）
-  var __play = evaluatePlayable(card, 'p1');
+  var __play = evaluatePlayable(card, seat);
   if(!__play.ok){ showToast(__play.reason, 'warn'); return; }
 
   // 联机：广播出牌意图（对方远端位以同一流程重放；目标选择/宫樱子免费用卡等决策经答案流同步）。
@@ -19861,7 +19869,7 @@ function useCardComplete(handIndex) {
   
   // 指向性交互卡：统一走 SPECIAL 表（玩家可视化 / AI 自动，效果一致）
   if (isSpecialInteractiveCard(card)) {
-    settleSpecialCard(card, handIndex, 'p1');
+    settleSpecialCard(card, handIndex, seat);
     return;
   }
 
@@ -19871,7 +19879,7 @@ function useCardComplete(handIndex) {
       proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, target);
     });
   } else {
-    proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, 'p2');
+    proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, __foe);
   }
 }
 
