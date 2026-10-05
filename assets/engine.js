@@ -336,6 +336,38 @@ var Online = {
     return true;
   },
   /* ============================================================
+   * 【S3 大厅入口】从 URL 读取开关来启用权威模式（**默认关闭 ⇒ 不调用则行为逐字不变**）
+   * ------------------------------------------------------------
+   *   ?auth=<baseUrl>   启用（baseUrl 留空或写 1 ⇒ 用同源）；配合 ?authroom=<房间>、?authseat=p1|p2
+   *   失败（连不上/快照拉不到）⇒ 自动 stop + disableAuthoritative ⇒ **回到房主权威（降级路径）**
+   *  调用方：联机大厅/启动流程；本函数自身**不做任何自动启用**，避免悄悄改变现有行为。
+   * ============================================================ */
+  tryEnableAuthoritativeFromUrl: function (hooks) {
+    try {
+      if (typeof location === 'undefined' || !location.search) return false;
+      var m = /[?&]auth=([^&]*)/.exec(String(location.search));
+      if (!m) return false;                                  /* 没有开关 ⇒ 什么都不做 */
+      var base = decodeURIComponent(m[1] || '');
+      if (!base || base === '1') base = '';                  /* 空/1 ⇒ 同源 */
+      var rm = /[?&]authroom=([^&]*)/.exec(String(location.search));
+      var sm = /[?&]authseat=([^&]*)/.exec(String(location.search));
+      var room = rm ? decodeURIComponent(rm[1]) : (Online.roomId || 'default');
+      var seat = sm ? decodeURIComponent(sm[1]) : (Online.mySide || 'p1');
+      var h = hooks || {};
+      Online.enableAuthoritative(base, seat);
+      Online.startAuthoritativeLoop(room, {
+        onSnapshot: h.onSnapshot || null,
+        onPending: h.onPending || null,
+        onError: function (why) {
+          /* 连不上/拉不到 ⇒ **自动回退到房主权威**（作者口径：保留降级路径） */
+          try { Online.stopAuthoritativeLoop(); Online.disableAuthoritative(); } catch (e) {}
+          if (typeof h.onError === 'function') { try { h.onError(why); } catch (e) {} }
+        }
+      });
+      return true;
+    } catch (e) { return false; }
+  },
+  /* ============================================================
    * 2026-09-16 收口：联机**只保留房主权威一条路**
    * ------------------------------------------------------------
    * 权威路径：authority === 'host'（唯一发版路径）
