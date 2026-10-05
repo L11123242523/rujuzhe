@@ -7062,9 +7062,9 @@ var TW = {
       if (battleState) {
         var __candsH = opts.candidates || [];
         var __humanCand = __candsH.filter(function (c) { return c && c.owner && !isAISeat(c.owner); });
-        battleState._awaitingDecision = __humanCand.length
-          ? { seat: __humanCand[0].owner, label: (opts.label || '时点窗口'), since: Date.now() }
-          : null;
+        /* 【批次1】时点窗口也进权威账本（原来这里写的是**对象** ⇒ 污染计数器 ⇒ 永不归零 ✗） */
+        if (__humanCand.length) { try { if (typeof Decision !== 'undefined' && Decision && Decision.enter) Decision.enter('humanCandidates'); else battleState._awaitingDecision = __humanCand.length; } catch (e) {} }
+        else { try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {} }
       }
     } catch (e) { console.error('标记等待决断出错', e); }
     var win = {
@@ -11540,6 +11540,7 @@ __defEngineState('_choiceQueue', function () { return []; }); // 弹窗队列：
    所有玩家决策入口成对调用 enter/leave；闸门 __decideWaitGate / __phaseWaitBusy 只看它。
    原来只有连锁窗会设置它 ⇒ 选项弹窗/选卡时 AI 以为玩家空闲 ⇒ 抢跑。 */
 function __decideEnter(why) {
+  try { if (typeof Decision !== 'undefined' && Decision && Decision.enter) { Decision.enter(why); return; } } catch (e) {}
   try {
     if (typeof battleState === 'undefined' || !battleState) return;
     battleState._awaitingDecision = (battleState._awaitingDecision || 0) + 1;
@@ -11547,6 +11548,7 @@ function __decideEnter(why) {
   } catch (e) {}
 }
 function __decideLeave(why) {
+  try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) { Decision.leave(why); return; } } catch (e) {}
   try {
     if (typeof battleState === 'undefined' || !battleState) return;
     var n = (battleState._awaitingDecision || 0) - 1;
@@ -12991,7 +12993,13 @@ function __inBattleScreen() {
     return !!el.classList.contains('active');
   } catch (e) { return false; }
 }
+/* 【批次1】唯一判据：只读 Decision（旧字段 battleState._awaitingDecision 不再参与判断 ✓） */
 function __playerDeciding() {
+  try { if (typeof Decision !== 'undefined' && Decision && Decision.isOpen) return !!Decision.isOpen(); } catch (e) {}
+  return __playerDeciding_legacy();
+}
+/* 原实现保留为 legacy 兜底（仅在 Decision 缺失时使用 ✓） */
+function __playerDeciding_legacy() {
   try { return !!(typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision); } catch (e) { return false; }
 }
 /* 语义①：**引擎锁** —— 效果正在结算/连锁锁/正在组新连锁（"能不能插入新效果"看这个） */
