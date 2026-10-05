@@ -13,7 +13,9 @@ services:
     region: singapore          # 新加坡，对国内延迟最低
     branch: main
     rootDir: .                 # 仓库根即服务根
-    buildCommand: npm install
+    # 【2026-10-05】权威服是**零依赖**的（只用 Node 内置 http/fs/path/crypto）⇒ 不需要装依赖。
+    # 原来写 npm install 会把 colyseus / express / playwright-core 等（早期原型遗留）全装上 —— 慢，且可能直接失败。
+    buildCommand: echo "no build needed (zero-dependency authoritative server)"
     # 【2026-10-05 改】原来跑的是 npm start（旧中继）；现在启动「服务器权威」：
     #   server/authoritative-server.mjs 是**零依赖**的 Node HTTP 服（读平台注入的 PORT），
     #   服务器持引擎跑规则，客户端只发意图/只收快照 —— 客机触发的被动收益天然归客机。
