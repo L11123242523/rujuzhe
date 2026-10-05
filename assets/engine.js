@@ -305,8 +305,15 @@ var Online = {
       /* ① 快照 ⇒ 套用渲染 */
       Online._authFetch('/snapshot?room=' + enc(Online._authRoom) + '&seat=' + Online.serverSeat, null, function (j) {
         if (!j || !j.snapshot) {
-          Online._authFailCount = (Online._authFailCount || 0) + 1;
-          if (Online._authFailCount === 5 && typeof h.onError === 'function') { try { h.onError('snapshot-unavailable'); } catch (e) {} }
+          /* · j === null ⇒ 真连不上（网络/服务器不可达）⇒ **计入失败**，够 5 次才回退；
+             · j 非 null 但没有 snapshot（如 409 not-started）⇒ **服务器可达、只是还没开局**
+               ⇒ **绝不能算失败** —— 否则对手晚几秒进来，本机就先把权威模式关掉了（E2E 实测到的隐患）。 */
+          if (!j) {
+            Online._authFailCount = (Online._authFailCount || 0) + 1;
+            if (Online._authFailCount === 5 && typeof h.onError === 'function') { try { h.onError('snapshot-unavailable'); } catch (e) {} }
+          } else {
+            Online._authFailCount = 0;
+          }
           return;
         }
         Online._authFailCount = 0;
@@ -355,7 +362,11 @@ var Online = {
       var seat = sm ? decodeURIComponent(sm[1]) : (Online.mySide || 'p1');
       var h = hooks || {};
       Online.enableAuthoritative(base, seat);
-      Online.startAuthoritativeLoop(room, {
+      /* ⚠ 这里**只启用标志、不启动轮询** —— 轮询要等"进了房间"才有意义：
+         页面一加载就轮询 /snapshot?room=default ⇒ 服务器回 409 not-started
+         ⇒ 会被误判成"连不上" ⇒ 5 次后自动回退，把刚启用的权威模式又关掉（E2E 实测踩到）。
+         轮询由 createRoom / joinRoom 在拿到房号后启动。 */
+      if (h.startLoop) Online.startAuthoritativeLoop(room, {
         onSnapshot: h.onSnapshot || null,
         onPending: h.onPending || null,
         onError: function (why) {
