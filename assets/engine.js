@@ -262,9 +262,12 @@ var Online = {
     return true;
   },
   /* 以下四个是"客户端退化"用的接口（默认关闭时**不会被调用**；用浏览器原生 fetch） */
+  _authFetchImpl: null,      /* 【可测 / 可换传输】注入自定义 fetch；为空时用全局 fetch（测试床的 fetch 是桩、连不上本地端口） */
   _authFetch: function (path, opts, cb) {
     try {
-      fetch(Online.authoritativeEndpoint + path, opts || {})
+      var f = Online._authFetchImpl || (typeof fetch === 'function' ? fetch : null);
+      if (!f) { if (cb) cb(null); return; }
+      f(Online.authoritativeEndpoint + path, opts || {})
         .then(function (r) { return r.json(); })
         .then(function (j) { if (cb) cb(j); })
         .catch(function () { if (cb) cb(null); });
@@ -283,6 +286,54 @@ var Online = {
   answerPending: function (room, payload, cb) {
     Online._authFetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ room: room || Online.roomId || 'default', seat: Online.serverSeat, payload: payload }) }, cb);
+  },
+  /* ============================================================
+   * 【S3 客户端接入】权威模式下的客户端循环（默认**不启动**；只有显式 start 才跑）
+   * ------------------------------------------------------------
+   *   · 轮询 /snapshot ⇒ 用 NetSync.applySnapshot **套用渲染**（客户端不跑规则）；
+   *   · 轮询 /pending  ⇒ 把"该我答的问题"交给调用方弹窗，答案经 /answer 回传；
+   *   · **连续失败**达到阈值 ⇒ 回调 onError ⇒ 调用方应回退（disableAuthoritative + stop，回到房主权威）。
+   *  为什么要有失败阈值：作者口径"**保留房主权威作为降级路径**" —— 服务器抖动时必须能自动退回。
+   * ============================================================ */
+  startAuthoritativeLoop: function (room, hooks) {
+    Online.stopAuthoritativeLoop();
+    var h = hooks || {};
+    Online._authRoom = room || Online.roomId || 'default';
+    Online._authFailCount = 0;
+    var enc = function (s) { try { return encodeURIComponent(s); } catch (e) { return s; } };
+    var tick = function () {
+      /* ① 快照 ⇒ 套用渲染 */
+      Online._authFetch('/snapshot?room=' + enc(Online._authRoom) + '&seat=' + Online.serverSeat, null, function (j) {
+        if (!j || !j.snapshot) {
+          Online._authFailCount = (Online._authFailCount || 0) + 1;
+          if (Online._authFailCount === 5 && typeof h.onError === 'function') { try { h.onError('snapshot-unavailable'); } catch (e) {} }
+          return;
+        }
+        Online._authFailCount = 0;
+        try { if (typeof NetSync !== 'undefined' && NetSync.applySnapshot) NetSync.applySnapshot(j.snapshot); } catch (e) {}
+        if (typeof h.onSnapshot === 'function') { try { h.onSnapshot(j.snapshot); } catch (e) {} }
+      });
+      /* ② 待答问题 ⇒ 交给调用方弹窗；答案回传 */
+      Online._authFetch('/pending?room=' + enc(Online._authRoom) + '&seat=' + Online.serverSeat, null, function (j) {
+        if (!j || !j.pending || Online._authAnswering) return;
+        if (typeof h.onPending !== 'function') return;      /* 没给处理方式 ⇒ **不瞎答**（宁可让服务器按超时兜底） */
+        Online._authAnswering = true;
+        var answered = false;
+        var answerFn = function (payload) {
+          if (answered) return; answered = true;
+          Online.answerPending(Online._authRoom, payload, function () { Online._authAnswering = false; });
+        };
+        try { h.onPending(j.pending, answerFn); } catch (e) { Online._authAnswering = false; }
+      });
+    };
+    Online._authTimer = setInterval(tick, 800);
+    tick();
+    return true;
+  },
+  stopAuthoritativeLoop: function () {
+    if (Online._authTimer) { try { clearInterval(Online._authTimer); } catch (e) {} Online._authTimer = null; }
+    Online._authAnswering = false;
+    return true;
   },
   /* ============================================================
    * 2026-09-16 收口：联机**只保留房主权威一条路**
