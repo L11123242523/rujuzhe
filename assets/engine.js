@@ -6395,6 +6395,44 @@ registerTrigger({
   }
 });
 
+/* 【task2 补齐 2026-10-05】钢笔 SP：「一回合一次，有技能卡或攻击卡被送入墓地后可以发动，抽一张。」
+   按既有注册表模式登记（与 liuli-hw-sp-leave / toma-sp-leave 同构）。
+   ownerOf 返回**受益座位**（永续区持有【钢笔】的玩家）——归属跟人走，不写死 p1。 */
+registerTrigger({
+  id: 'gangbi-sp-grave',
+  timing: 'leave-field',
+  ownerOf: function () {
+    var list = [];
+    playerIds().forEach(function (w) {
+      var q = battleState[w];
+      if (q && (q.permanent || []).some(function (c) { return c && /钢笔/.test(String(c.name || '')); })) list.push(w);
+    });
+    return list;   // 可能多个座位（双方都持有钢笔）
+  },
+  cond: function (ctx, owner) {
+    if (!ctx || !ctx.card) return false;
+    if (ctx.reason === 'use') return false;                       // 卡面"被送入墓地"⇒ 玩家"使用"送墓不算（口径第 4 条）
+    if (__missTiming('gangbi-sp-grave', ctx)) return false;
+    var cat = ctx.card._category;
+    if (cat !== 'skill_cards' && cat !== 'attack_cards') return false;   // 只认技能卡 / 攻击卡
+    var q = battleState[owner];
+    if (!q) return false;
+    if (q._gangbiSPTurn === battleState.turn) return false;       // 一回合一次（本回合已用过）
+    if (q._gangbiQueuedFor === ctx.card) return false;            // 同一次离场事件不重复排队
+    return true;
+  },
+  mandatory: false,   // 卡面"可以发动" ⇒ 选发（走正常连锁窗口询问）
+  label: function (ctx) { return '【钢笔·SP】有' + ((ctx && ctx.card && ctx.card._category === 'attack_cards') ? '攻击卡' : '技能卡') + '被送入墓地·自己抽1张'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    q._gangbiQueuedFor = ctx.card;
+    q._gangbiSPTurn = battleState.turn;                            // 标记本回合已发动（一回合一次）
+    addBattleLog(owner, '【钢笔·SP】有【' + ((ctx.card && ctx.card.name) || '') + '】被送入墓地，自己抽1张');
+    if (typeof drawCard === 'function') drawCard(owner);
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+
 registerTrigger({
   id: 'self-grave',
   timing: 'leave-field',
