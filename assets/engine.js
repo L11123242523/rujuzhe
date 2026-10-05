@@ -19850,18 +19850,18 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
           return;
         }
         var sa = handlePermanentActivation(card, effectText, function () {
-          continueCardUse(card, effectText, isPermanent, actionType, target, true);
+          continueCardUse('p1', card, effectText, isPermanent, actionType, target, true);
         });
-        if (!sa) continueCardUse(card, effectText, isPermanent, actionType, target, false);
+        if (!sa) continueCardUse('p1', card, effectText, isPermanent, actionType, target, false);
       });
       return;
     }
     // 非永续卡：正常解析整段效果
     var specialActivation = handlePermanentActivation(card, effectText, function() {
-      continueCardUse(card, effectText, isPermanent, actionType, target, true);
+      continueCardUse('p1', card, effectText, isPermanent, actionType, target, true);
     });
     if (!specialActivation) {
-      continueCardUse(card, effectText, isPermanent, actionType, target, false);
+      continueCardUse('p1', card, effectText, isPermanent, actionType, target, false);
     }
   }
   // 宫樱子被动：免费用卡次数充足时询问是否消耗
@@ -20787,12 +20787,14 @@ function settleSpecialCard(card, handIndex, user, outerDone) {
   });
 }
 
-function continueCardUse(card, effectText, isPermanent, actionType, target, alreadyHandledOnPlay) {
+/* 【task3 结构修复 2026-10-05】加 user 首参：本函数自称"玩家/AI一致"的统一管线，但过去把座位写死 'p1'
+   ⇒ 谁调用都记在 p1 头上（被动/去向都会错）。现在按使用者走；现调用点全在 p1 路径 ⇒ 显式传 'p1'，行为不变。 */
+function continueCardUse(user, card, effectText, isPermanent, actionType, target, alreadyHandledOnPlay) {
   // 卡牌去向 + 角色被动钩子（无论效果如何解析都必须执行一次）
   function __finalize() {
     // 去向（效果处理区/墓地）与使用后角色被动钩子走统一管线（玩家/AI一致）
-    placeAfterUse('p1', card, isPermanent);
-    postUsePassiveHooks('p1', card, function () {
+    placeAfterUse(user, card, isPermanent);
+    postUsePassiveHooks(user, card, function () {
       updateBattleUI();
       checkBattleEnd();
     });
@@ -20804,7 +20806,7 @@ function continueCardUse(card, effectText, isPermanent, actionType, target, alre
 
   // 非永续单次卡：统一走 runSingleCardSteps —— 效果将执行前由 beforeEffectExecution 开“双方连锁窗口”，
   // 无可连锁卡时静默放行；不再使用旧的、只问自己且不真正连锁的 showTimingQuestion 确认框
-  runSingleCardSteps('p1', card, target, __finalize);
+  runSingleCardSteps(user, card, target, __finalize);
 }
 
 /* ==== 导出垫片（不改名字，仅供跨文件可见）==== */
