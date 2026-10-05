@@ -12460,6 +12460,21 @@ function __appendLogEntry(rec) {
  *   ENV.now() / ENV.rng()   —— 时间与随机数：服务器必须持有权威随机源
  * 默认 ENV = 现有浏览器行为 → **行为零变化**（由现有套件守住）。
  * ============================================================ */
+/* 【S2 结构修复 2026-10-05】ENV.ask 的座位归属守卫（返回 true=继续走本机原有分支；false=已处理/已拒绝）。 */
+function __envAskSeatGuard(seat, spec, kind, cb) {
+  if (!seat || seat === 'p1') return true;                 /* 本机座位/未指定 ⇒ 原样走本地（行为不变） */
+  try {
+    if (typeof Online !== 'undefined' && Online && Online.active && !Online.isGuest && typeof Online.askRemote === 'function') {
+      /* 联机房主态：把问题发往该座位（原始 spec 一并带上，S3/S4 阶段由客机端渲染） */
+      Online.askRemote({ kind: 'prompt', origin: 'ENV.ask', specKind: kind, spec: spec }, cb);
+      return false;
+    }
+  } catch (e) {}
+  /* 没有远端通道（单机/客人态/异常）：**宁可没有这个选择，也不替别人做决定** */
+  try { if (typeof addBattleLog === 'function') addBattleLog('system', '【归属】跳过座位 ' + seat + ' 的决策（' + kind + '）：当前无远端通道'); } catch (e2) {}
+  if (typeof cb === 'function') cb(null);
+  return false;
+}
 var ENV = {
   kind: 'browser',
   log: function (rec) {
@@ -12486,6 +12501,12 @@ var ENV = {
   ask: function (seat, spec, cb) {
     try {
       var kind = (spec && spec.kind) || 'choice';
+      /* 【S2 结构修复 2026-10-05】座位归属守卫：非本机座位（seat 存在且 ≠ 'p1'）的决策**绝不在本机渲染**。
+         过去只有 pickList 检查 seat，choice/pickCards/targetPlayer/targetCards 会忽略 seat、把"该对手选的问题"
+         弹在房主屏幕上（="客机的决定由房主代做"的入口级根因）。
+         联机房主态 ⇒ 经 Online.askRemote 发往对端；否则 ⇒ 安全返回 null 并留日志。
+         seat='p1' 或未传 seat ⇒ 行为逐字不变。 */
+      if (typeof __envAskSeatGuard === 'function' && !__envAskSeatGuard(seat, spec, kind, cb)) return;
       if (kind === 'choice') return __askChoiceLocal(spec, cb);
       if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
       if (kind === 'targetPlayer') return __askTargetPlayerLocal(spec && spec.card, spec && spec.effectText, cb);
