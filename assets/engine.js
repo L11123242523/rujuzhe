@@ -237,6 +237,54 @@ var Online = {
      SPEC_TIMEOUT_MS: 对手多久不选就按默认项继续（不再永久卡死） */
   role:'', isGuest:false,
   /* ============================================================
+   * 【S3/S4 服务器权威模式】2026-10-05
+   * ------------------------------------------------------------
+   * 默认 **false** ⇒ 一切照旧：现有"房主权威"就是**降级路径**（连不上权威服务器时仍能正常玩）。
+   * 打开后（enableAuthoritative）：本机不再跑规则 ——
+   *   · 操作改为 POST 到权威服务器的 /intent；
+   *   · 渲染改为从 /view 拉取服务器视图；
+   *   · 决策（"该某座位选"）由服务器经 /pending 下发、本机 /answer 回传；
+   *     引擎侧 ENV.ask 的座位守卫在 serverAuthoritative=true 时会把**所有座位**（含 p1）的决策都发往远端
+   *     —— 服务器权威下**不存在"本机座位"**。
+   * 为什么默认关闭：这是"新的权威形态"，必须能一键退回房主权威（作者口径：**保留降级路径**）。
+   * ============================================================ */
+  serverAuthoritative:false,
+  authoritativeEndpoint:'',
+  serverSeat:'',
+  enableAuthoritative: function (endpoint, seat) {
+    Online.authoritativeEndpoint = String(endpoint || '');
+    Online.serverSeat = (seat === 'p2') ? 'p2' : 'p1';
+    Online.serverAuthoritative = true;
+    return true;
+  },
+  disableAuthoritative: function () {
+    Online.serverAuthoritative = false;
+    return true;
+  },
+  /* 以下四个是"客户端退化"用的接口（默认关闭时**不会被调用**；用浏览器原生 fetch） */
+  _authFetch: function (path, opts, cb) {
+    try {
+      fetch(Online.authoritativeEndpoint + path, opts || {})
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (cb) cb(j); })
+        .catch(function () { if (cb) cb(null); });
+    } catch (e) { if (cb) cb(null); }
+  },
+  fetchServerView: function (room, cb) {
+    Online._authFetch('/view?room=' + encodeURIComponent(room || Online.roomId || 'default') + '&seat=' + Online.serverSeat, null, cb);
+  },
+  sendIntentToServer: function (room, intent, cb) {
+    Online._authFetch('/intent', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ room: room || Online.roomId || 'default', seat: Online.serverSeat, intent: intent }) }, cb);
+  },
+  fetchPending: function (room, cb) {
+    Online._authFetch('/pending?room=' + encodeURIComponent(room || Online.roomId || 'default') + '&seat=' + Online.serverSeat, null, cb);
+  },
+  answerPending: function (room, payload, cb) {
+    Online._authFetch('/answer', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ room: room || Online.roomId || 'default', seat: Online.serverSeat, payload: payload }) }, cb);
+  },
+  /* ============================================================
    * 2026-09-16 收口：联机**只保留房主权威一条路**
    * ------------------------------------------------------------
    * 权威路径：authority === 'host'（唯一发版路径）
