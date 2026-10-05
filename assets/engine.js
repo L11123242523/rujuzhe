@@ -21066,6 +21066,16 @@ try { window.rwGet = rwGet; } catch (e) {}
 try { window.rwMirror = rwMirror; } catch (e) {}
 try { window.setGameSeed = setGameSeed; } catch (e) {}
 try { window.Online = Online; } catch (e) {}
+/* 【S3 自动接线 2026-10-05】页面加载时若 URL 带 ?auth= ⇒ **自动启用服务器权威模式**；
+   不带该参数 ⇒ tryEnableAuthoritativeFromUrl 直接返回 false、**什么都不做**（现有房主权威行为逐字不变）。
+   为什么走 URL 而不是大厅勾选框：game.html 的旧"服务器权威"勾选框在 2026-09-16 收口时已删除，
+   而旧方案 C 的客户端逻辑（WS 的 engine 消息）仍残留在代码里、与本套 HTTP 接口不是一套协议
+   ⇒ 不盲改大厅 DOM，先用"零 DOM 改动"的方式把入口接上（大厅 UI 之后要做时再说）。 */
+try {
+  if (typeof Online !== 'undefined' && Online && typeof Online.tryEnableAuthoritativeFromUrl === 'function') {
+    setTimeout(function () { try { Online.tryEnableAuthoritativeFromUrl(); } catch (e) {} }, 0);
+  }
+} catch (e) {}
 try { window.__onlineDiverge = __onlineDiverge; } catch (e) {}
 try { window.onlineSurrender = onlineSurrender; } catch (e) {}
 try { window.__showSurrenderResult = __showSurrenderResult; } catch (e) {}
