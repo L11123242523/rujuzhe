@@ -16192,9 +16192,11 @@ var __tileQueueFlushing = false;
 function __queueTileEffect(player) {
   try {
     if (typeof battleState === 'undefined' || !battleState) return false;
-    battleState._pendingAfterChain = battleState._pendingAfterChain || [];
-    if (battleState._pendingAfterChain.indexOf(player) >= 0) return false;   // 同一玩家同批只排一次
-    battleState._pendingAfterChain.push(player);
+    try { if (typeof effectEngine !== 'undefined' && effectEngine) { effectEngine._pendingTriggers = effectEngine._pendingTriggers || []; } } catch (e) {}
+    var __tq = (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._pendingTriggers) || null;
+    if (!__tq) return false;
+    for (var __ti = 0; __ti < __tq.length; __ti++) { if (__tq[__ti] && __tq[__ti].__tileFor === player) return false; }
+    __tq.push({ id: '__tile', label: '__tile:' + player, __tileFor: player, fire: function () { return triggerTileEffect(player); } });
     var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES[battleState[player].position]) || {};
     addBattleLog(player, '【格子效果】结算中产生（第' + battleState[player].position + '格【' + (t.name || '') + '】）⇒ 排队，等本次连锁全部结算完成后再处理');
     return true;
@@ -16223,8 +16225,8 @@ function __drainAllWhenIdle(reason) {
       __drainRetryTimer = null;
       try {
         if (!__idle()) { if (++tries <= 40) { __drainRetryTimer = setTimeout(__step, 200); } return; }
-        try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
         try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) {}
+        try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
       } catch (e) {}
     }
     if (__drainRetryTimer) { try { clearTimeout(__drainRetryTimer); } catch (e) {} __drainRetryTimer = null; }
@@ -16234,8 +16236,10 @@ function __drainAllWhenIdle(reason) {
 function __flushPendingTileEffects() {
   try {
     if (__tileQueueFlushing) return;
-    var q = (battleState && battleState._pendingAfterChain) || [];
-    if (!q.length) return;
+    var __all = (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._pendingTriggers) || [];
+      var q = [];
+      for (var __i = 0; __i < __all.length; __i++) { if (__all[__i] && __all[__i].__tileFor) q.push(__all[__i].__tileFor); }
+      if (!q.length) return;
     if (typeof __effectsResolving === 'function' && __effectsResolving()) {
       /* 【2026-10-03 端到端实测修】"排了队但没人处理"：收尾那一刻结算上下文可能还没退干净
          ⇒ 安排一次**延后重试**（上限 40 次 ≈ 6 秒，防死循环），等结算真正结束再处理。 */
@@ -16255,7 +16259,9 @@ function __flushPendingTileEffects() {
       return;
     }
     __tileQueueFlushing = true;
-    var player = q.shift();
+    var player = q[0];
+
+    for (var __k = __all.length - 1; __k >= 0; __k--) { if (__all[__k] && __all[__k].__tileFor === player) { __all.splice(__k, 1); break; } }
     try { addBattleLog(player, '【格子效果】本次连锁已全部结算完成 ⇒ 现在处理排队的格子效果'); } catch (e) {}
     try { triggerTileEffect(player); } catch (e) { try { console.error('处理排队格子效果出错', e); } catch (e2) {} }
     __tileQueueFlushing = false;
