@@ -7648,6 +7648,7 @@ var TW = {
         if (fired) return; fired = true;
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); }
         catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
+        try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出结束 */
         /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
            死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
            （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
@@ -7656,6 +7657,7 @@ var TW = {
       try {
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
         catch (e) { try { console.error('ChainAnim.resolving 异常（不影响结算）', e); } catch (e2) {} }
+        try { if (typeof __animEnter === 'function') __animEnter('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出开始 */
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
@@ -13169,7 +13171,18 @@ __defEngineState('__eeWaitState', function () { return { reason: '', since: 0 };
  * ============================================================ */
 __defEngineState('_phase', function () { return 'idle'; });
 __defEngineState('_phaseStat', function () { return { enter: 0, leave: 0, depth: 0, last: '', trail: [] }; });
-function __phaseNow() { try { return (effectEngine && effectEngine._phase) || 'idle'; } catch (e) { return 'idle'; } }
+/* 【S-b 2026-10-06】把"动画演出"接进相位。
+   animating 是 resolving 的**子状态**（不额外加深度，避免与 _resolveDepth 的计数打架）。
+   作者口径：**以动画为准** —— 动画未结束不得推进下一个效果；演出期间双方都不可操作。 */
+function __animEnter(why) { try { var ee = effectEngine; if (!ee) return; ee._animating = true; ee._animWhy = String(why || ''); } catch (e) {} }
+function __animLeave(why) { try { var ee = effectEngine; if (!ee) return; ee._animating = false; ee._animWhy = ''; } catch (e) {} }
+function __phaseNow() {
+  try {
+    var ee = effectEngine;
+    if (ee && ee._animating) return 'animating';      /* 演出优先：动画期间对外就是 animating */
+    return (ee && ee._phase) || 'idle';
+  } catch (e) { return 'idle'; }
+}
 function __phaseEnter(next, why) {
   var ee = effectEngine; if (!ee) return;
   var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
