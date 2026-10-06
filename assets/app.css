@@ -3616,6 +3616,16 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #deckBuilder .card-item-name,
   body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:11.5px !important; line-height:1.28 !important; padding:3px 4px !important; letter-spacing:.2px; }
   body:not(.ui-classic) #deckBuilder .card-item-cost{ z-index:3 !important; }
+/* 【UI 2026-10-06·作者反馈"整体看起来太廉价"】底部操作按钮：
+   原来 5 个按钮 5 种颜色（黄/橙/紫/橙/紫），而且颜色写在内联 style 里 ⇒ 普通 CSS 盖不住、看着像工具箱。
+   这里统一成**玻璃中性风 + hover 抬升**；只保留「献祭」的红（危险操作需要醒目）。
+   ⚠ 必须用 !important：它们的内联 style 优先级更高，这是能生效的唯一写法。 */
+.battle-action-btn:not(.btn-sacrifice){background:rgba(255,255,255,.07) !important;border:1px solid rgba(255,255,255,.18) !important;
+  color:#e8eeff !important;font-weight:800 !important;letter-spacing:.4px;
+  transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease !important;
+  box-shadow:0 4px 14px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.08) !important;}
+.battle-action-btn:not(.btn-sacrifice):hover{transform:translateY(-2px) !important;border-color:rgba(255,217,130,.6) !important;
+  box-shadow:0 8px 22px rgba(255,190,80,.25) !important;}
 /* 【回退 2026-10-06·作者实测"游戏内能用滚轮滚到卡组配置界面"】
    上一版这里硬写了 `#deckBuilder{display:flex;flex-direction:column;justify-content:center;}` ——
    **屏级容器的 display 绝不能在这里覆盖**：`.screen` 正是靠 display 做显示/隐藏切换的，
