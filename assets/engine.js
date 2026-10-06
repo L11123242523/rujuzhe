@@ -3650,32 +3650,6 @@ function startBattle(__sandbox) {
   
   showScreen('battleScreen');
   initBattle();
-  /* ============================================================
-   * 【修 2026-10-06 · 作者实测"什么都没干到我回合就卡死"】
-   * ------------------------------------------------------------
-   * 我用 Playwright 自动打 240 秒 / 198 次采样，卡死现场是：
-   *   turn=1 / phase=prepare / **ph=awaiting-choice / _choiceWaiting=true**
-   *   而 depth=0、chainLock=false（引擎状态**干净**）
-   * ⇒ 即"**有一个决策询问排在队列里、却没有弹出来给玩家**"：玩家看不到弹窗，
-   *    流程又一直等这个答案 ⇒ 表现就是卡死。
-   * 根因：`_choiceQueue`（等待弹出的询问队列）**只有 TW.close 会排空**；
-   *   一旦那条收尾没走到（异常路径/跨阶段），询问就永远躺在队里不显示。
-   * 修法：加一个**心跳兜底**——"队列里有询问 **且** 当前没有任何弹窗在等" ⇒ 立刻放出来。
-   *   只在"确实没人弹窗"时才放，**不会抢任何正常流程**（有弹窗时一行都不做）。
-   * ============================================================ */
-  try {
-    if (typeof window !== 'undefined' && !window.__choiceQueueWatchdog) {
-      window.__choiceQueueWatchdog = setInterval(function () {
-        try {
-          if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length &&
-              !pendingChoiceCallback && typeof __drainChoiceQueueWhenIdle === 'function') {
-            try { addBattleLog('system', '【兜底】检测到 ' + _choiceQueue.length + ' 个询问排队却没弹窗 ⇒ 立即放出'); } catch (e) {}
-            __drainChoiceQueueWhenIdle('watchdog');
-          }
-        } catch (e) {}
-      }, 1200);
-    }
-  } catch (e) {}
 }
 
 // ===== 肉鸽模式 =====
@@ -4867,32 +4841,6 @@ function startRoguelikeBattle(node) {
   
   showScreen('battleScreen');
   initBattle();
-  /* ============================================================
-   * 【修 2026-10-06 · 作者实测"什么都没干到我回合就卡死"】
-   * ------------------------------------------------------------
-   * 我用 Playwright 自动打 240 秒 / 198 次采样，卡死现场是：
-   *   turn=1 / phase=prepare / **ph=awaiting-choice / _choiceWaiting=true**
-   *   而 depth=0、chainLock=false（引擎状态**干净**）
-   * ⇒ 即"**有一个决策询问排在队列里、却没有弹出来给玩家**"：玩家看不到弹窗，
-   *    流程又一直等这个答案 ⇒ 表现就是卡死。
-   * 根因：`_choiceQueue`（等待弹出的询问队列）**只有 TW.close 会排空**；
-   *   一旦那条收尾没走到（异常路径/跨阶段），询问就永远躺在队里不显示。
-   * 修法：加一个**心跳兜底**——"队列里有询问 **且** 当前没有任何弹窗在等" ⇒ 立刻放出来。
-   *   只在"确实没人弹窗"时才放，**不会抢任何正常流程**（有弹窗时一行都不做）。
-   * ============================================================ */
-  try {
-    if (typeof window !== 'undefined' && !window.__choiceQueueWatchdog) {
-      window.__choiceQueueWatchdog = setInterval(function () {
-        try {
-          if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length &&
-              !pendingChoiceCallback && typeof __drainChoiceQueueWhenIdle === 'function') {
-            try { addBattleLog('system', '【兜底】检测到 ' + _choiceQueue.length + ' 个询问排队却没弹窗 ⇒ 立即放出'); } catch (e) {}
-            __drainChoiceQueueWhenIdle('watchdog');
-          }
-        } catch (e) {}
-      }, 1200);
-    }
-  } catch (e) {}
   
   // 肉鸽模式隐藏地图UI（无地图无公共卡，单纯打怪）
   setTimeout(function() {
@@ -6374,35 +6322,9 @@ var ChainAnim = {
       var b = this._el();
       if (b) {
         var d = document.createElement('div'); d.className = 'csa-node owner-' + (node.owner || 'p1') + ' csa-in csa-enter';
-        /* 【链式演出 2026-10-06·第二处】视觉上"一环一环排出来"：
-           给本轮节点一个**递增的入场延迟**（第 i 环延迟 i×120ms，上限 0.6s）。
-           ⚠ **只改观感、不改逻辑** —— 节点在逻辑上立即存在（连锁组成绝不能等，
-             真加延时会拖慢 AI/玩家操作）；这里只是把 CSS 飞入动画错开，
-             看起来像 MD 那样"每加一环停一下、链条在生长"。 */
-        try { d.style.animationDelay = (Math.min(i, 5) * 0.12) + 's'; } catch (e) {}
         var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
         var tx = document.createElement('span'); tx.className = 'csa-txt'; tx.textContent = node.label || '';
-        /* 【链式演出 2026-10-06·作者问"为什么用文字不用卡图"】**节点里加卡图**。
-           原来节点只有 C{n} + 文字 ⇒ 看起来像"日志行"，这是廉价感的最大来源。
-           现在用这张卡的 image_url 做缩略图（MD 的连锁条就是"卡图 + 链号 + 名称"）；
-           拿不到图（无 card / 无 image_url / 加载失败）时自动退回纯文字，不报错、不影响布局。 */
-        try {
-          /* 【修 2026-10-06 · 作者报「比翼恋理这类技能卡在连锁条里没有卡图」】
-             卡不一定挂在 node.card 上 —— 候选节点的结构是 **c.pick.card / c.card**
-             （见同文件 __ck 的取法：`var p = c.pick || {}, cd = p.card || c.card;`）
-             ⇒ 原来只读 node.card ⇒ 技能卡/事件卡/状态触发那类节点全都无图。
-             这里两种都认；仍拿不到就退回纯文字，不影响布局。 */
-          var __cd = (node && (node.card || (node.pick && node.pick.card))) || null;
-          var __src = (__cd && (__cd.image_url || __cd.avatar_url)) || '';
-          if (__src) {
-            var im = document.createElement('img'); im.className = 'csa-img'; im.src = __src; im.alt = '';
-            im.onerror = function () { try { if (im.parentNode) im.parentNode.removeChild(im); } catch (e) {} };
-            d.appendChild(im);
-          }
-        } catch (e) {}
         d.appendChild(no); d.appendChild(tx); b.appendChild(d); this._nodes.push(d);
-        /* 【链式演出】标题实时显示链数，让"链在增长"可见（原来是固定的 CHAIN · 连锁） */
-        try { var tEl = b.querySelector('.csa-title'); if (tEl) tEl.textContent = 'CHAIN ' + (i + 1) + ' · 连锁'; } catch (e) {}
       }
     } catch (e) { try { console.error('连锁节点绘制异常（不影响推进）', e); } catch (e2) {} }
     this.flash('C' + (i + 1) + ' 发动 · ' + (node.label || ''), 'flash-activate');
@@ -6440,13 +6362,8 @@ var ChainAnim = {
       var ring = document.createElement('div'); ring.className = 'md-chain-resolve-ring'; el.appendChild(ring);
       var vw = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1280;
       var vh = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 720;
-      /* 【链式演出 2026-10-06·作者反馈「整体看起来太廉价」】原来落点跟着 CardAnim._targetRect()
-         （≈连锁条的位置）走 ⇒ 卡牌特写**压在连锁条上**，把 C1 和「CHAIN · 连锁」标题挡住（截图实测：
-         1280×820 下 chain-5-resolving.png 里 C2 特写压住了 C1 与标题）。
-         改成**固定在屏幕中央偏左**：连锁条独占右侧、特写独享中左，两边互不遮挡；
-         y 取中线稍上，起始位移仍带右偏 ⇒ 保留"从连锁条方向飞入"的方向感。 */
-      var cx = Math.round(vw * 0.38);
-      var cy = Math.round(vh * 0.46);
+      var cx = (typeof to.x === 'number' ? to.x : vw - 140) - (w / 2 + 34);
+      var cy = (typeof to.y === 'number' ? to.y : vh * .5);
       el.style.left = (cx - w / 2) + 'px'; el.style.top = (cy - h / 2) + 'px';
       document.body.appendChild(el);
       var kill = function () { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) {} };
@@ -7741,32 +7658,16 @@ var TW = {
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
         catch (e) { try { console.error('ChainAnim.resolving 异常（不影响结算）', e); } catch (e2) {} }
         try { if (typeof __animEnter === 'function') __animEnter('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出开始 */
-        /* 【逐个效果推进 2026-10-06 · 作者最高优先级口径"以动画为准"】
-           原来这里是"演出开始(__animEnter) → **立刻** fire 结算"，而 ChainAnim 自己的注释也承认"不阻塞任何推进"
-           ⇒ 多个环节的 fire 会在同一拍接连发生 ⇒ **多个效果同时执行本体、同时弹决策**（作者实测的"乱入"）。
-           现在：**演出期间 = animating**（__eeLocked 已按 _phase 拦住双方操作、AI 也不得插入），
-           **演出结束才结算这个效果**，再由 next() 推进下一个 ⇒ 一个效果：**演出 → 结算 → 下一个**。
-           ⛔ 只改这里：**不要动入链 / 同窗候选**（那是 MD/SEGOC 口径，上一轮我改错被 chain_completeness 打脸）。 */
-        /* 【分层重做·第 1 步 2026-10-06】让**结算层同步**：fire 立即执行，不再 setTimeout 等待演出。
-           演出（ChainAnim.resolving/done + CardAnim）是**表现层**，本来就写着"不阻塞任何推进"。
-           上一版把它包进定时器 ⇒ 同步调用栈变异步时间轴 ⇒ 所有配对（_resolveDepth / 推进 / 锁 / 弹窗归属）
-           从"栈免费保证"变成"要人记得" ⇒ 处处卡死（作者实测：永久"效果结算中"、莫名卡住）。
-           这里撤销那次异步化；下面那句"推进下一环"的定时器（**已由 __aiGuard 包装**）只决定节奏，不动。 */
-        try {
-        try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 演出结束 → 开始结算本效果 */
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          setTimeout(__aiGuard(step), 170); return;
+          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
+           死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
+           （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
+        setTimeout(__aiGuard(step), 170); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
         if (typeof node.fire === 'function') node.fire(next); else next();
-        } catch (e) {
-          try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
-          try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
-          try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e4) {}
-          next();
-        }
       } catch (e) {
         try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
         try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
@@ -7836,18 +7737,9 @@ function __twLegacyResolveSimultaneous(tp, candidates, allDone) {
      连锁现在只有一条路径：TW（时点窗口状态机）。任何调用都视为缺陷，直接转交适配器。 */
   console.warn('[连锁] __twLegacyResolveSimultaneous 不应被调用（连锁只有 TW 一条路径）');
   return resolveSimultaneous(tp, candidates, allDone);
-  /* ↓↓↓ 以下旧实现已不可达，待 S1b 删除 ↓↓↓ */
-  candidates = (candidates || []).filter(Boolean);
-  if (!candidates.length) { if (typeof allDone === 'function') allDone(); return; }
-  var foe = foeOf(tp);
-  var chain = [];
-  if (typeof ChainAnim !== 'undefined') ChainAnim.begin();
-/* 【已删除·连锁重构 S1b 收尾 2026-09-27】
-   这里原本是 `resolveChainStack` 时代**自写的一套组链循环**（addChain / chainText /
-   arrangeMandatory / freeChain，共 125 行）。连锁重构后组链只剩一条路径 —— TimingWindow（TW）——
-   经 `port-old/probe-dead-chain.mjs` 确认：这些函数**区块外引用 0 处**（纯死代码），故整段删除。
-   查历史实现：git log -S "function arrangeMandatory" -- game.html */
-  arrangeMandatory(tp, function () { arrangeMandatory(foe, function () { current = tp; passStreak = 0; freeChain(); }); });
+  /* 【2026-10-06 清理】这里原本还挂着一段 return 之后的**不可达旧实现残留**
+     （自写组链循环，且它调用的 arrangeMandatory / freeChain 早已被整段删除 ⇒ 悬空引用）。
+     已删除。函数的对外契约不变：任何调用都转交 resolveSimultaneous 并留一条警告。 */
 }
 function resolveChainStack(effect, onDone) {
   var stack = effect._chain || [];
@@ -12071,25 +11963,10 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
       btn.textContent = choice;
     }
     btn.onclick = function() {
-      /* ============================================================
-       * 【结构修 2026-10-06 · 戒律第 0 条："等待必须有唯一归属"】
-       * ------------------------------------------------------------
-       * 病灶（Playwright 实测：入间枫SP「从3项选2项」卡在「第1/2项」，480 秒、2938 次采样一动不动、queueLen=0）：
-       *   原顺序「①捕获 cb → ②清槽 → ③执行 cb → ④__dequeueChoice()」里，
-       *   ③ 如果**再开一个新弹窗**（多选的第 2 项 / 连续选择 / 谈窗接谈窗），它会建立**全新的等待（新槽）**；
-       *   紧接着 ④ 才跑 —— ④ 本意是"排空队列里的下一个询问"，却**作用在了 ③ 刚建立的新等待上** ⇒
-       *   新等待被清/被覆盖 ⇒ 弹窗挂着、答案永远回不来 ⇒ **卡死**。
-       * ⇒ 修法（**归属**，不是加兜底）：
-       *   · 本次回调只认**自己捕获的 cb**；
-       *   · **只有在"回调没有建立新等待"（槽仍为空）时，才去排空队列**；
-       *     若回调里已经开了新弹窗（槽非空）⇒ 说明新的等待已就位，**绝不能去动它**。
-       *   ⇒ 于是"谁开的窗、谁在等、由谁结束"三者对齐 ⇒ 回调被踩掉在结构上不可能发生。
-       * ============================================================ */
       var cb = pendingChoiceCallback;   // 先捕获：closeChoiceModal 会清空全局回调
       closeChoiceModal();
       if (cb) cb(index);
-      /* 【归属修】槽被回调重新占用（= 新等待已建立）⇒ 这一步必须让路，不许动它 */
-      if (!pendingChoiceCallback) __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
+      __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
     };
     buttonsDiv.appendChild(btn);
   });
@@ -12190,37 +12067,16 @@ function closeChoiceModal() {
   /* 【2026-10-01 修】关窗后必须把队列里排着的询问放出来（原来只清句柄 ⇒ 效果中产生的询问永久卡住） */
   try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('closeChoiceModal'); }, 0); } catch (e) {}
 }
-/* ============================================================
- * 【结构修 2026-10-06 · 戒律第 0 条："一切'读判定'只认一个唯一真相"】
- * ------------------------------------------------------------
- * 病灶（Playwright 自动跑实测：跑到 T7 时卡住，ph=awaiting-choice、弹窗可见、**queueLen=2 积压**）：
- *   原来"有没有弹窗在等"有**两套判据** —— ① 槽 pendingChoiceCallback；② `#choiceModal` 的 class。
- *   可实际弹窗用的是 **card-modal-overlay**（选目标 / 选卡 / 多选 / choice 全在里面），
- *   `#choiceModal` 压根不是 active ⇒ 排空逻辑**误判"没人在等"** ⇒
- *   把队列里的下一个询问硬塞出来，与正在等的那个**打架/叠窗** ⇒ 玩家只能答上面那个，
- *   下面那个永远答不到 ⇒ **队列积压 + awaiting-choice 恒真** ⇒ 卡死。
- *   而且决策槽不止一个（choice / **target** / picker…），只认一个槽必然漏。
- * ⇒ 修法：**统一成一个判定 `__anyDecisionPending()`**（覆盖所有决策槽 + 所有决策弹窗容器），
- *   队列排空**只信它** ⇒ "有人等就绝不插队、无人等就必定补弹"成为结构保证。
- * ============================================================ */
-function __anyDecisionPending() {
-  try { if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true; } catch (e) {}
-  try { if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine.pendingTargetCallback) return true; } catch (e) {}
-  /* 补充信号：任何"决策弹窗容器"处于 active 也算在等（万一还有我不知道的决策槽，宁可少弹也不插队） */
-  try {
-    var sels = ['#choiceModal.active', '.card-modal-overlay.active', '.card-picker-overlay.active',
-      '.target-cards-overlay.active', '.card-detail-modal.active', '.modal-overlay.active'];
-    for (var i = 0; i < sels.length; i++) { if (document.querySelector(sels[i])) return true; }
-  } catch (e) {}
-  return false;
-}
 /* 【2026-10-01 新增】空闲补弹：没有待答句柄、且弹窗确实不可见时，把队列里的下一条放出来。
    用于"效果执行中产生新询问"的各种收尾路径（关窗 / 连锁收尾 / 时点窗口关闭 / 入队兜底）。 */
 function __drainChoiceQueueWhenIdle(tag) {
   try {
     if (typeof _choiceQueue === 'undefined' || !_choiceQueue || !_choiceQueue.length) return false;
     if (battleState && battleState._over) { _choiceQueue = []; return false; }
-    if (__anyDecisionPending()) return false;                // 【唯一真相】任何决策在等 ⇒ 绝不插队
+    if (pendingChoiceCallback) return false;                 // 真有弹窗在等：等它被回答后再排
+    var modal = document.getElementById('choiceModal');
+    var vis = !!(modal && modal.classList && modal.classList.contains('active'));
+    if (vis) return false;                                   // 弹窗还开着：不抢
     var q = _choiceQueue.shift();
     if (!q) return false;
     try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) {}
@@ -12603,23 +12459,6 @@ function __clearPhaseScopedBuffsImpl() {
   } catch (e) { console.error('清理阶段限时加成出错（忽略）', e); }
 }
 function nextPhase() {
-  /* ============================================================
-   * 【回退+修 2026-10-06 · 作者实测"之前偶尔卡死，现在把把卡死"】
-   * ------------------------------------------------------------
-   * 上一版这里写的是「结算没完 ⇒ **推迟这次切换**（最多 7 秒，每 120ms 重试）」
-   * —— 那是**我造成的卡死**：只要锁有任何残留，玩家点「进入下个阶段」就**像没反应**，
-   *    而且每点一次都要等好几秒（作者感受就是"把把卡死"）。**绝不能在这里 return/等待。**
-   * 现在改成：**不等待、不重试**；只做一次"收口尝试"（清残留锁 + 排空队列），然后**照常切阶段**。
-   * 这样既保留了"切阶段前顺手收干净"的好处，又不可能因为这里卡住。
-   * ============================================================ */
-  try {
-    var __eeNP = effectEngine;
-    if (__eeNP && (((__eeNP._resolveDepth || 0) > 0) || !!__eeNP._chainLock || !!__eeNP._inNewChain)) {
-      try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock('切阶段前收口', 0); } catch (e) {}
-      try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
-      try { addBattleLog('system', '【阶段】切阶段前收口：清了残留结算锁/排空了队列'); } catch (e) {}
-    }
-  } catch (e) {}
   if (battleState.currentPlayer !== 'p1') return;
   /* 【2026-10-01 P1：阶段时点串联（作者口径："阶段切换其实也是会弹是否发动效果的"）】
      每个阶段边界都走"结束时点 → 切阶段 → 进入时点"，并且**用回调串联**：
@@ -12918,29 +12757,6 @@ var ENV = {
          联机房主态 ⇒ 经 Online.askRemote 发往对端；否则 ⇒ 安全返回 null 并留日志。
          seat='p1' 或未传 seat ⇒ 行为逐字不变。 */
       if (typeof __envAskSeatGuard === 'function' && !__envAskSeatGuard(seat, spec, kind, cb)) return;
-      /* ============================================================
-       * 【S-d 2026-10-06】把"等某座位选"登记进演出期状态机
-       * ------------------------------------------------------------
-       *  · _choiceWaiting = true ⇒ __phaseNow() 返回 **awaiting-choice**（对外口径：在等人答）；
-       *  · _choiceSeat 记住**在等哪个座位**（联机座位路由/诊断都靠它）；
-       *  · 与 animating 一样是**子状态**：**不动 _resolveDepth**（否则会与结算计数打架）。
-       *  · 回调包一层：**答完立刻清标记** ⇒ 不会把相位永久卡在 awaiting-choice。
-       * ============================================================ */
-      /* ============================================================
-       * 【结构修 · 戒律第 0 条】这里**原来还写了一个 _choiceWaiting 标志**表示"正在等答案"。
-       * 但引擎本来就有**唯一真相**（pendingChoiceCallback / _choiceQueue）⇒ 多这一份账必然不一致：
-       *   真账清了、假账还在 ⇒ 相位**永久卡在 awaiting-choice**
-       *   （实测：pendingCb=null、queueLen=0、弹窗 display:none，而 cw 仍为 true）。
-       * ⇒ **删掉这个字段**；只保留 _choiceSeat / _choiceKind 作**记录**（谁在等、等什么，供诊断与联机路由读）。
-       *   "是否在等"一律由 __phaseNow() **从真相派生**，这里不再自己记账、也不再包一层 cb。
-       * ============================================================ */
-      try {
-        var __eeW = effectEngine;
-        if (__eeW) {
-          __eeW._choiceSeat = (seat === undefined || seat === null || seat === '') ? 'p1' : seat;
-          __eeW._choiceKind = kind;
-        }
-      } catch (e) {}
       if (kind === 'choice') return __askChoiceLocal(spec, cb);
       if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
       if (kind === 'targetPlayer') return __askTargetPlayerLocal(spec && spec.card, spec && spec.effectText, cb);
@@ -13358,42 +13174,20 @@ __defEngineState('_phaseStat', function () { return { enter: 0, leave: 0, depth:
    作者口径：**以动画为准** —— 动画未结束不得推进下一个效果；演出期间双方都不可操作。 */
 function __animEnter(why) { try { var ee = effectEngine; if (!ee) return; ee._animating = true; ee._animWhy = String(why || ''); } catch (e) {} }
 function __animLeave(why) { try { var ee = effectEngine; if (!ee) return; ee._animating = false; ee._animWhy = ''; } catch (e) {} }
+/* 【2026-10-06 结构修正】原来 __phaseNow() 读的是 ee._phase，而 _phase 只由 __phaseEnter/__phaseLeave 写，
+   那两个函数又只被"后装访问器"调用 —— 访问器在**多实例**架构下永远落在旧实例上
+   （13207 注释自己已实测：「实测 enter=0，而对局明明跑过结算」），
+   于是 _phase 永远是 undefined ⇒ __phaseNow() 恒返回 'idle'
+   ⇒ 13543 那处「是否在结算中」的判定恒为 false（真的在结算也被当成空闲）。
+   现在改为**从唯一真相 _resolveDepth 派生**：不再有第二份账，"恒 idle" 在结构上不可能再出现。
+   （__phaseEnter/__phaseLeave 已随失效安装块一并删除。） */
 function __phaseNow() {
   try {
     var ee = effectEngine;
-    /* ============================================================
-     * 【结构修 2026-10-06 · 戒律第 0 条："把靠猜换成唯一真相"】
-     * ------------------------------------------------------------
-     * 病灶（Playwright 自动跑实测现场）：
-     *   ph=awaiting-choice ｜ cw=true ｜ kind=targetPlayer
-     *   而 pendingCb=null、queueLen=0、弹窗 display:none  —— 引擎嘴里说"在等答案"，
-     *   可**根本没有回调在等**。原因：引擎里本来只有**一份真相**
-     *   （pendingChoiceCallback = 当前弹窗的回调；_choiceQueue = 排队待弹的询问），
-     *   我 S-d 又加了第二份账 _choiceWaiting ⇒ 真账清了、假账还在 ⇒ 相位**永久卡在 awaiting-choice**。
-     * ⇒ 修法：**删掉这份假账**，改为"**有回调在等 或 队列里有询问**"才算在等 ⇒ 与真相同生同灭，不可能残留。
-     *   （_choiceSeat / _choiceKind 只保留作**记录**，不参与任何判定。）
-     * ============================================================ */
-    var __waiting = false;
-    try { __waiting = (typeof pendingChoiceCallback !== 'undefined' && !!pendingChoiceCallback); } catch (e) {}
-    if (!__waiting) { try { __waiting = (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length > 0); } catch (e) {} }
-    if (__waiting) return 'awaiting-choice';
-    if (ee && ee._animating) return 'animating';      /* 演出优先于 resolving：动画期间对外就是 animating */
-    return (ee && ee._phase) || 'idle';
+    if (ee && ee._animating) return 'animating';      /* 演出优先：动画期间对外就是 animating */
+    var d = (ee && typeof ee._resolveDepth === 'number') ? ee._resolveDepth : 0;
+    return d > 0 ? 'resolving' : 'idle';
   } catch (e) { return 'idle'; }
-}
-function __phaseEnter(next, why) {
-  var ee = effectEngine; if (!ee) return;
-  var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
-  ee._phase = next || 'resolving';
-  st.enter++; st.depth = st.enter - st.leave; st.last = String(why || '');
-  try { st.trail.push('+' + ee._phase + ':' + String(why || '')); if (st.trail.length > 60) st.trail.shift(); } catch (e) {}
-}
-function __phaseLeave(why) {
-  var ee = effectEngine; if (!ee) return;
-  var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
-  st.leave++; st.depth = st.enter - st.leave;
-  if (st.depth <= 0) { st.depth = 0; ee._phase = 'idle'; }   /* 退干净 ⇒ 回 idle（唯一可操作的时刻） */
-  try { st.trail.push('-' + String(why || '')); if (st.trail.length > 60) st.trail.shift(); } catch (e) {}
 }
 /* 【S-a·采样同步】为什么不装访问器：``effectEngine`` 是**每个引擎实例各一份**的（__defEngineState 机制），
    模块加载时装上去的访问器会落在**旧实例**上 ⇒ 测试/联机新建实例后就不生效（实测 enter=0，而对局明明跑过结算）。
@@ -13418,28 +13212,11 @@ function __phaseSnapshot() {
   return { phase: ee._phase || 'idle', enter: st.enter, leave: st.leave, depth: st.depth, last: st.last,
     trail: (st.trail || []).slice(-8), resolveDepth: (typeof ee._resolveDepth === 'number' ? ee._resolveDepth : 0) };
 }
-/* 【S-a·关键】把 ``_resolveDepth`` 的**每一次增减**都映射成相位迁移 ——
-   引擎里 _resolveDepth 的 ++/-- 散落在 5+ 处（__eeB/__eeM/__eeD/ops/16426…），逐个手改既费事又容易漏；
-   用访问器一处接住全部，且**完全不改判定**（读出来的值还是原来那个数）。
-   ⇒ 于是"有结算在跑"时 _phase === 'resolving'，退干净时自动回 'idle'。 */
-try {
-  (function () {
-    var ee = effectEngine; if (!ee) return;
-    var raw = (typeof ee._resolveDepth === 'number') ? ee._resolveDepth : 0;
-    Object.defineProperty(ee, '_resolveDepth', {
-      configurable: true, enumerable: true,
-      get: function () { return raw; },
-      set: function (v) {
-        var nv = (typeof v === 'number' && isFinite(v)) ? v : raw;
-        var was = raw; raw = nv;
-        try {
-          if (nv > 0 && was === 0) __phaseEnter('resolving', 'resolveDepth+');
-          else if (nv === 0 && was > 0) __phaseLeave('resolveDepth-');
-        } catch (e) {}
-      }
-    });
-  })();
-} catch (e) { try { console.warn('相位映射安装失败（不影响结算）', e); } catch (e2) {} }
+/* 【2026-10-06 清理】这里原本是「把 _resolveDepth 包成访问器、每次增减映射成相位迁移」的安装块。
+   它已被同一段的 13207 注释自我否定（多实例架构下访问器落在旧实例上，实测 enter=0），
+   却一直没删 —— 属于"无效补丁残留"：装了不生效、还把 __phaseNow() 误导成恒 idle。
+   现整体删除，相位一律由 __phaseNow() 从 _resolveDepth 派生。 */
+
 /** 原始等待原因（不做时间衰减）：'' = 没人在等 */
 function __eeRawWaitReason() {
   try {
@@ -13679,19 +13456,11 @@ function __eeLocked() {
   try {
     if (typeof effectEngine === 'undefined' || !effectEngine) return false;
     var ee = effectEngine;
-    var __ph = (typeof __phaseNow === 'function') ? __phaseNow() : 'idle';
-    /* 【S-e 修·重要】**只认 resolving / animating，绝不含 awaiting-choice**。
-       "在等玩家答"时 _choiceWaiting 只是**可观测状态**（谁在等、等哪个座位）；
-       若把它当锁，一旦标记在某些路径残留（如"拒绝连锁"/送墓触发那条 cb 不被调用），
-       手卡就会被**永久**判成"结算中不能用" —— 实测：SP选项①那几组用例 depth=0、连锁锁=false，
-       却有 3~4 张手卡"卡住"。⇒ 锁 = 真的在算（resolving/animating），不是"在等人"。 */
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock || __ph === 'resolving' || __ph === 'animating';
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
     if (!locked) return false;
     if (__eeWaitReason()) return true;                  // 有人真的在等 → 确实是"处理中"
     var idle = ee._stuckSince ? (Date.now() - ee._stuckSince) : 0;
-    /* 【S-e 2026-10-06·收敛阈值】原来这里**硬用 __EE_STALE_MS 常量**，而 __eeLocked 那边走运行时 __eeStaleMs()
-       ⇒ 同一件事两套阈值（测试调小阈值对本路径无效）。现在两处只认 __eeStaleMs()。 */
-    if (idle >= __eeStaleMs()) {
+    if (idle >= __EE_STALE_MS) {
       __eeForceUnlock('检测到过期结算锁', idle);
       return false;
     }
@@ -13728,11 +13497,8 @@ function __eeIdleWatchdog() {
     var ee = effectEngine;
     /* 【S-c 2026-10-06】判定**读演出期状态机**（与 _resolveDepth/_chainLock 等价，但从此以 _phase 为对外口径）；
        animating（动画演出中）也算"锁着" —— 作者口径：**以动画为准**，演出期间不许推进、不许操作。 */
-    /* 【S-e 修·同 13538 那处】锁只认 resolving/animating，**不含 awaiting-choice**：
-       "在等人答"是可观测状态（谁在等、等哪个座位），不是锁；否则 _choiceWaiting 一旦在
-       异常路径残留（cb 没被调用），手卡会被**永久**判成"结算中不能用"。 */
-    var __phL = (typeof __phaseNow === 'function') ? __phaseNow() : 'idle';
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock || __phL === 'resolving' || __phL === 'animating';
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock ||
+      (typeof __phaseNow === 'function' && __phaseNow() !== 'idle');
     if (!locked) { ee._stuckSince = 0; __eeWaitState.reason = ''; __eeWaitState.since = 0; return; }
     // 有人在等 → 这不是残留，不计时（等待判定与 __eeLocked() 共用一套，见上面的 __eeWaitReason）
     if (__eeWaitReason()) { ee._stuckSince = 0; return; }
@@ -13756,11 +13522,14 @@ try { setInterval(__eeIdleWatchdog, 2000); } catch (e) {}
 // 效果正在结算（含连锁逆结算）时，不允许手动另发效果；连锁询问发生在上锁之前，故不拦截合法连锁
 function __resolveLocked() {
   if (typeof effectEngine === 'undefined' || !effectEngine) return false;
-  // 自愈：没有活动连锁却残留深度，说明某条链异常退出，累计到阈值直接复位，避免整局锁死
-  if ((effectEngine._resolveDepth || 0) > 0 && !effectEngine._chainLock && !effectEngine._activeChain) {
-    effectEngine._stuckCount = (effectEngine._stuckCount || 0) + 1;
-    if (effectEngine._stuckCount > 40) { console.warn('检测到残留结算深度，已复位'); effectEngine._resolveDepth = 0; effectEngine._stuckCount = 0; try { __eeAfterRelease(); } catch (e) {} }
-  } else { effectEngine._stuckCount = 0; }
+  /* 【2026-10-06 清理】原文此处是一段"自愈"：
+       没有活动连锁却残留深度时，每次判定就给 _stuckCount +1，超过 40 次就**静默把 _resolveDepth 归零**。
+     它属于禁止清单 B3 明令禁止的"用静默复位去猜状态"，三个害处都很实在：
+       · 把真正的深度泄漏**掩盖**掉 ⇒ 根因永远不暴露（正是"几十轮修不好"的一部分原因）；
+       · 归零后 _resolveDepth 与实际结算不符 ⇒ 后续所有读数判定全错（症状从"卡住"变成"效果被吞"）；
+       · 本函数会被**每次读判定**调用，40 次阈值几乎瞬间到达 ⇒ 行为极不稳定、时好时坏。
+     已整体删除（连同只为它存在的 _stuckCount）。深度只认唯一真相；
+     若确有残留，用 window.__DEPTH_TRACE = true 记录的调用栈去定位并修根因。 */
   // 统一走 __eeLocked()：过期锁（空闲 4 秒且没人在等）不再拦人，并把原因写清楚
   if (typeof __eeLocked === 'function' ? __eeLocked() : ((effectEngine._resolveDepth > 0) || effectEngine._chainLock)) {
     var __wr = (typeof __eeWaitReason === 'function') ? __eeWaitReason() : '';
@@ -16575,6 +16344,29 @@ function runOneOp(op, ctx, next) {
   var user = ctx.user || 'p1', target = ctx.target || 'p2', p = battleState[user], q = battleState[target];
   var env = { user: user, target: target, p: p, q: q, pendingNext: false };
   var __famName = __OPS_OWNER[op.op];
+  /* 【只读诊断·默认关闭】window.__OPS_TRACE = true 时才启用：
+     记录每个 op 是否在 2 秒内推进。只记录、不改行为（生产环境零影响）。
+     用途：实证"哪个 op 未推进"导致 _resolveDepth 永不 -1（永久"效果结算中"）。 */
+  if (typeof window !== 'undefined' && window.__OPS_TRACE) {
+    var __t0 = Date.now(), __done = false, __fam = __famName || '(switch)';
+    var __origNext = next;
+    next = function () {
+      __done = true;
+      (window.__OPS_TRACE_LOG = window.__OPS_TRACE_LOG || []).push(
+        { op: op.op, fam: __fam, ms: Date.now() - __t0, ok: true });
+      return __origNext.apply(null, arguments);
+    };
+    setTimeout(function () {
+      if (__done) return;
+      (window.__OPS_TRACE_LOG = window.__OPS_TRACE_LOG || []).push({
+        op: op.op, fam: __fam, ms: Date.now() - __t0, ok: false,
+        card: (ctx && ctx.card && ctx.card.name) || '', user: (ctx && ctx.user) || '',
+        target: (ctx && ctx.target) || '', pendingNext: env.pendingNext,
+        tw: (typeof TW !== 'undefined' && TW && TW.active) ? true : false,
+        depth: (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._resolveDepth) || 0
+      });
+    }, 2000);
+  }
   if (__famName && __OPS_FAMILY[__famName]) {
     env.pendingNext = false;
     __OPS_FAMILY[__famName](op, ctx, next, env);
@@ -16730,26 +16522,9 @@ function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('runOps·效果步骤序列');
   if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
-  /* ============================================================
-   * 【结构修 2026-10-06 · 戒律第 0 条："释放必须有唯一出口" · 作者实测"没操作就卡在效果结算中"】
-   * ------------------------------------------------------------
-   * 病灶：原来 −1 只写在 `i >= ops.length` 那**一个分支**里，而推进**完全依赖 runOneOp 回调 step()**。
-   *   只要 runOneOp 存在"既不回调 step()、也不抛错"的路径（例如它内部等一个决策、而那条回调链断了），
-   *   `i` 就永远到不了 ops.length ⇒ **−1 永不执行** ⇒ `_resolveDepth` 永久 ≥1
-   *   ⇒ 全场手牌被判"效果/连锁结算中，无法插入发动" ⇒ 作者看到的"我没操作，它自己就卡住并说结算中"。
-   * 修法：把释放收敛成**唯一出口 __finish（幂等）** —— 正常走完 / 提前终止 / 异常收尾都必须经它；
-   *   重复调用无害（__finished 卫兵），且**先释放再 done()**，顺序不再含糊。
-   * ============================================================ */
-  var __finished = false;
-  var __finish = function () {
-    if (__finished) return; __finished = true;
-    try { if (__ee) __ee._resolveDepth = Math.max(0, (__ee._resolveDepth || 1) - 1); } catch (e) {}
-    try { __tryDrainTriggers(); } catch (e) {}
-    try { __eeAfterRelease(); } catch (e) {}
-  };
   var i = 0;
   (function step() {
-    if (i >= ops.length) { __finish(); if (done) done(); return; }
+    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
@@ -18720,14 +18495,7 @@ function __graveSelfApplies(player, card, reason) {
     /* 【2026-10-01】"被献祭/因效果送墓回复音韵"这类纯数值被动改为不进链直接执行（见 __graveDirectPassive）
        ⇒ 不再靠它开链；其余分支（神乐铃/盒子/破损/共鸣/认真起来了）不动。 */
     if (nm.indexOf('来自地狱的盒子') >= 0 && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时|因(为)?卡的效果而被送入墓地|因卡效果送墓/.test(sp)) return true;
-    /* 【修 2026-10-06 · 作者实测"破损电子设备送入墓地触发又被卡掉"】这里原来硬编码：
-         if (nm.indexOf('破损电子设备') >= 0) return true;
-       —— **无条件**把这张卡当作"有送墓触发"。可它卡面里**根本没有送墓触发效果**：
-         effect = 对一名其他玩家造成一次4面骰判定伤害，之后后退2格。
-         sp     = 这张卡进入墓地后可以花费1点音韵值将其回收，被回收后的此卡使用后放回牌组最下方。
-       ⇒ 引擎于是给它开了一个**空的连锁环节**「【破损电子设备】送入墓地触发」：进连锁、逆结算时 fire 空转
-         （作者看到的"逆结算了个寂寞"）。而它的**回收**由下面那条（「进入墓地后」+「回收」）命中，
-         **不依赖这个特例** ⇒ 删掉特例：回收照旧、空节点消失。 */
+    if (nm.indexOf('破损电子设备') >= 0) return true;
     var t2 = sp + eff;
     if (/进(入)?墓地后/.test(t2) && t2.indexOf('回收') >= 0) return true;
     if (nm === '共鸣' && sp && sp.indexOf('回收') >= 0) return true;
