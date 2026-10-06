@@ -12785,6 +12785,32 @@ var ENV = {
          联机房主态 ⇒ 经 Online.askRemote 发往对端；否则 ⇒ 安全返回 null 并留日志。
          seat='p1' 或未传 seat ⇒ 行为逐字不变。 */
       if (typeof __envAskSeatGuard === 'function' && !__envAskSeatGuard(seat, spec, kind, cb)) return;
+      /* ============================================================
+       * 【S-d 2026-10-06】把"等某座位选"登记进演出期状态机
+       * ------------------------------------------------------------
+       *  · _choiceWaiting = true ⇒ __phaseNow() 返回 **awaiting-choice**（对外口径：在等人答）；
+       *  · _choiceSeat 记住**在等哪个座位**（联机座位路由/诊断都靠它）；
+       *  · 与 animating 一样是**子状态**：**不动 _resolveDepth**（否则会与结算计数打架）。
+       *  · 回调包一层：**答完立刻清标记** ⇒ 不会把相位永久卡在 awaiting-choice。
+       * ============================================================ */
+      try {
+        var __eeW = effectEngine;
+        if (__eeW) {
+          __eeW._choiceWaiting = true;
+          __eeW._choiceSeat = (seat === undefined || seat === null || seat === '') ? 'p1' : seat;
+          __eeW._choiceKind = kind;
+        }
+      } catch (e) {}
+      (function () {
+        var __origCb = cb;
+        cb = function () {
+          try {
+            var __eeC = effectEngine;
+            if (__eeC) { __eeC._choiceWaiting = false; __eeC._choiceSeat = ''; __eeC._choiceKind = ''; }
+          } catch (e) {}
+          if (typeof __origCb === 'function') return __origCb.apply(this, arguments);
+        };
+      })();
       if (kind === 'choice') return __askChoiceLocal(spec, cb);
       if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
       if (kind === 'targetPlayer') return __askTargetPlayerLocal(spec && spec.card, spec && spec.effectText, cb);
@@ -13205,7 +13231,9 @@ function __animLeave(why) { try { var ee = effectEngine; if (!ee) return; ee._an
 function __phaseNow() {
   try {
     var ee = effectEngine;
-    if (ee && ee._animating) return 'animating';      /* 演出优先：动画期间对外就是 animating */
+    /* 【S-d】等某座位选 ⇒ awaiting-choice（比 animating 更具体，优先返回） */
+    if (ee && ee._choiceWaiting) return 'awaiting-choice';
+    if (ee && ee._animating) return 'animating';      /* 演出优先于 resolving：动画期间对外就是 animating */
     return (ee && ee._phase) || 'idle';
   } catch (e) { return 'idle'; }
 }
