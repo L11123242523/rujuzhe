@@ -19029,7 +19029,14 @@ function judgeAnimate(user, spec, cb) {
     }, { capPct: __ctrlCap, prefer: __ctrlPrefer });
     return;
   }
-  __judgeAnimPlay(user, spec, isCoin, finalVal, cb);
+  /* 【2026-10-06 结构修复 · 禁止清单 B1】点数在上一行已经**同步**算出（finalVal），
+     所以判定结果不必等动画：把动画交给演出队列（自己按序播、谁都不等它），
+     逻辑立刻带着点数继续。
+     （上面"有控骰"的那条路径要等玩家选择 —— 那是"决策"而不是"演出"，保留等待。） */
+  ShowQueue.push(function (fin) {
+    __judgeAnimPlay(user, spec, isCoin, finalVal, function () { try { fin(); } catch (e) {} });
+  });
+  if (typeof cb === 'function') cb(finalVal);
 }
 
 function __uiJudgeAnimOn() {
