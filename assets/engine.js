@@ -12098,14 +12098,35 @@ function closeChoiceModal() {
 }
 /* 【2026-10-01 新增】空闲补弹：没有待答句柄、且弹窗确实不可见时，把队列里的下一条放出来。
    用于"效果执行中产生新询问"的各种收尾路径（关窗 / 连锁收尾 / 时点窗口关闭 / 入队兜底）。 */
+/* 【2026-10-06 结构修复 · 禁止清单 B8「同一件事只能有一份账」】
+   原来"有没有弹窗在屏"用的是**两套只覆盖 choice 自己的判据**：
+     · pendingChoiceCallback（choice 的单槽）
+     · #choiceModal 是否 .active（choice 的 DOM）
+   ⇒ pickCards / targetPlayer / targetCards 的弹窗开着时，这两条都判"空闲"
+   ⇒ 队列里的 choice 被放出来，与它们**叠窗**；一次连锁里冒出多个效果时就是"一股脑弹窗"
+     （实测：同一次连锁出现 5 种弹窗、queueLen=3）。
+   现在统一成**一个判据**：覆盖全部决策容器 + 决策槽/栈，任何一类弹窗在屏都算"不空闲"。
+   这样"是否有人在等"只有一份账，"谁都不许抢"也只有一个理由。 */
+function __anyDecisionModalOpen() {
+  try {
+    var ids = ['choiceModal', 'cardPicker', 'cardListModal', 'targetSelectModal', 'timingModal'];
+    for (var i = 0; i < ids.length; i++) {
+      var el = document.getElementById(ids[i]);
+      if (el && el.classList && el.classList.contains('active')) return true;
+    }
+    if (typeof document !== 'undefined' && document.querySelector &&
+        document.querySelector('.card-modal-overlay.active, .target-cards-overlay.active, .card-picker-overlay.active, .modal-overlay.active')) return true;
+    if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true;
+    if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return true;
+    if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine.pendingTargetCallback) return true;
+    return false;
+  } catch (e) { return false; }
+}
 function __drainChoiceQueueWhenIdle(tag) {
   try {
     if (typeof _choiceQueue === 'undefined' || !_choiceQueue || !_choiceQueue.length) return false;
     if (battleState && battleState._over) { _choiceQueue = []; return false; }
-    if (pendingChoiceCallback) return false;                 // 真有弹窗在等：等它被回答后再排
-    var modal = document.getElementById('choiceModal');
-    var vis = !!(modal && modal.classList && modal.classList.contains('active'));
-    if (vis) return false;                                   // 弹窗还开着：不抢
+    if (__anyDecisionModalOpen()) return false;              // 任何一类决策弹窗在屏：都不抢（唯一判据）
     var q = _choiceQueue.shift();
     if (!q) return false;
     try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) {}
