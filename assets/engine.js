@@ -8205,6 +8205,13 @@ function __tryDrainTriggers() {
       };
     }
     try {
+      /* 【回退 2026-10-06 · 记一笔教训】**这里不能改成"逐个"**。
+         我试过把整队拆成"一次只推进一个"，chain_completeness_test 立刻红：
+         「端到端：离场事件开的窗口候选数 ≥ 2（进行曲 + 琉璃SP 同窗可选）」得到 1。
+         原因：**同时时点产生的多个效果本来就应当在同一窗口同时候选**（MD/SEGOC 口径），逐个开窗是错的。
+         ⇒ 作者报的"乱入"不在**入链**这一步，而在**结算/演出**那一步：
+           现在是"多个效果同时执行本体、同时弹决策"，应当改成"**先组好连锁 → 再逐个逆结算 + 逐个演出**"。
+         ⇒ 正确修法在**逆结算侧**（TW.settle 逐环推进 + animating 逐段演出 + 期间双方不可操作），不在这里。 */
       resolveSimultaneous(owner, q.map(__wrapDrainNode), function () {
         effectEngine._inNewChain = false;
         try { effectEngine._drainingCard = null; } catch (e) {}
@@ -13275,8 +13282,25 @@ function __eeWaitReason() {
   if (raw.indexOf('本机选择弹窗') === 0 || raw.indexOf('在等对手选择') === 0) return raw;
   return (now - __eeWaitState.since < 15000) ? raw : '';
 }
-/** 空闲多久算"没有任何效果活动"（任何战斗日志/效果入栈出栈都会重置 _stuckSince） */
-var __EE_STALE_MS = 6000;
+/** 空闲多久算"没有任何效果活动"（任何战斗日志/效果入栈出栈都会重置 _stuckSince）
+ *  【S-c 2026-10-06·按作者口径】**由 6 秒放宽到 5 分钟**。
+ *  为什么：这个"过期锁 ⇒ 强制解锁放行"的判定，正是**抢跑吞效果的来源** ——
+ *  演出/谈窗只要 6 秒内没有新战斗日志，就会被判成"锁残留"而放行 ⇒ 谈窗被跳过、整段效果消失
+ *  （作者实测："琉璃·抽2选1弃"整段不见，日志里就是【AI闸门】/过期锁放行那一行）。
+ *  作者口径是"**以动画为准、逐个效果推进**" ⇒ 只要真的有人在等（弹窗挂屏幕上 / 在等某座位作答），
+ *  就不该被时间赶走。⇒ 改为 5 分钟，**仅作异常兜底**（正常情况下绝不该触发；触发时大声写日志）。 */
+var __EE_STALE_MS = 300000;      /* 默认：5 分钟（**仅异常兜底**；正常绝不该触发） */
+/** 【S-c】把阈值做成**运行时读取** —— 这样测试可以把它调小来验证"自愈机制本身"，
+ *  而不必依赖"线上也会抢跑"（那正是我们要消除的行为）。设 window.__EE_STALE_MS_OVERRIDE 即可覆盖。 */
+function __eeStaleMs() {
+  /* ① **引擎实例字段**优先 —— 测试最可靠的方式（effectEngine 一定在沙箱里可达；
+     我第一版只读 window.__EE_STALE_MS_OVERRIDE，结果沙箱的 window 不是测试设的那个对象 ⇒ 没生效，
+     导致 6 条"测自愈"的用例全红）。 */
+  try { var ee = effectEngine; if (ee && ee._staleMsOverride) return ee._staleMsOverride; } catch (e) {}
+  /* ② window 覆盖（浏览器调试/联机时可用） */
+  try { if (typeof window !== 'undefined' && window.__EE_STALE_MS_OVERRIDE) return window.__EE_STALE_MS_OVERRIDE; } catch (e) {}
+  return __EE_STALE_MS;
+}
 /* ============================================================
  * 快照检查点判据（2026-09-16 收口 · 第 2 步）
  * ------------------------------------------------------------
@@ -13503,12 +13527,17 @@ function __eeIdleWatchdog() {
     if (typeof effectEngine === 'undefined' || !effectEngine) return;
     if (typeof battleState === 'undefined' || !battleState) return;
     var ee = effectEngine;
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
+    /* 【S-c 2026-10-06】判定**读演出期状态机**（与 _resolveDepth/_chainLock 等价，但从此以 _phase 为对外口径）；
+       animating（动画演出中）也算"锁着" —— 作者口径：**以动画为准**，演出期间不许推进、不许操作。 */
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock ||
+      (typeof __phaseNow === 'function' && __phaseNow() !== 'idle');
     if (!locked) { ee._stuckSince = 0; __eeWaitState.reason = ''; __eeWaitState.since = 0; return; }
     // 有人在等 → 这不是残留，不计时（等待判定与 __eeLocked() 共用一套，见上面的 __eeWaitReason）
     if (__eeWaitReason()) { ee._stuckSince = 0; return; }
     if (!ee._stuckSince) { ee._stuckSince = Date.now(); return; }
-    if (Date.now() - ee._stuckSince < __EE_STALE_MS) return;
+    /* 【S-c】阈值**运行时读取**（__eeStaleMs()）—— 线上是 5 分钟异常兜底；
+       测试可用 window.__EE_STALE_MS_OVERRIDE 调小来验"自愈机制本身"，不必依赖线上也抢跑。 */
+    if (Date.now() - ee._stuckSince < __eeStaleMs()) return;
     // 复位（可见地）：与放行判定共用 __eeForceUnlock，日志里带上"最后一次上锁位置"与调用栈
     var lastInc = ee._lastInc || null;
     if (__eeForceUnlock('检测到结算锁残留', Date.now() - ee._stuckSince)) {
