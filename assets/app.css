@@ -1326,20 +1326,34 @@ body.map3d-on .minimap-container { display: none !important; }
 }
 /* 连锁堆栈：玻璃卡片 + 金色链号 + 我方霓虹/对方绯红描边 */
 #chainStackAnim{filter:drop-shadow(0 10px 24px rgba(0,0,0,.45));}
-.csa-node{min-width:158px;max-width:248px;padding:9px 13px;border-radius:var(--md-r-s);
-  font-size:12.5px;font-weight:700;color:var(--md-text);line-height:1.35;
+.csa-node{min-width:200px;max-width:320px;padding:11px 15px;border-radius:var(--md-r-s);
+  font-size:13.5px;font-weight:700;color:var(--md-text);line-height:1.4;
   background:linear-gradient(150deg,var(--md-glass),var(--md-glass-2));
   border:1px solid var(--md-line-2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   box-shadow:var(--md-shadow),inset 0 1px 0 rgba(255,255,255,.06);
-  display:flex;align-items:center;gap:9px;opacity:0;transform:translateX(56px) scale(.9);}
-.csa-node.owner-p1{border-left:3px solid var(--md-neon);}
-.csa-node.owner-p2{background:linear-gradient(150deg,rgba(52,22,34,.86),rgba(30,12,20,.9));border-color:rgba(255,122,146,.42);border-left:3px solid var(--md-crimson);}
-.csa-node .csa-no{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-weight:900;font-size:14px;background:linear-gradient(135deg,var(--md-gold),var(--md-gold-2));color:#2c2008;
+  display:flex;align-items:center;gap:11px;opacity:0;transform:translateX(56px) scale(.9);}
+.csa-node.owner-p1{border-left:4px solid var(--md-neon);}
+.csa-node.owner-p2{background:linear-gradient(150deg,rgba(52,22,34,.86),rgba(30,12,20,.9));border-color:rgba(255,122,146,.42);border-left:4px solid var(--md-crimson);}
+.csa-node .csa-no{flex:none;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:900;font-size:15.5px;background:linear-gradient(135deg,var(--md-gold),var(--md-gold-2));color:#2c2008;
   box-shadow:var(--md-glow-gold);}
+/* 【链式演出 2026-10-06·作者问"为什么用文字不用卡图"】连锁节点里的**卡图缩略图**
+   （MD 的连锁条就是"卡图 + 链号 + 名称"；原来只有编号+文字，看起来像日志行 ⇒ 廉价感的来源） */
+.csa-node .csa-img{flex:none;width:32px;height:46px;border-radius:5px;object-fit:cover;object-position:center top;
+  border:1px solid rgba(255,255,255,.28);box-shadow:0 3px 10px rgba(0,0,0,.45);background:rgba(255,255,255,.06);}
 .csa-node.csa-in{animation:csaFlyIn var(--md-t) var(--md-ease) forwards;}
-.csa-node.csa-resolving{animation:csaResolve .5s ease infinite;border-color:var(--md-neon);box-shadow:var(--md-glow-neon);}
-.csa-node.csa-done{opacity:.55;filter:grayscale(.4);}
+/* 【链式演出 2026-10-06·第三处】当前结算那一环**明显拉开对比**：
+   它保持满亮 + 霓虹脉冲 + 深色底，其余环压暗 ⇒ 一眼看出"现在是哪一环在结算"
+   （原来所有环一样亮，看不出进度，观感就"平"）。 */
+#chainStackAnim.csa-stack-resolving .csa-node:not(.csa-resolving):not(.csa-lost){opacity:.6;filter:saturate(.75);}
+/* 【修 2026-10-06·截图才发现】`.csa-node` 初始 opacity:0，靠 `.csa-in` 的 csaFlyIn…forwards 飞到 1；
+   但同一元素上 `.csa-resolving` 又挂了 csaResolve —— **后声明的 animation 覆盖前一个** ⇒ csaFlyIn 失效
+   ⇒ 节点停在 opacity:0 ⇒ **"正在结算的那一环自己隐身了"**（截图里连锁条只有 C3/C1、C2 位置是空的）。
+   ⇒ 显式给 opacity:1（csaResolve 的 keyframes 不含 opacity，所以不冲突、脉冲照旧）。 */
+.csa-node.csa-resolving{animation:csaResolve .5s ease infinite;border-color:var(--md-neon);opacity:1;
+  background:linear-gradient(150deg,rgba(30,52,72,.96),rgba(14,26,40,.98));
+  box-shadow:0 0 0 2px rgba(126,240,255,.55),var(--md-glow-neon);}
+.csa-node.csa-done{opacity:.5;filter:grayscale(.45);}
 .csa-node.csa-lost{opacity:.6;border-color:#ff7b7b;}
 /* 中央横幅：更薄、更"金属" */
 #chainFlash .cf-tag{backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);letter-spacing:1.5px;}

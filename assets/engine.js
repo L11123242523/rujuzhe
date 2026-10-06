@@ -6330,6 +6330,18 @@ var ChainAnim = {
         try { d.style.animationDelay = (Math.min(i, 5) * 0.12) + 's'; } catch (e) {}
         var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
         var tx = document.createElement('span'); tx.className = 'csa-txt'; tx.textContent = node.label || '';
+        /* 【链式演出 2026-10-06·作者问"为什么用文字不用卡图"】**节点里加卡图**。
+           原来节点只有 C{n} + 文字 ⇒ 看起来像"日志行"，这是廉价感的最大来源。
+           现在用这张卡的 image_url 做缩略图（MD 的连锁条就是"卡图 + 链号 + 名称"）；
+           拿不到图（无 card / 无 image_url / 加载失败）时自动退回纯文字，不报错、不影响布局。 */
+        try {
+          var __src = (node && node.card && (node.card.image_url || node.card.avatar_url)) || '';
+          if (__src) {
+            var im = document.createElement('img'); im.className = 'csa-img'; im.src = __src; im.alt = '';
+            im.onerror = function () { try { if (im.parentNode) im.parentNode.removeChild(im); } catch (e) {} };
+            d.appendChild(im);
+          }
+        } catch (e) {}
         d.appendChild(no); d.appendChild(tx); b.appendChild(d); this._nodes.push(d);
         /* 【链式演出】标题实时显示链数，让"链在增长"可见（原来是固定的 CHAIN · 连锁） */
         try { var tEl = b.querySelector('.csa-title'); if (tEl) tEl.textContent = 'CHAIN ' + (i + 1) + ' · 连锁'; } catch (e) {}
@@ -7677,7 +7689,11 @@ var TW = {
            现在：**演出期间 = animating**（__eeLocked 已按 _phase 拦住双方操作、AI 也不得插入），
            **演出结束才结算这个效果**，再由 next() 推进下一个 ⇒ 一个效果：**演出 → 结算 → 下一个**。
            ⛔ 只改这里：**不要动入链 / 同窗候选**（那是 MD/SEGOC 口径，上一轮我改错被 chain_completeness 打脸）。 */
-        var __aMs = 420;
+        /* 【2026-10-06 缓解·作者实测"T5 进主阶段1 手牌被锁死"】原 420ms 让每个环节多等一拍，
+           实测出现「连锁逆结算**跨阶段**」（日志：T4/main1 组链 → T4/roll 才结算完）
+           ⇒ 结算锁跨阶段残留 ⇒ 下一回合手牌全被锁。先降到 220ms 降低概率；
+           真因是"**切换阶段前应先把当前连锁结算收完**"，那是下一步的结构修法（不在这一处硬顶）。 */
+        var __aMs = 220;
         try { var __eeA = effectEngine; if (__eeA && typeof __eeA._animMsOverride === 'number') __aMs = __eeA._animMsOverride; } catch (e) {}
         setTimeout(__aiGuard(function () {
         /* 【必须】原代码靠外层同步 try/catch 兜住 fire 的异常；挪进 setTimeout 后变成异步、
