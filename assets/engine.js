@@ -6362,8 +6362,13 @@ var ChainAnim = {
       var ring = document.createElement('div'); ring.className = 'md-chain-resolve-ring'; el.appendChild(ring);
       var vw = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1280;
       var vh = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 720;
-      var cx = (typeof to.x === 'number' ? to.x : vw - 140) - (w / 2 + 34);
-      var cy = (typeof to.y === 'number' ? to.y : vh * .5);
+      /* 【链式演出 2026-10-06·作者反馈「整体看起来太廉价」】原来落点跟着 CardAnim._targetRect()
+         （≈连锁条的位置）走 ⇒ 卡牌特写**压在连锁条上**，把 C1 和「CHAIN · 连锁」标题挡住（截图实测：
+         1280×820 下 chain-5-resolving.png 里 C2 特写压住了 C1 与标题）。
+         改成**固定在屏幕中央偏左**：连锁条独占右侧、特写独享中左，两边互不遮挡；
+         y 取中线稍上，起始位移仍带右偏 ⇒ 保留"从连锁条方向飞入"的方向感。 */
+      var cx = Math.round(vw * 0.38);
+      var cy = Math.round(vh * 0.46);
       el.style.left = (cx - w / 2) + 'px'; el.style.top = (cy - h / 2) + 'px';
       document.body.appendChild(el);
       var kill = function () { try { if (el.parentNode) el.parentNode.removeChild(el); } catch (e) {} };
