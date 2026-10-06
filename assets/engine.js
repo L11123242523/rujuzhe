@@ -3650,6 +3650,32 @@ function startBattle(__sandbox) {
   
   showScreen('battleScreen');
   initBattle();
+  /* ============================================================
+   * 【修 2026-10-06 · 作者实测"什么都没干到我回合就卡死"】
+   * ------------------------------------------------------------
+   * 我用 Playwright 自动打 240 秒 / 198 次采样，卡死现场是：
+   *   turn=1 / phase=prepare / **ph=awaiting-choice / _choiceWaiting=true**
+   *   而 depth=0、chainLock=false（引擎状态**干净**）
+   * ⇒ 即"**有一个决策询问排在队列里、却没有弹出来给玩家**"：玩家看不到弹窗，
+   *    流程又一直等这个答案 ⇒ 表现就是卡死。
+   * 根因：`_choiceQueue`（等待弹出的询问队列）**只有 TW.close 会排空**；
+   *   一旦那条收尾没走到（异常路径/跨阶段），询问就永远躺在队里不显示。
+   * 修法：加一个**心跳兜底**——"队列里有询问 **且** 当前没有任何弹窗在等" ⇒ 立刻放出来。
+   *   只在"确实没人弹窗"时才放，**不会抢任何正常流程**（有弹窗时一行都不做）。
+   * ============================================================ */
+  try {
+    if (typeof window !== 'undefined' && !window.__choiceQueueWatchdog) {
+      window.__choiceQueueWatchdog = setInterval(function () {
+        try {
+          if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length &&
+              !pendingChoiceCallback && typeof __drainChoiceQueueWhenIdle === 'function') {
+            try { addBattleLog('system', '【兜底】检测到 ' + _choiceQueue.length + ' 个询问排队却没弹窗 ⇒ 立即放出'); } catch (e) {}
+            __drainChoiceQueueWhenIdle('watchdog');
+          }
+        } catch (e) {}
+      }, 1200);
+    }
+  } catch (e) {}
 }
 
 // ===== 肉鸽模式 =====
@@ -4841,6 +4867,32 @@ function startRoguelikeBattle(node) {
   
   showScreen('battleScreen');
   initBattle();
+  /* ============================================================
+   * 【修 2026-10-06 · 作者实测"什么都没干到我回合就卡死"】
+   * ------------------------------------------------------------
+   * 我用 Playwright 自动打 240 秒 / 198 次采样，卡死现场是：
+   *   turn=1 / phase=prepare / **ph=awaiting-choice / _choiceWaiting=true**
+   *   而 depth=0、chainLock=false（引擎状态**干净**）
+   * ⇒ 即"**有一个决策询问排在队列里、却没有弹出来给玩家**"：玩家看不到弹窗，
+   *    流程又一直等这个答案 ⇒ 表现就是卡死。
+   * 根因：`_choiceQueue`（等待弹出的询问队列）**只有 TW.close 会排空**；
+   *   一旦那条收尾没走到（异常路径/跨阶段），询问就永远躺在队里不显示。
+   * 修法：加一个**心跳兜底**——"队列里有询问 **且** 当前没有任何弹窗在等" ⇒ 立刻放出来。
+   *   只在"确实没人弹窗"时才放，**不会抢任何正常流程**（有弹窗时一行都不做）。
+   * ============================================================ */
+  try {
+    if (typeof window !== 'undefined' && !window.__choiceQueueWatchdog) {
+      window.__choiceQueueWatchdog = setInterval(function () {
+        try {
+          if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length &&
+              !pendingChoiceCallback && typeof __drainChoiceQueueWhenIdle === 'function') {
+            try { addBattleLog('system', '【兜底】检测到 ' + _choiceQueue.length + ' 个询问排队却没弹窗 ⇒ 立即放出'); } catch (e) {}
+            __drainChoiceQueueWhenIdle('watchdog');
+          }
+        } catch (e) {}
+      }, 1200);
+    }
+  } catch (e) {}
   
   // 肉鸽模式隐藏地图UI（无地图无公共卡，单纯打怪）
   setTimeout(function() {
@@ -13277,8 +13329,22 @@ function __animLeave(why) { try { var ee = effectEngine; if (!ee) return; ee._an
 function __phaseNow() {
   try {
     var ee = effectEngine;
-    /* 【S-d】等某座位选 ⇒ awaiting-choice（比 animating 更具体，优先返回） */
-    if (ee && ee._choiceWaiting) return 'awaiting-choice';
+    /* ============================================================
+     * 【结构修 2026-10-06 · 戒律第 0 条："把靠猜换成唯一真相"】
+     * ------------------------------------------------------------
+     * 病灶（Playwright 自动跑实测现场）：
+     *   ph=awaiting-choice ｜ cw=true ｜ kind=targetPlayer
+     *   而 pendingCb=null、queueLen=0、弹窗 display:none  —— 引擎嘴里说"在等答案"，
+     *   可**根本没有回调在等**。原因：引擎里本来只有**一份真相**
+     *   （pendingChoiceCallback = 当前弹窗的回调；_choiceQueue = 排队待弹的询问），
+     *   我 S-d 又加了第二份账 _choiceWaiting ⇒ 真账清了、假账还在 ⇒ 相位**永久卡在 awaiting-choice**。
+     * ⇒ 修法：**删掉这份假账**，改为"**有回调在等 或 队列里有询问**"才算在等 ⇒ 与真相同生同灭，不可能残留。
+     *   （_choiceSeat / _choiceKind 只保留作**记录**，不参与任何判定。）
+     * ============================================================ */
+    var __waiting = false;
+    try { __waiting = (typeof pendingChoiceCallback !== 'undefined' && !!pendingChoiceCallback); } catch (e) {}
+    if (!__waiting) { try { __waiting = (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length > 0); } catch (e) {} }
+    if (__waiting) return 'awaiting-choice';
     if (ee && ee._animating) return 'animating';      /* 演出优先于 resolving：动画期间对外就是 animating */
     return (ee && ee._phase) || 'idle';
   } catch (e) { return 'idle'; }
