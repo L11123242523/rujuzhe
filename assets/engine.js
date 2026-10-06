@@ -6314,6 +6314,10 @@ var CardAnim = {
   }
 };
 var ChainAnim = {
+  /* 【作者 2026-10-06 明确要求：删掉连锁动画】
+     做法：下方紧接着把本对象的全部视觉方法替换成 no-op（保留对象本身与字段，
+     以免调用点报错）。**结算与逻辑完全不受影响** —— 动画层本来就不承重。
+     我此前在动画上的所有折腾（v65–v70 接入、补图）随之作废；ShowQueue 只保留"演出期输入锁"。 */
   _nodes: [], _box: null,
   _el: function () { if (!this._box) this._box = document.getElementById('chainStackAnim'); return this._box; },
   // 中央闪光横幅：发动 / 逆结算 / 完成 / 丢失对象，各时点都有明确动画提示
@@ -6343,7 +6347,27 @@ var ChainAnim = {
     /* 【__UI_PHASE6·③补】标记"这是效果发动那条主链的 C1"，结算时用它播"再播一次 C1 结算动画" */
     try { if (node && node.id === 'activation') this._actIdx = i; } catch (e) {}
     /* 【__UI_PHASE6·③】把这张卡记下来，供结算时"再播一次 C1 结算动画"用（纯动画层记录，不参与任何规则） */
-    try { this._cards = this._cards || []; this._cards[i] = (node && node.card) || null; } catch (e) {}
+    /* 【2026-10-06 修·连锁结算动画不显示卡图】
+       zone 里的卡是**精简对象**（game.html 里那句注释写明了：
+       "缺 image_url/effect 时回卡池按名字补齐"），而入链时带的就是这种精简对象
+       ⇒ this._cards[i].image_url 为空 ⇒ _cardResolve 走 else 分支、只显示卡名、没有卡图。
+       这里**复用引擎既有的补齐入口** __deckCardByName（按名字查 allCards / cardData 各分区 / 肉鸽数据）
+       把 image_url / avatar_url 补上；补不到就保持原样（渲染层的 else 分支仍显示卡名，不会空白）。
+       只在"动画记录"这一处补，不动渲染层、也不改卡对象本身（用浅合并生成副本）。 */
+    try {
+      this._cards = this._cards || [];
+      var __cc0 = (node && node.card) || null;
+      if (__cc0 && !__cc0.image_url && !__cc0.avatar_url && __cc0.name
+          && typeof __deckCardByName === 'function') {
+        try {
+          var __full0 = __deckCardByName(__cc0.name);
+          if (__full0 && (__full0.image_url || __full0.avatar_url)) {
+            __cc0 = Object.assign({}, __cc0, { image_url: __full0.image_url, avatar_url: __full0.avatar_url });
+          }
+        } catch (e) {}
+      }
+      this._cards[i] = __cc0;
+    } catch (e) {}
     /* 出牌/上链飞行（不承重：CardAnim.play 内部吞掉一切异常） */
     try { if (typeof CardAnim !== 'undefined' && CardAnim.play) CardAnim.play(node && node.card, node && node.label, i + 1); } catch (e) { console.error('出牌动画调用异常（不影响推进）', e); }
     /* 【__UI_PHASE6·不承重】节点/横幅都只是浮层：这里整段吞异常，画不出来也绝不影响推进 */
@@ -8257,7 +8281,12 @@ function __tryDrainTriggers() {
                  下一环的窗口就压上来把它们盖掉（作者实测的"乱入 / 询问框消失"）。
                  注：这与本函数上方 8260-8266 那段前人教训一致 ——
                  "入链"要同窗（同时候选），"逆结算"要逐环（一环没完绝不推下一环）。 */
-              if (__chainBusyForDrain()) { __wait(); return; }   // 没完成 → 一直等（结算结束 / 询问被应答）
+              /* 【P0 止损 · 2026-10-06】恢复"有限等待"（上限 5 秒）。
+                 我上一版把上限删掉（本意是让"等玩家回答"不被打断），结果一旦判据为真就**无限等**
+                 ⇒ 逆结算永不出环 ⇒ AI 造成的伤害没被应用、我方手牌因"效果处理中"全部变灰（作者实测）。
+                 这里回到"最多 5 秒"：它只作为**异常兜底**（正常路径仍由"结算结束 / 询问被应答"结束），
+                 万一任何判据意外恒真，也不会把整局拖死。 */
+              if (__chainBusyForDrain() && Date.now() - __t0 < 5000) { __wait(); return; }
               finish();
             }, 120);
           })();
@@ -21766,6 +21795,16 @@ try { window.__aiSelfHarmOf = __aiSelfHarmOf; } catch (e) {}
 try { window.__aiNetOf = __aiNetOf; } catch (e) {}
 try { window.aiDecideChain = aiDecideChain; } catch (e) {}
 try { window.CardAnim = CardAnim; } catch (e) {}
+/* 【作者 2026-10-06 要求：删掉连锁动画】把 ChainAnim 的全部视觉方法替换为 no-op。
+   对象与字段保留（调用点不会报错），**结算与逻辑完全不受影响**（动画层本就不承重）。 */
+try {
+  if (typeof ChainAnim !== 'undefined' && ChainAnim) {
+    ['begin', 'push', 'flash', 'resolving', 'done', 'end', '_cardResolve', '_el', '_anim'].forEach(function (k) {
+      try { ChainAnim[k] = function () {}; } catch (e) {}
+    });
+    try { ChainAnim._nodes = []; ChainAnim._cards = []; } catch (e) {}
+  }
+} catch (e) {}
 try { window.ChainAnim = ChainAnim; } catch (e) {}
 try { window.__twClearStaleChainLock = __twClearStaleChainLock; } catch (e) {}
 try { window.__mdOrderSimultaneous = __mdOrderSimultaneous; } catch (e) {}
