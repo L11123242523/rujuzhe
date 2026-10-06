@@ -15777,14 +15777,45 @@ function playDrawAnim(user, cards, cb) {
   });
 }
 
+/* ===== 演出队列（2026-10-06 · 结构骨架，作者口径的落点）=====
+   作者口径：「结算完 → 播动画 → 下一个；演出期间双方不可操作」。
+   铁律 B1 禁止"让逻辑等动画"，所以分工是：
+     · 结算层：同步算完，只把"要演什么"推到这个队列（不等结果）；
+     · 演出层（本队列）：自己按序播，**谁都不等它**；
+     · 输入锁 window.__showBusy：只由本队列的生命周期决定（一份账），只用来拒绝玩家输入，
+       不阻塞任何逻辑。
+   "有序演出"从此由队列保证，而不是靠每处调用点各写一个 setTimeout（顺序无保证、还会互相盖）。 */
+var ShowQueue = {
+  q: [],
+  busy: false,
+  push: function (fn) { try { this.q.push(fn); } catch (e) { return; } this.drain(); },
+  drain: function () {
+    if (this.busy) return;
+    var fn = this.q.shift();
+    if (!fn) { try { window.__showBusy = false; } catch (e) {} return; }
+    this.busy = true;
+    try { window.__showBusy = true; } catch (e) {}
+    var self = this, done = false;
+    var fin = function () {
+      if (done) return; done = true;
+      self.busy = false;
+      self.drain();                      /* 播下一个；队空时会把 __showBusy 置回 false */
+    };
+    try { fn(fin); } catch (e) { try { console.warn('演出任务异常（已跳过）', e); } catch (e2) {} fin(); }
+  },
+  size: function () { return this.q.length + (this.busy ? 1 : 0); }
+};
 function playSearchAnim(user, cb) {
   var __ol2 = (typeof Online !== 'undefined' && Online.active);
   var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || __ol2 || (typeof document === 'undefined');
   if (auto) { cb && cb(); return; }
   var ov = __animOverlay();
-  ov.innerHTML = '<div style="background:rgba(20,20,40,0.92);border:2px solid #74b9ff;border-radius:12px;padding:26px 40px;color:#74b9ff;font-size:20px;font-weight:bold;">🔍 ' + (user === 'p2' ? '对手正在检索卡区…' : '正在检索卡区…') + '</div>';
-  ov.style.display = 'flex';
-  setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 480);
+  ShowQueue.push(function (fin) {
+    ov.innerHTML = '<div style="background:rgba(20,20,40,0.92);border:2px solid #74b9ff;border-radius:12px;padding:26px 40px;color:#74b9ff;font-size:20px;font-weight:bold;">🔍 ' + (user === 'p2' ? '对手正在检索卡区…' : '正在检索卡区…') + '</div>';
+    ov.style.display = 'flex';
+    setTimeout(function () { try { ov.style.display = 'none'; } catch (e) {} fin(); }, 480);
+  });
+  cb && cb();   /* 逻辑不等演出（B1）：动画交给队列，结算立即继续 */
 }
 
 function __opsDamage(op, ctx, next, env) {
