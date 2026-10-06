@@ -8249,7 +8249,15 @@ function __tryDrainTriggers() {
           (function __wait() {
             setTimeout(function () {
               if (__done) return;
-              if (__chainBusyForDrain() && Date.now() - __t0 < 5000) { __wait(); return; }   // 还在结算 → 继续等
+              /* 【自排连锁 · 2026-10-06】去掉"5 秒就放行"的时限。
+                 按禁止清单 B3（不许用超时去"猜"状态）：这一环没完成就该一直等 ——
+                 等待只有两个来源：「正在结算」或「玩家还没回答决策」，两者都有**明确的结束条件**
+                 （结算结束 / 询问被应答），不需要用时间猜。
+                 原来 5 秒一过就 finish() ⇒ 直接推进下一环 ⇒ 若玩家还在回答上一环的询问，
+                 下一环的窗口就压上来把它们盖掉（作者实测的"乱入 / 询问框消失"）。
+                 注：这与本函数上方 8260-8266 那段前人教训一致 ——
+                 "入链"要同窗（同时候选），"逆结算"要逐环（一环没完绝不推下一环）。 */
+              if (__chainBusyForDrain()) { __wait(); return; }   // 没完成 → 一直等（结算结束 / 询问被应答）
               finish();
             }, 120);
           })();
@@ -19079,6 +19087,18 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
 
 function __ruriMaxJudgeSP(user, diceKind, roll) {
   try {
+    /* 【只读诊断 · 默认关闭】window.__RURI_TRACE = true 时记录每次调用的实参，
+       用于定位"琉璃SP 不触发（作者：所有判定伤害卡都不触发）"。
+       记录：谁调、骰种、点数、开关是否已注册。只记录、不改行为（默认分支不执行）。 */
+    try {
+      if (typeof window !== 'undefined' && window.__RURI_TRACE) {
+        (window.__RURI_LOG = window.__RURI_LOG || []).push({
+          user: user, diceKind: diceKind, roll: roll,
+          registered: !!(battleState && battleState[user] && battleState[user]._ruriSP),
+          t: Date.now()
+        });
+      }
+    } catch (e) {}
     if(!battleState) return false;
     var p = battleState[user];
     if(!p || !p._ruriSP) return false;
