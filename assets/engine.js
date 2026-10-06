@@ -7751,7 +7751,7 @@ var TW = {
            演出（ChainAnim.resolving/done + CardAnim）是**表现层**，本来就写着"不阻塞任何推进"。
            上一版把它包进定时器 ⇒ 同步调用栈变异步时间轴 ⇒ 所有配对（_resolveDepth / 推进 / 锁 / 弹窗归属）
            从"栈免费保证"变成"要人记得" ⇒ 处处卡死（作者实测：永久"效果结算中"、莫名卡住）。
-           这里撤销那次异步化；下面 7738 的 setTimeout(step,170) 只决定"下一环节奏"，不动。 */
+           这里撤销那次异步化；下面那句"推进下一环"的定时器（**已由 __aiGuard 包装**）只决定节奏，不动。 */
         try {
         try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 演出结束 → 开始结算本效果 */
         if (typeof node.alive === 'function' && !node.alive()) {
