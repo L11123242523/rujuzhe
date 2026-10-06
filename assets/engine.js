@@ -12516,6 +12516,29 @@ function __clearPhaseScopedBuffsImpl() {
   } catch (e) { console.error('清理阶段限时加成出错（忽略）', e); }
 }
 function nextPhase() {
+  /* ============================================================
+   * 【根治 2026-10-06 · 作者实测"进主阶段1 手牌被锁死"】
+   * ------------------------------------------------------------
+   * 日志里的直接证据是「**连锁逆结算跨阶段**」：
+   *   [T4/main1] 【连锁组成】…  →  [T4/roll] [阶段] 进入投骰阶段（AI）  →  [T4/roll] ▸ 逆结算 C1…
+   * 即**结算还没收完就切到了下一个阶段** ⇒ 结算锁跨阶段残留 ⇒ 下一回合手牌全被锁。
+   * 这里做两件事（都只拦"真的还在结算"，正常情况零影响）：
+   *   ① 还有结算在跑（_resolveDepth>0 / _chainLock / _inNewChain）⇒ **先推迟这次切换**，等它收完再来；
+   *      最多推迟 60×120ms ≈ 7 秒（异常兜底：真的收不干净就强制收口，绝不无限等、也绝不带着锁切阶段）；
+   *   ② 顺手把排队的触发/格子效果排空 —— 它们本来就该在"本次连锁全部结算完成"后才处理。
+   * ============================================================ */
+  try {
+    var __eeNP = effectEngine;
+    var __busyNP = !!__eeNP && (((__eeNP._resolveDepth || 0) > 0) || !!__eeNP._chainLock || !!__eeNP._inNewChain);
+    if (__busyNP) {
+      __eeNP._npRetry = (__eeNP._npRetry || 0) + 1;
+      if (__eeNP._npRetry === 1) { try { addBattleLog('system', '【阶段】当前连锁还在结算 ⇒ 等它收完再切阶段（避免锁跨阶段残留）'); } catch (e) {} }
+      if (__eeNP._npRetry <= 60) { setTimeout(__aiGuard(nextPhase), 120); return; }
+      try { addBattleLog('system', '【阶段】等待结算收尾超时（约7秒）⇒ 先强制收口再切阶段'); } catch (e) {}
+      try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock('切阶段前强制收口', 0); } catch (e) {}
+      __eeNP._npRetry = 0;
+    } else if (__eeNP) { __eeNP._npRetry = 0; }
+  } catch (e) {}
   if (battleState.currentPlayer !== 'p1') return;
   /* 【2026-10-01 P1：阶段时点串联（作者口径："阶段切换其实也是会弹是否发动效果的"）】
      每个阶段边界都走"结束时点 → 切阶段 → 进入时点"，并且**用回调串联**：
