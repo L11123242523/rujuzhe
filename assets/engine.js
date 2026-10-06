@@ -13535,11 +13535,19 @@ function __eeLocked() {
   try {
     if (typeof effectEngine === 'undefined' || !effectEngine) return false;
     var ee = effectEngine;
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
+    var __ph = (typeof __phaseNow === 'function') ? __phaseNow() : 'idle';
+    /* 【S-e 修·重要】**只认 resolving / animating，绝不含 awaiting-choice**。
+       "在等玩家答"时 _choiceWaiting 只是**可观测状态**（谁在等、等哪个座位）；
+       若把它当锁，一旦标记在某些路径残留（如"拒绝连锁"/送墓触发那条 cb 不被调用），
+       手卡就会被**永久**判成"结算中不能用" —— 实测：SP选项①那几组用例 depth=0、连锁锁=false，
+       却有 3~4 张手卡"卡住"。⇒ 锁 = 真的在算（resolving/animating），不是"在等人"。 */
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock || __ph === 'resolving' || __ph === 'animating';
     if (!locked) return false;
     if (__eeWaitReason()) return true;                  // 有人真的在等 → 确实是"处理中"
     var idle = ee._stuckSince ? (Date.now() - ee._stuckSince) : 0;
-    if (idle >= __EE_STALE_MS) {
+    /* 【S-e 2026-10-06·收敛阈值】原来这里**硬用 __EE_STALE_MS 常量**，而 __eeLocked 那边走运行时 __eeStaleMs()
+       ⇒ 同一件事两套阈值（测试调小阈值对本路径无效）。现在两处只认 __eeStaleMs()。 */
+    if (idle >= __eeStaleMs()) {
       __eeForceUnlock('检测到过期结算锁', idle);
       return false;
     }
@@ -13576,8 +13584,11 @@ function __eeIdleWatchdog() {
     var ee = effectEngine;
     /* 【S-c 2026-10-06】判定**读演出期状态机**（与 _resolveDepth/_chainLock 等价，但从此以 _phase 为对外口径）；
        animating（动画演出中）也算"锁着" —— 作者口径：**以动画为准**，演出期间不许推进、不许操作。 */
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock ||
-      (typeof __phaseNow === 'function' && __phaseNow() !== 'idle');
+    /* 【S-e 修·同 13538 那处】锁只认 resolving/animating，**不含 awaiting-choice**：
+       "在等人答"是可观测状态（谁在等、等哪个座位），不是锁；否则 _choiceWaiting 一旦在
+       异常路径残留（cb 没被调用），手卡会被**永久**判成"结算中不能用"。 */
+    var __phL = (typeof __phaseNow === 'function') ? __phaseNow() : 'idle';
+    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock || __phL === 'resolving' || __phL === 'animating';
     if (!locked) { ee._stuckSince = 0; __eeWaitState.reason = ''; __eeWaitState.since = 0; return; }
     // 有人在等 → 这不是残留，不计时（等待判定与 __eeLocked() 共用一套，见上面的 __eeWaitReason）
     if (__eeWaitReason()) { ee._stuckSince = 0; return; }
@@ -18548,7 +18559,14 @@ function __graveSelfApplies(player, card, reason) {
     /* 【2026-10-01】"被献祭/因效果送墓回复音韵"这类纯数值被动改为不进链直接执行（见 __graveDirectPassive）
        ⇒ 不再靠它开链；其余分支（神乐铃/盒子/破损/共鸣/认真起来了）不动。 */
     if (nm.indexOf('来自地狱的盒子') >= 0 && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时|因(为)?卡的效果而被送入墓地|因卡效果送墓/.test(sp)) return true;
-    if (nm.indexOf('破损电子设备') >= 0) return true;
+    /* 【修 2026-10-06 · 作者实测"破损电子设备送入墓地触发又被卡掉"】这里原来硬编码：
+         if (nm.indexOf('破损电子设备') >= 0) return true;
+       —— **无条件**把这张卡当作"有送墓触发"。可它卡面里**根本没有送墓触发效果**：
+         effect = 对一名其他玩家造成一次4面骰判定伤害，之后后退2格。
+         sp     = 这张卡进入墓地后可以花费1点音韵值将其回收，被回收后的此卡使用后放回牌组最下方。
+       ⇒ 引擎于是给它开了一个**空的连锁环节**「【破损电子设备】送入墓地触发」：进连锁、逆结算时 fire 空转
+         （作者看到的"逆结算了个寂寞"）。而它的**回收**由下面那条（「进入墓地后」+「回收」）命中，
+         **不依赖这个特例** ⇒ 删掉特例：回收照旧、空节点消失。 */
     var t2 = sp + eff;
     if (/进(入)?墓地后/.test(t2) && t2.indexOf('回收') >= 0) return true;
     if (nm === '共鸣' && sp && sp.indexOf('回收') >= 0) return true;
