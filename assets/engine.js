@@ -15761,20 +15761,26 @@ function playDrawAnim(user, cards, cb) {
   if (auto) { cb && cb(); return; } // 自动结算/联机/无界面：同步继续，不等动画
   var __isMine = (user === 'p1');
   var __cards = cards || [];
-  __drawFlyFromDeck(user, __cards.length, function () {
-    var ov = __animOverlay();
-    var inner = __cards.map(function (c) {
-      var face = __isMine && c.image_url;
-      return '<div style="background:linear-gradient(135deg,#2c3e50,#34495e);border:2px solid #feca57;border-radius:8px;padding:8px;margin:0 6px;width:118px;text-align:center;animation:pop .3s ease;">' +
-        '<img src="' + (face ? c.image_url : 'assets/images/ui2/cardback_carry.webp?v=1') + '" style="width:100px;height:120px;object-fit:cover;border-radius:6px;display:block;margin:0 auto;">' +
-        (__isMine ? '<div style="color:#fff;font-size:12px;font-weight:bold;margin-top:4px;word-break:break-all;">' + (c.name || '') + '</div>' : '') + '</div>';
-    }).join('');
-    ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">'
-      + (__isMine ? ('✨ 抽到 ' + __cards.length + ' 张卡') : ('🂠 对手抽了 ' + __cards.length + ' 张卡（背面）'))
-      + '</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
-    ov.style.display = 'flex';
-    setTimeout(function () { ov.style.display = 'none'; cb && cb(); }, 640);
+  /* 【2026-10-06 结构修复 · 禁止清单 B1】"飞卡 + 展示"两段动画整体交给演出队列自己播；
+     逻辑立刻继续 —— 抽到的卡在这行之前**已经进手**（drawCard 早跑完了），动画只是"演"。
+     调用处仍写 `playDrawAnim(..., next)`，但它不再需要等动画：next 会更早、且必然被调用。 */
+  ShowQueue.push(function (fin) {
+    __drawFlyFromDeck(user, __cards.length, function () {
+      var ov = __animOverlay();
+      var inner = __cards.map(function (c) {
+        var face = __isMine && c.image_url;
+        return '<div style="background:linear-gradient(135deg,#2c3e50,#34495e);border:2px solid #feca57;border-radius:8px;padding:8px;margin:0 6px;width:118px;text-align:center;animation:pop .3s ease;">' +
+          '<img src="' + (face ? c.image_url : 'assets/images/ui2/cardback_carry.webp?v=1') + '" style="width:100px;height:120px;object-fit:cover;border-radius:6px;display:block;margin:0 auto;">' +
+          (__isMine ? '<div style="color:#fff;font-size:12px;font-weight:bold;margin-top:4px;word-break:break-all;">' + (c.name || '') + '</div>' : '') + '</div>';
+      }).join('');
+      ov.innerHTML = '<div style="text-align:center;"><div style="color:#feca57;font-size:18px;font-weight:bold;margin-bottom:10px;">'
+        + (__isMine ? ('✨ 抽到 ' + __cards.length + ' 张卡') : ('🂠 对手抽了 ' + __cards.length + ' 张卡（背面）'))
+        + '</div><div style="display:flex;justify-content:center;flex-wrap:wrap;">' + inner + '</div></div>';
+      ov.style.display = 'flex';
+      setTimeout(function () { try { ov.style.display = 'none'; } catch (e) {} fin(); }, 640);
+    });
   });
+  cb && cb();
 }
 
 /* ===== 演出队列（2026-10-06 · 结构骨架，作者口径的落点）=====
