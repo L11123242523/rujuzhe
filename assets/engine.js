@@ -7658,16 +7658,35 @@ var TW = {
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
         catch (e) { try { console.error('ChainAnim.resolving 异常（不影响结算）', e); } catch (e2) {} }
         try { if (typeof __animEnter === 'function') __animEnter('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出开始 */
+        /* 【逐个效果推进 2026-10-06 · 作者最高优先级口径"以动画为准"】
+           原来这里是"演出开始(__animEnter) → **立刻** fire 结算"，而 ChainAnim 自己的注释也承认"不阻塞任何推进"
+           ⇒ 多个环节的 fire 会在同一拍接连发生 ⇒ **多个效果同时执行本体、同时弹决策**（作者实测的"乱入"）。
+           现在：**演出期间 = animating**（__eeLocked 已按 _phase 拦住双方操作、AI 也不得插入），
+           **演出结束才结算这个效果**，再由 next() 推进下一个 ⇒ 一个效果：**演出 → 结算 → 下一个**。
+           ⛔ 只改这里：**不要动入链 / 同窗候选**（那是 MD/SEGOC 口径，上一轮我改错被 chain_completeness 打脸）。 */
+        var __aMs = 420;
+        try { var __eeA = effectEngine; if (__eeA && typeof __eeA._animMsOverride === 'number') __aMs = __eeA._animMsOverride; } catch (e) {}
+        setTimeout(__aiGuard(function () {
+        /* 【必须】原代码靠外层同步 try/catch 兜住 fire 的异常；挪进 setTimeout 后变成异步、
+           外层 catch 抓不到（实测直接把进程打崩：__applyNode → Object.fire → Timeout）。
+           ⇒ 把**同一套保护**搬进异步回调里。 */
+        try {
+        try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 演出结束 → 开始结算本效果 */
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
-           死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
-           （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
-        setTimeout(__aiGuard(step), 170); return;
+          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。 */
+          setTimeout(__aiGuard(step), 170); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
         if (typeof node.fire === 'function') node.fire(next); else next();
+        } catch (e) {
+          try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
+          try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
+          try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e4) {}
+          next();
+        }
+        }), __aMs);
       } catch (e) {
         try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
         try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
