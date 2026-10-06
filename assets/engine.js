@@ -8653,7 +8653,19 @@ function __fxSendDice(seat, val, sides, count) {
     if (typeof Online._fxSend === 'function') Online._fxSend({ kind: 'dice', seat: seat, val: val, sides: sides || 6, count: count || 1 });
   } catch (e) {}
 }
+/* 【2026-10-06 结构修复 · 禁止清单 B1】对外的 playDiceRollAnim 只负责"把演出推给队列"，逻辑立刻继续。
+   投掷点数 finalVal 是**入参**（不是动画算出来的），所以结算没有任何理由等它 ——
+   原来 6 处调用点（__goExtra / __aiMoveNow / __goExtra2 / __goExtra3 …）都把逻辑当回调传，
+   在函数内部接入可让这 6 处一起受益，调用点一行都不用改。
+   （原实现整体改名为 __playDiceRollAnimShow，作为纯演出任务；它自带的 3 秒保险只保护演出自身，
+     与结算无关。） */
 function playDiceRollAnim(who, finalVal, sides, count, cb) {
+  ShowQueue.push(function (fin) {
+    __playDiceRollAnimShow(who, finalVal, sides, count, function () { try { fin(); } catch (e) {} });
+  });
+  if (cb) cb();
+}
+function __playDiceRollAnimShow(who, finalVal, sides, count, cb) {
   var area = document.getElementById('diceAnimationArea');
   var diceEl = document.getElementById('diceRolling');
   var resEl = document.getElementById('diceResult');
