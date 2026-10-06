@@ -12072,10 +12072,25 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
       btn.textContent = choice;
     }
     btn.onclick = function() {
+      /* ============================================================
+       * 【结构修 2026-10-06 · 戒律第 0 条："等待必须有唯一归属"】
+       * ------------------------------------------------------------
+       * 病灶（Playwright 实测：入间枫SP「从3项选2项」卡在「第1/2项」，480 秒、2938 次采样一动不动、queueLen=0）：
+       *   原顺序「①捕获 cb → ②清槽 → ③执行 cb → ④__dequeueChoice()」里，
+       *   ③ 如果**再开一个新弹窗**（多选的第 2 项 / 连续选择 / 谈窗接谈窗），它会建立**全新的等待（新槽）**；
+       *   紧接着 ④ 才跑 —— ④ 本意是"排空队列里的下一个询问"，却**作用在了 ③ 刚建立的新等待上** ⇒
+       *   新等待被清/被覆盖 ⇒ 弹窗挂着、答案永远回不来 ⇒ **卡死**。
+       * ⇒ 修法（**归属**，不是加兜底）：
+       *   · 本次回调只认**自己捕获的 cb**；
+       *   · **只有在"回调没有建立新等待"（槽仍为空）时，才去排空队列**；
+       *     若回调里已经开了新弹窗（槽非空）⇒ 说明新的等待已就位，**绝不能去动它**。
+       *   ⇒ 于是"谁开的窗、谁在等、由谁结束"三者对齐 ⇒ 回调被踩掉在结构上不可能发生。
+       * ============================================================ */
       var cb = pendingChoiceCallback;   // 先捕获：closeChoiceModal 会清空全局回调
       closeChoiceModal();
       if (cb) cb(index);
-      __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
+      /* 【归属修】槽被回调重新占用（= 新等待已建立）⇒ 这一步必须让路，不许动它 */
+      if (!pendingChoiceCallback) __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
     };
     buttonsDiv.appendChild(btn);
   });
@@ -12176,16 +12191,37 @@ function closeChoiceModal() {
   /* 【2026-10-01 修】关窗后必须把队列里排着的询问放出来（原来只清句柄 ⇒ 效果中产生的询问永久卡住） */
   try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('closeChoiceModal'); }, 0); } catch (e) {}
 }
+/* ============================================================
+ * 【结构修 2026-10-06 · 戒律第 0 条："一切'读判定'只认一个唯一真相"】
+ * ------------------------------------------------------------
+ * 病灶（Playwright 自动跑实测：跑到 T7 时卡住，ph=awaiting-choice、弹窗可见、**queueLen=2 积压**）：
+ *   原来"有没有弹窗在等"有**两套判据** —— ① 槽 pendingChoiceCallback；② `#choiceModal` 的 class。
+ *   可实际弹窗用的是 **card-modal-overlay**（选目标 / 选卡 / 多选 / choice 全在里面），
+ *   `#choiceModal` 压根不是 active ⇒ 排空逻辑**误判"没人在等"** ⇒
+ *   把队列里的下一个询问硬塞出来，与正在等的那个**打架/叠窗** ⇒ 玩家只能答上面那个，
+ *   下面那个永远答不到 ⇒ **队列积压 + awaiting-choice 恒真** ⇒ 卡死。
+ *   而且决策槽不止一个（choice / **target** / picker…），只认一个槽必然漏。
+ * ⇒ 修法：**统一成一个判定 `__anyDecisionPending()`**（覆盖所有决策槽 + 所有决策弹窗容器），
+ *   队列排空**只信它** ⇒ "有人等就绝不插队、无人等就必定补弹"成为结构保证。
+ * ============================================================ */
+function __anyDecisionPending() {
+  try { if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true; } catch (e) {}
+  try { if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine.pendingTargetCallback) return true; } catch (e) {}
+  /* 补充信号：任何"决策弹窗容器"处于 active 也算在等（万一还有我不知道的决策槽，宁可少弹也不插队） */
+  try {
+    var sels = ['#choiceModal.active', '.card-modal-overlay.active', '.card-picker-overlay.active',
+      '.target-cards-overlay.active', '.card-detail-modal.active', '.modal-overlay.active'];
+    for (var i = 0; i < sels.length; i++) { if (document.querySelector(sels[i])) return true; }
+  } catch (e) {}
+  return false;
+}
 /* 【2026-10-01 新增】空闲补弹：没有待答句柄、且弹窗确实不可见时，把队列里的下一条放出来。
    用于"效果执行中产生新询问"的各种收尾路径（关窗 / 连锁收尾 / 时点窗口关闭 / 入队兜底）。 */
 function __drainChoiceQueueWhenIdle(tag) {
   try {
     if (typeof _choiceQueue === 'undefined' || !_choiceQueue || !_choiceQueue.length) return false;
     if (battleState && battleState._over) { _choiceQueue = []; return false; }
-    if (pendingChoiceCallback) return false;                 // 真有弹窗在等：等它被回答后再排
-    var modal = document.getElementById('choiceModal');
-    var vis = !!(modal && modal.classList && modal.classList.contains('active'));
-    if (vis) return false;                                   // 弹窗还开着：不抢
+    if (__anyDecisionPending()) return false;                // 【唯一真相】任何决策在等 ⇒ 绝不插队
     var q = _choiceQueue.shift();
     if (!q) return false;
     try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) {}
@@ -12891,24 +12927,21 @@ var ENV = {
        *  · 与 animating 一样是**子状态**：**不动 _resolveDepth**（否则会与结算计数打架）。
        *  · 回调包一层：**答完立刻清标记** ⇒ 不会把相位永久卡在 awaiting-choice。
        * ============================================================ */
+      /* ============================================================
+       * 【结构修 · 戒律第 0 条】这里**原来还写了一个 _choiceWaiting 标志**表示"正在等答案"。
+       * 但引擎本来就有**唯一真相**（pendingChoiceCallback / _choiceQueue）⇒ 多这一份账必然不一致：
+       *   真账清了、假账还在 ⇒ 相位**永久卡在 awaiting-choice**
+       *   （实测：pendingCb=null、queueLen=0、弹窗 display:none，而 cw 仍为 true）。
+       * ⇒ **删掉这个字段**；只保留 _choiceSeat / _choiceKind 作**记录**（谁在等、等什么，供诊断与联机路由读）。
+       *   "是否在等"一律由 __phaseNow() **从真相派生**，这里不再自己记账、也不再包一层 cb。
+       * ============================================================ */
       try {
         var __eeW = effectEngine;
         if (__eeW) {
-          __eeW._choiceWaiting = true;
           __eeW._choiceSeat = (seat === undefined || seat === null || seat === '') ? 'p1' : seat;
           __eeW._choiceKind = kind;
         }
       } catch (e) {}
-      (function () {
-        var __origCb = cb;
-        cb = function () {
-          try {
-            var __eeC = effectEngine;
-            if (__eeC) { __eeC._choiceWaiting = false; __eeC._choiceSeat = ''; __eeC._choiceKind = ''; }
-          } catch (e) {}
-          if (typeof __origCb === 'function') return __origCb.apply(this, arguments);
-        };
-      })();
       if (kind === 'choice') return __askChoiceLocal(spec, cb);
       if (kind === 'pickCards') return __askPickCardsLocal(spec, cb);
       if (kind === 'targetPlayer') return __askTargetPlayerLocal(spec && spec.card, spec && spec.effectText, cb);
