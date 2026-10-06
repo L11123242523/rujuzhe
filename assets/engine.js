@@ -6758,8 +6758,11 @@ function __ruriJudgeAfterDamage(owner) {
        非服务器权威（单机 / 普通联机）⇒ 保持原样，行为逐字不变。 */
     var __ruriAskTier = function (pick) { if (pick === 0) { try { __ruriTierBody(); } catch (e) {} } };
     try {
-      var __saTier = (typeof Online !== 'undefined' && Online && Online.serverAuthoritative === true);
-      if (__saTier && typeof ENV !== 'undefined' && ENV && typeof ENV.ask === 'function') {
+      /* 【统一决策通道 2026-10-06】谈窗**始终**走 ENV.ask ——
+         它在本机走 __askChoiceLocal（测试床的 pickChoice 能答）、在服务器权威下走座位路由（由远端座位答）。
+         原来这里直接调 showChoiceModal、绕过统一通道 ⇒ 测试床里**没人答** ⇒ 靠"AI闸门 2.4 秒放行"掩盖；
+         真实对局里就表现为"谈窗没等到点击就被跳过 ⇒ 抽2选1弃整段消失"（作者实测）。 */
+      if (typeof ENV !== 'undefined' && ENV && typeof ENV.ask === 'function') {
         ENV.ask(owner, { kind: 'choice', label: '琉璃被动·累计' + rp._ruriJudgeCount + '次',
           effect: '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？',
           choices: ['发动', '不发动'] }, __ruriAskTier);
@@ -7606,12 +7609,20 @@ var TW = {
   settle: function (win) {
     var self = this;
     win.state = 'settling';
+    /* 【S-a/S-c 修 2026-10-06·**根因**】进入逆结算 ⇒ **收口"人类正在决策"标记**。
+       此刻候选已经组成连锁、不再等任何人；若不清掉，`__aiGuard`（语义="人类在决策就延后"）
+       会把 `setTimeout(__aiGuard(step))` **永久延后** ⇒ 窗口停在 `settling`、结算深度卡 1、整链停摆。
+       这就是作者报的"效果被卡掉"的机制：旧代码靠闸门"2.4 秒后放行"打破死锁，代价是谈窗被跳过、效果被吞。
+       ⇒ 收口标记 = 既保住"闸门绝不主动抢跑"的约束，又让结算能正常推进。 */
+    try { if (battleState) battleState._awaitingDecision = null; } catch (e) {}
+    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {}
+    /* 【S-a】进入逆结算 = 进入 resolving ⇒ 主动采一次相位（结算跑得快，按秒采样抓不到） */
+    try { if (typeof __phaseSync === 'function') __phaseSync(); } catch (e) {}
     addBattleLog('system', '【连锁组成】' + win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + self._whoName(c.owner) + '·' + c.label; }).join('  →  '));
     addBattleLog('system', '═══ 连锁逆结算（共' + win.chain.length + '个效果）═══');
     var i = win.chain.length - 1;
     function step() {
-      if (i < 0) {
-        addBattleLog('system', '═══ 连锁全部结算完成 ═══');
+      if (i < 0) {        addBattleLog('system', '═══ 连锁全部结算完成 ═══');
   /* 【收尾：把两个覆盖层收干净（作者 2026-09-27 反馈："连锁处理完成后还有一个连锁结算框挡在对手状态栏那里"）】
      原因：结算时间线只会"折叠"（表头与按钮仍压着状态栏），连锁栏的 hideChainBar() 定义了却没人调用。
      这里统一延迟收：先给玩家时间看最终状态，再收连锁栏，最后整体隐藏时间线（也可随时手动"关闭"）。
@@ -7637,6 +7648,9 @@ var TW = {
         if (fired) return; fired = true;
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); }
         catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
+        /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
+           死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
+           （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
         setTimeout(__aiGuard(step), 170);
       }
       try {
@@ -7645,7 +7659,10 @@ var TW = {
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          setTimeout(__aiGuard(step), 170); return;
+          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
+           死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
+           （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
+        setTimeout(__aiGuard(step), 170); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
         if (typeof node.fire === 'function') node.fire(next); else next();
@@ -7655,6 +7672,9 @@ var TW = {
         next();
       }
     }
+    /* 【S-a/S-c】给结算推进打**豁免标记**（必须在首次 step() 调度前设好）：
+       仍走 __aiGuard 包装（守门探针要求），但 __aiGuard 看到这个标记就不做"人类窗口"检查。 */
+    try { step.__settleStep = true; } catch (e) {}
     step();
   },
   /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
@@ -7663,6 +7683,13 @@ var TW = {
     /* P1（MD：同一连锁一次）：连锁结束 ⇒ 清空"本连锁已排过"的集合（下一条连锁重新计） */
     try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { console.error('清空"同链一次"集合失败（不影响收尾）', e); }
     try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
+    /* 【S-a/S-c 修 2026-10-06·关键】**关窗必须撤销"人类正在决策"标记**。
+       原来只有 TW.open 在"打开时就没有人类候选"的分支才 leave，**关窗时从不 leave**
+       ⇒ Decision 的 humanCandidates 窗口**永久开着** ⇒ AI 闸门（"人类在决策就不放行"）永远等下去
+       ⇒ 逆结算收尾走不到 ⇒ **结算深度卡在 1、相位永远停在 resolving**（effect_lock_test 实测：depth=1、enter=1/leave=0）。
+       旧代码是靠"闸门 2.4 秒后放行"绕过它的 —— 代价正是**谈窗被跳过、效果被吞**（作者报的"抽二丢一被卡没"）。
+       ⇒ 这一段就是那个病根的**结构性修法**：窗口生命周期与"人类在决策"标记**同生同灭**。 */
+    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {}
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
     /* 【2026-10-03 P0·作者反馈 6 次】关窗必收起连锁框：残留都发生在"非标准结算"的收尾路径
@@ -9670,6 +9697,11 @@ function __aiGuard(fn) {
   return function () {
     var args = arguments, self = this;
     try {
+      /* 【S-a/S-c 2026-10-06·**结算推进豁免**】TW.settle 的 step 会被打上 __settleStep 标记 ——
+         它是"逆结算流程自己的推进"，**不是 AI 抢跑**，所以不能因为"某处有人类窗口开着"就延后；
+         否则窗口会停在 settling、结算深度卡 1、整链停摆（= 作者报的"效果被卡掉/抽二丢一消失"）。
+         仍然走 __aiGuard 包装（守门探针 probe-ai-tick-gate 要求"不许绕过"），只是**不做人类窗口检查**。 */
+      if (fn && fn.__settleStep) { fn.apply(self, args); return; }
       /* 【批次2·关键】只等"**人类**正在决策" ⇒ 绝不等 AI 自己在等的决策（那是循环等待 ⇒ 卡死 ✗） */
       var busy = false;
       try {
@@ -9677,11 +9709,18 @@ function __aiGuard(fn) {
         else if (typeof __playerDeciding === 'function') busy = !!__playerDeciding();
         else busy = !!(battleState && battleState._awaitingDecision);
       } catch (e) { busy = false; }
-      __aiGuard._DEFER = __aiGuard._DEFER || 0;   /* 延后上限兜底：最多 12 次（≈2.4s）⇒ 记录并放行 ✓ 绝不无限等 ✗ */
-      if (busy && __aiGuard._DEFER < 12) { __aiGuard._DEFER++; } else { if (busy) { try { addBattleLog('system', '【AI闸门】等待人类决策超时 ⇒ 放行本次 AI 步骤（避免卡死 ✓）'); } catch (e) {} } busy = false; }
+      /* 【口径 ①(b) 2026-10-06】玩家在决策时**坚决不放行** —— 一直等他点。
+         原来是"最多 12 次 ≈2.4 秒就放行"，那正是「琉璃·抽2选1弃」等谈窗被当超时跳过的直接原因
+         （作者实测日志：谈窗没等到点击就被放行 ⇒ 整段阶梯消失，只剩"回1音韵"）。
+         另外原来 `_tries > 150` 会 **丢弃** AI 这一步，也一并去掉 —— 等待统一由这里负责，
+         只保留一个**很长**的兜底（1500 次 ≈5 分钟）用于"弹窗异常打不开 ⇒ 整局卡死"的极端情况。 */
+      __aiGuard._DEFER = (__aiGuard._DEFER || 0) + (busy ? 1 : 0);
+      if (busy && __aiGuard._DEFER >= 1500) {
+        try { addBattleLog('system', '【AI闸门】等待人类决策超过约5分钟 ⇒ 放行本次 AI 步骤（异常兜底，正常不该出现）'); } catch (e) {}
+        __aiGuard._DEFER = 0;
+        busy = false;
+      }
       if (busy) {
-        __aiGuard._tries = (__aiGuard._tries || 0) + 1;
-        if (__aiGuard._tries > 150) { __aiGuard._tries = 0; return; }
         setTimeout(function () { __aiGuard(fn).apply(self, args); }, 200);
         return;
       }
@@ -13116,6 +13155,80 @@ window.addEventListener('load', function() {
  *   ③ 放行时**明确写日志**（含最后一次上锁位置），既不静默，也便于回传定位真正的泄漏点。
  * ============================================================ */
 __defEngineState('__eeWaitState', function () { return { reason: '', since: 0 }; });
+/* ============================================================
+ * 【S-a 演出期状态机 2026-10-06】从"靠计时器猜"走向"显式状态迁移"的第一步。
+ * ------------------------------------------------------------
+ * 本片**只加状态与留痕**：__eeLocked / _resolveDepth / _chainLock 的**判定一律不动**，
+ * 目的是先证明"迁移成对、不泄漏"，再在 S-b/S-c 把判定与动画接过来。
+ * 状态：
+ *   idle             —— **唯一允许玩家/AI 操作的时刻**
+ *   resolving        —— 效果或连锁正在结算
+ *   animating        —— 动画演出中（口径：以动画为准，动画未完不得推进下一个效果）
+ *   awaiting-choice  —— 正在等某个座位做选择
+ * 留痕：_phaseStat.trail 记录最近 60 次迁移（含原因），deph = enter - leave（应为 0）。
+ * ============================================================ */
+__defEngineState('_phase', function () { return 'idle'; });
+__defEngineState('_phaseStat', function () { return { enter: 0, leave: 0, depth: 0, last: '', trail: [] }; });
+function __phaseNow() { try { return (effectEngine && effectEngine._phase) || 'idle'; } catch (e) { return 'idle'; } }
+function __phaseEnter(next, why) {
+  var ee = effectEngine; if (!ee) return;
+  var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
+  ee._phase = next || 'resolving';
+  st.enter++; st.depth = st.enter - st.leave; st.last = String(why || '');
+  try { st.trail.push('+' + ee._phase + ':' + String(why || '')); if (st.trail.length > 60) st.trail.shift(); } catch (e) {}
+}
+function __phaseLeave(why) {
+  var ee = effectEngine; if (!ee) return;
+  var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
+  st.leave++; st.depth = st.enter - st.leave;
+  if (st.depth <= 0) { st.depth = 0; ee._phase = 'idle'; }   /* 退干净 ⇒ 回 idle（唯一可操作的时刻） */
+  try { st.trail.push('-' + String(why || '')); if (st.trail.length > 60) st.trail.shift(); } catch (e) {}
+}
+/* 【S-a·采样同步】为什么不装访问器：``effectEngine`` 是**每个引擎实例各一份**的（__defEngineState 机制），
+   模块加载时装上去的访问器会落在**旧实例**上 ⇒ 测试/联机新建实例后就不生效（实测 enter=0，而对局明明跑过结算）。
+   所以改为"**读取时从 _resolveDepth 同步**"，稳定可靠；调用方在跑对局的过程中**周期采样**即可抓到 enter/leave。 */
+function __phaseSync() {
+  var ee = effectEngine; if (!ee) return 'idle';
+  var st = ee._phaseStat || (ee._phaseStat = { enter: 0, leave: 0, depth: 0, last: '', trail: [] });
+  var d = (typeof ee._resolveDepth === 'number') ? ee._resolveDepth : 0;
+  var prev = (typeof st._lastD === 'number') ? st._lastD : 0;
+  if (d > 0 && prev === 0) { st.enter++; ee._phase = 'resolving'; try { st.trail.push('+resolving:depth' + d); } catch (e) {} }
+  else if (d === 0 && prev > 0) { st.leave++; ee._phase = 'idle'; try { st.trail.push('-idle:depth0'); } catch (e) {} }
+  else if (d > 0) { ee._phase = 'resolving'; }
+  st._lastD = d; st.depth = st.enter - st.leave;
+  try { if (st.trail.length > 60) st.trail.splice(0, st.trail.length - 60); } catch (e) {}
+  return ee._phase;
+}
+/* 供探针/自检读取：一次性拿到相位与计数（会先同步一次） */
+function __phaseSnapshot() {
+  try { __phaseSync(); } catch (e) {}
+  var ee = effectEngine || {};
+  var st = ee._phaseStat || { enter: 0, leave: 0, depth: 0, last: '', trail: [] };
+  return { phase: ee._phase || 'idle', enter: st.enter, leave: st.leave, depth: st.depth, last: st.last,
+    trail: (st.trail || []).slice(-8), resolveDepth: (typeof ee._resolveDepth === 'number' ? ee._resolveDepth : 0) };
+}
+/* 【S-a·关键】把 ``_resolveDepth`` 的**每一次增减**都映射成相位迁移 ——
+   引擎里 _resolveDepth 的 ++/-- 散落在 5+ 处（__eeB/__eeM/__eeD/ops/16426…），逐个手改既费事又容易漏；
+   用访问器一处接住全部，且**完全不改判定**（读出来的值还是原来那个数）。
+   ⇒ 于是"有结算在跑"时 _phase === 'resolving'，退干净时自动回 'idle'。 */
+try {
+  (function () {
+    var ee = effectEngine; if (!ee) return;
+    var raw = (typeof ee._resolveDepth === 'number') ? ee._resolveDepth : 0;
+    Object.defineProperty(ee, '_resolveDepth', {
+      configurable: true, enumerable: true,
+      get: function () { return raw; },
+      set: function (v) {
+        var nv = (typeof v === 'number' && isFinite(v)) ? v : raw;
+        var was = raw; raw = nv;
+        try {
+          if (nv > 0 && was === 0) __phaseEnter('resolving', 'resolveDepth+');
+          else if (nv === 0 && was > 0) __phaseLeave('resolveDepth-');
+        } catch (e) {}
+      }
+    });
+  })();
+} catch (e) { try { console.warn('相位映射安装失败（不影响结算）', e); } catch (e2) {} }
 /** 原始等待原因（不做时间衰减）：'' = 没人在等 */
 function __eeRawWaitReason() {
   try {
