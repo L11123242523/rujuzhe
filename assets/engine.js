@@ -7747,22 +7747,16 @@ var TW = {
            现在：**演出期间 = animating**（__eeLocked 已按 _phase 拦住双方操作、AI 也不得插入），
            **演出结束才结算这个效果**，再由 next() 推进下一个 ⇒ 一个效果：**演出 → 结算 → 下一个**。
            ⛔ 只改这里：**不要动入链 / 同窗候选**（那是 MD/SEGOC 口径，上一轮我改错被 chain_completeness 打脸）。 */
-        /* 【2026-10-06 缓解·作者实测"T5 进主阶段1 手牌被锁死"】原 420ms 让每个环节多等一拍，
-           实测出现「连锁逆结算**跨阶段**」（日志：T4/main1 组链 → T4/roll 才结算完）
-           ⇒ 结算锁跨阶段残留 ⇒ 下一回合手牌全被锁。先降到 220ms 降低概率；
-           真因是"**切换阶段前应先把当前连锁结算收完**"，那是下一步的结构修法（不在这一处硬顶）。 */
-        var __aMs = 220;
-        try { var __eeA = effectEngine; if (__eeA && typeof __eeA._animMsOverride === 'number') __aMs = __eeA._animMsOverride; } catch (e) {}
-        setTimeout(__aiGuard(function () {
-        /* 【必须】原代码靠外层同步 try/catch 兜住 fire 的异常；挪进 setTimeout 后变成异步、
-           外层 catch 抓不到（实测直接把进程打崩：__applyNode → Object.fire → Timeout）。
-           ⇒ 把**同一套保护**搬进异步回调里。 */
+        /* 【分层重做·第 1 步 2026-10-06】让**结算层同步**：fire 立即执行，不再 setTimeout 等待演出。
+           演出（ChainAnim.resolving/done + CardAnim）是**表现层**，本来就写着"不阻塞任何推进"。
+           上一版把它包进定时器 ⇒ 同步调用栈变异步时间轴 ⇒ 所有配对（_resolveDepth / 推进 / 锁 / 弹窗归属）
+           从"栈免费保证"变成"要人记得" ⇒ 处处卡死（作者实测：永久"效果结算中"、莫名卡住）。
+           这里撤销那次异步化；下面 7738 的 setTimeout(step,170) 只决定"下一环节奏"，不动。 */
         try {
         try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 演出结束 → 开始结算本效果 */
         if (typeof node.alive === 'function' && !node.alive()) {
           try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。 */
           setTimeout(__aiGuard(step), 170); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
@@ -7773,7 +7767,6 @@ var TW = {
           try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e4) {}
           next();
         }
-        }), __aMs);
       } catch (e) {
         try { console.error('TimingWindow node error', node && node.label, e); } catch (e2) {}
         try { addBattleLog('system', '【连锁】C' + (idx + 1) + ' 结算异常，已跳过并继续：' + ((e && e.message) || e)); } catch (e3) {}
