@@ -3614,12 +3614,13 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
     border-radius:7px 7px 0 0 !important; display:block !important;
   }
   body:not(.ui-classic) #deckBuilder .card-item-name,
-  body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:9.5px !important; padding:2px 3px !important; }
+  body:not(.ui-classic) #deckBuilder .card-item .card-name{ font-size:11.5px !important; line-height:1.28 !important; padding:3px 4px !important; letter-spacing:.2px; }
   body:not(.ui-classic) #deckBuilder .card-item-cost{ z-index:3 !important; }
-/* 【UI 2026-10-06 · 作者反馈「整体看起来太廉价」】卡组配置页原来只占上半屏：
-   1440×900 实测下面约 1/4 全空（见 port-old/_shots/ui-1-after-click.png）⇒ 整体"轻飘飘、没撑满"。
-   这里让内容**垂直居中**并补一点底部呼吸位；只加布局、不碰任何交互（选择器命中不了也无副作用）。 */
-#deckBuilder{display:flex;flex-direction:column;justify-content:center;padding-bottom:3.5vh;}
+/* 【回退 2026-10-06·作者实测"游戏内能用滚轮滚到卡组配置界面"】
+   上一版这里硬写了 `#deckBuilder{display:flex;flex-direction:column;justify-content:center;}` ——
+   **屏级容器的 display 绝不能在这里覆盖**：`.screen` 正是靠 display 做显示/隐藏切换的，
+   被我这条规则钉死之后，卡组配置页在"非当前屏"时**没有被真正隐藏** ⇒ 滚轮能滚过去。
+   ⇒ 已删除该行（保留下面无害的子选择器）。（居中诉求以后用不碰 display 的方式做。） */
 #deckBuilder .deck-panels,#deckBuilder .deck-body,#deckBuilder .deck-main{align-content:center;}
 }
 @media screen and (min-width: 1500px){

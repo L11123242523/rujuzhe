@@ -12517,27 +12517,21 @@ function __clearPhaseScopedBuffsImpl() {
 }
 function nextPhase() {
   /* ============================================================
-   * 【根治 2026-10-06 · 作者实测"进主阶段1 手牌被锁死"】
+   * 【回退+修 2026-10-06 · 作者实测"之前偶尔卡死，现在把把卡死"】
    * ------------------------------------------------------------
-   * 日志里的直接证据是「**连锁逆结算跨阶段**」：
-   *   [T4/main1] 【连锁组成】…  →  [T4/roll] [阶段] 进入投骰阶段（AI）  →  [T4/roll] ▸ 逆结算 C1…
-   * 即**结算还没收完就切到了下一个阶段** ⇒ 结算锁跨阶段残留 ⇒ 下一回合手牌全被锁。
-   * 这里做两件事（都只拦"真的还在结算"，正常情况零影响）：
-   *   ① 还有结算在跑（_resolveDepth>0 / _chainLock / _inNewChain）⇒ **先推迟这次切换**，等它收完再来；
-   *      最多推迟 60×120ms ≈ 7 秒（异常兜底：真的收不干净就强制收口，绝不无限等、也绝不带着锁切阶段）；
-   *   ② 顺手把排队的触发/格子效果排空 —— 它们本来就该在"本次连锁全部结算完成"后才处理。
+   * 上一版这里写的是「结算没完 ⇒ **推迟这次切换**（最多 7 秒，每 120ms 重试）」
+   * —— 那是**我造成的卡死**：只要锁有任何残留，玩家点「进入下个阶段」就**像没反应**，
+   *    而且每点一次都要等好几秒（作者感受就是"把把卡死"）。**绝不能在这里 return/等待。**
+   * 现在改成：**不等待、不重试**；只做一次"收口尝试"（清残留锁 + 排空队列），然后**照常切阶段**。
+   * 这样既保留了"切阶段前顺手收干净"的好处，又不可能因为这里卡住。
    * ============================================================ */
   try {
     var __eeNP = effectEngine;
-    var __busyNP = !!__eeNP && (((__eeNP._resolveDepth || 0) > 0) || !!__eeNP._chainLock || !!__eeNP._inNewChain);
-    if (__busyNP) {
-      __eeNP._npRetry = (__eeNP._npRetry || 0) + 1;
-      if (__eeNP._npRetry === 1) { try { addBattleLog('system', '【阶段】当前连锁还在结算 ⇒ 等它收完再切阶段（避免锁跨阶段残留）'); } catch (e) {} }
-      if (__eeNP._npRetry <= 60) { setTimeout(__aiGuard(nextPhase), 120); return; }
-      try { addBattleLog('system', '【阶段】等待结算收尾超时（约7秒）⇒ 先强制收口再切阶段'); } catch (e) {}
-      try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock('切阶段前强制收口', 0); } catch (e) {}
-      __eeNP._npRetry = 0;
-    } else if (__eeNP) { __eeNP._npRetry = 0; }
+    if (__eeNP && (((__eeNP._resolveDepth || 0) > 0) || !!__eeNP._chainLock || !!__eeNP._inNewChain)) {
+      try { if (typeof __eeForceUnlock === 'function') __eeForceUnlock('切阶段前收口', 0); } catch (e) {}
+      try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
+      try { addBattleLog('system', '【阶段】切阶段前收口：清了残留结算锁/排空了队列'); } catch (e) {}
+    }
   } catch (e) {}
   if (battleState.currentPlayer !== 'p1') return;
   /* 【2026-10-01 P1：阶段时点串联（作者口径："阶段切换其实也是会弹是否发动效果的"）】
