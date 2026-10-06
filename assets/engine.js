@@ -27,6 +27,35 @@ function __engineInstance() {
   return __ENGINE;
 }
 
+/* ===== 结算深度：唯一入口（2026-10-06 结构收敛）=====
+   原先 _resolveDepth 的 ++/-- 散落在 5 对共 10 处，每处都要人记得配对 ——
+   任何一处漏配对就是"永久结算中"（卡死族）。这里把增减收敛成两个函数，
+   行为与原来完全等价（+1 / max(0,-1)），但从此**只有这两个函数**能改深度。
+   附带只读账本：window.__DEPTH_TRACE = true 时记录 who / 前后值 / 调用栈，
+   用于对账"哪处 +1 没有配对的 -1"（默认关闭，零行为影响）。 */
+function __eeDepthBook(where, from, to) {
+  try {
+    if (typeof window === 'undefined' || !window.__DEPTH_TRACE) return;
+    (window.__DEPTH_LOG = window.__DEPTH_LOG || []).push({
+      w: where, from: from, to: to, d: to - from, t: Date.now(),
+      stack: String((new Error()).stack || '').split('\n').slice(2, 6).join(' | ')
+    });
+  } catch (e) {}
+}
+function __eeDepthAdd(ee, where) {
+  if (!ee) return;
+  var from = ee._resolveDepth || 0;
+  ee._resolveDepth = from + 1;
+  __eeDepthBook(where, from, from + 1);
+}
+function __eeDepthSub(ee, where) {
+  if (!ee) return;
+  var from = ee._resolveDepth || 0;
+  var to = Math.max(0, (from || 1) - 1);
+  ee._resolveDepth = to;
+  __eeDepthBook(where, from, to);
+}
+
 var __ENGINE_BUSY = null;
 
 function __defEngineState(name, initValue) {
@@ -8313,13 +8342,13 @@ function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('beforeEffectExecution·效果执行前连锁窗口');
-  if(__eeB)__eeB._resolveDepth=(__eeB._resolveDepth||0)+1;
+  __eeDepthAdd(__eeB,'eeB·进入结算');
   // 作者口径：使用卡时先把这张卡放进永续区（效果处理区）作为 C1（占用格数），结算完毕再按种类送墓
   var __c1card = effect && effect.card;
   var __c1who = (effect && (effect.player || effect.user)) || 'p1';
   if (__c1card) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
-  function __releaseB(){ if(__releasedB) return; __releasedB=true; if(__eeB)__eeB._resolveDepth=Math.max(0,(__eeB._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+  function __releaseB(){ if(__releasedB) return; __releasedB=true; __eeDepthSub(__eeB,'eeB·释放'); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
@@ -8491,9 +8520,9 @@ function executeMoveEffect(effect) {
   // 结算锁：移动落地与踩格级联期间禁止手动插入发动
   var __eeM=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('executeMoveEffect·移动投掷结算');
-  if(__eeM)__eeM._resolveDepth=(__eeM._resolveDepth||0)+1;
+  __eeDepthAdd(__eeM,'eeM·进入结算');
   var __releasedM=false;
-  function __relM(){ if(__releasedM) return; __releasedM=true; if(__eeM)__eeM._resolveDepth=Math.max(0,(__eeM._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
+  function __relM(){ if(__releasedM) return; __releasedM=true; __eeDepthSub(__eeM,'eeM·释放'); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} }
   // 异常安全：移动落地/踩格级联中任何抛出都要释放结算锁，否则深度残留会锁死全场操作
   try {
   runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
@@ -16521,10 +16550,10 @@ function runOneOp(op, ctx, next) {
 function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('runOps·效果步骤序列');
-  if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
+  __eeDepthAdd(__ee,'runOps·进入');
   var i = 0;
   (function step() {
-    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
+    if (i >= ops.length) { __eeDepthSub(__ee,'runOps·走完 ops'); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
@@ -16562,7 +16591,7 @@ function dispatchStep(text, ctx, next) {
 
 function executeEffectSteps(steps, context, finalCallback, showLog) {
   __eeMarkInc('executeEffectSteps·逐步骤结算');
-  var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null; if(__ee2)__ee2._resolveDepth=(__ee2._resolveDepth||0)+1;
+  var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null; __eeDepthAdd(__ee2,'runOps家族·进入');
   // 嵌套链保护：保存外层日志与自动结算标志，链结束后恢复，避免外层 AI 链被内层提前复位
   var __prevLog = effectEngine.effectLog;
   var __prevAuto = effectEngine.autoResolve;
@@ -16574,7 +16603,7 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
   var currentStep = 0;
   
   function __finalize() {
-    if(__ee2)__ee2._resolveDepth=Math.max(0,(__ee2._resolveDepth||1)-1);
+    __eeDepthSub(__ee2,'runOps家族·释放');
     /* 2026-09-27：原先静默吞。释放点出错会让锁/深度留在原地 ⇒ 出声，并用 S5 的清理器兜一下
        （清理器只在"无窗口、无结算深度、无待结算动作"时才动手，不会放掉正在结算的锁）。 */
     try { __eeAfterRelease(); } catch (e) {
@@ -19060,9 +19089,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   // 结算锁：伤害响应窗/结算期间禁止手动插入发动
   var __eeD=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
-  if(__eeD)__eeD._resolveDepth=(__eeD._resolveDepth||0)+1;
+  __eeDepthAdd(__eeD,'eeD·进入结算');
   var __releasedD=false;
-  function __relD(){ if(__releasedD) return; __releasedD=true; if(__eeD)__eeD._resolveDepth=Math.max(0,(__eeD._resolveDepth||1)-1); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('release'); } catch (e) {} }   /* 【2026-10-05】结算退干净 ⇒ 统一排空（带重试） */
+  function __relD(){ if(__releasedD) return; __releasedD=true; __eeDepthSub(__eeD,'eeD·释放'); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('release'); } catch (e) {} }   /* 【2026-10-05】结算退干净 ⇒ 统一排空（带重试） */
   try {
   var p = battleState[target];
   if (p) p._lastHitTaken = 0; // C16 “命中且造成N点以上伤害后可以打落”类条件：每次伤害结算前先清零本次实际伤害记录
