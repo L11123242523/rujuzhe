@@ -16737,9 +16737,26 @@ function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('runOps·效果步骤序列');
   if(__ee)__ee._resolveDepth=(__ee._resolveDepth||0)+1;
+  /* ============================================================
+   * 【结构修 2026-10-06 · 戒律第 0 条："释放必须有唯一出口" · 作者实测"没操作就卡在效果结算中"】
+   * ------------------------------------------------------------
+   * 病灶：原来 −1 只写在 `i >= ops.length` 那**一个分支**里，而推进**完全依赖 runOneOp 回调 step()**。
+   *   只要 runOneOp 存在"既不回调 step()、也不抛错"的路径（例如它内部等一个决策、而那条回调链断了），
+   *   `i` 就永远到不了 ops.length ⇒ **−1 永不执行** ⇒ `_resolveDepth` 永久 ≥1
+   *   ⇒ 全场手牌被判"效果/连锁结算中，无法插入发动" ⇒ 作者看到的"我没操作，它自己就卡住并说结算中"。
+   * 修法：把释放收敛成**唯一出口 __finish（幂等）** —— 正常走完 / 提前终止 / 异常收尾都必须经它；
+   *   重复调用无害（__finished 卫兵），且**先释放再 done()**，顺序不再含糊。
+   * ============================================================ */
+  var __finished = false;
+  var __finish = function () {
+    if (__finished) return; __finished = true;
+    try { if (__ee) __ee._resolveDepth = Math.max(0, (__ee._resolveDepth || 1) - 1); } catch (e) {}
+    try { __tryDrainTriggers(); } catch (e) {}
+    try { __eeAfterRelease(); } catch (e) {}
+  };
   var i = 0;
   (function step() {
-    if (i >= ops.length) { if(__ee)__ee._resolveDepth=Math.max(0,(__ee._resolveDepth||1)-1); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
+    if (i >= ops.length) { __finish(); if (done) done(); return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
