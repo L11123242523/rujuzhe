@@ -6387,7 +6387,13 @@ var ChainAnim = {
            现在用这张卡的 image_url 做缩略图（MD 的连锁条就是"卡图 + 链号 + 名称"）；
            拿不到图（无 card / 无 image_url / 加载失败）时自动退回纯文字，不报错、不影响布局。 */
         try {
-          var __src = (node && node.card && (node.card.image_url || node.card.avatar_url)) || '';
+          /* 【修 2026-10-06 · 作者报「比翼恋理这类技能卡在连锁条里没有卡图」】
+             卡不一定挂在 node.card 上 —— 候选节点的结构是 **c.pick.card / c.card**
+             （见同文件 __ck 的取法：`var p = c.pick || {}, cd = p.card || c.card;`）
+             ⇒ 原来只读 node.card ⇒ 技能卡/事件卡/状态触发那类节点全都无图。
+             这里两种都认；仍拿不到就退回纯文字，不影响布局。 */
+          var __cd = (node && (node.card || (node.pick && node.pick.card))) || null;
+          var __src = (__cd && (__cd.image_url || __cd.avatar_url)) || '';
           if (__src) {
             var im = document.createElement('img'); im.className = 'csa-img'; im.src = __src; im.alt = '';
             im.onerror = function () { try { if (im.parentNode) im.parentNode.removeChild(im); } catch (e) {} };
