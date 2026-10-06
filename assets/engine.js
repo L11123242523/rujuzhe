@@ -8197,7 +8197,39 @@ function __tryDrainTriggers() {
     //  ①标记 `_drainingCard` = 正在结算的那张卡 → 它自己不会再被入队（避免"自己入队自己"的无限循环）
     //  ②等它真正结算完（深度归零）或最多 5 秒再推进连锁，这样连锁条显示的是真实进度
     function __chainBusyForDrain() {
-      try { return (effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock; } catch (e) { return false; }
+      try {
+        if ((effectEngine._resolveDepth || 0) > 0 || !!effectEngine._chainLock) return true;
+        /* 【自排连锁 · 2026-10-06】★关键补充：**本环正在等玩家应答**也算"这一环还没完成"。
+           否则框架会判"完成"并立刻推进下一环 ⇒ 下一环的窗口压在上一环还在等的询问上
+           ⇒ 询问框被盖掉、整段效果消失。
+           作者实测现场：琉璃被动「抽二弃一」开窗等玩家选卡时，破损电子设备 SP「回收」
+           的窗口盖上来，抽二弃一的询问框没了。根因就是这里只看了结算深度/连锁锁，
+           没看"是否有人正等着回答"。
+           注意：本判据只影响**链条推进的等待**，不改"是否另开新连锁"
+           （此前两次改 __tryDrainTriggers 入口去拦"排空"，与套件"要另开新连锁"的期望正面冲突 ⇒ 必红；
+            这次的改动点在另一处，语义不同）。
+           判据用真实可见的 DOM 决策弹窗：Node 测试环境没有 document ⇒ 直接返回 false（行为同改动前）。 */
+        try {
+          if (typeof document !== 'undefined' && document.querySelector) {
+            var __visM = function (el) {
+              if (!el) return false;
+              try {
+                var cs = (typeof window !== 'undefined' && window.getComputedStyle) ? window.getComputedStyle(el) : null;
+                if (!cs) return false;
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                var op = parseFloat(cs.opacity);
+                return (!isNaN(op) ? op > 0.01 : true);
+              } catch (e) { return false; }
+            };
+            var __ms = ['#choiceModal.active', '#cardPicker.active', '.card-modal-overlay.active',
+                        '.target-cards-overlay.active', '.modal-overlay.active', '.card-picker-overlay.active'];
+            for (var __i2 = 0; __i2 < __ms.length; __i2++) {
+              if (__visM(document.querySelector(__ms[__i2]))) return true;
+            }
+          }
+        } catch (e) {}
+        return false;
+      } catch (e) { return false; }
     }
     function __wrapDrainNode(x) {
       return {
@@ -9750,6 +9782,14 @@ function __aiGuard(fn) {
         else if (typeof __playerDeciding === 'function') busy = !!__playerDeciding();
         else busy = !!(battleState && battleState._awaitingDecision);
       } catch (e) { busy = false; }
+      /* 【2026-10-06 演出期同样要等 —— 作者报「AI 抢跑又回来了」的直接修复】
+         演出队列（ShowQueue）正在播动画时，AI 不得抢在动画之前行动。
+         原因：在此之前"动画"与"逻辑"是串联的，AI 的下一步天然排在动画之后；
+         v65–v69 把逻辑与演出解耦（禁止清单 B1 要求）之后，逻辑立即推进 ⇒ AI 立即行动
+         ⇒ 动画还在播就抢跑。
+         这里把"演出期"并入**同一个等待条件**：仍然是"等"（不丢弃这一步、也不超时放行），
+         完全复用下面既有的等待机制，不新增任何计时器或兜底分支。 */
+      if (!busy && typeof window !== 'undefined' && window.__showBusy) busy = true;
       /* 【口径 ①(b) 2026-10-06】玩家在决策时**坚决不放行** —— 一直等他点。
          原来是"最多 12 次 ≈2.4 秒就放行"，那正是「琉璃·抽2选1弃」等谈窗被当超时跳过的直接原因
          （作者实测日志：谈窗没等到点击就被放行 ⇒ 整段阶梯消失，只剩"回1音韵"）。
