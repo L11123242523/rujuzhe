@@ -20284,6 +20284,13 @@ function useCardCompleteFor(seat, handIndex) {
   if (!__me) return;
   var __foe = (seat === 'p1') ? 'p2' : 'p1';
   if (__resolveLocked()) return;
+  /* 【演出锁 · 2026-10-06】演出队列正在播动画时，拒绝**玩家**的点击（AI 不受影响）。
+     与结算锁同层并列、各管一头：结算锁管"逻辑在跑"，演出锁管"动画在演"。
+     锁只由 ShowQueue 的生命周期决定（一份账），并且只拦输入、不阻塞任何逻辑 —— 符合铁律 B1。 */
+  if (seat === 'p1' && typeof window !== 'undefined' && window.__showBusy) {
+    try { showToast('效果演出中…', 'info'); } catch (e) {}
+    return;
+  }
   // 对手回合：手牌一律不能手发（含角色技能卡——技能卡"全时点"限于自己回合）；
   // 对手回合能用的只有：响应窗口内的连锁卡、已盖伏的卡、在场永续的主动效果、满足条件的墓地效果。
   if (battleState.currentPlayer !== seat) {
