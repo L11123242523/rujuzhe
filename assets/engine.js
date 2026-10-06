@@ -15983,8 +15983,17 @@ function __opsDamage(op, ctx, next, env) {
         addBattleLog(user, '对目标施加' + (op.rounds || 1) + '轮[缴械]（持续期间不可打出[侵略]标签卡）');
       };
       if (__dsHand.length === 1) { __dsApply(__dsHand[0]); break; }
+      /* 【2026-10-06 结构修复 · 真卡死】原来这段选完卡**没有调 next()**：
+         回调只做 __dsApply 就结束 ⇒ runOps 家族路径的 i 到不了终点 ⇒ 本 op 的 -1 永不执行
+         ⇒ depth 泄漏、"效果/连锁结算中"永久为真
+         （实测证据：OP 埋点抓到 __opsDamage / disarm_target 未推进；depth 账本净 +3）。
+         这里补上"谁在等、由谁结束"：pickFromList 的**每条路径**都会回调
+         （空列表 cb([])、非联机 p2 直接回调、p1 走选卡弹窗），故 next() 必然执行；
+         再用 try/finally 保证即使 __dsApply 抛错也一定推进。 */
       pickFromList(user, __dsHand.map(function (c) { return { card: c, zone: 'hand', index: battleState[target].hand.indexOf(c) }; }),
-        '选择要送入墓地的攻击卡', 1, function (picks) { if (picks && picks[0]) __dsApply(picks[0].card); });
+        '选择要送入墓地的攻击卡', 1, function (picks) {
+          try { if (picks && picks[0]) __dsApply(picks[0].card); } finally { next(); }
+        });
       return;
     }
     case 'pay_n_deal_n': {
