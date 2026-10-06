@@ -16222,7 +16222,17 @@ function __opsCards(op, ctx, next, env) {
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
       }); };
-      playSearchAnim(user, __doSearchPick); // 检索动画结束后再让玩家选卡（检索后的“那之后”隔断）
+      /* 【2026-10-06 结构修正 · 禁止清单 B1「绝不让逻辑等动画」】
+         原文是：playSearchAnim(user, __doSearchPick);
+         即把「选卡 + next()」整段挂在**动画回调**上。动画一旦不回调
+         （__animOverlay() 取不到元素抛异常 / 被节流 / 被别的弹窗覆盖），next() 就永远丢失
+         ⇒ 整条 ops 链停在此处 ⇒ __finalize 的 -1 不执行 ⇒ depth 泄漏 ⇒ "永久结算中"。
+         实测证据：+1 于 executeEffectSteps 5 次，而 -1 于 __finalize 只有 4 次（差 1）；
+         OP 埋点抓到的未推进项正是 __opsCards / search。
+         现在把两层解耦：**动画只负责"演"，谁都不等它**；逻辑（选卡与推进）立即进行。
+         （演出顺序的职责归演出层，见演出队列；结算层不得依赖它。） */
+      try { playSearchAnim(user, function () {}); } catch (e) {}
+      __doSearchPick();
       return;
     }
     case 'return_all_deck': ['grave', 'removed', 'removedFromGame'].forEach(function (z) { (p[z] || []).forEach(function (c) { p.deck.push(c); }); p[z] = []; }); if (typeof shuffleArray === 'function') shuffleArray(p.deck); addBattleLog(user, '墓地与移出区全部返回牌组并洗切'); break;
