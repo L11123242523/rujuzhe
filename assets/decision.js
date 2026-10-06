@@ -50,19 +50,9 @@
     STALE_MS: STALE_MS,
     enter: function (tag, seat) {
       tag = String(tag || '?');
-      /* 【2026-10-06 结构修复 · 禁止清单 B7「同一件事只能有一份账」】
-         原来这里是**无条件 S.count++**：同一个 tag 反复开窗会把计数越堆越高，
-         而每次 enter 又刷新该 tag 的心跳（S.tags[tag] = now()）⇒ 下面那个 8 秒看门狗
-         **永远摘不掉它** ⇒ 判据"有人类正在决策"恒真 ⇒ __aiGuard 永远等
-         ⇒ 逆结算走不到 __endChain ⇒ _chainLock 永不清除
-         ⇒ AI 造成的伤害没被应用、我方手牌因"效果处理中"全部变灰（作者实测）。
-         现在改为**幂等**：同一 tag 已经开着时，只刷新心跳与座位，**不再 +1**。
-         这样"反复开同一个窗口"不会把计数堆高，leave 一次就能干净清掉；
-         同时也修掉反方向的问题（leave 多减把计数提前清零 ⇒ AI 抢跑）。 */
-      var existed = !!S.tags[tag];
       S.tags[tag] = now();
       S.seats[tag] = (seat == null) ? null : seat;      /* 记"是谁在决策"✓（区分人类/AI，避免循环等待 ✗） */
-      if (!existed) S.count++;
+      S.count++;
       startWatch();
       mirror();
       return S.count;
