@@ -6322,9 +6322,17 @@ var ChainAnim = {
       var b = this._el();
       if (b) {
         var d = document.createElement('div'); d.className = 'csa-node owner-' + (node.owner || 'p1') + ' csa-in csa-enter';
+        /* 【链式演出 2026-10-06·第二处】视觉上"一环一环排出来"：
+           给本轮节点一个**递增的入场延迟**（第 i 环延迟 i×120ms，上限 0.6s）。
+           ⚠ **只改观感、不改逻辑** —— 节点在逻辑上立即存在（连锁组成绝不能等，
+             真加延时会拖慢 AI/玩家操作）；这里只是把 CSS 飞入动画错开，
+             看起来像 MD 那样"每加一环停一下、链条在生长"。 */
+        try { d.style.animationDelay = (Math.min(i, 5) * 0.12) + 's'; } catch (e) {}
         var no = document.createElement('span'); no.className = 'csa-no'; no.textContent = 'C' + (i + 1);
         var tx = document.createElement('span'); tx.className = 'csa-txt'; tx.textContent = node.label || '';
         d.appendChild(no); d.appendChild(tx); b.appendChild(d); this._nodes.push(d);
+        /* 【链式演出】标题实时显示链数，让"链在增长"可见（原来是固定的 CHAIN · 连锁） */
+        try { var tEl = b.querySelector('.csa-title'); if (tEl) tEl.textContent = 'CHAIN ' + (i + 1) + ' · 连锁'; } catch (e) {}
       }
     } catch (e) { try { console.error('连锁节点绘制异常（不影响推进）', e); } catch (e2) {} }
     this.flash('C' + (i + 1) + ' 发动 · ' + (node.label || ''), 'flash-activate');
