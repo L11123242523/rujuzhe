@@ -15823,6 +15823,31 @@ var ShowQueue = {
   },
   size: function () { return this.q.length + (this.busy ? 1 : 0); }
 };
+/* 【演出锁 · UI 层统一拦截（2026-10-06）】
+   演出期间拒绝**玩家输入**：在**捕获阶段**拦下战斗区的点击 / 指针按下。
+   一处收敛即可覆盖"出牌 / 角色技能 / 盖伏 / 永续主动 / 投骰 / 结束回合"等全部入口，
+   不必在每个业务函数里各写一遍（既容易漏，也会把 UI 判断渗进结算层）。
+   · 只拦输入，不阻塞任何逻辑（铁律 B1）；
+   · 锁的开关只由 ShowQueue 决定（一份账，队列空即放行）；
+   · 只认战斗区的具体可点元素，**弹窗按钮不在其列** ⇒ 演出期间玩家仍能正常回答弹窗
+     （这一点很重要：否则"演出中不能操作"会把必须回答的决策也一起锁死）。 */
+(function () {
+  if (typeof document === 'undefined' || !document.addEventListener) return;
+  var SEL = '.hand-card, .battle-action-btn, .char-skill-btn, .char-skill, .permanent-card, .permanent-item,'
+    + ' #rollDiceBtn, #endTurnBtn, .roll-btn, .end-turn-btn, .deck-zone, .grave-zone';
+  var guard = function (e) {
+    try {
+      if (typeof window === 'undefined' || !window.__showBusy) return;
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (!t.closest(SEL)) return;
+      e.stopPropagation();
+      if (e.cancelable) e.preventDefault();
+    } catch (e2) {}
+  };
+  document.addEventListener('click', guard, true);
+  document.addEventListener('pointerdown', guard, true);
+})();
 function playSearchAnim(user, cb) {
   var __ol2 = (typeof Online !== 'undefined' && Online.active);
   var auto = (typeof effectEngine !== 'undefined' && effectEngine.autoResolve) || __ol2 || (typeof document === 'undefined');
