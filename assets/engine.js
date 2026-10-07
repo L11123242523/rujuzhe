@@ -1528,6 +1528,20 @@ var Online = {
      绝不静默地把默认值当成"玩家的选择"。 */
   _renderAsk:function(spec, done, fromHost){
     spec=spec||{};
+    /* 【2026-10-07 修·**根因**：联机"任何需要玩家选择的卡都不行"】
+       `ENV.ask` 的座位守卫把问题**包了一层**再发：
+         { kind:'prompt', origin:'ENV.ask', specKind:'targetCards', seat:'p2',
+           spec:{ kind:'targetCards', player:'p2', zone:'hand', label:… } }
+       而客人侧原来直接拿**外层**去画 —— 外层没有 player/zone/choices/cards ⇒ 落到
+       "本机没有候选可画"的分支 ⇒ `done(null)`：弹窗不出现、房主收到 null（作者实测症状）。
+       确定性复现：`probe-ask-loopback.cjs`（把房主发出的消息直接喂进客人收消息入口）——
+       修前：客人弹窗 0 次、回答 null；修后：就地取材画出弹窗并答上。
+       ⇒ 这里把外层**剥开**，用内层 spec 来画；`specKind` 作为 kind 的兜底。 */
+    if (spec.kind === 'prompt' && spec.spec && typeof spec.spec === 'object') {
+      var __inner = spec.spec;
+      if (!__inner.kind && spec.specKind) __inner.kind = spec.specKind;
+      spec = __inner;
+    }
     /* 【2026-10-07 现场诊断（作者联机复现一次即可定位）】
        把"客人侧到底收到了什么形状的询问、有没有画出来"写进战斗日志。
        为什么需要它：作者报"客人用需要选的卡没有选择能力"，而发送/渲染分属两台机器，
