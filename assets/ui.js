@@ -813,7 +813,7 @@ function __updateBattleUI_impl() {
         }
       } else {
         hand.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:12px;">' + 
-          (battleState.currentPlayer === 'p2' ? 'AI回合中...' : '当前阶段：' + (phaseNames[battleState.phase] || battleState.phase) + '，点击"进入下个阶段"继续') + '</div>';
+          (battleState.currentPlayer === 'p2' ? '对手回合中...' : '当前阶段：' + (phaseNames[battleState.phase] || battleState.phase) + '，点击"进入下个阶段"继续') + '</div>';
       }
     }
   } catch(e) {
@@ -1064,7 +1064,7 @@ function renderMinimap() {
   if (miniP2 && p2Tile) {
     miniP2.style.left = p2Tile.x + '%';
     miniP2.style.top = p2Tile.y + '%';
-    miniP2.title = 'AI：第' + battleState.p2.position + '格 - ' + p2Tile.name;
+    miniP2.title = '对手：第' + battleState.p2.position + '格 - ' + p2Tile.name;
   }
   
   // 放大地图（真实图片，只更新标记）
