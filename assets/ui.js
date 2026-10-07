@@ -1303,7 +1303,20 @@ function showTargetCards(player, zone, title, selectable, callback, decider) {
      调用点要传 decider（出手的人）：例如【善意面具】是"从自己手牌选"⇒ decider=出手者；
      【妖刀五月雨】是"破坏对方场上1张"⇒ 区域是对方的、但决策人仍是出手者。 */
   var __askSeat = decider || player;
-  return ENV.ask(__askSeat, { kind: 'targetCards', player: player, zone: zone, label: title, selectable: selectable }, callback);
+  /* 【2026-10-07 目标①·**询问带上候选**（含 indices 映射）】
+     原来只发 `player/zone`，客人必须靠自己本地同步状态去"就地取材"才画得出来 ——
+     一旦两端状态有偏差（或客人那份区域为空），就会画不出来。
+     现在把**候选名单随问题一起发**：客人侧走通用的 `cards` 渲染分支，`indices` 保证回传的
+     下标是**出题方视角**（锁步同序，但显式映射更稳）。 */
+  var __cands = [];
+  try {
+    var __arr = (typeof battleState !== 'undefined' && battleState && battleState[player] && battleState[player][zone]) || [];
+    __cands = __arr.map(function (c) { return (c && c.name) || '（未知卡）'; });
+  } catch (e) { __cands = []; }
+  return ENV.ask(__askSeat, {
+    kind: 'targetCards', player: player, zone: zone, label: title, selectable: selectable,
+    cards: __cands, indices: __cands.map(function (_, i) { return i; })
+  }, callback);
 }
 
 function showAttackCardSelect(attackCards, callback) {
