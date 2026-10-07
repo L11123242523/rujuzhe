@@ -12143,6 +12143,21 @@ function onlineDecideModal(side, title, cardName, effect, choices, callback) {
   });
 }
 function _showChoiceModalNow(title, cardName, effect, choices, callback) {
+  /* 【2026-10-07 结构修·**排队而不是覆盖**】实测（probe-depth-hunt）：同一张卡【绿宝之杖·择】的结算被跑 4 次，
+     其中两处**永远没回调**（op 序列 choice#1✗ → choice#2✓ → draw#3✗ → draw#4✓ → move✓），
+     深度因此净欠 3 笔、锁滞留约 3.9 秒 —— 根因就是这里：新弹窗把旧按钮清空（buttonsDiv.innerHTML=''）
+     ⇒ 旧句柄的回调**永远不会再被调用** ⇒ 那一步效果永久停摆。
+     修法：**一个弹窗在屏时，新的请求一律入队**（复用 __askChoiceLocal 那套队列，
+     由 __dequeueChoice / __drainChoiceQueueWhenIdle 在旧的答完后放出）。
+     —— 注意：不要改成"把旧的回调按 null 补答"，那会让效果**重复执行**（card_expect_batchB「查阅」手牌 +5，已实测）。 */
+  try {
+    if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback &&
+        typeof _choiceQueue !== 'undefined' && _choiceQueue) {
+      _choiceQueue.push({ title: title, cardName: cardName, effect: effect, choices: choices, callback: callback });
+      try { addBattleLog('system', '【弹窗排队】“' + title + '”等当前询问答完再弹（不覆盖 ⇒ 不会丢掉旧应答）'); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
   var modal = document.getElementById('choiceModal');
   document.getElementById('choiceTitle').textContent = title;
   document.getElementById('choiceCardName').textContent = cardName;
