@@ -9822,39 +9822,52 @@ function __aiGuard(fn) {
        否则窗口会停在 settling、结算深度卡 1、整链停摆（= 作者报的"效果被卡掉/抽二丢一消失"）。
        仍然走 __aiGuard 包装（守门探针 probe-ai-tick-gate 要求"不许绕过"），只是**不做人类窗口检查**。 */
     if (fn && fn.__settleStep) { fn.apply(self, args); return; }
-    /* 【2026-10-07 结构修】**等待次数必须属于"这一次等待"**。
-       原来用的是 `__aiGuard._DEFER` 这个**全局共享**计数器：某次等待累到 1400 就放行过一次之后，
-       计数器并不会归零到"这次等待"的语义（只有到 1500 才清零）⇒ 之后一次毫不相干的等待只需 100 拍
-       就会被放行 ⇒ **抢跑**。另外 `__aiGuard._tries = 0` 是没人读的死代码，一并去掉。
-       现在 __defer 是本次调用的局部变量，随这一次等待生灭 ✓ */
-    var __defer = 0;
+    /* 【2026-10-07 结构修·**把最后一个"猜"删掉**】
+       原来这里有一个"等满 1500 拍（≈5 分钟）就放行这一步"的兜底 —— 它就是"用计时器盖症状"：
+       放行那一刻就是抢跑；不放行又会在账漏放时把 AI 卡死。两头都不对。
+       根子在于判据：原来只看"有没有人类决策的**账**"，而账可能是漏放的。
+       现在改成"**账 + 真有一件事在等**"（见 __aiGateBusy）：
+         · 有窗口/询问挂着 ⇒ 一直等（人不动就永远不动，没有上限、没有放行）
+         · 账还挂着但**没有任何窗口/询问在等** ⇒ 那是漏放的账，不该拦人 ⇒ 直接放行
+       ⇒ 既不需要"等满 5 分钟"，也不会因为漏放的账把 AI 卡死。全程零阈值。 */
     var __attempt = function () {
-      /* 【批次2·关键】只等"**人类**正在决策" ⇒ 绝不等 AI 自己在等的决策（那是循环等待 ⇒ 卡死 ✗） */
       var busy = false;
-      try {
-        if (typeof Decision !== 'undefined' && Decision && Decision.isHumanOpen) busy = !!Decision.isHumanOpen(typeof isAISeat === 'function' ? isAISeat : null);
-        else if (typeof __playerDeciding === 'function') busy = !!__playerDeciding();
-        else busy = !!(battleState && battleState._awaitingDecision);
-        /* 【2026-10-06 演出期同样要等 —— 作者报「AI 抢跑又回来了」的直接修复】
-           演出队列（ShowQueue）正在播动画时，AI 不得抢在动画之前行动。并入**同一个等待条件**：
-           仍然是"等"（不丢弃这一步、也不超时放行），不新增任何计时器或兜底分支。 */
-        if (!busy && typeof window !== 'undefined' && window.__showBusy) busy = true;
-      } catch (e) { busy = false; }
+      try { busy = (typeof __aiGateBusy === 'function') ? !!__aiGateBusy() : false; } catch (e) { busy = false; }
+      /* 【2026-10-06 演出期同样要等 —— 作者报「AI 抢跑又回来了」的直接修复】
+         演出队列（ShowQueue）正在播动画时，AI 不得抢在动画之前行动。并入**同一个等待条件**：
+         仍然是"等"，不丢弃这一步、也不超时放行。 */
+      if (!busy) { try { if (typeof window !== 'undefined' && window.__showBusy) busy = true; } catch (e) {} }
       if (!busy) return fn.apply(self, args);
-      /* 【口径 ①(b) 2026-10-06】玩家在决策时**坚决不放行** —— 一直等他点。
-         只保留一个很长的兜底（1500 拍 ≈5 分钟）用于"弹窗异常打不开 ⇒ 整局卡死"的极端情况。 */
-      __defer++;
-      if (__defer >= 1500) {
-        try {
-          addBattleLog('system', '【AI闸门】本次等待人类决策已约 5 分钟 ⇒ 放行这一步（异常兜底，正常不该出现）' +
-            '—— 请连同上面的【决策·存活提示】一起回传，用来定位是谁没关窗');
-        } catch (e) {}
-        return fn.apply(self, args);
-      }
       setTimeout(__attempt, 200);
     };
     return __attempt();
   };
+}
+/* 【2026-10-07 新增·AI 闸门的唯一判据】"现在该不该等人类" —— **按事实**，不按时间。
+   ① 先问唯一权威：有没有**人类**座位在决策（AI 自己的等待不算，否则循环等待 ⇒ 卡死）；
+   ② 再看是不是**真有一件事在等**：弹窗回调 / 弹窗排队 / 选卡器 / 目标选择 / 连锁窗 / 等对手回答。
+   两者都成立才等。只有账、没有任何一件事在等 ⇒ 那本账是漏放的，不拦人。
+   判不出来时**保守地等**（宁可等，不可抢跑）。 */
+function __aiGateBusy() {
+  var human = false;
+  try {
+    if (typeof Decision !== 'undefined' && Decision && Decision.isHumanOpen) human = !!Decision.isHumanOpen(typeof isAISeat === 'function' ? isAISeat : null);
+    else if (typeof __playerDeciding === 'function') human = !!__playerDeciding();
+    else human = !!(typeof battleState !== 'undefined' && battleState && battleState._awaitingDecision);
+  } catch (e) { human = false; }
+  if (!human) return false;
+  try {
+    if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) return true;
+    if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) return true;
+    if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) return true;
+    if (typeof _targetSelectOpen !== 'undefined' && _targetSelectOpen) return true;
+    if (typeof _targetSelectQueue !== 'undefined' && _targetSelectQueue && _targetSelectQueue.length) return true;
+    if (typeof TW !== 'undefined' && TW && TW.active) return true;
+    if (typeof Online !== 'undefined' && Online && Online.active && Online._asks) {
+      for (var k in Online._asks) { if (Object.prototype.hasOwnProperty.call(Online._asks, k)) return true; }
+    }
+  } catch (e) { return true; }     /* 判不出来 ⇒ 保守地等 */
+  return false;
 }
 function __decideWaitGate(tag, retryFn) {
   try {
