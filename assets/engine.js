@@ -14768,6 +14768,13 @@ function __compileBody(t) {
       ops.push({ op: 'damage_by_removed', plus: plus, kind: kind });
     } else if (/足以击碎[^。；]*护盾/.test(t)) {
       ops.push({ op: 'break_shield' });
+    } else if (/已损失同步值的?\s*\d+\s*%/.test(t)) {
+      /* 【2026-10-07 新增·作者新卡「邪恶南瓜攻击！」】按"目标**已损失**同步值"的百分比造伤。
+         为什么必须特化：通用分支只会把文本里的 **33** 当成固定伤害（实测打出 36 = 33 + baseDamage 2 + 被动 1）。
+         数值改到**结算时**按目标当时的同步值算（见 case 'damage_by_lost_sync'）。 */
+      var __lpM = t.match(/已损失同步值的?\s*(\d+)\s*%/);
+      var __lpRow = /(?:对)?同一行|同行/.test(t) && !/(?:所有|全部|每|各)[^。；;]{0,6}玩家/.test(t);
+      ops.push({ op: 'damage_by_lost_sync', pct: +__lpM[1], kind: kind, range: __lpRow ? { dir: 'row', range: 21 } : null });
     } else {
       var __aoeM = t.match(/(前方|后方|前后|周围)?\s*(\d+)\s*格范围?内[^。；]{0,14}?(?:所有|全部|每|各)[^。；]{0,6}玩家/);
       var __rowAoe = /同一行|同行/.test(t) && /(?:所有|全部|每|各)[^。；]{0,6}玩家/.test(t);
@@ -16337,6 +16344,23 @@ function playSearchAnim(user, cb) {
 function __opsDamage(op, ctx, next, env) {
   var user = env.user, target = env.target, p = env.p, q = env.q;
   switch (op.op) {
+    case 'damage_by_lost_sync': {
+      /* 【2026-10-07 新增】按目标"**已损失**同步值"的百分比造伤（作者新卡【邪恶南瓜攻击！】）。
+         lost = maxSync - sync；伤害 = floor(lost × pct / 100)。
+         为什么单独一个 op：文本里的 33 若被当固定伤害，会打出 36 这种离谱数字（33 + baseDamage 2 + 被动 1）。 */
+      var __lost = Math.max(0, (q.maxSync || 0) - (q.sync || 0));
+      var __amt = Math.floor(__lost * (op.pct || 0) / 100);
+      var __cnm = (ctx.card && ctx.card.name) || '效果';
+      if (op.range && !__inTileRange(user, target, op.range)) {
+        addBattleLog(user, '【' + __cnm + '】目标不在同一行，该造伤不适用'); next(); return;
+      }
+      if (__amt <= 0) {
+        addBattleLog(user, '【' + __cnm + '】目标还没损失同步值（已损失0）⇒ 本次造伤为0'); next(); return;
+      }
+      addBattleLog(user, '【' + __cnm + '】按目标已损失同步值计算：已损失' + __lost + ' × ' + (op.pct || 0) + '% = ' + __amt + '点伤害');
+      applyDamageOps(user, target, { op: 'damage', judge: false, base: __amt, kind: op.kind || '混沌' }, function () { next(); }, ctx.card);
+      return;
+    }
     case 'damage': {
       // 自己造成类（targetWho:'self'）：承受者是使用者本人，不是 ctx.target。
       // 旧实现无视该标记、一律打 target —— 编译成功但行为反了（静默错误），这里统一收口。
@@ -21720,7 +21744,88 @@ function chooseZoneCard(user, who, zone, title, cb) {
   else { cb(arr.length ? arr[0] : null, arr.length ? 0 : -1); }
 }
 
+/* 【2026-10-07 新增·**恫吓**】作者新卡【邪恶南瓜攻击！】的新机制（引擎里原先没有）：
+   受击者必须把"效果处理区"的一张**盖卡或永续卡**放回手卡；否则受到 **3 点混沌伤害**并**失去 2 点音韵值**。
+   · 玩家侧：弹窗让他选交哪一张，或选"不交"；
+   · 联机远端位：走 onlineDecideModal 让对手那边自己选（绝不替他决定）；
+   · AI：有牌可交就交（默认交，避免凭空吃罚）。
+   口径来源：卡面原文（read_image 抄录），不自行发挥。 */
+function __applyIntimidate(target, srcName, done) {
+  var tp = battleState && battleState[target];
+  var fin = function () { try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {} if (done) done(); };
+  if (!tp) { fin(); return; }
+  var pool = [];
+  try { (tp.permanent || []).forEach(function (c) { if (c) pool.push({ c: c, zone: 'permanent' }); }); } catch (e) {}
+  try { (tp.faceDownCards || []).forEach(function (c) { if (c) pool.push({ c: c, zone: 'faceDownCards' }); }); } catch (e) {}
+  var who = (target === 'p1') ? '你' : '对手';
+  addBattleLog(target, '【恫吓】' + who + '必须把效果处理区的一张盖卡/永续卡放回手卡，否则将受到3点混沌伤害并失去2点音韵值');
+  function penalty() {
+    addBattleLog(target, '【恫吓】没有交出卡 ⇒ ' + who + '受到3点混沌伤害并失去2点音韵值');
+    try { tp.cost = Math.max(0, (tp.cost || 0) - 2); } catch (e) {}
+    try { dealDamageWithResponse(target, 3, '恫吓', fin, '混沌', null, { kind: 'attribute' }); } catch (e) { fin(); }
+  }
+  function giveBack(entry) {
+    try {
+      var arr = tp[entry.zone] || [], i = arr.indexOf(entry.c);
+      if (i >= 0) arr.splice(i, 1);
+      entry.c._addedByEffect = true;
+      (tp.hand = tp.hand || []).push(entry.c);
+      addBattleLog(target, '【恫吓】把【' + (entry.c.name || '卡') + '】放回手卡（因此避开3点混沌伤害与2点音韵）');
+    } catch (e) { console.error('恫吓·放回手卡出错', e); }
+    fin();
+  }
+  if (!pool.length) { addBattleLog(target, '【恫吓】' + who + '的效果处理区没有可交的盖卡/永续卡'); penalty(); return; }
+  var labels = pool.map(function (x) { return '交出【' + (x.c.name || '卡') + '】'; });
+  labels.push('不交（受3点混沌伤害并失去2点音韵值）');
+  var pick = function (i) { if (i == null || i < 0 || i >= pool.length) penalty(); else giveBack(pool[i]); };
+  if (target === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('恫吓', '受击者必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到3点混沌伤害并失去2点音韵值', labels, pick); return; }
+  if (typeof Online !== 'undefined' && Online.active && target === 'p2' && typeof onlineDecideModal === 'function') {
+    onlineDecideModal('p2', '恫吓（对手）', '必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到3点混沌伤害并失去2点音韵值', labels, pick); return;
+  }
+  giveBack(pool[0]);
+}
 var SPECIAL_CARD_HANDLERS = {
+  // ============================================================
+  // 【邪恶南瓜攻击！】（混沌·攻击·费3，琉璃(万圣祭)携带）—— 2026-10-07 作者新增
+  // 卡面：来为节日增添一丝惊……喜（吓）！
+  //   •（可以向后移动5格）对同行的一名其他玩家造成目标（已损失同步值的33%）点混沌属性伤害，并对目标施加恫吓。
+  //   •恫吓：受击者必须将效果处理区的一张盖卡或者永续卡放回手卡，否则将受到3点混沌属性伤害并失去2点音韵值。
+  // 为什么必须走特判：编译器对"**已损失同步值的33%**"这种"结算时才知数值"的伤害没有对应 op
+  //   （实测该子句 compileStepOps 返回 null），通用兜底会把文本里的 **33** 当固定伤害
+  //   ⇒ 实测打出 36（33 + baseDamage 2 + 琉璃(万圣祭)被动 +1）。架构闸（getSpecialHandler）在存在 null 步时自动让本特判生效。
+  // ============================================================
+  '邪恶南瓜攻击！': {
+    play: function (card, user, done) {
+      var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
+      var t = battleState[foe];
+      var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
+      /* ① 同行校验（同一行才算命中；本作 42 格环形，"同行"由统一射程函数判定） */
+      var __sameRow = true;
+      try { if (typeof __inTileRange === 'function') __sameRow = __inTileRange(user, foe, { dir: 'row', range: 21 }); } catch (e) {}
+      if (!__sameRow) { addBattleLog(user, '【' + N + '】目标不在同一行 ⇒ 不造成伤害，也不施加恫吓'); __fin(); return; }
+      /* ② 伤害 = floor(目标**已损失**同步值 × 33%) */
+      var lost = Math.max(0, (t.maxSync || 0) - (t.sync || 0));
+      var dmg = Math.floor(lost * 0.33);
+      if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 33% = ' + dmg + ' 点混沌伤害');
+      else addBattleLog(user, '【' + N + '】目标还没损失同步值 ⇒ 本次造伤为 0');
+      var __afterDmg = function () {
+        /* ③ 恫吓：目标从效果处理区交出一张盖卡/永续卡回手；不交（或没有）⇒ 3 点混沌 + 失 2 音韵值 */
+        __applyIntimidate(foe, N, __fin);
+      };
+      if (dmg > 0) {
+        try { dealDamageWithResponse(foe, dmg, N, __afterDmg, '混沌', user, { kind: 'attribute' }); }
+        catch (e) { console.error('邪恶南瓜攻击·造伤异常', e); __afterDmg(); }
+      } else __afterDmg();
+    }
+  },
+  /* 【2026-10-07 新增·恫吓（作者新卡的机制，引擎里原先没有）】
+     受击者必须把"效果处理区"的一张盖卡或永续卡放回手卡；否则受到 3 点混沌伤害并失去 2 点音韵值。
+     · 玩家侧：弹窗让他选交哪一张，或选"不交"；
+     · AI 侧：有牌可交就交价值最低的那张（默认交），避免凭空吃罚。
+     口径来源：卡面原文（read_image 抄录）。 */
+  '__intimidate': {
+    play: function () { /* 占位：恫吓不是一张卡，走下面的函数，不经过出牌流程 */ }
+  },
   // ============================================================
   // 小试身手！堆沙堡（热忱·技能·费3，里绪(水着)携带）—— 2026-09-16 新增
   // 卡面：自己的回合才能发动，前进1格。那之后开始一次堆沙堡。
@@ -21916,6 +22021,12 @@ function getSpecialHandler(card) {
   // 双面连锁卡（幸运护符/颠倒骰子/特制手套）：主动效果带方向选择/复合语义（抵消+前进、自我方向选择、三选一检索），
   // 必须走 SPECIAL 特判保证卡面语义完整且主要阶段可直接使用（结构化层只覆盖其连锁响应面）
   if (n === '幸运护符' || n === '颠倒骰子' || n === '特制手套') return h;
+  /* 【2026-10-07】邪恶南瓜攻击！同理必须走特判：卡面的伤害是"**已损失同步值的33%**"——
+     数值要到**结算时**才知道，指令层没有对应 op（该子句实测 compileStepOps = null），
+     可架构闸只看"整段能不能编译"，于是判它"能编译"、让指令层接管 ⇒ 伤害整段被丢掉，
+     通用兜底又把文本里的 33 当成固定伤害（实测打出 36 = 33 + baseDamage 2 + 被动 1）。
+     ⇒ 与上面三张同款：显式声明"这张卡必须走 SPECIAL 特判"。 */
+  if (n === '邪恶南瓜攻击！') return h;
   // 架构闸：结构化指令层能精确编译的卡，优先走指令层；旧特判仅对指令层无法编译(null)的卡兜底，杜绝旧硬编码覆盖新卡面
   if (h && typeof compileStepOps === 'function') {
     var __main = (typeof getMainEffectText === 'function') ? getMainEffectText(t) : t;
