@@ -2693,6 +2693,16 @@ function evaluatePlayable(card,player,opts){
     if(!teamHasCardCharacter(player,card)) return {ok:false,reason:'队伍未编入【'+(card.character_full||card.character||'对应角色')+'】，不能使用其技能卡【'+name+'】（同名不同形态不通用，需编入对应形态）'};
     if(card._skillUsedThisTurn) return {ok:false,reason:'技能卡【'+name+'】本回合已经使用过了（每回合一次）'};
   }
+  /* 【2026-10-07 新增·**额外同步值使用条件**】卡面写"这张卡需要支付 N 点同步值才能使用"时，
+     它是**前置条件**（作者 2026-10-07 明确：同步值小于 N 就不能使用该卡），不是费用字段。
+     唯一入口 __extraSyncCostOf，判定与扣费都调它，避免两处各写一份。 */
+  var __xsNeed = (typeof __extraSyncCostOf === 'function') ? __extraSyncCostOf(card) : 0;
+  if (__xsNeed > 0) {
+    var __xp = battleState[player];
+    if (!__xp || (__xp.sync || 0) < __xsNeed) {
+      return { ok: false, reason: '同步值不足' + __xsNeed + '点，无法使用【' + name + '】（这张卡需要支付' + __xsNeed + '点同步值才能使用，当前同步' + ((__xp && __xp.sync) || 0) + '）' };
+    }
+  }
   // 4) 费用（"1+"/"2+"等字符串费用卡取基数比较，修复 NaN 比较导致0费/负费可出卡）；[超频]状态可透支音韵
   var cost=parseInt(card.cost,10)||0;
   if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
@@ -3473,6 +3483,33 @@ function cardBelongsToTeam(card, teamNames) {
   }
   return false;
 }
+/* 【2026-10-07 新增·**额外同步值使用条件**的唯一入口】
+   卡面："这张卡需要支付 7 点同步值才能使用" ⇒ **前置条件**（同步<7 不能用）+ 使用时扣 7（作者的裁决）。
+   为什么单独抽一个函数：判定（evaluatePlayable 灰卡）与扣费（使用路径）必须**同一份数据**，
+   否则一定会出现"界面能点、扣费却没扣"或反过来的错位。
+   将来别的卡加同类条件，往这张表里加一行即可。 */
+var EXTRA_SYNC_COST = { '镌刻的艺术': 7 };
+function __extraSyncCostOf(card) {
+  try {
+    if (!card) return 0;
+    var n = String(card.name || '');
+    for (var k in EXTRA_SYNC_COST) { if (Object.prototype.hasOwnProperty.call(EXTRA_SYNC_COST, k) && n.indexOf(k) >= 0) return EXTRA_SYNC_COST[k]; }
+    return 0;
+  } catch (e) { return 0; }
+}
+/* 【2026-10-07 新增·**规则上的属性别名**】
+   卡面写"这张卡在规则上还能当作 X 属性使用"时，**卡组构建与效果判定都要认**（作者 2026-10-07 明确：都管）。
+   所以要有一个**唯一入口**来问"这张卡在规则上算什么属性" —— 各处都调它，不要各自去读 card.attribute
+   （那正是"同一件事多份实现"的老毛病，一定会漏）。
+   目前只有镌刻的艺术（混沌 ⇒ 规则上也可作无序）。 */
+function __ruleAttrOf(card) {
+  try {
+    if (!card) return '';
+    var n = String(card.name || '');
+    if (n.indexOf('镌刻的艺术') >= 0) return '无序';   /* 卡面：「这张卡在规则上还能当作无序属性的卡使用」 */
+    return card.attribute || '';
+  } catch (e) { return (card && card.attribute) || ''; }
+}
 // 【道具属性硬需求】默认2无序 + 每名非混沌角色对应属性2；混沌角色不占硬需求(留灵活位)。返回需求表/硬需求总数/灵活位数
 function computeAttrRequirement(chars) {
   var req = { '无序': 2 };
@@ -3619,7 +3656,10 @@ function validateDeck(player) {
   var attrNeed={'无序':2};
   chars.forEach(function(c){ if(c.attribute && c.attribute!=='混沌') attrNeed[c.attribute]=(attrNeed[c.attribute]||0)+2; });
   var attrHave={};
-  items.forEach(function(c){ if(c.attribute) attrHave[c.attribute]=(attrHave[c.attribute]||0)+1; });
+  /* 【2026-10-07】道具的属性配额统计改走 __ruleAttrOf：
+     卡面写"在规则上还能当作 X 属性使用"的卡（镌刻的艺术 ⇒ 无序）在**卡组构建**里也算那个属性
+     （作者 2026-10-07 明确：构建与效果判定都管）。 */
+  items.forEach(function(c){ var a=(typeof __ruleAttrOf==='function')?__ruleAttrOf(c):(c.attribute||''); if(a) attrHave[a]=(attrHave[a]||0)+1; });
   Object.keys(attrNeed).forEach(function(a){
     if((attrHave[a]||0)<attrNeed[a]) errs.push('【'+a+'】属性道具不足：需要'+attrNeed[a]+'张，当前'+(attrHave[a]||0)+'张（规则：2无序+每名非混沌角色对应属性2张，混沌角色为灵活位）');
   });
@@ -11564,14 +11604,8 @@ function aiUsePermanentActive(player, done) {
   function next() {
     if (battleState._over || i >= acts.length) { if (done) done(); return; }
     var item = acts[i++], card = item.card, act = item.act, h = act.handler;
-    if (h === 'juanKe') { // 镌刻的艺术：付4同步回2/4音韵（同步<50%时翻倍）
-      if (p.sync < 4) { next(); return; }
-      p.sync -= 4;
-      var back = (p.sync < ((p.maxSync || 999) * 0.5)) ? 4 : 2;
-      recoverCost(player, back, '镌刻的艺术[AI]');
-      L('AI【镌刻的艺术】支付4同步，回复' + back + '音韵（当前' + p.cost + '）');
-      syncNext(card, act); return;
-    }
+    /* 【2026-10-07 作者重做·主模式】AI 侧的"镌刻的艺术·旧永续主动"整段删除（付4同步回2/4音韵）。
+       注册表里该卡的 active 已置 null ⇒ AI 的 acts 里不会再产出这条；这里删掉镜像，避免留一条死路。 */
     if (h === 'ruler') { // 设计师的直尺：支付音韵前进（每1点=1格，至多20；每回合一次）
       if (!(p.cost > 0)) { next(); return; }
       var pay = Math.min(p.cost, 5), mv = Math.min(pay, 20);
@@ -14916,11 +14950,18 @@ function __compileBody(t) {
 
   // 检索 / 回收 / 放回
   var exm = t.match(/(无序|热忱|理智|混沌)以外/); // 仅四属性可作排除项，修复把"加入无序/选这张卡"误捕获为属性
+  /* 【2026-10-07 新增·**正向属性筛选**（镌刻的艺术需要）】
+     实测缺陷：文本"从牌组把一张**混沌属性**的卡加入手卡"编译出来是
+     `{op:'search', sources:['deck'], tags:[], cats:[], excludeAttr:null, …}` ——
+     **"混沌属性"这半句被整段丢掉** ⇒ 检索会给出全部卡，与卡面不符（这正是"文本权威"要防的偏差）。
+     这里补上正向 attr：只有当文本不是"X属性**以外**"（那是排除项）时才认。 */
+  var __posAttr = null;
+  if (!/属性\s*以外/.test(t)) { var __pam = t.match(/(无序|热忱|理智|混沌)\s*属性/); if (__pam) __posAttr = __pam[1]; }
   if (/加入手卡|加入手牌|加入[^。；，]{0,14}(?:道具卡|卡)|回收/.test(t)) {
     var sources = __parseSources(t); if (!sources.length) sources = ['deck'];
     var tags = __parseTags(t), cats = __parseCats(t);
     var need = __matchNum(new RegExp('(?:选|将)?[^。；，]{0,8}' + __NUM + '\\s*张'), t) || 1;
-    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, excludeAttr: exm ? exm[1] : null, excludeSelf: /这张卡以外|自身以外|此卡以外/.test(t), need: need, maxCost: (function(){ var m = t.match(/费用\s*(?:不大于|不超过|≤|<=)\s*(\d+)/); return m ? +m[1] : null; })(), to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
+    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, attr: __posAttr, excludeAttr: exm ? exm[1] : null, excludeSelf: /这张卡以外|自身以外|此卡以外/.test(t), need: need, maxCost: (function(){ var m = t.match(/费用\s*(?:不大于|不超过|≤|<=)\s*(\d+)/); return m ? +m[1] : null; })(), to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
   }
   // 下次造伤附带判定
   var nj = t.match(/下一次造伤害附带(硬币|四面骰|六面骰|4面骰|6面骰)判定伤害/);
@@ -16729,6 +16770,15 @@ function __opsCards(op, ctx, next, env) {
     case 'search': {
       var sw = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target : user; if (typeof __refillDeckIfEmpty==='function' && (op.sources||[]).indexOf('deck')>=0) __refillDeckIfEmpty(sw); var list = collectZoneCards(sw, op.sources, op.tags, op.cats, op.excludeAttr); // C19 代词主语归目标
       if (op.excludeSelf) list = list.filter(function (x) { return x.card !== ctx.card; }); // "这张卡以外"排除自身
+      /* 【2026-10-07 新增】正向属性筛选（文本"X属性的卡"）——走 __ruleAttrOf，
+         这样"在规则上当作某属性使用"的别名（如镌刻的艺术 ⇒ 无序）在检索里也生效。
+         背景：编译层原来把"混沌属性"整段丢掉（实测产物无任何正向属性字段）⇒ 会给出全部卡，与卡面不符。 */
+      if (op.attr) {
+        list = list.filter(function (x) {
+          var a = (typeof __ruleAttrOf === 'function') ? __ruleAttrOf(x && x.card) : (x && x.card && x.card.attribute);
+          return a === op.attr;
+        });
+      }
       /* 【魔法清点名单】费用上限：新卡面"选一张费用不大于3的卡" ⇒ search 支持 maxCost 过滤 */
       if (op.maxCost != null) list = list.filter(function (x) { return (Number(x.card && x.card.cost) || 0) <= Number(op.maxCost); });
       var __doSearchPick = function () {
@@ -20222,9 +20272,18 @@ var PERMANENT_STRUCT = [
      注：旧机制"消耗金币减1000"本次不动（属强度改动且被用例固化，等作者确认）。 */
   { match: ['黑色卡片'],
     onPlay: ['从牌组选一张道具卡加入手卡，那之后获得那张卡所需要的音韵值×500的金币'], active: null },
+  /* 【2026-10-07 作者重做·主模式】镌刻的艺术：**旧效果全部删除**（每回合付4同步回2/4音韵、每失4同步攻击力+1、
+     以及原先的"检索[侵略]标签卡"），换成新卡面：
+       · 前置条件：**同步值 ≥ 7 才能使用**，使用时**扣 7 点同步**（卡的 cost 字段保持 0）→ 见 evaluatePlayable 与使用路径；
+       · 发动时：从牌组把一张**混沌属性**的卡加入手卡；
+       · 属性别名：**在规则上当作无序属性使用**（卡组构建与效果判定都认）→ 见 __ruleAttrOf；
+       · SP：把墓地这张卡**移出游戏**才能发动 ⇒ 选此卡以外一张被移出的卡**放回墓地** ⇒ 该卡为混沌则**弹窗**问是否加入手卡。 */
   { match: ['镌刻'],
-    onPlay: ['从牌组或移出游戏的卡中选一张[侵略]标签的卡加入手卡'],
-    active: { once: 'turn', flag: '_juanUsedTurn', handler: 'juanKe' } },
+    onPlay: ['从牌组把一张混沌属性的卡加入手卡'],
+    /* 【2026-10-07】不再用具名 handler：编译层已支持"X属性的卡"的正向筛选
+       （实测产物 attr:"混沌"），所以**文本层直接驱动**，与"黑色卡片"同一机制。
+       使用前置（同步≥7 且扣 7）另在 evaluatePlayable / settleCardExecution，见 __extraSyncCostOf。 */
+    active: null },
   { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
       /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
       active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
@@ -20516,16 +20575,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
     else if (typeof showChoiceModal === 'function') showChoiceModal('蓝宝之杖·命', '每个自己回合的主要阶段可以发动：对一名玩家造成一次硬币判定伤害', '正面2点判定伤害／反面不造成', opts, __pick);
     return true;
   },
-  // 镌刻：付4同步回2音韵（同步低于50%回4）
-  juanKe: function (card, user) {
-    var p = battleState[user], maxS = p.maxSync || p.sync;
-    if (p.sync < 4) { if (user === 'p1') showToast('【镌刻的艺术】同步值不足4点，无法支付主动效果。', 'warn'); return false; }
-    p.sync = Math.max(0, p.sync - 4);
-    var low = p.sync < maxS * 0.5, back = low ? 4 : 2;
-    p.cost = Math.min(p.cost + back, p.maxCost);
-    addBattleLog(user, '【镌刻的艺术】支付4同步，回复' + back + '音韵（同步' + p.sync + '、音韵' + p.cost + '）' + (low ? '（低于50%，+100%）' : ''));
-    updateBattleUI(); return true;
-  },
+  /* 【2026-10-07 作者重做·主模式】**镌刻的艺术的旧永续主动整段删除**（付4同步回2/4音韵）。
+     新卡面里没有这条 ⇒ handler `juanKe` 与注册表 active 一并去掉。
+     新行为：使用前置"同步值≥7"（见 evaluatePlayable）+ 发动时"从牌组把一张混沌属性的卡加入手卡"
+     （见 juankePlay）+ SP"墓地移出⇒放回被移出的卡⇒混沌则弹窗加入手卡"（见 __juankeSP）。 */
   // 直尺：每1音韵前进1格（每回合一次）
   ruler: function (card, user) {
     var p = battleState[user], foe = foeOf(user);
@@ -21536,6 +21589,23 @@ function settleCardExecution(card, user, target, opts, done) {
   opts = opts || {};
   var p = battleState[user];
   var isPerm = card._category === 'item_permanent';
+  /* 【2026-10-07 新增·**额外同步值使用条件**的扣费点（唯一）】
+     卡面"这张卡需要支付7点同步值才能使用" ⇒ 使用时扣 7（作者裁决：前置条件，不是费用字段）。
+     放在这里是因为**所有座位、所有出牌路径最终都经过本函数**（p1 的 useCard、AI、联机远端位），
+     一处接住就不会出现"某个座位忘了扣"。
+     判定（界面灰卡）在 evaluatePlayable 里用同一个 __extraSyncCostOf。 */
+  var __xsNeed = (typeof __extraSyncCostOf === 'function') ? __extraSyncCostOf(card) : 0;
+  if (__xsNeed > 0) {
+    if ((p.sync || 0) < __xsNeed) {
+      addBattleLog(user, '【' + card.name + '】同步值不足' + __xsNeed + '点，无法使用（当前同步' + (p.sync || 0) + '）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      if (done) done();
+      return;
+    }
+    p.sync -= __xsNeed;
+    addBattleLog(user, '【' + card.name + '】支付' + __xsNeed + '点同步值才能使用（剩余同步' + p.sync + '）');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
   // 【避免双扣】调用方若已完成付费（含宫樱子免费用卡的玩家选择），必须传 alreadyPaid:true。
   // 否则这里会再扣一次 opts.actualCost，导致费用 4 的牌扣掉 8（联机远端位曾因此与对面分叉）。
