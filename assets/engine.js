@@ -5713,7 +5713,11 @@ function startTurn() {
     if (typeof __tomaDeclare === 'function') __tomaDeclare(player);     // 冬马被动：主要阶段发动一次
     battleState.phase = 'main1';
     updateBattleUI();
-    setTimeout(__aiGuard(aiTurn), 600);
+    /* 【2026-10-07 结构修】原来这里是 `setTimeout(__aiGuard(aiTurn), 600)` —— 凭空等 600 毫秒起步。
+       现在改成**优先权移交到 AI 的那一刻立刻调用**（排到当前这轮同步工作之后，微任务）：
+       不承诺时间、不猜时长；要"慢一点"由演出队列（ShowQueue）负责，
+       要"该不该等"由闸门按事实判断。⇒ AI 的起步不再由计时器决定。 */
+    __afterSync(__aiGuard(aiTurn));
   } else if (isRemoteSeat(player)) {
     // 联机远端位回合：由对方 p1 操作广播的意图流逐条驱动（onlineApplyIntent）
     battleState.phase = 'prepare';
@@ -16985,6 +16989,16 @@ function __opMark(op, seq) {
   } catch (e) { return null; }
 }
 var __runOpsSeq = 0;      /* 【诊断】给每一次 runOps 一个唯一编号，用于区分"同一序列的两步"与"两个嵌套序列" */
+/* 【2026-10-07 结构修】把"下一步"排到**当前这一轮同步工作之后**（微任务），而不是固定等 N 毫秒。
+   这不是计时器：它不承诺"过多久"，只承诺"等当前这轮算完"。
+   节奏由演出队列（ShowQueue）负责 —— 作者口径"以动画为准"由它保证（有序演出、逻辑不等它）。 */
+function __afterSync(fn) {
+  try {
+    if (typeof queueMicrotask === 'function') { queueMicrotask(fn); return; }
+    if (typeof Promise !== 'undefined' && Promise.resolve) { Promise.resolve().then(fn); return; }
+  } catch (e) {}
+  try { setTimeout(fn, 0); } catch (e) { try { fn(); } catch (e2) {} }
+}
 function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
   var __seqId = ++__runOpsSeq;
