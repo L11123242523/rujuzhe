@@ -1401,16 +1401,12 @@ var Online = {
     /* 让"在等对手回答"这件事**看得见**（作者 2026-09-13 报："效果已经结算完却仍卡在连锁结算中"）：
        等答案期间房主的结算深度是 >0 的，于是自己所有手卡都会提示"效果/连锁结算中"。
        以前这里只弹一个转圈提示、不写战斗日志，玩家看不出"是在等我回答"还是"游戏卡了"。 */
-    try{ addBattleLog('system','【联机】等待对手选择：「'+(spec.label||'')+'」（最多 '+Math.round((this.SPEC_TIMEOUT_MS||20000)/1000)+' 秒，超时按默认项继续）'); }catch(e){}
-    this._asks[id].timer=setTimeout(function(){
-      if(!self._asks[id]) return;
-      delete self._asks[id];
-      try{ addBattleLog('system','【联机】对手超时未选择（'+(spec.label||'')+'），已按默认项继续'); }catch(e){}
-      self._hideWaiting();
-      cb(null);
-      // 超时后务必补推一次：客人那边可能停在"结算中"的旧快照上
-      try{ self._sendSnapshotNow(); }catch(e){}
-    }, this.SPEC_TIMEOUT_MS);
+    /* 【2026-10-07 作者裁决·规则类改动】"这个游戏是好友之间对战，不用设立等待时间" ⇒
+       **删掉 20 秒超时自动继续**。原来的行为是对手 20 秒不选就**按默认项替他继续**
+       （= 让时钟做了一个规则决定），而且这个网络侧的常量还被 __eeRawWaitReason 当成规则判据用
+       （见那里的注释）。现在：对手没答就一直等，不设上限、不替他做决定。
+       —— 这也让"规则层零时间"少一处：网络侧不再产生任何"规则结论"。 */
+    try{ addBattleLog('system','【联机】等待对手选择：「'+(spec.label||'')+'」（不设等待上限：好友对战，一直等对手作答）'); }catch(e){}
   },
   _onAnswer:function(m){
     var rec=this._asks[m.id];
@@ -12004,16 +12000,75 @@ function __decideLeaveKind(kind) {
   __decideLeave(t);
   return true;
 }
+/* 【2026-10-07 结构修·按事实对账】释放"承载它的窗口已经不在了"的账。
+   ------------------------------------------------------------------
+   实测（probe-no-leaked-accounts）：真出 6 张牌之后，有 5 本 cardPicker 账 + 2 本 choiceModal 账
+   **永久挂着**。机制：新弹窗/新选卡器会把旧的按钮容器清空（`buttonsDiv.innerHTML=''` /
+   `grid.innerHTML=''`）⇒ 旧窗口的回调**永远不会被调用** ⇒ 它那本账没人释放。
+   旧代码是靠"心跳 8 秒过期"把它自动清掉的（代价就是抢跑）；把过期删掉之后，漏放就永久挂着了。
+   这里**不用时间**：只问一个事实 —— "有没有一个**还在屏幕上**的窗口承载这本账"？
+     · choiceModal：就是 pendingChoiceCallback（当前渲染的那一个）
+     · cardPicker ：就是 _cardPickerStack 的**最后一个**（引擎一次只渲染一个，旧的按钮已被清空）
+     · chainChoice：只要 TW.active（连锁窗）还开着，就一律保留
+   不满足 ⇒ 释放。事实变了就释放，事实没变就不动 —— 没有阈值、没有超时。 */
+function __decideLiveTags() {
+  var live = {};
+  var doc = (typeof document !== 'undefined') ? document : null;
+  if (!doc) return live;
+  /* 【按"玩家看得见"判活】只有**屏幕上确实显示着**的窗口才算活的承载者。
+     为什么不能用 `_cardPickerStack` 的最后一个当判据：被丢弃的旧回调**永远留在栈里**，
+     看起来一直"活着" ⇒ 实测那样只能把漏账从 7 本收敛到 1 本、那一本永远清不掉。
+     DOM 上的 active 是**事实**（玩家真的看得见它）——与 __eeRawWaitReason 用的是同一套口径。 */
+  try {
+    var md = doc.getElementById('choiceModal');
+    if (md && md.classList && md.classList.contains('active')) {
+      var pc = pendingChoiceCallback;
+      if (pc && pc.__decideTag) live[pc.__decideTag] = 1;
+    }
+  } catch (e) {}
+  try {
+    var pk = doc.getElementById('cardPicker');
+    if (pk && pk.classList && pk.classList.contains('active') && !(pk.style && pk.style.display === 'none')) {
+      var st = _cardPickerStack || [];
+      var last = st.length ? st[st.length - 1] : null;
+      if (last && last.__decideTag) live[last.__decideTag] = 1;
+    }
+  } catch (e) {}
+  return live;
+}
+function __decideReconcile(why) {
+  try {
+    if (typeof Decision === 'undefined' || !Decision.snapshot) return 0;
+    var tags = Decision.snapshot().tags || [];
+    if (!tags.length) return 0;
+    var live = __decideLiveTags();
+    var chainLive = false;
+    try { chainLive = !!(typeof TW !== 'undefined' && TW && TW.active); } catch (e) {}
+    var released = 0;
+    tags.forEach(function (t) {
+      if (String(t).indexOf('__decide:') !== 0) return;            /* TW 的账由 TW.close 收，这里不管 */
+      if (live[t]) return;
+      if (chainLive && String(t).indexOf('__decide:chainChoice#') === 0) return;
+      try { Decision.leave(t); released++; } catch (e) {}
+    });
+    if (released) {
+      try { addBattleLog('system', '【决策·对账】释放了 ' + released + ' 本"窗口已经不在屏幕上"的账（' + (why || '') + '）'); } catch (e) {}
+    }
+    return released;
+  } catch (e) { return 0; }
+}
 function __decideWrapped(cb, why) {
   /* 把"应答回调"包一层：玩家做出选择时立刻 leave（避免靠 close 才清）
      【2026-10-07 结构修】tag 必须**每个包装器唯一**：两个并存的询问若共用同一个 why，
      先答完的那个 leave 会把后一个的账一起删掉 ⇒ AI 抢跑（旧语义下更狠：直接清空整表）。 */
   var kind = String(why || '?');
+  /* 开新窗之前先按事实对账：把"窗口已经不在屏幕上"的旧账收掉（**只收账、不应答** ⇒ 行为中性） */
+  try { __decideReconcile('开新窗之前'); } catch (e) {}
   var __tag = '__decide:' + kind + '#' + (++__decideSeq);
   __decideEnter(__tag);
   __decideTagByKind[kind] = __tag;
   var done = false;
-  return function () {
+  var fn = function () {
     if (!done) {
       done = true;
       __decideLeave(__tag);
@@ -12021,6 +12076,8 @@ function __decideWrapped(cb, why) {
     }
     try { if (typeof cb === 'function') return cb.apply(this, arguments); } catch (e) { throw e; }
   };
+  fn.__decideTag = __tag;      /* 让"窗口的承载者"能自报家门（对账要用，见 __decideLiveTags） */
+  return fn;
 }
 
 function __askChoiceLocal(spec, callback) {
@@ -12083,6 +12140,20 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
   
   var buttonsDiv = document.getElementById('choiceButtons');
   buttonsDiv.innerHTML = '';
+  /* 【2026-10-07 结构修·只收账，不改行为】渲染新弹窗会把旧按钮清掉 ⇒ 旧句柄的回调**永远不会被调用**。
+     这里只把它那本决策账收掉（"承载它的窗口已经不在屏幕上了" = 事实），**不替它应答**。
+     为什么不补答：实测补答会让那一步效果**继续往下跑**，与"被取代即停摆"的原行为不同
+     ⇒ 效果重复执行（card_expect_batchB 的「查阅」手牌 +5 就是这么来的）。
+     "被取代的窗口该怎么办"是另一件事（该走排队，不该被覆盖），改它要单独一轮 + 单独验证；
+     本轮只解决"账永远挂着把 AI 卡死"这一件。 */
+  try {
+    var __prevCb = pendingChoiceCallback;
+    if (__prevCb && __prevCb.__decideTag) {
+      try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave(__prevCb.__decideTag); } catch (e) {}
+      try { if (__decideTagByKind && __decideTagByKind['choiceModal'] === __prevCb.__decideTag) delete __decideTagByKind['choiceModal']; } catch (e) {}
+      try { addBattleLog('system', '【询问】上一个弹窗被新的取代（它的应答已不可能到达）⇒ 已收掉它那本"正在决策"的账'); } catch (e) {}
+    }
+  } catch (e) {}
   pendingChoiceCallback = callback;
   
   /* 【2026-10-01 抽取页面】卡背模式：N 张背面向下的卡，点哪张就回哪张的下标（与文字选项同一套应答口径） */
@@ -13107,6 +13178,16 @@ function __askPickCardsLocal(spec, callback) {
   var multi = need >= 2;
   var chosen = [];
   _cardPickerMultiCallback = callback;
+  /* 【2026-10-07 结构修·只收账，不改行为】下面 grid.innerHTML='' 会把旧选卡器的按钮清掉 ⇒
+     旧回调永远不会被调用。这里只把它的决策账收掉（窗口已不在屏幕上 = 事实），**不替它应答** ——
+     理由同 _showChoiceModalNow 那处：补答会让效果重复执行（已被 card_expect_batchB 打脸）。 */
+  try {
+    while (_cardPickerStack && _cardPickerStack.length) {
+      var __prevP = _cardPickerStack.shift();
+      try { if (__prevP && __prevP.__decideTag) { try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave(__prevP.__decideTag); } catch (e2) {} } } catch (e2) {}
+      try { addBattleLog('system', '【选卡】上一个选卡器被新的取代（它的应答已不可能到达）⇒ 已收掉它那本"正在决策"的账'); } catch (e2) {}
+    }
+  } catch (e) {}
   _cardPickerStack.push(callback);
   grid.innerHTML = '';
   var oldBar = document.getElementById('cardPickerBtnBar'); if (oldBar) oldBar.remove();
@@ -13404,12 +13485,14 @@ function __eeRawWaitReason() {
     if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback && cls.indexOf('active') >= 0) return '本机选择弹窗（屏幕上）';
     if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) return '弹窗排队中（' + _choiceQueue.length + ' 个）';
     if (typeof Online !== 'undefined' && Online && Online.active) {
+      /* 【2026-10-07 作者裁决】好友对战不设等待时间 ⇒ 只要还有一条"在等对手回答"的记录，
+         就是**真的在等**，不再按 maxWait（SPEC_TIMEOUT_MS+5000）判它过期。
+         原来那条把"网络侧的一个超时常量"当成了规则判据（网络概念进了规则层）。 */
       var asks = Online._asks || {};
-      var maxWait = (Online.SPEC_TIMEOUT_MS || 20000) + 5000;
       for (var k in asks) {
         if (!Object.prototype.hasOwnProperty.call(asks, k)) continue;
         var r = asks[k];
-        if (r && (!r.at || (Date.now() - r.at) < maxWait)) return '在等对手选择：「' + ((r.spec && r.spec.label) || '') + '」';
+        if (r) return '在等对手选择：「' + ((r.spec && r.spec.label) || '') + '」';
       }
     }
     var da = document.getElementById('diceAnimationArea');
@@ -13671,6 +13754,10 @@ function __eeMarkInc(site) {
 }
 function __eeIdleWatchdog() {
   try {
+    /* 【2026-10-07】顺带做一次**按事实对账**：把"窗口已经不在屏幕上"的决策账释放掉
+       （弹窗/选卡器被新的取代时，旧应答回调永远不会被调用 ⇒ 那本账没人释放）。
+       这是**事实判断**（窗口在不在），不是时间判断 —— 不留阈值、不放行任何真实等待。 */
+    try { if (typeof __decideReconcile === 'function') __decideReconcile('看门狗对账'); } catch (e) {}
     if (typeof effectEngine === 'undefined' || !effectEngine) return;
     if (typeof battleState === 'undefined' || !battleState) return;
     var ee = effectEngine;
