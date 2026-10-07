@@ -1066,7 +1066,7 @@ window.__CARD_DATA__ = {
             "黑色卡片"
          ],
          "combo_notes": "冬马的同步加油站：4费回4同步抽1、之后3回合每回合回2，SP在同步低于3时回复量再+50%，它不打伤害，价值全在喂同步消耗件。镌刻的艺术每回合支付4同步换2音韵并给队伍+1攻击，妖刀五月雨吃3同步换破坏或抽卡，开销全由它填回。队员配琉璃(万圣祭)与黑色卡片补手牌。",
-         "image_url": "assets/images/ui2/img_iUyI2lzUe6.webp?v=3",
+         "image_url": "assets/images/ui2/img_iUyI2lzUe6.webp?v=6",
          "character_full": "现实间冬马",
          "attack_range": "无（治疗卡）",
          "range_adjustment": 0,
@@ -1105,7 +1105,7 @@ window.__CARD_DATA__ = {
             "宫樱子"
          ],
          "combo_notes": "先打鼓舞（混沌[增益]，用后费用-1）触发枫的队长被动敏锐洞察：抽1馈赠卡再抽1，异色送墓正好当一次献祭并回2音韵，再打得分！对手要么交一张混沌卡进墓，要么连吃两段2点混沌。队员木原光太郎给献祭次数+1、首次献祭后还能选队伍攻击+1，宫樱子编组SP队伍攻击+2让两段各+1。",
-         "image_url": "assets/images/ui2/img_lYL7RgQUOC.webp?v=3",
+         "image_url": "assets/images/ui2/img_lYL7RgQUOC.webp?v=6",
          "character_full": "入间枫",
          "attack_range": "前后4格内一名玩家",
          "range_adjustment": 0,
@@ -1144,7 +1144,7 @@ window.__CARD_DATA__ = {
             "羽奈(往昔)"
          ],
          "combo_notes": "2费发起决斗：双方各亮一张卡比属性克制（无序克理智、理智克热忱、混沌被所有属性克），胜方打3点，两张卡一起进墓——这是不因使用入墓，冬马当队长时SP会因此对卡的持有者补4点无序伤害。光太郎当队长则靠千金之势把丢掉的卡补回来（初始手牌+1、每回合多抽1）。",
-         "image_url": "assets/images/ui2/img_2b1PUt19RN.webp?v=3",
+         "image_url": "assets/images/ui2/img_2b1PUt19RN.webp?v=6",
          "character_full": "木原光太郎",
          "attack_range": "同一行内一名玩家",
          "range_adjustment": 0.15,
@@ -1183,7 +1183,7 @@ window.__CARD_DATA__ = {
             "特制手套"
          ],
          "combo_notes": "1费打2点理智再回1音韵，Lv10是1费4点伤害回3音韵，是惠音韵值序列发动机里最便宜的一环。被动要连用3张牌看音韵值增减：放轻松些(1)→音叉(2)→特制手套(3)递增触发乐曲α（回4音韵抽1），三张同费（加侦探放大镜、20面骰）则触发乐曲δ（献祭次数+1并补4点理智伤害）。",
-         "image_url": "assets/images/ui2/card_fang_qingsongxie.webp?v=3",
+         "image_url": "assets/images/ui2/card_fang_qingsongxie.webp?v=6",
          "character_full": "松山惠",
          "attack_range": "前后3格内一名玩家",
          "range_adjustment": 0,
@@ -1222,7 +1222,7 @@ window.__CARD_DATA__ = {
             "宫樱子"
          ],
          "combo_notes": "结衣的编组SP给每段热忱伤害+1并无视1点防御，这张卡还按距离加伤、每靠近1格再+1，用法就是贴脸打。先用柔软枕头（回3同步+前进3格）或能量饮料（位移×2）挪进人堆，再连打最远3格与身后2格，三人局一回合白赚三段。队员琉璃(水着)、宫樱子抬队伍攻击，小仓霞的编组SP免判定挪位。",
-         "image_url": "assets/images/ui2/img_TCWVHjtq0i.webp?v=3",
+         "image_url": "assets/images/ui2/img_TCWVHjtq0i.webp?v=6",
          "character_full": "小野结衣",
          "attack_range": "前方最远3格+身后2格",
          "range_adjustment": -0.1,
@@ -1260,7 +1260,7 @@ window.__CARD_DATA__ = {
             "遥控骰子"
          ],
          "combo_notes": "2费扣对手2点同步再挂[神醉]（下次投掷点数减半），废掉他一轮的位移与判定伤害。配合打起精神来！给自己追加掷骰阶段，一回合投第二次时触发葵的队长被动福音雅颂，从墓地捡回一张单次道具并回2音韵，目标换成入间予则双方各拿1点引导核心。队员再带碰碰冰茶与20面骰补投掷控制。",
-         "image_url": "assets/images/ui2/img_8j1QiILJvu.webp?v=3",
+         "image_url": "assets/images/ui2/img_8j1QiILJvu.webp?v=6",
          "character_full": "小野葵",
          "attack_range": "同一行内一名玩家",
          "range_adjustment": 0.15,
@@ -1340,7 +1340,7 @@ window.__CARD_DATA__ = {
             "小野结衣"
          ],
          "combo_notes": "快速移动5格再打3点热忱，贯穿让破盾溢出的伤害照给，Lv10时能到5点。真正的钩子是里绪的位移计数：每累计移动8格就能花1音韵补一次四面骰判定伤害，所以钢筋铁肘(前进5格)接认真起来了！(前进3格)刚好过门槛。队员小野结衣给这段热忱+1并无视1点防御，能量饮料把位移翻倍。",
-         "image_url": "assets/images/ui2/img_uVrQLrUbyb.webp?v=3",
+         "image_url": "assets/images/ui2/img_uVrQLrUbyb.webp?v=6",
          "character_full": "现实间里绪",
          "attack_range": "前移5格后前后3格内一名玩家",
          "range_adjustment": 0,
@@ -1417,7 +1417,7 @@ window.__CARD_DATA__ = {
             "极夜君王之冕"
          ],
          "combo_notes": "3费可先前进3格，再对前后4格内一名玩家打一次四面骰判定，4点以上就打落其一张手卡并让他丢3点音韵。所以要堆判定加成：队员现实间里绪的编组SP给全队判定+1，把四面骰抬成2-5，打落命中率翻倍。破损电子设备与钢笔（判定+1、费用-1）拼出低费判定连打，墓地这张卡还能顶一次伤害。",
-         "image_url": "assets/images/ui2/img_rytBHz0SiP.webp?v=3",
+         "image_url": "assets/images/ui2/img_rytBHz0SiP.webp?v=6",
          "character_full": "小沙香琉璃",
          "attack_range": "前后4格内一名玩家",
          "range_adjustment": 0,
@@ -1456,7 +1456,7 @@ window.__CARD_DATA__ = {
             "破损电子设备"
          ],
          "combo_notes": "前方6格全体吃一次四面骰判定，再前进3格贴进人堆，累计4点以上回2音韵。核心是先堆判定伤害：队员现实间里绪给全队判定+1，小沙香琉璃在打出最大判定后让你抽1回2音韵，钢笔再加1，四面骰就成稳定3-6的AOE。队长琉璃(水着)用比翼恋理铺前后4格领域（判定+2）再踩进去开这一脚。",
-         "image_url": "assets/images/ui2/img_9FUfMuUIbJ.webp?v=3",
+         "image_url": "assets/images/ui2/img_9FUfMuUIbJ.webp?v=6",
          "character_full": "琉璃(水着)",
          "attack_range": "前方6格内所有玩家(AOE)",
          "range_adjustment": 0,
@@ -1533,7 +1533,7 @@ window.__CARD_DATA__ = {
             "琉璃(水着)"
          ],
          "combo_notes": "打没护盾的目标固定5点，所以用法是先剥盾再补刀：宫樱子当队员给队伍攻击+2、克制+1，小野结衣再给热忱卡+1伤害并无视1点防御，落下来就是6-7点。对有护盾的目标则专门拆盾，拆完接红宝之杖·运（付多少音韵就打多少热忱伤害）；杂鱼！杂鱼！先降3点防御。",
-         "image_url": "assets/images/ui2/img_rVfi2yisPj.webp?v=3",
+         "image_url": "assets/images/ui2/img_rVfi2yisPj.webp?v=6",
          "character_full": "小仓霞",
          "attack_range": "同一行内一名玩家",
          "range_adjustment": 0.15,
@@ -1572,7 +1572,7 @@ window.__CARD_DATA__ = {
             "侦探放大镜"
          ],
          "combo_notes": "3费把上一张用过的卡整张捡回手，若回收的是[侵略]卡还多打2点热忱，所以前一手得刻意下侵略牌。最顺手的是神乐铃（1费热忱侵略，每进一次墓下次伤害+1）：打神乐铃→案件还原捡回它并补2点热忱→再打神乐铃。红宝之杖·运付7音韵以上让下次伤害+20%，反复回收叠加后第6次直接秒杀。",
-         "image_url": "assets/images/ui2/img_RhBCWqW0x2.webp?v=3",
+         "image_url": "assets/images/ui2/img_RhBCWqW0x2.webp?v=6",
          "character_full": "椎名小春",
          "attack_range": "SP：一名玩家（无距离限制）",
          "range_adjustment": 0.1,
@@ -1611,7 +1611,7 @@ window.__CARD_DATA__ = {
             "里绪(水着)"
          ],
          "combo_notes": "1费驱散一名玩家的所有负面与附加效果，并让另一名玩家失去1点同步值：既解自家的[神醉]、[缴械]，也能扒掉对手的弱点分析、鼓舞这类附加效果，是少见的双向解法。同步压制接结晶碎弧（伤害前扣目标5点同步）与搜查令，里绪(水着)当队员时首次移动抽2张正好触发伊织的恩典。",
-         "image_url": "assets/images/ui2/img_CEYwyNKafJ.webp?v=3",
+         "image_url": "assets/images/ui2/img_CEYwyNKafJ.webp?v=6",
          "character_full": "小野伊织",
          "attack_range": "无（驱散卡）",
          "range_adjustment": 0,
@@ -1650,7 +1650,7 @@ window.__CARD_DATA__ = {
             "神乐铃"
          ],
          "combo_notes": "樱子的专属携带卡，2费全图降3防。防御一旦被打成负数，墓地里这张卡的SP就让后续每一段伤害都+1，所以它必须先手、多段卡后手：夏日泳圈攻击！每次穿透2伤变3伤，清凉时间！的判定段与理智段各+1，水枪攻击！同行AOE段段加码，神乐铃这种1点小伤害直接被顶成2点。",
-         "image_url": "assets/images/ui2/img_c56HyLkQLO.webp?v=3",
+         "image_url": "assets/images/ui2/img_c56HyLkQLO.webp?v=6",
          "character_full": "宫樱子",
          "attack_range": "全图范围内一名玩家",
          "range_adjustment": 0.3,
@@ -1689,7 +1689,7 @@ window.__CARD_DATA__ = {
             "破损电子设备"
          ],
          "combo_notes": "予的专属携带卡，2费1点无序加一次4面骰判定。判定那段吃增伤：予当队长时SP全队判定+1，现实间里绪判定+1（队员位也生效），小沙香琉璃每段判定回1音韵、累计后全队判定再+1。再配钢笔（判定+1、攻击卡减费），蓝宝之杖·命与破损电子设备各补一段判定；目标是枫时基础才变2点。",
-         "image_url": "assets/images/ui2/img_5EzxBXInfH.webp?v=3",
+         "image_url": "assets/images/ui2/img_5EzxBXInfH.webp?v=6",
          "character_full": "入间予",
          "attack_range": "同一行内一名玩家",
          "range_adjustment": 0.15,
@@ -1728,7 +1728,7 @@ window.__CARD_DATA__ = {
             "血之佑戒·红泪拉克莎"
          ],
          "combo_notes": "予(水着)的专属携带卡，2费扫同行全体2点理智，多掏3音韵顶到5点。供费靠予(水着)每张理智卡回1音韵、枫(水着)自然回复+50%、血之佑戒·红泪拉克莎上限+2；夹在两张2费卡间触发露璐缇雅同费回音韵。松山惠把2费当递增旋律起点触发乐曲α。中招者下一张卡多付1音韵。",
-         "image_url": "assets/images/ui2/img_d3Z599tJ4l.webp?v=3",
+         "image_url": "assets/images/ui2/img_d3Z599tJ4l.webp?v=6",
          "character_full": "予(水着)",
          "attack_range": "同一行所有玩家(AOE)",
          "range_adjustment": 0.25,
@@ -1767,7 +1767,7 @@ window.__CARD_DATA__ = {
             "侦探放大镜"
          ],
          "combo_notes": "雨宫羽奈专属卡，3费移3-6格，与同格对手贴脸打2点理智再击退4格，落点不触发格子效果。想贴到人得先控位：拦路者把路障丢在对手必经格，强行把其终点改成路障格；猎手爪链打断对方移动后自己再前压3格，侦探放大镜调±2格把距离卡进3-6。伤害端吃予(水着)、枫(水着)各+1理智。",
-         "image_url": "assets/images/ui2/img_6u1ljvBnvy.webp?v=3",
+         "image_url": "assets/images/ui2/img_6u1ljvBnvy.webp?v=6",
          "character_full": "雨宫羽奈",
          "attack_range": "同格玩家",
          "range_adjustment": -0.25,
@@ -1806,7 +1806,7 @@ window.__CARD_DATA__ = {
             "钢筋铁肘"
          ],
          "combo_notes": "宁雨清专属卡，2费给一名玩家+1防御，并让其下次攻击无视3点护盾。SP只数队内标签：增益者宁雨清、松山惠加增幅者入间枫，或琉璃(水着)一人兼两标签，凑够2名防御就变+2。把这层破盾垫给红宝之杖·运、钢筋铁肘这类一击，3点护盾白给，伤害直接落血；不吃骰子，随时上手都能先垫一刀。",
-         "image_url": "assets/images/ui2/img_e6yk5jnQa0.webp?v=3",
+         "image_url": "assets/images/ui2/img_e6yk5jnQa0.webp?v=6",
          "character_full": "宁雨清",
          "attack_range": "无（增益卡）",
          "range_adjustment": 0,
@@ -1844,7 +1844,7 @@ window.__CARD_DATA__ = {
             "结晶碎弧"
          ],
          "combo_notes": "里绪(水着)专属卡，2费跳到同行对手所在格，移动超过6格白拿一张馈赠卡。破局队冲的就是这份馈赠：里绪(水着)首次抽馈赠必中和声降2入迷、首次移动再抽2张；共鸣者剔掉200$、小野伊织让馈赠不出500$，结晶碎弧是唯一的直接降入迷手段。超不过6格就白搭，很吃站位。",
-         "image_url": "assets/images/ui2/img_76lHT2rq0d.webp?v=3",
+         "image_url": "assets/images/ui2/img_76lHT2rq0d.webp?v=6",
          "character_full": "里绪(水着)",
          "attack_range": "移动到同一行目标格",
          "range_adjustment": -0.05,
@@ -1884,7 +1884,7 @@ window.__CARD_DATA__ = {
             "杂鱼！杂鱼！"
          ],
          "combo_notes": "星奈(水着)专属卡，3费前移3格，对前方2格内全体打2段：1点判定伤害加1点理智。两段分开吃加成：星奈(水着)SP每命中一段前进1格回1音韵，予(水着)、枫(水着)各给理智+1，判定那段靠钢笔+1，极夜君王之冕再追一次同等判定伤害。开打前先垫杂鱼！杂鱼！把防御压负，两段各+1。",
-         "image_url": "assets/images/ui2/img_9YPerM1CwR.webp?v=3",
+         "image_url": "assets/images/ui2/img_9YPerM1CwR.webp?v=6",
          "character_full": "星奈(水着)",
          "attack_range": "前方2格内所有玩家(AOE)",
          "range_adjustment": -0.05,
@@ -1923,7 +1923,7 @@ window.__CARD_DATA__ = {
             "拦路者"
          ],
          "combo_notes": "枫(水着)专属卡，3费直线飞4格，命中谁就2点理智并降1防，穿多人可连续破甲。关键是每段吃理智加成：予(水着)把全队伤害转成理智，她和枫(水着)的SP各再+1，一段4点；先垫杂鱼！杂鱼！或一刀两断！打西瓜！压成负防更疼。命中过的泳圈不销毁、留场上，拦路者把路障摆在轨道上逼人撞。",
-         "image_url": "assets/images/ui2/img_AzVyk90HGB.webp?v=3",
+         "image_url": "assets/images/ui2/img_AzVyk90HGB.webp?v=6",
          "character_full": "枫(水着)",
          "attack_range": "前/后方飞行物最远4格，命中后继续飞行(穿透)",
          "range_adjustment": 0,
@@ -1935,6 +1935,43 @@ window.__CARD_DATA__ = {
             "stable": 6.5
          },
          "brief": "三费直线穿透每段2伤并破1防，留场逼位，费用效率高。"
+      },
+      {
+         "name": "邪恶南瓜攻击！",
+         "character": "琉璃(万圣祭)",
+         "character_full": "琉璃(万圣祭)",
+         "cost": 3,
+         "attribute": "混沌",
+         "type": "侵略",
+         "effect": "（可以向后移动5格）对同行的一名其他玩家造成目标（已损失同步值的33%）点混沌属性伤害，并对目标施加恫吓。恫吓：受击者必须将效果处理区的一张盖卡或者永续卡放回手卡，否则将受到3点混沌属性伤害并失去2点音韵值。",
+         "score": 6.8,
+         "grade": "B",
+         "baseDamage": 2,
+         "damageType": "混沌",
+         "scaling": "目标已损失同步值的33%，同行单体，附带恫吓（不交盖卡/永续就再吃3混沌并失2音韵）",
+         "archetypes": [
+            "混沌伤害队",
+            "控制队"
+         ],
+         "recommended_with": [
+            "琉璃(万圣祭)",
+            "小沙香琉璃",
+            "妖刀五月雨",
+            "最佳化",
+            "破损电子设备"
+         ],
+         "combo_notes": "这张的伤害是\"按对方已经掉掉的同步值算\"，所以它是**收尾牌**而不是开场牌：先用妖刀五月雨、最佳化这类先把对手同步压下去，再打这一张，33% 才会变成实打实的数字。恫吓是它的第二个价值——逼对手把效果处理区的一张盖卡或永续卡收回手，不交就再吃 3 点混沌并掉 2 音韵；对手场面越厚，这一下越疼。开局可先向后移动 5 格脱离接触，等同步压下去再回头打。",
+         "image_url": "assets/images/ui2/img_pumpkinAtk1.webp?v=6",
+         "attack_range": "同行的一名其他玩家(单体)",
+         "range_adjustment": 0,
+         "_category": "attack_cards",
+         "dims": {
+            "cost": 6.5,
+            "flex": 5.5,
+            "synergy": 7,
+            "stable": 6
+         },
+         "brief": "3费同行单体混沌伤害（按目标已损失同步的33%）+ 恫吓逼迫交牌"
       }
    ],
    "skill_cards": [
