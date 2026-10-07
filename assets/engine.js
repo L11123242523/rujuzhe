@@ -3497,6 +3497,24 @@ function __extraSyncCostOf(card) {
     return 0;
   } catch (e) { return 0; }
 }
+/* 【2026-10-07 新增·**额外同步值使用条件**的唯一扣费入口】
+   判定在 evaluatePlayable（界面灰卡）用的是同一个 __extraSyncCostOf；扣费必须**每个使用路径**都调它：
+   玩家单次卡/永续卡的手发路径（useCardCompleteFor 里直接扣音韵，**不经过 settleCardExecution**）、
+   AI 与联机远端位的路径（走 settleCardExecution）。
+   少接一处就会出现"能出牌但同步没扣"——作者实测就是这样（日志里没有"支付7点同步值"那行）。 */
+function __payExtraSync(user, card) {
+  try {
+    var need = __extraSyncCostOf(card);
+    if (!need) return true;
+    var p = battleState[user];
+    if (!p) return true;
+    if ((p.sync || 0) < need) return false;
+    p.sync -= need;
+    addBattleLog(user, '【' + card.name + '】支付' + need + '点同步值才能使用（剩余同步' + p.sync + '）');
+    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    return true;
+  } catch (e) { return true; }
+}
 /* 【2026-10-07 新增·**规则上的属性别名**】
    卡面写"这张卡在规则上还能当作 X 属性使用"时，**卡组构建与效果判定都要认**（作者 2026-10-07 明确：都管）。
    所以要有一个**唯一入口**来问"这张卡在规则上算什么属性" —— 各处都调它，不要各自去读 card.attribute
@@ -20281,13 +20299,13 @@ var PERMANENT_STRUCT = [
        · 前置条件：**同步值 ≥ 7 才能使用**，使用时**扣 7 点同步**（卡的 cost 字段保持 0）→ 见 evaluatePlayable 与使用路径；
        · 发动时：从牌组把一张**混沌属性**的卡加入手卡；
        · 属性别名：**在规则上当作无序属性使用**（卡组构建与效果判定都认）→ 见 __ruleAttrOf；
-       · SP：把墓地这张卡**移出游戏**才能发动 ⇒ 选此卡以外一张被移出的卡**放回墓地** ⇒ 该卡为混沌则**弹窗**问是否加入手卡。 */
-  { match: ['镌刻'],
-    onPlay: ['从牌组把一张混沌属性的卡加入手卡'],
-    /* 【2026-10-07】不再用具名 handler：编译层已支持"X属性的卡"的正向筛选
-       （实测产物 attr:"混沌"），所以**文本层直接驱动**，与"黑色卡片"同一机制。
-       使用前置（同步≥7 且扣 7）另在 evaluatePlayable / settleCardExecution，见 __extraSyncCostOf。 */
-    active: null },
+       · SP：把墓地这张卡**移出游戏**才能发动 ⇒ 选此卡以外一张被移出的卡**放回墓地** ⇒ 该卡为混沌则**弹窗**问是否加入手卡。
+     ⚠ **本表是"永续卡"的登记表**（`resolvePermanentOnPlay` 只对 `_category==='item_permanent'` 的卡查它）。
+     这张卡 2026-10-07 已改为**单次卡** ⇒ 这里**不再登记它**：
+     它的效果由**卡面文本**驱动（走单次卡的 ops 路径）。
+     作者实测日志证据：留着这条登记时，效果**执行了两次**（"发动时效果"一次 + "主要效果"一次，
+     两次都写了"加入手卡"）—— 一条效果两个来源，必然重复。 */
+  /* { match: ['镌刻'], onPlay: ['从牌组把一张混沌属性的卡加入手卡'], active: null },  ← 已删除（见上） */
   { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
       /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
       active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
@@ -20963,6 +20981,11 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
       battleState.p1.cost -= actualCost;
       if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
     }
+    /* 【2026-10-07 修·**额外同步值使用条件要在这里也扣**】
+       玩家"单次卡/永续卡"的手发路径**不经过 settleCardExecution**（这里直接扣音韵）⇒
+       只把扣费写在 settleCardExecution 里，玩家侧根本不会扣（作者实测日志里没有"支付7点同步值"那行就是证据）。
+       现在两处都调**同一个** __payExtraSync（判定用的也是同一个 __extraSyncCostOf）⇒ 不会再出现"能出牌却没扣"。 */
+    try { if (typeof __payExtraSync === 'function') __payExtraSync('p1', card); } catch (e) {}
     // 仅“从手牌发动”才移除手牌；盖伏卡已在 activateFaceDown 从盖伏区移出，handIndex 为 -1 时绝不能误删手牌末张
     if (!fromFaceDown) battleState.p1.hand.splice(handIndex, 1);
     recordSkillUse(card, 'p1');
@@ -21598,17 +21621,12 @@ function settleCardExecution(card, user, target, opts, done) {
      放在这里是因为**所有座位、所有出牌路径最终都经过本函数**（p1 的 useCard、AI、联机远端位），
      一处接住就不会出现"某个座位忘了扣"。
      判定（界面灰卡）在 evaluatePlayable 里用同一个 __extraSyncCostOf。 */
-  var __xsNeed = (typeof __extraSyncCostOf === 'function') ? __extraSyncCostOf(card) : 0;
-  if (__xsNeed > 0) {
-    if ((p.sync || 0) < __xsNeed) {
-      addBattleLog(user, '【' + card.name + '】同步值不足' + __xsNeed + '点，无法使用（当前同步' + (p.sync || 0) + '）');
-      if (typeof updateBattleUI === 'function') updateBattleUI();
-      if (done) done();
-      return;
-    }
-    p.sync -= __xsNeed;
-    addBattleLog(user, '【' + card.name + '】支付' + __xsNeed + '点同步值才能使用（剩余同步' + p.sync + '）');
+  /* 【2026-10-07】扣费改成调**唯一入口**（与玩家手发路径共用一份实现，见 __payExtraSync） */
+  if (typeof __payExtraSync === 'function' && !__payExtraSync(user, card)) {
+    addBattleLog(user, '【' + card.name + '】同步值不足，无法使用（当前同步' + (p.sync || 0) + '）');
     if (typeof updateBattleUI === 'function') updateBattleUI();
+    if (done) done();
+    return;
   }
   var actual = (opts.actualCost === 0 || typeof opts.actualCost === 'number') ? opts.actualCost : computeActualCost(card, user);
   // 【避免双扣】调用方若已完成付费（含宫樱子免费用卡的玩家选择），必须传 alreadyPaid:true。
