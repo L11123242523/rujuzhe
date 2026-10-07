@@ -6418,10 +6418,31 @@ var ChainAnim = {
     try { var self0 = this; setTimeout(function () { try { self0._cardResolve(i, label); } catch (e) {} }, 220); } catch (e) {}
     this.flash('逆结算 C' + (i + 1) + ' · ' + (label || ''), 'flash-resolve');
   },
-  done: function (i, lost, label) {
+  /* 【2026-10-07 结构修·**"这段演出多久"由动画层自己说了算**】
+     原来规则层（连锁推进的 next()）自己写死 `setTimeout(step, 170)` —— 那是对动画时长的**猜**：
+     猜短了效果会在动画没播完时乱入（作者报过），猜长了整条连锁拖沓。
+     现在动画层提供 `_doneMs()`（它自己那段视觉的时长）并在 `done()` 里回调"演完了"，
+     规则层不再持有任何时长数字。
+     · 数值来源是 **CSS 自己**：结算横幅是 `#chainFlash.show{animation:chainFlashPop .5s}`（见 app.css），
+       所以这里取 500ms —— 不是新猜的数，是把 CSS 里已有的数搬到它该在的地方。
+     · 动画被关掉（window.__UI_ANIM=false）⇒ 返回 0 ⇒ 调用方**立刻继续**，绝不空等。 */
+  _doneMs: function () {
+    try { if (typeof CardAnim !== 'undefined' && CardAnim.enabled && !CardAnim.enabled()) return 0; } catch (e) {}
+    try { if (typeof document === 'undefined') return 0; } catch (e) {}
+    return 500;
+  },
+  done: function (i, lost, label, onDone) {
     var d = this._nodes[i]; if (d) { d.classList.remove('csa-resolving'); d.classList.add(lost ? 'csa-lost' : 'csa-done'); }
     try { var b = this._el(); if (b) b.classList.remove('csa-stack-resolving'); } catch (e) {}
     this.flash('C' + (i + 1) + (lost ? ' 失去对象' : ' 结算完成'), lost ? 'flash-lost' : 'flash-ok');
+    /* 【2026-10-07】"演完了"的回调：给规则层一个**事件**，它就不必再猜时长。
+       注意这里用的是 setTimeout —— 它一定会触发（不像 animationend 可能因为元素被移除/被打断而永不触发），
+       所以**不存在"回调不来 ⇒ 整链停摆"的风险**。 */
+    if (typeof onDone === 'function') {
+      var ms = 0; try { ms = this._doneMs ? this._doneMs() : 0; } catch (e) { ms = 0; }
+      if (!(ms > 0)) { try { onDone(); } catch (e) {} return; }
+      setTimeout(function () { try { onDone(); } catch (e) {} }, ms);
+    }
   },
   /* 【__UI_PHASE6·③】结算动画本体：卡 + 「C1 结算」徽章 + 扩散光环，落在连锁堆栈左侧。
      不承重：动画关闭 / animate 不可用 / 任何异常 ⇒ 只做清理，绝不影响结算。 */
@@ -7765,13 +7786,26 @@ var TW = {
       /* 动画层**不承重**：ChainAnim.* 抛错绝不能打断推进（否则 step 不再被调度、整链停摆） */
       function next() {
         if (fired) return; fired = true;
-        try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, false, node.label); }
-        catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
         try { if (typeof __animLeave === 'function') __animLeave('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出结束 */
         /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
            死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
            （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
-        setTimeout(__aiGuard(step), 170);
+        /* 【2026-10-07 结构修·事件驱动】原来这里是 `setTimeout(__aiGuard(step), 170)` ——
+           规则层自己猜"这段演出多久"：猜短了效果在动画没播完时乱入（作者报过），猜长了整链拖沓。
+           现在把"演完了"作为**回调**交给动画层（ChainAnim.done 第 4 个参数），由它按自己的时长回调
+           （数值来自 CSS 的 chainFlashPop .5s，不是规则层新猜的数）。
+           · 动画被关（__UI_ANIM=false）⇒ _doneMs() 返回 0 ⇒ 立刻回调，不空等；
+           · 动画层不存在 / 抛错 ⇒ 立刻推进 ⇒ **整链绝不会因为动画停摆**。 */
+        var __advanced = false;
+        var __advance = function () {
+          if (__advanced) return; __advanced = true;
+          try { __aiGuard(step)(); } catch (e) { try { console.error('连锁推进异常', e); } catch (e2) {} }
+        };
+        var __ok = false;
+        try {
+          if (typeof ChainAnim !== 'undefined' && ChainAnim.done) { ChainAnim.done(idx, false, node.label, __advance); __ok = true; }
+        } catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
+        if (!__ok) __advance();
       }
       try {
         try { if (typeof ChainAnim !== 'undefined' && ChainAnim.resolving) ChainAnim.resolving(idx, node.label); }
