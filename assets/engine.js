@@ -13822,6 +13822,17 @@ function __eeIdleWatchdog() {
               __ring.map(function (r) { return (r.d > 0 ? '+' : '') + r.d + '@' + r.w.replace(/·(进入|释放|走完 ops).*/, ''); }).join(' → '));
           }
         } catch (e) {}
+        /* 卡住的 op（进了没回调）—— 深度滞留链条的最后一环 */
+        try {
+          var __ops = ee._opRing || [];
+          var __stuck = __ops.filter(function (o) { return o && !o.back; });
+          if (__stuck.length) {
+            addBattleLog('system', '【效果锁】卡住的步骤 op（进了没回调，共 ' + __stuck.length + ' 个）：' +
+              __stuck.map(function (o) { return o.name; }).join('、'));
+          } else if (__ops.length) {
+            addBattleLog('system', '【效果锁】步骤 op 全部有回调（共 ' + __ops.length + ' 个）⇒ 滞留在更外层（不是 op 没回调）');
+          }
+        } catch (e) {}
       } catch (e) {}
       if (lastInc && lastInc.site) {
         addBattleLog('system', '【效果锁】最后一次上锁位置：' + lastInc.site + '（' + Math.round((Date.now() - lastInc.at) / 1000) + '秒前）');
@@ -16913,8 +16924,26 @@ function runOneOp(op, ctx, next) {
   next();
 }
 
+/* 【2026-10-07 新增·纯诊断】op 级现场：记录每个效果的"步骤 op"进入与回调。
+   为什么需要它：深度滞留实测形态是"6 笔 +1 只配上 3 笔 -1"，而深度标签只到"哪张卡"，
+   再往下就说不清"卡在哪一步"。有了这个环，强解日志能指名到具体 op（例如 wait_choice / draw / move）。
+   环形最多留 16 笔；不参与任何判定，删掉也不影响行为。 */
+function __opMark(op, seq) {
+  try {
+    var ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    if (!ee) return null;
+    var name = (op && (op.op || op.kind || op.t || op.type)) || '?';
+    var ring = ee._opRing || (ee._opRing = []);
+    var rec = { name: String(name), seq: String(seq || '?'), t: Date.now(), back: null };
+    ring.push(rec);
+    if (ring.length > 16) ring.splice(0, ring.length - 16);
+    return rec;
+  } catch (e) { return null; }
+}
+var __runOpsSeq = 0;      /* 【诊断】给每一次 runOps 一个唯一编号，用于区分"同一序列的两步"与"两个嵌套序列" */
 function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
+  var __seqId = ++__runOpsSeq;
   /* 【2026-10-07】深度账本的标签带上**卡名**：出"结算完了还锁着"时，日志能直接说出是哪张卡的嵌套链没跑完
      （原来只写 'runOps·进入'，认不出是谁；实测滞留形态就是"6 笔 +1 只配上 3 笔 -1"）。
      纯诊断字符串，不参与任何判定；取不到卡名就退回原标签。 */
@@ -16924,7 +16953,7 @@ function runOps(ops, ctx, done) {
   var i = 0;
   (function step() {
     if (i >= ops.length) { __eeDepthSub(__ee,'runOps·走完 ops[' + __tag.slice(7) + ']'); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
-    try { runOneOp(ops[i++], ctx, step); }
+    var __op = ops[i++]; var __rec = (typeof __opMark === 'function') ? __opMark(__op, __tag.slice(7) + '#' + __seqId) : null; try { runOneOp(__op, ctx, function () { try { if (__rec) __rec.back = Date.now(); } catch (e0) {} step(); }); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
 }
