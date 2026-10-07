@@ -1,113 +1,124 @@
-/* assets/decision.js —— 【机制级重写·批次1】"玩家正在决策"的唯一权威
+/* assets/decision.js —— "玩家正在决策"的唯一权威（2026-10-07 结构重写：账按窗口独立记）
  *
- *  为什么重写（实测证据）：旧实现 `battleState._awaitingDecision` 有**两种互不兼容的类型** ✗
- *    · __decideEnter：`= (旧值 || 0) + 1`                        ← 数字（计数器）
- *    · 时点窗口(7065)：`= 候选数 ? {seat,label,since} : null`    ← 对象 ✗
- *    ⇒ 对象再进 `(旧值||0)+1` ⇒ 变字符串 "[object Object]1" ⇒ `n > 0` 失效 ⇒ **永不归零**
- *    ⇒ 尊重它 = 卡死；无视它 = 抢跑（作者两个症状同源）✓
+ *  ============================================================
+ *  上一版为什么错（作者实测"AI 抢跑一直存在"，七轮都没修掉）：
+ *    上一版用「**一个全局计数** + 一张 tag 表」表示"多个并存的窗口"，但两者不同步：
+ *      · `leave(tag)` **不管这个 tag 存不存在，都减计数**（当时的理由：防"漏减 ⇒ 永久泄漏"）
+ *      · 计数一到 0 就 `S.tags = {}` —— **整张表清空**
+ *    ⇒ 一个"没有人类候选"的时点窗口开一次关一次，净减 2~3 次
+ *    ⇒ 计数被推向 0 ⇒ **另一个还开着的人类窗口，标记被连带抹掉**
+ *    ⇒ `__aiGuard` 读到"没有人类在决策" ⇒ **AI 抢跑**（实测 153ms 就发生，根本不用等 8 秒）
+ *    实测证据：`enter A,B → count=2`；再 `leave('A')` 一次错配 ⇒ `count=0, tags=[]`，B 被连带清空。
+ *    这就是"把漏减的补丁"换成"多减 + 连带清空"的典型 —— 补丁引出了反方向的症状。
  *
- *  本模块的设计（单一职责、可独立测试）：
- *    · **唯一存储**在自己内部（count + tags{tag: 心跳时间}）✓ 判据只读它 ✓
- *      ⇒ 任何地方再"直接赋值 battleState._awaitingDecision"都**不再影响判据** ✓（这是止血的关键 ✓）
- *    · `enter(tag)` / `leave(tag)` 成对；`touch(tag)` 续心跳（给"确实开着的窗口"用 ✓）
- *    · **自愈看门狗**（每 500ms）：某 tag 心跳超过 STALE_MS 没续 ⇒ 判为泄漏 ⇒ 摘掉它 + 写日志 ✓
- *    · `isOpen()` = count > 0（唯一判据，供 __playerDeciding / __decideWaitGate / __phaseWaitBusy / __aiGuard 用）
- *    · 兼容镜像：进入/离开时把 `battleState._awaitingDecision` 写成数字（**只写不读** ✓），
- *      便于旧日志/调试观察；判据一律不看它 ✓
+ *  这一版的规矩（每条都是为了"结构上不可能再错"）：
+ *    ① **没有全局计数**：`count` 一律从表里派生（`Object.keys`）⇒ "计数与表不同步"这件事写不出来。
+ *    ② `leave(tag)` **只删自己那个键**：tag 不存在 ⇒ **什么都不做**（只写一条诊断日志），绝不减别人的账。
+ *    ③ **永不做整表清空**（只有显式 `reset()` 才清，且带原因）。
+ *    ④ `enter` 幂等：同一个 tag 重复进只刷新，不叠加。
+ *    ⑤ **不按时间摘账**：心跳只用来"写一条可见日志"（`WARN_MS`），**不改任何状态**。
+ *       ——"靠时间猜"正是抢跑与卡死的共同来源（猜早了抢跑、猜晚了卡死），这里一律不猜。
+ *    ⑥ tag 必须**按窗口唯一**（调用方负责，见 TW.open/close）⇒ 窗口 A 关闭不可能影响窗口 B。
  *
- *  自检：node assets/decision.js        # Node 下直接跑 6 条用例（不依赖浏览器）
+ *  自检：node assets/decision.js        # Node 下直接跑（不依赖浏览器）
  *  在页面里：<script src="assets/decision.js?v=N"></script> 先于 engine.js 加载 ✓
  */
 (function (root) {
   'use strict';
-  var STALE_MS = 8000;      /* 心跳超过 8 秒没续 ⇒ 判为泄漏 */
-  var TICK_MS = 500;
+  /* 只用于"写一条日志"的观测阈值：活过这么久还没 leave ⇒ 提示可能泄漏。
+     ⚠ 它**不摘账、不改状态** —— 只让泄漏看得见，不替它做决定。 */
+  var WARN_MS = 30000;
+  var TICK_MS = 5000;
 
-  var S = { count: 0, tags: {}, seats: {}, timer: null };
+  /* 唯一存储：tag -> { seat, at }。没有第二个计数器。 */
+  var S = { tags: {}, timer: null, warned: {} };
 
   function now() { return Date.now(); }
-  function keys() { var a = [], k; for (k in S.tags) if (S.tags[k]) a.push(k); return a; }
+  function keys() { return Object.keys(S.tags); }
+  function count() { return keys().length; }
   function log(msg) { try { if (typeof addBattleLog === 'function') addBattleLog('system', msg); } catch (e) {} }
   function mirror() {
-    try { if (typeof battleState !== 'undefined' && battleState) battleState._awaitingDecision = S.count > 0 ? S.count : null; } catch (e) {}
+    try { if (typeof battleState !== 'undefined' && battleState) battleState._awaitingDecision = count() > 0 ? count() : null; } catch (e) {}
   }
   function startWatch() { if (S.timer || typeof setInterval !== 'function') return; S.timer = setInterval(tick, TICK_MS); }
   function stopWatch() { if (S.timer) { try { clearInterval(S.timer); } catch (e) {} S.timer = null; } }
 
-  /** 自愈：摘掉心跳过期的 tag（真开着的窗口会持续 touch ⇒ 不会被摘 ✓） */
+  /** 观测：只把"活得异常久"的 tag 写进日志，**不动账** ✓ */
   function tick() {
-    var t = now(), stale = [], k;
-    for (k in S.tags) { if (S.tags[k] && (t - S.tags[k]) > STALE_MS) stale.push(k); }
-    if (!stale.length) return;
-    stale.forEach(function (tag) { delete S.tags[tag]; S.count = Math.max(0, S.count - 1); });
-    log('【自愈】清掉泄漏的"玩家正在决策"标记：' + stale.join('、') + '（心跳超时 ' + Math.round(STALE_MS / 1000) + 's）');
-    if (S.count <= 0) { S.count = 0; S.tags = {}; stopWatch(); }
-    mirror();
-    try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    var t = now();
+    keys().forEach(function (k) {
+      var rec = S.tags[k];
+      if (!rec) return;
+      if ((t - (rec.at || 0)) > WARN_MS && !S.warned[k]) {
+        S.warned[k] = 1;
+        log('【决策·存活提示】窗口「' + k + '」已开 ' + Math.round((t - rec.at) / 1000) + 's 还没关（座位=' +
+          (rec.seat == null ? '未记录' : rec.seat) + '）—— 只提示，不摘账；若确属泄漏请查它的关闭出口');
+      }
+    });
   }
 
   var Decision = {
-    STALE_MS: STALE_MS,
+    WARN_MS: WARN_MS,
+    STALE_MS: WARN_MS,          /* 兼容旧名：现在只用于日志，**不再摘账** */
     enter: function (tag, seat) {
       tag = String(tag || '?');
-      /* 【2026-10-06 结构修复 · 禁止清单 B7「同一件事只能有一份账」】
-         原来这里是**无条件 S.count++**：同一个 tag 反复开窗会把计数越堆越高，
-         而每次 enter 又刷新该 tag 的心跳（S.tags[tag] = now()）⇒ 下面那个 8 秒看门狗
-         **永远摘不掉它** ⇒ 判据"有人类正在决策"恒真 ⇒ __aiGuard 永远等
-         ⇒ 逆结算走不到 __endChain ⇒ _chainLock 永不清除
-         ⇒ AI 造成的伤害没被应用、我方手牌因"效果处理中"全部变灰（作者实测）。
-         现在改为**幂等**：同一 tag 已经开着时，只刷新心跳与座位，**不再 +1**。
-         这样"反复开同一个窗口"不会把计数堆高，leave 一次就能干净清掉；
-         同时也修掉反方向的问题（leave 多减把计数提前清零 ⇒ AI 抢跑）。 */
       var existed = !!S.tags[tag];
-      S.tags[tag] = now();
-      S.seats[tag] = (seat == null) ? null : seat;      /* 记"是谁在决策"✓（区分人类/AI，避免循环等待 ✗） */
-      if (!existed) S.count++;
-      startWatch();
+      S.tags[tag] = { seat: (seat == null) ? null : seat, at: now() };
+      delete S.warned[tag];
+      if (!existed) startWatch();
       mirror();
-      return S.count;
+      return count();
     },
     leave: function (tag) {
       tag = String(tag || '?');
-      /* 【关键修正】计数**以 count 为准**（与旧计数器同语义 ✓）：即使 tag 不匹配（enter('A')/leave('B')）
-         也必须减计数 ✓ —— 否则一处配对错名就会永久泄漏 ✗（这正是我在治的病 ✗）。
-         tag 仅用于诊断：命中就删掉它；没命中就记一笔"配对错名"，便于排查 ✓ */
-      var had = !!S.tags[tag];
-      if (had) delete S.tags[tag];
-      else if (S.count > 0) { try { log('【决策·配对提醒】leave("' + tag + '") 未匹配到同名 enter（当前开着：' + keys().join('、') + '）'); } catch (e) {} }
-      S.count = Math.max(0, S.count - 1);
-      if (!S.count) { S.tags = {}; stopWatch(); }
+      if (!S.tags[tag]) {
+        /* 关键：错配**什么都不做**。绝不再"不管存不存在都减" —— 那会把别人的账一起抹掉。
+           只在"确实还有别的窗口开着"时才提醒（这时错配才可能有影响；否则纯噪声）。 */
+        if (count() > 0) {
+          try { log('【决策·配对提醒】leave("' + tag + '") 没有对应的 enter ⇒ 不动作（当前开着：' + keys().join('、') + '）'); } catch (e) {}
+        }
+        return count();
+      }
+      delete S.tags[tag];
+      delete S.warned[tag];
+      if (!count()) stopWatch();
       mirror();
-      return S.count;
+      return count();
     },
-    /** 续心跳：给"确实开着的窗口/正在等待的弹窗"用 ✓ */
-    touch: function (tag) { if (tag != null) { if (S.tags[String(tag)]) S.tags[String(tag)] = now(); } else { Object.keys(S.tags).forEach(function (k) { S.tags[k] = now(); }); } },
+    /** 续心跳：保留给"确实还开着"的窗口用（现在它只影响日志，不影响生死 ✓） */
+    touch: function (tag) {
+      if (tag == null) { keys().forEach(function (k) { if (S.tags[k]) S.tags[k].at = now(); }); return count(); }
+      tag = String(tag);
+      if (S.tags[tag]) S.tags[tag].at = now();
+      return count();
+    },
     /** 唯一判据 ✓ */
-    isOpen: function () { return S.count > 0; },
-    /** 【批次2 关键】只统计"**人类**正在决策" ⇒ 供 AI 闸门用 ✓
-     *  为什么：若 AI 也在等某个由 AI 自己推进才能关闭的决策，就是**循环等待 ⇒ 卡死** ✗
-     *  isAISeatFn(seat) 由调用方提供（引擎里的 isAISeat ✓）；seat 未知的按"人类"处理（保守，防抢跑 ✓），
-     *  但闸门另有"延后上限"兜底，绝不会无限等 ✗ */
+    isOpen: function () { return count() > 0; },
+    /** 只统计"**人类**正在决策" ⇒ 供 AI 闸门用 ✓
+     *  seat 未知的按"人类"处理（保守，防抢跑 ✓）。 */
     isHumanOpen: function (isAISeatFn) {
       var k, n = 0;
       for (k in S.tags) {
-        if (!S.tags[k]) continue;
-        var seat = S.seats[k];
+        if (!Object.prototype.hasOwnProperty.call(S.tags, k)) continue;
+        var rec = S.tags[k]; if (!rec) continue;
+        var seat = rec.seat;
         var isAI = false;
         try { isAI = (seat != null && typeof isAISeatFn === 'function') ? !!isAISeatFn(seat) : false; } catch (e) { isAI = false; }
         if (!isAI) n++;
       }
       return n > 0;
     },
-    /** 全清（异常收尾/回主界面用 ✓） */
+    /** 全清（**只**用于异常收尾/回主界面等显式场合 ✓） */
     reset: function (why) {
-      if (!S.count && !keys().length) return;
-      S.count = 0; S.tags = {}; stopWatch(); mirror();
-      log('【决策·复位】' + (why || '异常收尾') + ' ⇒ 清空全部决策标记');
+      if (!count()) return 0;
+      var had = keys().join('、');
+      S.tags = {}; S.warned = {}; stopWatch(); mirror();
+      log('【决策·复位】' + (why || '异常收尾') + ' ⇒ 清空全部决策标记（原有：' + had + '）');
+      return 0;
     },
-    snapshot: function () { return { count: S.count, tags: keys(), alive: JSON.parse(JSON.stringify(S.tags)) }; },
-    /** 仅测试用：把某 tag 的心跳拨回 ms 毫秒前（用于验证自愈 ✓） */
-    _backdate: function (tag, ms) { if (S.tags[String(tag)]) S.tags[String(tag)] = now() - (ms || 0); },
+    snapshot: function () { return { count: count(), tags: keys(), alive: JSON.parse(JSON.stringify(S.tags)) }; },
+    /** 仅测试用：把某 tag 的时间拨回 ms 毫秒前（用于验证"观测提示"✓） */
+    _backdate: function (tag, ms) { if (S.tags[String(tag)]) S.tags[String(tag)].at = now() - (ms || 0); },
     _tick: tick        /* 供探针手动触发，不依赖真实定时器 ✓ */
   };
 
@@ -121,32 +132,45 @@ if (typeof module !== 'undefined' && require.main === module) {
   const D = module.exports;
   let bad = 0;
   const chk = (ok, label, extra) => { if (!ok) bad++; console.log('   ' + (ok ? '✅' : '❌') + ' ' + label + (extra ? ' —— ' + extra : '')); };
-  console.log('   —— ① 成对进出 ⇒ 必须归零 ——');
+
+  console.log('   —— ① 成对进出 ⇒ 归零 ——');
   D.enter('a'); D.enter('b');
-  chk(D.isOpen() === true, '进入后 isOpen() = true');
+  chk(D.isOpen() === true, '进入后 isOpen() = true', 'count=' + D.snapshot().count);
   D.leave('a'); D.leave('b');
   chk(D.isOpen() === false, '成对离开后 isOpen() = false', 'count=' + D.snapshot().count);
 
-  console.log('   —— ② 泄漏（只进不出）⇒ 看门狗必须自愈 ——');
-  D.enter('leak');
-  chk(D.isOpen() === true, '泄漏期间 isOpen() = true');
+  console.log('   —— ② 幂等：重复 enter 不叠加 ——');
+  D.enter('x'); D.enter('x'); D.enter('x');
+  chk(D.snapshot().count === 1, 'enter 三次 ⇒ count 仍为 1', 'count=' + D.snapshot().count);
+  D.leave('x');
+  chk(D.isOpen() === false, 'leave 一次即归零', 'count=' + D.snapshot().count);
+
+  console.log('   —— ③ ★核心保证：错配 leave **不许**影响别的账 ——');
+  D.enter('A'); D.enter('B');
+  D.leave('A');
+  chk(D.isOpen() === true && D.snapshot().tags.join() === 'B', 'leave(A) 后 B 仍在', JSON.stringify(D.snapshot().tags));
+  D.leave('A'); D.leave('A'); D.leave('压根没开过');
+  chk(D.isOpen() === true && D.snapshot().tags.join() === 'B',
+    '**再错配 leave 三次 ⇒ B 依然在**（上一版这里会被整表清空 ✗）', JSON.stringify(D.snapshot().tags));
+  D.leave('B');
+  chk(D.isOpen() === false, 'B 自己 leave 后才归零', 'count=' + D.snapshot().count);
+
+  console.log('   —— ④ 不按时间摘账：超时只写日志 ——');
+  D.enter('long');
+  D._backdate('long', D.WARN_MS + 1000);
   D._tick();
-  chk(D.isOpen() === true, '未超时 ⇒ 不自愈（**不许误清真窗口**）');
-  D._backdate('leak', D.STALE_MS + 1000);        /* 把心跳拨回 9 秒前 */
-  D._tick();                                      /* 看门狗出手 */
-  chk(D.isOpen() === false, '**心跳超时 ⇒ 自愈清掉泄漏标记**', JSON.stringify(D.snapshot()));
+  chk(D.isOpen() === true, '**心跳超时后账仍在**（不再自动摘除 ⇒ 不会再因此抢跑 ✓）', JSON.stringify(D.snapshot().tags));
+  D.leave('long');
+  chk(D.isOpen() === false, '仍然由 leave 结束');
 
-  console.log('   —— ②b 真窗口（持续 touch）不许被误清 ——');
-  D.enter('win');
-  for (let i = 0; i < 3; i++) { D._backdate('win', D.STALE_MS + 1000); D.touch('win'); D._tick(); }
-  chk(D.isOpen() === true, '**持续续心跳 ⇒ 一直不被清**（真窗口安全）');
-  D.reset('自检收尾');
-  chk(D.isOpen() === false, 'reset 后 isOpen() = false');
-
-  console.log('   —— ③ 旧字段不再影响判据（止血的关键）——');
+  console.log('   —— ⑤ 旧字段不再影响判据 ——');
   try { globalThis.battleState = {}; } catch (e) {}
   try { battleState._awaitingDecision = { seat: 'p1', since: Date.now() }; } catch (e) {}
-  chk(D.isOpen() === false, '**外部直接赋值 battleState._awaitingDecision 不再让判据为真**', String(D.isOpen()));
+  chk(D.isOpen() === false, '外部直接赋值 battleState._awaitingDecision 不再让判据为真', String(D.isOpen()));
+
+  console.log('   —— ⑥ reset 显式全清 ——');
+  D.enter('p'); D.enter('q'); D.reset('自检');
+  chk(D.isOpen() === false, 'reset 后归零');
 
   console.log(bad ? '   ❌ 失败 ' + bad + ' 项' : '   ✅ 全部通过');
   process.exit(bad ? 1 : 0);

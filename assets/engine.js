@@ -7352,17 +7352,27 @@ var TW = {
     /* 【标记"正在等谁决断"】（原来由已删的 __offerOptionalEffect 维护；迁到窗口后**没人再写它** ⇒
        aiTurn / aiPlayCards 的停等闸门失效 ⇒ AI 会在你还没答完窗口时继续出牌、效果跑到下一回合才结算）。
        只在"确实轮到一个人类座位决策"时标记；AI 自己的触发会被 AI 分支直接接受，不需要等人。 */
+    /* 【2026-10-07 结构修 · 账必须按窗口唯一】原来**所有**窗口共用 tag 'humanCandidates'，
+       于是一个"没有人类候选"的窗口只要 leave 一次，就会把**别的窗口**的账一起删掉；
+       加上旧 leave 是"不管存不存在都减计数、计数归零就整表清空" ⇒ 实测 153ms 就能把别人的标记抹掉 ⇒ AI 抢跑。
+       现在：id 在这里先定下来，tag = 'tw'+id ⇒ **窗口 A 的关闭在结构上不可能影响窗口 B**。 */
+    var __wid = ++this.seq;
     try {
       if (battleState) {
         var __candsH = opts.candidates || [];
         var __humanCand = __candsH.filter(function (c) { return c && c.owner && !isAISeat(c.owner); });
-        /* 【批次1】时点窗口也进权威账本（原来这里写的是**对象** ⇒ 污染计数器 ⇒ 永不归零 ✗） */
-        if (__humanCand.length) { try { if (typeof Decision !== 'undefined' && Decision && Decision.enter) Decision.enter('humanCandidates'); else battleState._awaitingDecision = __humanCand.length; } catch (e) {} }
-        else { try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {} }
+        /* 只在"确实轮到一个人类座位决策"时开账；**没有人类候选就什么都不做**
+           （旧代码在这里反向 leave，是"没开过的账也去减"的源头之一 ✗） */
+        if (__humanCand.length) {
+          try {
+            if (typeof Decision !== 'undefined' && Decision && Decision.enter) Decision.enter('tw' + __wid, __humanCand[0].owner);
+            else battleState._awaitingDecision = __humanCand.length;
+          } catch (e) {}
+        }
       }
     } catch (e) { console.error('标记等待决断出错', e); }
     var win = {
-      id: ++this.seq,
+      id: __wid,                 /* 【2026-10-07】id 只在这里复用上面已定的 __wid（不再 ++seq）⇒ tag 与窗口一一对应 */
       type: opts.type || 'simultaneous',
       tp: tp,
       foe: (typeof foeOf === 'function') ? foeOf(tp) : 'p2',
@@ -7668,7 +7678,9 @@ var TW = {
        这就是作者报的"效果被卡掉"的机制：旧代码靠闸门"2.4 秒后放行"打破死锁，代价是谈窗被跳过、效果被吞。
        ⇒ 收口标记 = 既保住"闸门绝不主动抢跑"的约束，又让结算能正常推进。 */
     try { if (battleState) battleState._awaitingDecision = null; } catch (e) {}
-    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {}
+    /* 【2026-10-07 结构修】只收**本窗口自己**的账（tag = 'tw'+id）。
+       旧代码不分窗口地 leave('humanCandidates') ⇒ 结算会把别的窗口的账一起删掉。 */
+    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + win.id); } catch (e) {}
     /* 【S-a】进入逆结算 = 进入 resolving ⇒ 主动采一次相位（结算跑得快，按秒采样抓不到） */
     try { if (typeof __phaseSync === 'function') __phaseSync(); } catch (e) {}
     addBattleLog('system', '【连锁组成】' + win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + self._whoName(c.owner) + '·' + c.label; }).join('  →  '));
@@ -7744,7 +7756,10 @@ var TW = {
        ⇒ 逆结算收尾走不到 ⇒ **结算深度卡在 1、相位永远停在 resolving**（effect_lock_test 实测：depth=1、enter=1/leave=0）。
        旧代码是靠"闸门 2.4 秒后放行"绕过它的 —— 代价正是**谈窗被跳过、效果被吞**（作者报的"抽二丢一被卡没"）。
        ⇒ 这一段就是那个病根的**结构性修法**：窗口生命周期与"人类在决策"标记**同生同灭**。 */
-    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('humanCandidates'); } catch (e) {}
+    try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + win.id); } catch (e) {}
+    /* 【2026-10-07】连锁窗自己那一笔账（ui.js 的 showChainChoice 用 kind 'chainChoice' 开的）
+       也要在关窗时收掉 —— 否则"窗关了、账还挂着" ⇒ AI 一直等它。 */
+    try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) {}
     try { if (typeof ChainAnim !== 'undefined' && ChainAnim.end) ChainAnim.end(); }
     catch (e) { try { console.error('ChainAnim.end 异常（不影响收尾）', e); } catch (e2) {} }
     /* 【2026-10-03 P0·作者反馈 6 次】关窗必收起连锁框：残留都发生在"非标准结算"的收尾路径
@@ -11977,12 +11992,35 @@ function __decideLeave(why) {
     if (!battleState._awaitingDecision) battleState._awaitingWhy = '';
   } catch (e) {}
 }
+var __decideSeq = 0;
+/* kind -> 当前开着的那个 tag。用途：**关窗函数要精确释放自己那一笔账**。
+   旧代码里 closeChoiceModal 释放的是硬编码的 'closeChoiceModal'，而 enter 用的是包装器生成的唯一 tag
+   —— 名字根本对不上；旧 leave"不管存不存在都减计数"把这件事掩盖了（代价是会把别人的账一起抹掉）。
+   现在按 kind 记住自己的 tag，关窗时只删自己这一笔 ✓ */
+var __decideTagByKind = {};
+function __decideLeaveKind(kind) {
+  kind = String(kind || '?');
+  var t = __decideTagByKind[kind];
+  if (!t) return false;
+  delete __decideTagByKind[kind];
+  __decideLeave(t);
+  return true;
+}
 function __decideWrapped(cb, why) {
-  /* 把"应答回调"包一层：玩家做出选择时立刻 leave（避免靠 close 才清） */
-  __decideEnter(why);
+  /* 把"应答回调"包一层：玩家做出选择时立刻 leave（避免靠 close 才清）
+     【2026-10-07 结构修】tag 必须**每个包装器唯一**：两个并存的询问若共用同一个 why，
+     先答完的那个 leave 会把后一个的账一起删掉 ⇒ AI 抢跑（旧语义下更狠：直接清空整表）。 */
+  var kind = String(why || '?');
+  var __tag = '__decide:' + kind + '#' + (++__decideSeq);
+  __decideEnter(__tag);
+  __decideTagByKind[kind] = __tag;
   var done = false;
   return function () {
-    if (!done) { done = true; __decideLeave(why); }
+    if (!done) {
+      done = true;
+      __decideLeave(__tag);
+      if (__decideTagByKind[kind] === __tag) delete __decideTagByKind[kind];
+    }
     try { if (typeof cb === 'function') return cb.apply(this, arguments); } catch (e) { throw e; }
   };
 }
@@ -12177,8 +12215,9 @@ try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 7
 try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) {}
 
 function closeChoiceModal() {
-  /* 【2026-10-05】弹窗被关闭（含点遮罩/超时）⇒ 也要清，避免标记残留把 AI 卡死 */
-  try { __decideLeave('closeChoiceModal'); } catch (e) {}
+  /* 【2026-10-07 结构修】按**类**释放自己那一笔账（原来硬编码 'closeChoiceModal'，与 enter 的 tag 对不上；
+     旧 leave"错了也减"掩盖了它，代价是会把别的窗口的账一起抹掉 ⇒ AI 抢跑）。 */
+  try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('choiceModal'); } catch (e) {}
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
   pendingChoiceCallback = null;
@@ -13027,6 +13066,9 @@ function closeCardModal(e) {
 function closeCardPicker(e) {
   if (!e || e.target.id === 'cardPicker') {
     document.getElementById('cardPicker').classList.remove('active');
+    /* 【2026-10-07 结构修】选卡器关掉（未作答就关）时，也要释放它自己那一笔账，
+       否则没人答也没人关的账会一直挂着 ⇒ AI 永远等（或反之被旧逻辑连带抹掉别人的账） */
+    try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('cardPicker'); } catch (e2) {}
   }
 }
 // 游戏内通用选卡弹窗（从给定卡牌数组中选一张）
