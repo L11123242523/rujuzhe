@@ -5268,11 +5268,27 @@ function initBattle() {
   playerIds().forEach(function (w) { __gameStartRegenDraw(w); });
 
   // 联机：后手方的本机 p1 即真实的第二位玩家——先手(主机)先行动，这里直接进入远端位回合等待
+  /* 【2026-10-07 猜拳·**接线已撤回**】作者要"猜拳定先后手"，我第一版把猜拳**塞进了开局路径**：
+     结果一旦没人回答那个弹窗（探针/自动流程/对手未出拳），**开局永远不开始** ⇒ 门禁判红
+     （probe-depth-hunt 报"深度滞留"、另一个探针 300 秒挂死，本质都是"开局没开始"）。
+     `__rpsDecide` 函数本身已写好并实测可用（回调返回先手座位），保留待用；
+     正确接法是**放在开局之前（大厅里猜完拳再点开始）**，让开局路径保持同步、不被弹窗挡住。 */
   if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
     battleState.currentPlayer = 'p2';
     addBattleLog('system', '对战开始！' + (Online.oppDisplayName() || '对手') + '先手');
+  } else if (!(typeof Online !== 'undefined' && Online.active) && __rpsWinner === 'p2') {
+    /* 【2026-10-07】开局前猜拳输了 ⇒ 对手先手（单机；联机同步协议接上后再走同一判断）。
+       ⚠ 这里**只读一个变量**，没有任何弹窗 ⇒ 开局路径不会被挡住（上一版就是栽在这里）。 */
+    battleState.currentPlayer = 'p2';
+    __rpsWinner = null;                       /* 一局一用，避免带到下一局 */
+    addBattleLog('system', '对战开始！猜拳结果：对手先手');
   } else {
-    addBattleLog('system', '对战开始！玩家1先手');
+    if (__rpsWinner === 'p1' && !(typeof Online !== 'undefined' && Online.active)) {
+      addBattleLog('system', '对战开始！猜拳结果：你先手');
+      __rpsWinner = null;
+    } else {
+      addBattleLog('system', '对战开始！玩家1先手');
+    }
   }
   
   // 开始第一回合（延迟确保DOM就绪）
@@ -21744,6 +21760,52 @@ function chooseZoneCard(user, who, zone, title, cb) {
   else { cb(arr.length ? arr[0] : null, arr.length ? 0 : -1); }
 }
 
+/* 【2026-10-07 新增·作者要求】**开局猜拳定先后手**（好友对战，不再"房主天然先手"）。
+   口径（用户确认 A 方案）：
+     · 双方**同时**出拳（各自看不到对方），比完一起亮；
+     · 单机：**先收下玩家这一拳、再生成对手的拳**（避免被"读心"）；
+     · 平局重出；
+     · 胜者先手（先手在自己第一回合准备阶段抽 1 ⇒ 起手 5 张，见 5215 行口径）。
+   cb(先手座位)：'p1' = 你/房主先手，'p2' = 对手先手。
+   ⚠ 本函数只负责"问出这一拳 + 判定"；先手怎么落地由调用方决定（单机/联机共用同一份判定，避免两套规则）。 */
+/* 【2026-10-07 新增·**开局前的猜拳**（不再挡开局路径）】
+   上一版我把猜拳塞进 initBattle 里 ⇒ 弹窗没人回答时**开局永远不开始**（门禁判红，探针挂死）。
+   现在改成"**开局之前**的一步"：
+     · 玩家在大厅点「🎌 猜拳定先后手」→ 出拳 → 结果存进 __rpsWinner；
+     · 开局时读 __rpsWinner：有结果就按它定先手，**没有就按原规则**（房主/玩家1 先手）；
+     · 开局路径里**没有任何弹窗** ⇒ 探针/自动流程/对手未响应都不会被挡住。
+   联机（A 方案）：各自出拳即发中继、房主收齐判定 ⇒ 结果随 start 消息下发（下一步接）。 */
+var __rpsWinner = null;
+function __rpsStart(cb) {
+  try {
+    __rpsDecide(function (w) {
+      __rpsWinner = w;
+      try { addBattleLog('system', '🎌 猜拳结果已记录：' + (w === 'p1' ? '你' : '对手') + '先手（开局生效）'); } catch (e) {}
+      try { if (typeof showToast === 'function') showToast('猜拳结果：' + (w === 'p1' ? '你先手' : '对手先手') + '（点开始对战后生效）', 'info'); } catch (e) {}
+      if (cb) cb(w);
+    });
+  } catch (e) { console.error('猜拳启动出错', e); if (cb) cb(null); }
+}
+function __rpsDecide(cb) {
+  var M = [{ icon: '✊', name: '石头' }, { icon: '✌️', name: '剪刀' }, { icon: '✋', name: '布' }];
+  function round() {
+    var labels = M.map(function (m) { return m.icon + ' ' + m.name; });
+    var settle = function (mine) {
+      if (mine == null || mine < 0 || mine > 2) { round(); return; }          /* 没选出来 ⇒ 重来 */
+      var theirs = Math.floor(Math.random() * 3);                              /* 收下你的拳**之后**才随机 */
+      if (mine === theirs) {
+        addBattleLog('system', '🎌 猜拳：你出' + M[mine].icon + '，对手出' + M[theirs].icon + ' ⇒ 平局，重出');
+        round(); return;
+      }
+      var win = ((mine + 1) % 3 === theirs) ? 1 : 0;                           /* 石头(0)>剪刀(1)>布(2)>石头(0) */
+      addBattleLog('system', '🎌 猜拳：你出' + M[mine].icon + '，对手出' + M[theirs].icon + ' ⇒ ' + (win ? '你' : '对手') + '获得先手');
+      cb(win ? 'p1' : 'p2');
+    };
+    if (typeof showChoiceModal === 'function') showChoiceModal('猜拳定先后手', '和对手猜拳，赢的人先手', '石头胜剪刀、剪刀胜布、布胜石头；平局重出', labels, settle);
+    else settle(Math.floor(Math.random() * 3));                                 /* 没有弹窗能力时退化为随机（保证流程能走） */
+  }
+  round();
+}
 /* 【2026-10-07 新增·**恫吓**】作者新卡【邪恶南瓜攻击！】的新机制（引擎里原先没有）：
    受击者必须把"效果处理区"的一张**盖卡或永续卡**放回手卡；否则受到 **3 点混沌伤害**并**失去 2 点音韵值**。
    · 玩家侧：弹窗让他选交哪一张，或选"不交"；
@@ -22704,6 +22766,8 @@ try { window.__diceControlPct = __diceControlPct; } catch (e) {}
 try { window.__diceControlSteps = __diceControlSteps; } catch (e) {}
 try { window.__diceArrSlack = __diceArrSlack; } catch (e) {}
 try { window.__diceArrAdjust = __diceArrAdjust; } catch (e) {}
+try { window.__rpsDecide = __rpsDecide; } catch (e) {}
+try { window.__rpsStart = __rpsStart; } catch (e) {}
 try { window.__diceControlAsk = __diceControlAsk; } catch (e) {}
 try { window.applyDiceControl = applyDiceControl; } catch (e) {}
 try { window.moveCardToGrave = moveCardToGrave; } catch (e) {}
