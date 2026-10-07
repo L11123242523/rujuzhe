@@ -13792,6 +13792,19 @@ function __eeIdleWatchdog() {
     // 复位（可见地）：与放行判定共用 __eeForceUnlock，日志里带上"最后一次上锁位置"与调用栈
     var lastInc = ee._lastInc || null;
     if (__eeForceUnlock('检测到结算锁残留', Date.now() - ee._stuckSince)) {
+      /* 【2026-10-07】强解时必须把**现场**写全，否则只有"上锁位置"仍然定不到是哪个效果卡住的。
+         这里把"当时还有哪些效果/触发在飞"一并写进日志 —— 玩家回传日志就能直接指到那一个效果。 */
+      try {
+        var __inflight = [];
+        try { (ee.chainStack || []).forEach(function (c) { if (c && (c.label || c.name)) __inflight.push(String(c.label || c.name)); }); } catch (e) {}
+        try { var __pt = ee._pendingTriggers || []; __pt.forEach(function (t) { if (t && t.label) __inflight.push('待处理:' + String(t.label)); }); } catch (e) {}
+        try {
+          var __es = (typeof battleState !== 'undefined' && battleState && battleState.effectStack) ? battleState.effectStack : [];
+          __es.forEach(function (x) { var nm = x && (x.label || (x.card && x.card.name) || x.name); if (nm) __inflight.push('效果区:' + String(nm)); });
+        } catch (e) {}
+        addBattleLog('system', '【效果锁】当时还在飞的效果/触发（' + __inflight.length + ' 条）：' +
+          (__inflight.slice(0, 6).join('、') || '（一条都没有 —— 说明是"账没配对"，不是"效果没跑完"）'));
+      } catch (e) {}
       if (lastInc && lastInc.site) {
         addBattleLog('system', '【效果锁】最后一次上锁位置：' + lastInc.site + '（' + Math.round((Date.now() - lastInc.at) / 1000) + '秒前）');
       } else {
