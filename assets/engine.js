@@ -5498,6 +5498,20 @@ function __replayShowLast() {
 
 function startTurn() {
   if (battleState && battleState._over) return; // 对局已结束：不再开始新回合
+  /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
+     实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
+     它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
+     这是事实约束、不是超时：新回合开始 ⇒ 上一个回合的窗口到此为止（作者口径本来就是
+     "切换阶段前应先把当前连锁收完"）。这里**只收账、不替它推进**（改流程会动到对局结果，属另一件事），
+     并且**明确写日志**，不再静默。 */
+  try {
+    if (typeof TW !== 'undefined' && TW && TW.active) {
+      var __orphan = TW.active;
+      try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + __orphan.id); } catch (e) {}
+      try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) {}
+      addBattleLog('system', '【时点窗口】上一个回合的窗口（#' + (__orphan.id || '?') + '）还没关就开始新回合 ⇒ 已收掉它那本"正在决策"的账（窗口不许跨回合）');
+    }
+  } catch (e) {}
   /* 【编组生效规则·__memberGateV4】放在回合最前面，保证一定跑到（每座位一次、幂等）：
      卡面没写"作为队员编组也生效"的角色，其被动/SP 只在队长位生效。 */
   try {
@@ -7414,6 +7428,19 @@ var TW = {
       labelOf: (typeof opts.labelOf === 'function') ? opts.labelOf : null,
       passLabelOf: (typeof opts.passLabelOf === 'function') ? opts.passLabelOf : null
     };
+    /* 【2026-10-07 结构修·不许"覆盖式"丢窗口】实测（浏览器 E2E 冒烟的真实日志）：
+       这里直接 `this.active = win` 覆盖掉上一个窗口 ⇒ **旧窗口永远不会关**
+       ⇒ 它那本账（tw<id>）永久挂着（日志里 tw1/tw2 存活超过 30 秒）。
+       修法：覆盖之前先把旧窗口的账收掉（**只收账、不替它推进** —— 改流程会动到对局结果，属另一件事），
+       并把这次覆盖**明确写进日志**，不再静默。 */
+    try {
+      var __oldWin = this.active;
+      if (__oldWin && __oldWin !== win && __oldWin.id) {
+        try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + __oldWin.id); } catch (e) {}
+        try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) {}
+        addBattleLog('system', '【时点窗口】上一个窗口（#' + __oldWin.id + '）还没关就被新窗口取代 ⇒ 已收掉它那本"正在决策"的账');
+      }
+    } catch (e) {}
     this.active = win;
     if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
     addBattleLog('system', '【时点窗口】打开（' + win.type + '，回合方=' + this._whoName(tp) + '，初始候选 ' + win.candidates.length + '）');
@@ -7677,6 +7704,19 @@ var TW = {
       done: (typeof opts.done === 'function') ? opts.done : function () {},
       titleOf: null, bodyOf: null, labelOf: null, passLabelOf: null, onClose: null
     };
+    /* 【2026-10-07 结构修·不许"覆盖式"丢窗口】实测（浏览器 E2E 冒烟的真实日志）：
+       这里直接 `this.active = win` 覆盖掉上一个窗口 ⇒ **旧窗口永远不会关**
+       ⇒ 它那本账（tw<id>）永久挂着（日志里 tw1/tw2 存活超过 30 秒）。
+       修法：覆盖之前先把旧窗口的账收掉（**只收账、不替它推进** —— 改流程会动到对局结果，属另一件事），
+       并把这次覆盖**明确写进日志**，不再静默。 */
+    try {
+      var __oldWin = this.active;
+      if (__oldWin && __oldWin !== win && __oldWin.id) {
+        try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + __oldWin.id); } catch (e) {}
+        try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) {}
+        addBattleLog('system', '【时点窗口】上一个窗口（#' + __oldWin.id + '）还没关就被新窗口取代 ⇒ 已收掉它那本"正在决策"的账');
+      }
+    } catch (e) {}
     this.active = win;
     if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
     this.settle(win);
@@ -12075,6 +12115,17 @@ function __decideLiveTags() {
       if (last && last.__decideTag) live[last.__decideTag] = 1;
     }
   } catch (e) {}
+  /* 【2026-10-07 修】连锁窗的豁免原来写成"只要**任何**窗口开着，所有 chainChoice 账都保留" ——
+     太宽：被覆盖掉的旧窗口的 chainChoice 会跟着一起被永久保留（实测 tw1/tw2 泄漏时它也在）。
+     现在只保留**最后一个** chainChoice（一次只可能有一个连锁窗在屏上），与选卡器同一口径。 */
+  try {
+    if (typeof TW !== 'undefined' && TW && TW.active) {
+      var all = (typeof Decision !== 'undefined' && Decision.snapshot) ? (Decision.snapshot().tags || []) : [];
+      for (var i = all.length - 1; i >= 0; i--) {
+        if (String(all[i]).indexOf('__decide:chainChoice#') === 0) { live[all[i]] = 1; break; }
+      }
+    }
+  } catch (e) {}
   return live;
 }
 function __decideReconcile(why) {
@@ -12182,11 +12233,25 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
      由 __dequeueChoice / __drainChoiceQueueWhenIdle 在旧的答完后放出）。
      —— 注意：不要改成"把旧的回调按 null 补答"，那会让效果**重复执行**（card_expect_batchB「查阅」手牌 +5，已实测）。 */
   try {
-    if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback &&
+    var __qm = document.getElementById('choiceModal');
+    var __modalOnScreen = !!(__qm && __qm.classList && __qm.classList.contains('active'));
+    if (__modalOnScreen && typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback &&
         typeof _choiceQueue !== 'undefined' && _choiceQueue) {
       _choiceQueue.push({ title: title, cardName: cardName, effect: effect, choices: choices, callback: callback });
       try { addBattleLog('system', '【弹窗排队】“' + title + '”等当前询问答完再弹（不覆盖 ⇒ 不会丢掉旧应答）'); } catch (e) {}
       return;
+    }
+    /* 【2026-10-07 修·**陈旧句柄**（作者实测："卡片打出没有动画提示了"）】
+       上面那个守卫原来只看 `pendingChoiceCallback` **这个变量** —— 可它可能是**陈旧的**：
+       弹窗早就不在屏幕上了，变量还留着。那样它承载的那笔账已经不可能被应答（回调永远不会到），
+       却会把**之后所有**弹窗全部挡进队列 ⇒ 玩家看到的是"出牌之后什么都没发生、没提示、没动画"。
+       现在改成按**事实**判断（弹窗是否真在屏幕上）；陈旧就当场收掉它那本账再正常渲染。
+       —— 与 __decideLiveTags / __eeRawWaitReason 同一口径：**只认屏幕上看得见的窗口**。 */
+    if (!__modalOnScreen && typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) {
+      var __stale = pendingChoiceCallback;
+      try { if (__stale && __stale.__decideTag && typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave(__stale.__decideTag); } catch (e) {}
+      try { pendingChoiceCallback = null; } catch (e) {}
+      try { addBattleLog('system', '【询问】上一个句柄已陈旧（弹窗不在屏幕上）⇒ 已收掉它那本账，继续弹新的'); } catch (e) {}
     }
   } catch (e) {}
   var modal = document.getElementById('choiceModal');
@@ -22065,16 +22130,16 @@ try { window.__aiSelfHarmOf = __aiSelfHarmOf; } catch (e) {}
 try { window.__aiNetOf = __aiNetOf; } catch (e) {}
 try { window.aiDecideChain = aiDecideChain; } catch (e) {}
 try { window.CardAnim = CardAnim; } catch (e) {}
-/* 【作者 2026-10-06 要求：删掉连锁动画】把 ChainAnim 的全部视觉方法替换为 no-op。
-   对象与字段保留（调用点不会报错），**结算与逻辑完全不受影响**（动画层本就不承重）。 */
-try {
-  if (typeof ChainAnim !== 'undefined' && ChainAnim) {
-    ['begin', 'push', 'flash', 'resolving', 'done', 'end', '_cardResolve', '_el', '_anim'].forEach(function (k) {
-      try { ChainAnim[k] = function () {}; } catch (e) {}
-    });
-    try { ChainAnim._nodes = []; ChainAnim._cards = []; } catch (e) {}
-  }
-} catch (e) {}
+/* 【2026-10-07 · 恢复连锁动画】
+   这里原本（2026-10-06）是这么一块：把 ChainAnim 的 9 个视觉方法（begin/push/flash/resolving/done/end/
+   _cardResolve/_el/_anim）全部替换成 no-op，注释写的是"作者要求删掉连锁动画"。
+   但**作者留档的 2026-10-06 反馈原话是**：「没有动画强制结算是这样的，导致效果乱入」
+   —— 他要的是"**让动画管住结算节奏**"，不是"把动画删掉"；而 2026-10-07 作者实测反馈
+   「少了连锁动画」。⇒ 判断那次删动画是**把口径理解反了**，现在恢复。
+   安全性：动画层**不承重**（ChainAnim/CardAnim 的每个调用点都包了 try/catch，
+   ShowQueue 只负责"演出期输入锁"），所以恢复它不会影响结算与逻辑。
+   想临时关掉仍可用既有开关：`window.__UI_ANIM = false`（CardAnim.enabled() 会认它）。
+   —— 若恢复后出现任何异常，把这段 no-op 块加回来即可（我已把原文保留在提交说明里）。 */
 try { window.ChainAnim = ChainAnim; } catch (e) {}
 try { window.__twClearStaleChainLock = __twClearStaleChainLock; } catch (e) {}
 try { window.__mdOrderSimultaneous = __mdOrderSimultaneous; } catch (e) {}
