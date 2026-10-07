@@ -800,6 +800,18 @@ var Online = {
   },
   _onRelay:function(m){
     if(!m||!m.k) return;
+    /* 【2026-10-07 现场诊断·客人侧收消息入口】
+       作者实测："只要是需要玩家选择的卡（先哲之馈赠/蓝图/盒子/绿杖…）都不行" ⇒ 说明**房主发来的
+       "选择题"没送到客人**（不需要选择的卡在房主那边结算，所以正常）。
+       这里把关键几类消息的到达情况写进日志，复现一次就能区分两种根因：
+         · 没有「🔎【联机诊断】收到 relay:ask」这行 ⇒ **消息没送到**（发送/中继/连接层）；
+         · 有这行但没有弹窗                 ⇒ **送到了但没画出来**（客人侧渲染层）。
+       只记关键几类（ask/ans/intent/answer），不记高频的 ev/fx/snap，避免刷屏。 */
+    try{
+      if(m.k==='ask'||m.k==='ans'||m.k==='intent'||m.k==='answer'){
+        addBattleLog('system','🔎【联机诊断】收到 relay:'+m.k+(m.k==='ask'?('（问题：'+((m.spec&&m.spec.label)||'未命名')+'；kind='+((m.spec&&m.spec.kind)||'-')+'；cards='+(((m.spec&&m.spec.cards)||[]).length)+'；choices='+(((m.spec&&m.spec.choices)||[]).length)+'）'):''));
+      }
+    }catch(e){}
     var self=this;
     switch(m.k){
       /* 【2026-10-07 猜拳定先后手·联机（A 方案：各自出拳即发、房主收齐判定）】
@@ -1467,7 +1479,10 @@ var Online = {
     var id='q'+(++this._askSeq);
     this._asks[id]={ cb:cb, spec:spec, at:Date.now() };
     var __sent=false;
-    try{ this._send({t:'relay', m:{k:'ask', id:id, spec:spec}}); __sent=true; }catch(e){ __sent=false; }
+    /* ⚠ 必须看 `_send` 的**返回值**：它在 ws 未就绪时**静默 return false**（不抛异常）。
+       我上一版只 try/catch、不看返回值 ⇒ 会把"根本没发出去"当成"已发出、正在等对手"，
+       于是房主一直等一个不存在的回答（双实例探针实测：客人侧 ask 收到 0 条）。 */
+    try{ __sent = (this._send({t:'relay', m:{k:'ask', id:id, spec:spec}}) === true); }catch(e){ __sent=false; }
     if(!__sent){
       delete this._asks[id];
       try{ __onlineDiverge('无法把选择「'+(spec.label||'')+'」发给对手（连接异常）——本次选择未能询问对方'); }catch(e){}
