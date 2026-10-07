@@ -16915,11 +16915,15 @@ function runOneOp(op, ctx, next) {
 
 function runOps(ops, ctx, done) {
   var __ee=(typeof effectEngine!=='undefined')?effectEngine:null;
-  __eeMarkInc('runOps·效果步骤序列');
-  __eeDepthAdd(__ee,'runOps·进入');
+  /* 【2026-10-07】深度账本的标签带上**卡名**：出"结算完了还锁着"时，日志能直接说出是哪张卡的嵌套链没跑完
+     （原来只写 'runOps·进入'，认不出是谁；实测滞留形态就是"6 笔 +1 只配上 3 笔 -1"）。
+     纯诊断字符串，不参与任何判定；取不到卡名就退回原标签。 */
+  var __tag = (ctx && ctx.card && ctx.card.name) ? ('runOps·' + ctx.card.name) : 'runOps·效果步骤序列';
+  __eeMarkInc(__tag);
+  __eeDepthAdd(__ee,'runOps·进入[' + __tag.slice(7) + ']');
   var i = 0;
   (function step() {
-    if (i >= ops.length) { __eeDepthSub(__ee,'runOps·走完 ops'); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
+    if (i >= ops.length) { __eeDepthSub(__ee,'runOps·走完 ops[' + __tag.slice(7) + ']'); if (done) done(); try { __tryDrainTriggers(); } catch (e) {} try { __eeAfterRelease(); } catch (e) {} return; }
     try { runOneOp(ops[i++], ctx, step); }
     catch (e) { console.error('runOneOp error:', e); addBattleLog('system', '效果步骤执行异常（已跳过该步骤继续）：' + ((e && e.message) || e)); step(); }
   })();
@@ -16956,8 +16960,12 @@ function dispatchStep(text, ctx, next) {
 }
 
 function executeEffectSteps(steps, context, finalCallback, showLog) {
-  __eeMarkInc('executeEffectSteps·逐步骤结算');
-  var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null; __eeDepthAdd(__ee2,'runOps家族·进入');
+  var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null;
+  /* 【2026-10-07】标签带卡名，便于线上从日志认出"是哪张卡的嵌套链没跑完"（纯诊断，不参与判定）。
+     ⚠ 标记必须**紧邻**在上锁那一行之前（effect_lock_test 有这条静态断言，我第一版插了两行就被抓到）。 */
+  var __tag2 = (context && context.card && context.card.name) ? context.card.name : '未记录';
+  __eeMarkInc('executeEffectSteps·逐步骤结算' + (__tag2 === '未记录' ? '' : '（' + __tag2 + '）'));
+  __eeDepthAdd(__ee2,'runOps家族·进入[' + __tag2 + ']');
   // 嵌套链保护：保存外层日志与自动结算标志，链结束后恢复，避免外层 AI 链被内层提前复位
   var __prevLog = effectEngine.effectLog;
   var __prevAuto = effectEngine.autoResolve;
@@ -16969,7 +16977,7 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
   var currentStep = 0;
   
   function __finalize() {
-    __eeDepthSub(__ee2,'runOps家族·释放');
+    __eeDepthSub(__ee2,'runOps家族·释放[' + __tag2 + ']');
     /* 2026-09-27：原先静默吞。释放点出错会让锁/深度留在原地 ⇒ 出声，并用 S5 的清理器兜一下
        （清理器只在"无窗口、无结算深度、无待结算动作"时才动手，不会放掉正在结算的锁）。 */
     try { __eeAfterRelease(); } catch (e) {
