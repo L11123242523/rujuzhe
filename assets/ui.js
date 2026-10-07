@@ -1291,9 +1291,19 @@ function showOppZone(zone) {
   if (typeof showTargetCards === 'function') showTargetCards('p2', zone, title, false, null);
 }
 
-function showTargetCards(player, zone, title, selectable, callback) {
+function showTargetCards(player, zone, title, selectable, callback, decider) {
   // C 阶段·第 2 步收尾：同样走决策出口（选卡决策；纯查看时 selectable=false，实现里只画不选）
-  return ENV.ask('p1', { kind: 'targetCards', player: player, zone: zone, label: title, selectable: selectable }, callback);
+  /* 【2026-10-07 修·联机客人"要选的卡点了没反应、弹窗不出现"】
+     原来这里是 `ENV.ask('p1', …)` —— 座位**硬编码 p1**：在房主那一端 p1 = 房主自己
+     ⇒ 房主**问自己**，客人那边什么也收不到（作者实测症状）。
+     现在把两件事分开、写清楚：
+       · `player`  = **从谁的区域里选**（读哪一份数据）；
+       · `decider` = **谁来决定**（询问发给谁；缺省 = player）。
+     联机时 ENV.ask 会把"非本机座位"转发给对端 ⇒ 客人自己那边画弹窗、自己作答。
+     调用点要传 decider（出手的人）：例如【善意面具】是"从自己手牌选"⇒ decider=出手者；
+     【妖刀五月雨】是"破坏对方场上1张"⇒ 区域是对方的、但决策人仍是出手者。 */
+  var __askSeat = decider || player;
+  return ENV.ask(__askSeat, { kind: 'targetCards', player: player, zone: zone, label: title, selectable: selectable }, callback);
 }
 
 function showAttackCardSelect(attackCards, callback) {

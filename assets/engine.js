@@ -802,6 +802,27 @@ var Online = {
     if(!m||!m.k) return;
     var self=this;
     switch(m.k){
+      /* 【2026-10-07 猜拳定先后手·联机（A 方案：各自出拳即发、房主收齐判定）】
+         ⚠ 座位语义：**本机永远是 p1、对手是 p2**（见本文件开头说明）
+           ⇒ `__rpsWinner='p2'` 恒表示"**本机后手**"；房主判定用 host/guest 表达，两边各自换算。 */
+      case 'rps': {
+        this._rpsFoe = (m.v | 0);
+        try { addBattleLog('system', '🎌 猜拳：对手已出拳'); } catch (e) {}
+        if (!this.isGuest) this._rpsHostResolve();
+        break;
+      }
+      case 'rpsResult': {
+        try { window.__rpsWinner = (m.first === 'host') ? 'p2' : 'p1'; } catch (e) {}
+        try { addBattleLog('system', '🎌 猜拳结果：' + (m.first === 'host' ? '对手' : '你') + '获得先手（开局生效）'); } catch (e) {}
+        try { if (typeof showToast === 'function') showToast('猜拳结果：' + (m.first === 'host' ? '对手先手' : '你先手'), 'info'); } catch (e) {}
+        break;
+      }
+      case 'rpsTie': {
+        this._rpsFoe = null;
+        try { addBattleLog('system', '🎌 猜拳平局，请重新出拳'); } catch (e) {}
+        try { if (typeof showToast === 'function') showToast('猜拳平局，请再出一次', 'warn'); } catch (e) {}
+        break;
+      }
       case 'deck':
         try{
           // 收到的永远是"对手那一套"：本机自己是 p1，所以写到 foeOf('p1')（1v1 = p2）
@@ -1269,6 +1290,40 @@ var Online = {
         · 旧协议房主：本地操作由它自己的引擎执行（sendIntent 是空操作，pushSnapshot 会推状态）。
         · 旧协议客人：发 {t:'relay', m:{k:'act', a}} 给房主（原样保留）。
      这三个入口（客人拦截块 / 本机 UI 点击 / sendIntent）现在都走 sendAct，行为由模式决定。 */
+  /* 【2026-10-07】联机猜拳：问本机出拳 → 发出 → 房主收齐判定（客人等结果）。
+     为什么先手要"等结果"而不在本函数返回：联机下两边必须**同一份判定**，由房主算完回发。 */
+  rpsPick:function(cb){
+    var self=this;
+    var M=[{icon:'✊',name:'石头'},{icon:'✌️',name:'剪刀'},{icon:'✋',name:'布'}];
+    var settle=function(v){
+      if(v==null||v<0||v>2){ self.rpsPick(cb); return; }     /* 没选出来 ⇒ 重问 */
+      self._rpsMine = v|0;
+      self._send({t:'relay', m:{k:'rps', v:self._rpsMine}});
+      try{ addBattleLog('system','🎌 猜拳：你出'+M[v].icon+'，等待对手出拳…'); }catch(e){}
+      if(!self.isGuest) self._rpsHostResolve();              /* 房主：若对手已出拳则立刻判定 */
+      if(cb) cb(null);                                       /* 联机下先手以 rpsResult 为准 */
+    };
+    if(typeof showChoiceModal==='function') showChoiceModal('猜拳定先后手','和对手猜拳，赢的人先手','石头胜剪刀、剪刀胜布、布胜石头；平局重出', M.map(function(m){return m.icon+' '+m.name;}), settle);
+    else settle(Math.floor(Math.random()*3));
+  },
+  /* 【2026-10-07】房主判定（A 方案）：收齐双方出拳 → 判胜负 → 回发结果；平局则通知重出。
+     判定规则与单机**共用同一条**（石头(0)>剪刀(1)>布(2)>石头(0)），不写两套。 */
+  _rpsHostResolve:function(){
+    if(this._rpsMine==null || this._rpsFoe==null) return;
+    var ICON=['✊','✌️','✋'];
+    var mine=this._rpsMine|0, foe=this._rpsFoe|0;
+    this._rpsFoe=null;
+    if(mine===foe){
+      this._send({t:'relay', m:{k:'rpsTie'}});
+      try{ addBattleLog('system','🎌 猜拳：双方都出'+ICON[mine]+' ⇒ 平局，请重新出拳'); }catch(e){}
+      return;
+    }
+    var first = (((mine+1)%3===foe) ? 'host' : 'guest');
+    try{ window.__rpsWinner = (first==='host') ? 'p1' : 'p2'; }catch(e){}
+    this._send({t:'relay', m:{k:'rpsResult', first:first}});
+    try{ addBattleLog('system','🎌 猜拳：你出'+ICON[mine]+'，对手出'+ICON[foe]+' ⇒ '+(first==='host'?'你':'对手')+'获得先手（开局生效）'); }catch(e){}
+    try{ if(typeof showToast==='function') showToast('猜拳结果：'+(first==='host'?'你先手':'对手先手'),'info'); }catch(e){}
+  },
   sendIntent:function(a){
     /* 旧协议房主：本地已经执行完了，这里本来就是空操作。
        服务器权威：必须真的发出去（少数没有经过拦截块的调用点会走到这里）。 */
@@ -1439,13 +1494,13 @@ var Online = {
      两边的问题形状本来就同源（都是 ENV.ask 的 spec），只是通道不同（relay/ans 与 engine/ans）。 */
   _onAsk:function(m){
     var self=this;
-    this._renderAsk(m.spec||{}, function(v){ self.sendAnswer(m.id, v); });
+    this._renderAsk(m.spec||{}, function(v){ self.sendAnswer(m.id, v); }, true);   /* true = 来自房主 ⇒ 座位要按视角换算 */
   },
   /* 用现成弹窗把一个问题画出来，把选择交给 done(v)。
      支持：choices（单选）、cards（单选/多选 need/allowLess）、其余退化成 prompt。
      形状不认识的类型（例如服务器发来的 targetPlayer —— publicSpec 没带效果文本）**明确写日志**再按默认继续，
      绝不静默地把默认值当成"玩家的选择"。 */
-  _renderAsk:function(spec, done){
+  _renderAsk:function(spec, done, fromHost){
     spec=spec||{};
     var label=spec.label||'请选择';
     // 回传的是"出题人那份列表的下标"：若给了 indices 映射就翻译，否则原样回传
@@ -1477,6 +1532,30 @@ var Online = {
           });
         };
         step();
+        return;
+      }
+      /* 【2026-10-07 修·**联机客人"要选的卡点了没反应、弹窗不出现"**】
+         出题方（房主）发来的"选卡"询问只带 `kind:'targetCards'` + `player/zone`，**不带候选列表**；
+         原先它直接落到下面那个"没有候选可画"的分支 ⇒ `done(null)`：弹窗不画、选择被静默跳过
+         （作者实测：联机时客人用需要选的卡，点了什么也没有）。
+         修法：**就地取材** —— 客人本地有同步过来的 battleState，直接按 spec 的 player/zone 取候选来画，
+         **不需要新增任何协议往返**；座位按视角换算（本机永远是 p1，房主的 p1 在本机是 p2），
+         下标按出题方视角回传（两端数组同序，锁步同步保证）。 */
+      if (String(spec.kind || '') === 'targetCards' && spec.player && spec.zone && typeof battleState !== 'undefined' && battleState) {
+        var __seat = spec.player;
+        if (fromHost && typeof Online !== 'undefined' && Online && Online.isGuest) __seat = (__seat === 'p1') ? 'p2' : (__seat === 'p2' ? 'p1' : __seat);
+        var __arr = (battleState[__seat] && battleState[__seat][spec.zone]) || [];
+        if (__arr.length) {
+          var __opts = __arr.map(function (c, i) { return (i + 1) + '. ' + ((c && c.name) || '（未知卡）'); });
+          if (spec.selectable === false) {   /* 纯查看：只画不选 */
+            showChoiceModal(label, '', (spec.text || '仅供查看'), __opts.concat(['关闭']), function () { done(null); });
+            return;
+          }
+          showChoiceModal(label, '', (spec.text || '选择一张卡'), __opts, function (i) { done(i); });
+          return;
+        }
+        try { addBattleLog('system', '【联机】「' + label + '」在本机没有可选的卡（区域为空），按默认继续'); } catch (e) {}
+        done(null);
         return;
       }
       if(spec.kind && spec.kind!=='choice' && spec.kind!=='pickCards' && spec.kind!=='pickList'){
@@ -5292,6 +5371,9 @@ function initBattle() {
   }
   
   // 开始第一回合（延迟确保DOM就绪）
+  /* 【2026-10-07】"游戏内先猜拳"的接线**已撤回**：它让 probe-depth-sweep 出现 1 次强解（绿宝之杖·择），
+     门禁判红 ⇒ 按纪律不发布。猜拳目前仍在大厅（v107 已上线的做法）：开局路径里不放询问，永远不会挡住开局。
+     下一步要放进游戏内，必须先让"开局猜拳"与结算流程互不干扰（探针能过），再上。 */
   setTimeout(function() {
     try {
       startTurn();
@@ -21778,6 +21860,12 @@ function chooseZoneCard(user, who, zone, title, cb) {
 var __rpsWinner = null;
 function __rpsStart(cb) {
   try {
+    /* 【2026-10-07】联机：走 Online.rpsPick（出拳发中继、房主判定、结果回发）——
+       单机与联机**共用同一条判定规则**，只是"对手那一拳"的来源不同（随机 / 中继）。 */
+    if (typeof Online !== 'undefined' && Online && Online.active && typeof Online.rpsPick === 'function') {
+      Online.rpsPick(cb);
+      return;
+    }
     __rpsDecide(function (w) {
       __rpsWinner = w;
       try { addBattleLog('system', '🎌 猜拳结果已记录：' + (w === 'p1' ? '你' : '对手') + '先手（开局生效）'); } catch (e) {}
