@@ -2623,7 +2623,7 @@ window.__CARD_DATA__ = {
     "永奏进行曲"
    ],
    "combo_notes": "3费打2点理智伤害并压2点防御（持续2次行动）。枫(水着)队长追加1段1点理智伤害，予(水着)再给全队理智伤害+1。破甲链先铺杂鱼！杂鱼！降3点防御，再用这张压成负数，负防目标最终伤害再+1。墓地SP送一张卡即可回手，每回合白送一次送墓，配永奏进行曲每次进墓打1点无序伤害。",
-   "image_url": "assets/images/ui2/img_uZjl4gBK6Y.webp?v=3",
+   "image_url": "assets/images/ui2/img_uZjl4gBK6Y.webp?v=4",
    "character_full": "枫(水着)",
    "_category": "skill_cards",
    "dims": {
@@ -2884,7 +2884,7 @@ window.__CARD_DATA__ = {
     "Huginn&Muninn"
    ],
    "combo_notes": "镌刻把同步值当燃料：每回合付4同步换2音韵，同步掉到一半以下后同样的支付翻倍到4音韵，且每失去4同步全队攻击力+1。血之佑戒每回合花2同步给最终伤害+1、妖刀五月雨每发动一次失3同步，两家开销正好把镌刻的攻击力喂起来；永奏进行曲的墓地SP也付4同步，顺手把回音韵推到翻倍档。",
-   "image_url": "assets/images/ui2/img_VK0GAj3BqV.webp?v=3",
+   "image_url": "assets/images/ui2/img_VK0GAj3BqV.webp?v=4",
    "_category": "item_permanent",
    "card_type": "道具/永续",
    "tags": [
