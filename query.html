@@ -2729,7 +2729,11 @@ function renderValidation(){
   // 属性匹配
   const req = getAttrRequirement();
   const current = {'无序':0,'热忱':0,'理智':0,'混沌':0};
-  deck.items.forEach(item=>{if(item){const card=item.category==='item_permanent'?DB.item_permanent[item._idx]:DB.item_single[item._idx];current[card.attribute]=(current[card.attribute]||0)+1;}});
+  /* 【2026-10-07】按"**规则属性**"统计：卡面写"在规则上还能当作 X 属性使用"的卡（如镌刻的艺术 ⇒ 无序）
+     要算在 X 那个位置上，否则编组界面永远报"道具属性分配不满足需求"（作者实测反馈）。
+     字段来自**数据**（rule_attr），与对战站 engine.js 的 __ruleAttrOf 同一来源，避免两站各写一份而漂移。 */
+  const ruleAttrOf = (c) => (c && (c.rule_attr || c.attribute)) || '';
+  deck.items.forEach(item=>{if(item){const card=item.category==='item_permanent'?DB.item_permanent[item._idx]:DB.item_single[item._idx];const a=ruleAttrOf(card);current[a]=(current[a]||0)+1;}});
   let attrOk = true;
   Object.entries(req).forEach(([attr,count])=>{if((current[attr]||0)<count)attrOk=false;});
   if(attrOk) items.push({ok:true,text:'道具属性分配合规'});
@@ -3773,7 +3777,7 @@ function randomByArchetype(){
     // 角色协同
     if(teamSynergyItems.has(c.name)) score += 6;
     // 属性需求满足（高优先级）
-    if(attrNeed[c.attribute] && attrNeed[c.attribute] > 0) score += 5;
+    {const _a=(c&&(c.rule_attr||c.attribute))||""; if(attrNeed[_a] && attrNeed[_a] > 0) score += 5;}
     // 通用功能
     const eff = (c.effect||'')+(c.passive||'');
     if(/回.*音韵|回复.*费|\+.*音韵|自然回复/.test(eff)) score += 2;
@@ -4194,7 +4198,7 @@ function randomByArchetype(){
   // ===== 第一步：严格按属性需求补全（属性硬约束）=====
   // 计算已选卡属性分布
   let selectedAttrs = {};
-  selectedItems.forEach(c=>{selectedAttrs[c.attribute]=(selectedAttrs[c.attribute]||0)+1;});
+  selectedItems.forEach(c=>{const a=(c&&(c.rule_attr||c.attribute))||"";selectedAttrs[a]=(selectedAttrs[a]||0)+1;});
   // 计算剩余属性需求
   let remainingAttrNeed = {};
   for(const [attr, need] of Object.entries(attrNeed)){
@@ -4218,7 +4222,7 @@ function randomByArchetype(){
     }
     // 重新计算
     selectedAttrs = {};
-    selectedItems.forEach(c=>{selectedAttrs[c.attribute]=(selectedAttrs[c.attribute]||0)+1;});
+    selectedItems.forEach(c=>{const a=(c&&(c.rule_attr||c.attribute))||"";selectedAttrs[a]=(selectedAttrs[a]||0)+1;});
     remainingAttrNeed = {};
     for(const [attr, need] of Object.entries(attrNeed)){
       const remain = need - (selectedAttrs[attr]||0);

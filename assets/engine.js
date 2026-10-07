@@ -3505,6 +3505,10 @@ function __extraSyncCostOf(card) {
 function __ruleAttrOf(card) {
   try {
     if (!card) return '';
+    /* 【2026-10-07】**优先读数据里的声明**（rule_attr）——这是唯一来源：
+       查询站（query.html 的编组界面）与对战站都要认同一条规则，写两处必然漂移。
+       名字兜底只为兼容"数据还没带上该字段"的旧数据。 */
+    if (card.rule_attr) return String(card.rule_attr);
     var n = String(card.name || '');
     if (n.indexOf('镌刻的艺术') >= 0) return '无序';   /* 卡面：「这张卡在规则上还能当作无序属性的卡使用」 */
     return card.attribute || '';
