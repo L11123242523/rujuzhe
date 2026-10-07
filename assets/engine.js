@@ -11918,14 +11918,12 @@ function __drawPickPage(kind, player, cb) {
 function drawGiftCard(player, pickName) {
   if (!battleState) return;
   var p = battleState[player];
-  /* 【2026-10-01 抽取页面】玩家侧先点选（AI / 已选过 / 自动结算 跳过） */
-  if (!pickName && player === 'p1' && !(typeof effectEngine !== 'undefined' && effectEngine && effectEngine.autoResolve)) {
-    var __gp0 = (typeof __pileGet === 'function') ? __pileGet('gifts') : null;
-    if (__gp0 && __gp0.length > 1) {
-      __drawPickPage('gifts', player, function (nm) { drawGiftCard(player, nm || '__auto__'); });
-      return;
-    }
-  }
+  /* 【2026-10-07 作者要求：**把馈赠卡动画删了**】
+     原来这里会在"馈赠卡堆还有 1 张以上"时弹出**抽取页面**（玩家自己点选点哪格取哪张），
+     作者反馈这动画多余（而且它会被别的流程带出来、看着像 bug）⇒ **去掉这一层，直接结算**。
+     注意：只动**馈赠卡**这一条；御神签的抽取页面（__drawPickPage('omikuji', …)）保持原样。
+     pickName 参数保留 —— 其它调用点（惠SP / 伊织SP / draw_gift 指令层）仍可按名字指定要抽哪张。 */
+
   function __doDraw(remove2) {
     // 馈赠卡池：200$, 500$, 1000$, Noise(>10), Noise(≤10), 和声
     var giftPool = [
