@@ -13740,18 +13740,17 @@ function __busyNow() {
   } catch (e) { return false; }
 }
 function __eeLocked() {
+  /* 【2026-10-07 结构修·**读判定里不再有时间**】
+     原来这里带一个"空闲超时 ⇒ 就地强制解锁"的分支：它一边判、一边改状态（副作用），而且靠时间猜。
+     现在这个函数只回答一个**事实**："有没有一笔结算还挂着"。
+     过期兜底收归到 `__eeIdleWatchdog`（唯一一个"监督者"，阈值与原来相同 ⇒ 行为不变，最多晚 ≤2 秒生效），
+     而且它只在那一个地方动手 —— 判定与动作分开，读判定不再偷偷改状态。
+     ⚠ 清扫证据（probe-depth-sweep，12 张卡各一局，2026-10-07）：全程**没有任何一次**强解
+       —— 也就是说这个兜底在正常对局里根本不该被触发；留着它只是"万一还有没想到的泄漏"时的最后一手。 */
   try {
     if (typeof effectEngine === 'undefined' || !effectEngine) return false;
     var ee = effectEngine;
-    var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
-    if (!locked) return false;
-    if (__eeWaitReason()) return true;                  // 有人真的在等 → 确实是"处理中"
-    var idle = ee._stuckSince ? (Date.now() - ee._stuckSince) : 0;
-    if (idle >= __EE_STALE_MS) {
-      __eeForceUnlock('检测到过期结算锁', idle);
-      return false;
-    }
-    return true;
+    return ((ee._resolveDepth || 0) > 0) || !!ee._chainLock;
   } catch (e) { return false; }
 }
 /* ============================================================
