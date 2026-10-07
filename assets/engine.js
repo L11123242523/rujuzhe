@@ -9821,45 +9821,43 @@ function aiResourceStep(done) {
 function __aiGuard(fn) {
   return function () {
     var args = arguments, self = this;
-    try {
-      /* 【S-a/S-c 2026-10-06·**结算推进豁免**】TW.settle 的 step 会被打上 __settleStep 标记 ——
-         它是"逆结算流程自己的推进"，**不是 AI 抢跑**，所以不能因为"某处有人类窗口开着"就延后；
-         否则窗口会停在 settling、结算深度卡 1、整链停摆（= 作者报的"效果被卡掉/抽二丢一消失"）。
-         仍然走 __aiGuard 包装（守门探针 probe-ai-tick-gate 要求"不许绕过"），只是**不做人类窗口检查**。 */
-      if (fn && fn.__settleStep) { fn.apply(self, args); return; }
+    /* 【S-a/S-c 2026-10-06·**结算推进豁免**】TW.settle 的 step 会被打上 __settleStep 标记 ——
+       它是"逆结算流程自己的推进"，**不是 AI 抢跑**，所以不能因为"某处有人类窗口开着"就延后；
+       否则窗口会停在 settling、结算深度卡 1、整链停摆（= 作者报的"效果被卡掉/抽二丢一消失"）。
+       仍然走 __aiGuard 包装（守门探针 probe-ai-tick-gate 要求"不许绕过"），只是**不做人类窗口检查**。 */
+    if (fn && fn.__settleStep) { fn.apply(self, args); return; }
+    /* 【2026-10-07 结构修】**等待次数必须属于"这一次等待"**。
+       原来用的是 `__aiGuard._DEFER` 这个**全局共享**计数器：某次等待累到 1400 就放行过一次之后，
+       计数器并不会归零到"这次等待"的语义（只有到 1500 才清零）⇒ 之后一次毫不相干的等待只需 100 拍
+       就会被放行 ⇒ **抢跑**。另外 `__aiGuard._tries = 0` 是没人读的死代码，一并去掉。
+       现在 __defer 是本次调用的局部变量，随这一次等待生灭 ✓ */
+    var __defer = 0;
+    var __attempt = function () {
       /* 【批次2·关键】只等"**人类**正在决策" ⇒ 绝不等 AI 自己在等的决策（那是循环等待 ⇒ 卡死 ✗） */
       var busy = false;
       try {
         if (typeof Decision !== 'undefined' && Decision && Decision.isHumanOpen) busy = !!Decision.isHumanOpen(typeof isAISeat === 'function' ? isAISeat : null);
         else if (typeof __playerDeciding === 'function') busy = !!__playerDeciding();
         else busy = !!(battleState && battleState._awaitingDecision);
+        /* 【2026-10-06 演出期同样要等 —— 作者报「AI 抢跑又回来了」的直接修复】
+           演出队列（ShowQueue）正在播动画时，AI 不得抢在动画之前行动。并入**同一个等待条件**：
+           仍然是"等"（不丢弃这一步、也不超时放行），不新增任何计时器或兜底分支。 */
+        if (!busy && typeof window !== 'undefined' && window.__showBusy) busy = true;
       } catch (e) { busy = false; }
-      /* 【2026-10-06 演出期同样要等 —— 作者报「AI 抢跑又回来了」的直接修复】
-         演出队列（ShowQueue）正在播动画时，AI 不得抢在动画之前行动。
-         原因：在此之前"动画"与"逻辑"是串联的，AI 的下一步天然排在动画之后；
-         v65–v69 把逻辑与演出解耦（禁止清单 B1 要求）之后，逻辑立即推进 ⇒ AI 立即行动
-         ⇒ 动画还在播就抢跑。
-         这里把"演出期"并入**同一个等待条件**：仍然是"等"（不丢弃这一步、也不超时放行），
-         完全复用下面既有的等待机制，不新增任何计时器或兜底分支。 */
-      if (!busy && typeof window !== 'undefined' && window.__showBusy) busy = true;
+      if (!busy) return fn.apply(self, args);
       /* 【口径 ①(b) 2026-10-06】玩家在决策时**坚决不放行** —— 一直等他点。
-         原来是"最多 12 次 ≈2.4 秒就放行"，那正是「琉璃·抽2选1弃」等谈窗被当超时跳过的直接原因
-         （作者实测日志：谈窗没等到点击就被放行 ⇒ 整段阶梯消失，只剩"回1音韵"）。
-         另外原来 `_tries > 150` 会 **丢弃** AI 这一步，也一并去掉 —— 等待统一由这里负责，
-         只保留一个**很长**的兜底（1500 次 ≈5 分钟）用于"弹窗异常打不开 ⇒ 整局卡死"的极端情况。 */
-      __aiGuard._DEFER = (__aiGuard._DEFER || 0) + (busy ? 1 : 0);
-      if (busy && __aiGuard._DEFER >= 1500) {
-        try { addBattleLog('system', '【AI闸门】等待人类决策超过约5分钟 ⇒ 放行本次 AI 步骤（异常兜底，正常不该出现）'); } catch (e) {}
-        __aiGuard._DEFER = 0;
-        busy = false;
+         只保留一个很长的兜底（1500 拍 ≈5 分钟）用于"弹窗异常打不开 ⇒ 整局卡死"的极端情况。 */
+      __defer++;
+      if (__defer >= 1500) {
+        try {
+          addBattleLog('system', '【AI闸门】本次等待人类决策已约 5 分钟 ⇒ 放行这一步（异常兜底，正常不该出现）' +
+            '—— 请连同上面的【决策·存活提示】一起回传，用来定位是谁没关窗');
+        } catch (e) {}
+        return fn.apply(self, args);
       }
-      if (busy) {
-        setTimeout(function () { __aiGuard(fn).apply(self, args); }, 200);
-        return;
-      }
-      __aiGuard._tries = 0;
-    } catch (e) {}
-    return fn.apply(self, args);
+      setTimeout(__attempt, 200);
+    };
+    return __attempt();
   };
 }
 function __decideWaitGate(tag, retryFn) {
@@ -13680,10 +13678,27 @@ function __eeIdleWatchdog() {
        animating（动画演出中）也算"锁着" —— 作者口径：**以动画为准**，演出期间不许推进、不许操作。 */
     var locked = ((ee._resolveDepth || 0) > 0) || !!ee._chainLock ||
       (typeof __phaseNow === 'function' && __phaseNow() !== 'idle');
-    if (!locked) { ee._stuckSince = 0; __eeWaitState.reason = ''; __eeWaitState.since = 0; return; }
+    if (!locked) { ee._stuckSince = 0; ee._stuckWarned = false; __eeWaitState.reason = ''; __eeWaitState.since = 0; return; }
     // 有人在等 → 这不是残留，不计时（等待判定与 __eeLocked() 共用一套，见上面的 __eeWaitReason）
     if (__eeWaitReason()) { ee._stuckSince = 0; return; }
     if (!ee._stuckSince) { ee._stuckSince = Date.now(); return; }
+    /* 【2026-10-07 结构修·**只观测，不动作**】
+       作者实测"结算完了还锁着我"：锁住了、却没有任何人在等、也没有任何效果活动。
+       真正的放行要等 5 分钟兜底（__eeStaleMs），而这 5 分钟里**没有任何线索**指出是哪一处漏了释放。
+       所以在这里：锁住 3 秒就先把"谁把它锁上的"写进日志 —— **不改状态、不放行**。
+       有了这条，玩家回传日志就能定位到具体调用点，我们按"补那个出口"去修根因；
+       而不是把计时器调短（那是猜，猜早了就会吞效果 —— 这个坑已经踩过）。 */
+    {
+      var __idleFor = Date.now() - ee._stuckSince;
+      if (__idleFor >= 3000 && !ee._stuckWarned) {
+        ee._stuckWarned = true;
+        var __li = ee._lastInc || null;
+        addBattleLog('system', '【效果锁·诊断】已锁住 ' + Math.round(__idleFor / 1000) + 's 且没有任何人在等（深度=' +
+          (ee._resolveDepth || 0) + '、连锁锁=' + (!!ee._chainLock ? '开' : '关') + '）—— 上锁位置：' +
+          (__li && __li.site ? __li.site + '（' + Math.round((Date.now() - __li.at) / 1000) + '秒前）' : '未记录'));
+        try { if (__li && __li.stack) console.warn('[效果锁·诊断] 上锁调用栈：', __li.stack); } catch (e) {}
+      }
+    }
     /* 【S-c】阈值**运行时读取**（__eeStaleMs()）—— 线上是 5 分钟异常兜底；
        测试可用 window.__EE_STALE_MS_OVERRIDE 调小来验"自愈机制本身"，不必依赖线上也抢跑。 */
     if (Date.now() - ee._stuckSince < __eeStaleMs()) return;
