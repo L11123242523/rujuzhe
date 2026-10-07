@@ -17673,7 +17673,13 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
   }
   
   // 抽取馈赠卡（支持"抽1张馈赠卡"和"抽取馈赠卡"）
-  if ((effectText.indexOf('抽取') >= 0 || effectText.indexOf('抽') >= 0) && effectText.indexOf('馈赠') >= 0) {
+  /* 【2026-10-07 修·作者反馈】"抽馈赠卡的那个选项就没必要给普通的带选项的卡用了"。
+     原因：这里是拿**整段卡面文本**做子串扫描 —— 只要文本里同时出现"抽/抽取"和"馈赠"就抽一张，
+     于是**带分支选项的卡**（三选一 / ①②③…）不管玩家选没选那一支，都会播抽馈赠卡。
+     改法：**有分支选项的文本不走这条老路**，交给指令层的 `draw_gift`（只在被选中的那一支里执行，见 case 'draw_gift'）。
+     保留老路是为了兜住"文本能读、但编译层没产出 draw_gift"的简单卡（那种卡没有分支，行为不变）。 */
+  var __hasBranches = /[①②③④⑤⑥]/.test(effectText) || /三选一|二选一|四选一|选择一项|选一项|以下效果|其中一项|获得：|行动内\s*[：:]/.test(effectText);
+  if (!__hasBranches && (effectText.indexOf('抽取') >= 0 || effectText.indexOf('抽') >= 0) && effectText.indexOf('馈赠') >= 0) {
     if (typeof drawGiftCard === 'function') {
       drawGiftCard(user);
       effectEngine.effectLog.push({
