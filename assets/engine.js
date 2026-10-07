@@ -35,6 +35,18 @@ function __engineInstance() {
    用于对账"哪处 +1 没有配对的 -1"（默认关闭，零行为影响）。 */
 function __eeDepthBook(where, from, to) {
   try {
+    /* 【2026-10-07】常开的**环形记录**（最近 12 笔增减，开销可忽略、不改变任何行为）：
+       强解时把它打出来，就能直接看出"哪一笔 +1 没有配上 -1"。
+       以前只有 window.__DEPTH_TRACE 才记录，而那个开关在实战里没人会去开
+       ⇒ 线上出问题时拿不到现场（这正是"效果锁"排查一直卡住的原因）。 */
+    try {
+      var ee0 = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+      if (ee0) {
+        var ring = ee0._depthRing || (ee0._depthRing = []);
+        ring.push({ w: String(where), d: to - from, to: to, t: Date.now() });
+        if (ring.length > 12) ring.splice(0, ring.length - 12);
+      }
+    } catch (e2) {}
     if (typeof window === 'undefined' || !window.__DEPTH_TRACE) return;
     (window.__DEPTH_LOG = window.__DEPTH_LOG || []).push({
       w: where, from: from, to: to, d: to - from, t: Date.now(),
@@ -9870,31 +9882,16 @@ function __aiGateBusy() {
   return false;
 }
 function __decideWaitGate(tag, retryFn) {
-  try {
-    /* 【目标③】委托唯一权威（玩家是否在决策） */
-    var ad = (typeof __playerDeciding === 'function') ? __playerDeciding() : (battleState && battleState._awaitingDecision);
-    if (!ad) return false;
-    /* 【2026-10-03 修·作者实测】只要玩家**真的**有询问在等（弹窗回调 / 连锁窗 / 排队询问 / 弹窗可见），
-       就绝不因"超时"放行 —— 原来 20 秒无条件放行，玩家认真思考时会被夺走决定权。
-       只有标记泄漏（没有任何询问在等）时才清理，避免整局卡死。 */
-    var __realWait = false;
-    try {
-      if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) __realWait = true;
-      if (typeof _choiceQueue !== 'undefined' && _choiceQueue && _choiceQueue.length) __realWait = true;
-      if (typeof TW !== 'undefined' && TW && TW.active) __realWait = true;
-      var __m = document.getElementById('choiceModal');
-      if (__m && __m.classList && __m.classList.contains('active')) __realWait = true;
-    } catch (e) {}
-    if (__realWait) return true;
-    var age = Date.now() - (ad.since || 0);
-    if (age > 20000) {
-      try { console.error('【等待决断·超时】' + (ad.label || '') + ' 已等待 ' + Math.round(age / 1000) + 's，自动放行（' + tag + '）'); } catch (e) {}
-      try { addBattleLog('system', '【提示】等待「' + (ad.label || '') + '」的作答超时，已自动继续'); } catch (e2) {}
-      battleState._awaitingDecision = null;
-      return false;
-    }
-    return true;
-  } catch (e) { return false; }
+  /* 【2026-10-07 结构修·收口到唯一判据】
+     原来这里是"账 + 真有询问在等 + **20 秒兜底放行**"。那条 20 秒就是时间猜测：
+     玩家认真思考超过 20 秒会被夺走决定权 —— 历史上"谈窗被跳过、效果被吞"正是它（作者实测过）。
+     现在直接委托 __aiGateBusy()（同一个问题：**AI 该不该等玩家**）：
+       · 账 + 真有一件事在等 ⇒ 等（没有上限）
+       · 账还挂着、没有任何窗口/询问在等 ⇒ 那是漏放的账，不拦人 ⇒ 不必等
+     ⇒ 不需要任何超时，"规则层里的时间"因此少一处。
+     tag / retryFn 只为兼容既有调用点保留（它们只用于日志措辞，不参与判定）。 */
+  try { if (typeof __aiGateBusy === 'function') return !!__aiGateBusy(); } catch (e) {}
+  try { return !!(typeof __playerDeciding === 'function' && __playerDeciding()); } catch (e) { return false; }
 }
 
 /* 【2026-10-01 ①-2（作者裁决 1.b）】AI 回合的阶段时点：与玩家侧 nextPhase 完全同构 ——
@@ -13817,6 +13814,14 @@ function __eeIdleWatchdog() {
         } catch (e) {}
         addBattleLog('system', '【效果锁】当时还在飞的效果/触发（' + __inflight.length + ' 条）：' +
           (__inflight.slice(0, 6).join('、') || '（一条都没有 —— 说明是"账没配对"，不是"效果没跑完"）'));
+        /* 最近 12 笔深度增减（常开环形记录）—— 直接看出哪一笔 +1 没配上 -1 */
+        try {
+          var __ring = ee._depthRing || [];
+          if (__ring.length) {
+            addBattleLog('system', '【效果锁】最近 ' + __ring.length + ' 笔深度增减：' +
+              __ring.map(function (r) { return (r.d > 0 ? '+' : '') + r.d + '@' + r.w.replace(/·(进入|释放|走完 ops).*/, ''); }).join(' → '));
+          }
+        } catch (e) {}
       } catch (e) {}
       if (lastInc && lastInc.site) {
         addBattleLog('system', '【效果锁】最后一次上锁位置：' + lastInc.site + '（' + Math.round((Date.now() - lastInc.at) / 1000) + '秒前）');
