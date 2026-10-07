@@ -7812,12 +7812,10 @@ var TW = {
         catch (e) { try { console.error('ChainAnim.resolving 异常（不影响结算）', e); } catch (e2) {} }
         try { if (typeof __animEnter === 'function') __animEnter('effect-' + idx); } catch (e) {}   /* 【S-b】本效果演出开始 */
         if (typeof node.alive === 'function' && !node.alive()) {
-          try { if (typeof ChainAnim !== 'undefined' && ChainAnim.done) ChainAnim.done(idx, true, node.label); } catch (e) {}
           addBattleLog(node.owner, '【' + node.label + '】结算时目标已不存在，丢失对象，不处理');
-          /* 【S-a/S-c 修 2026-10-06】推进**仍走闸门**（不绕过 —— probe-ai-tick-gate 有守门断言）。
-           死锁的真正修法在 TW.settle 入口：进入逆结算时**收口"人类正在决策"标记**
-           （此刻候选已组成连锁、不再等任何人），否则闸门会把 step 永久延后。 */
-        setTimeout(__aiGuard(step), 170); return;
+          /* 【2026-10-07】与 next() 共用**同一份实现**（原来这里又抄了一遍 170ms 的猜测）。
+             推进仍走闸门；演出时长由动画层回调决定。 */
+          __chainAdvanceAfterDone(step, idx, true, node.label); return;
         }
         addBattleLog(node.owner, '▸ 逆结算 C' + (idx + 1) + '【' + node.label + '】');
         if (typeof node.fire === 'function') node.fire(next); else next();
@@ -9473,7 +9471,11 @@ function promptDiscardToLimit(player, done) {
         addBattleLog(player, '手牌超限，弃置【' + d2.name + '】（剩余手牌' + p.hand.length + '张）');
       }
       if (typeof updateBattleUI === 'function') updateBattleUI();
-      setTimeout(__aiGuard(step), 120);
+      /* 【2026-10-07 结构修】原来是 `setTimeout(__aiGuard(step), 120)` —— 凭空等 120 毫秒。
+         这一段循环里**没有任何动画调用**（只有 moveCardToGrave + 刷新 UI），
+         所以没有"要等的演出"；按作者口径「以动画为准」，没有动画就不该等。
+         改成"排到当前这轮同步工作之后"（__afterSync，不是计时器）。 */
+      __afterSync(__aiGuard(step));
     }
     // 联机：p2 是活人（客人），必须由他自己选并把候选卡名发过去
     if (typeof Online !== 'undefined' && Online.active && !Online.isGuest && player !== 'p1') {
@@ -17091,6 +17093,24 @@ var __runOpsSeq = 0;      /* 【诊断】给每一次 runOps 一个唯一编号�
 /* 【2026-10-07 结构修】把"下一步"排到**当前这一轮同步工作之后**（微任务），而不是固定等 N 毫秒。
    这不是计时器：它不承诺"过多久"，只承诺"等当前这轮算完"。
    节奏由演出队列（ShowQueue）负责 —— 作者口径"以动画为准"由它保证（有序演出、逻辑不等它）。 */
+/* 【2026-10-07】"某个链节结算完 ⇒ 推进下一步"的**唯一实现**（原来在 TW.settle 里写了两遍，
+   各带一个 170ms 的猜测）。时长由**动画层**说了算：ChainAnim.done 的 onDone 回调；
+   规则层不持有任何时长数字。
+   · 动画被关 ⇒ _doneMs() 返回 0 ⇒ 立刻回调（不空等）；
+   · 动画层不存在 / 抛错 ⇒ 立刻推进 ⇒ 整链绝不会因为动画停摆；
+   · 推进仍然走闸门（__aiGuard）。 */
+function __chainAdvanceAfterDone(step, idx, lost, label) {
+  var advanced = false;
+  var adv = function () {
+    if (advanced) return; advanced = true;
+    try { __aiGuard(step)(); } catch (e) { try { console.error('连锁推进异常', e); } catch (e2) {} }
+  };
+  var ok = false;
+  try {
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.done) { ChainAnim.done(idx, !!lost, label, adv); ok = true; }
+  } catch (e) { try { console.error('ChainAnim.done 异常（不影响结算）', e); } catch (e2) {} }
+  if (!ok) adv();
+}
 function __afterSync(fn) {
   try {
     if (typeof queueMicrotask === 'function') { queueMicrotask(fn); return; }
