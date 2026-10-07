@@ -1426,6 +1426,8 @@ var Online = {
     delete this._asks[m.id];
     if(rec.timer) clearTimeout(rec.timer);
     this._hideWaiting();
+    /* 【2026-10-07】对手答了 ⇒ "在等对手回答"这个事实结束 ⇒ 唤醒 AI 闸门（事件唤醒） */
+    try{ if (typeof __aiWake === 'function') __aiWake(); }catch(e){}
     try{ rec.cb(m.v===undefined?null:m.v); }catch(e){ console.error('处理回答失败',e); }
     // 客人的回答会推进房主这边的流程；流程后段往往还有异步结算，补一次推送，免得客人停在旧快照
     var self=this;
@@ -9826,6 +9828,26 @@ function aiResourceStep(done) {
 /* 【治本 2026-10-06】AI 定时续跑的**唯一闸门**：每次 tick 都复查"玩家是否正在决策"，
    忙 ⇒ 延后 200ms 再来（上限 150 次 ≈ 30 秒），绝不越过玩家的决策抢跑 ✓。
    ⚠ 所有 AI 的 setTimeout 都必须用本包装器（否则就是又开了一条绕过闸门的路 ✗）。 */
+/* 【2026-10-07 结构修·**事件唤醒**取代 200ms 轮询】
+   闸门原来靠 `setTimeout(__attempt, 200)` 反复问"还忙吗" —— 那是轮询，规则层里的一处时间。
+   现在改成：忙 ⇒ **登记一个唤醒器**，然后不再占任何定时器；谁把"等待的事实"结束了
+   （窗口关掉、账被释放、队列排空、演出结束、对手答了…）就调一次 `__aiWake()`，闸门立刻重试。
+   ⇒ 决定"能不能动"的路径里**一个定时器都没有**。
+   兜底：`__eeIdleWatchdog`（每 2 秒的监督者）每拍也调一次 `__aiWake()` ——
+   万一哪条状态变化路径漏了唤醒，最坏只是晚 ≤2 秒，**不会永久卡住**（它是监督者，不是判定函数）。 */
+var __aiWaiters = [];
+var __aiWaking = false, __aiWakeAgain = false;
+function __aiWake() {
+  if (__aiWaking) { __aiWakeAgain = true; return; }
+  __aiWaking = true;
+  try {
+    do {
+      __aiWakeAgain = false;
+      var list = __aiWaiters; __aiWaiters = [];
+      for (var i = 0; i < list.length; i++) { try { list[i](); } catch (e) {} }
+    } while (__aiWakeAgain && __aiWaiters.length);
+  } catch (e) {} finally { __aiWaking = false; }
+}
 function __aiGuard(fn) {
   return function () {
     var args = arguments, self = this;
@@ -9850,8 +9872,13 @@ function __aiGuard(fn) {
          仍然是"等"，不丢弃这一步、也不超时放行。 */
       if (!busy) { try { if (typeof window !== 'undefined' && window.__showBusy) busy = true; } catch (e) {} }
       if (!busy) return fn.apply(self, args);
-      setTimeout(__attempt, 200);
+      /* 忙：登记唤醒器（**不占定时器**）。同一个 attempt 只登记一次，避免重复入表。 */
+      if (!__registered) {
+        __registered = true;
+        __aiWaiters.push(function () { __registered = false; __attempt(); });
+      }
     };
+    var __registered = false;
     return __attempt();
   };
 }
@@ -13782,6 +13809,9 @@ function __eeIdleWatchdog() {
        （弹窗/选卡器被新的取代时，旧应答回调永远不会被调用 ⇒ 那本账没人释放）。
        这是**事实判断**（窗口在不在），不是时间判断 —— 不留阈值、不放行任何真实等待。 */
     try { if (typeof __decideReconcile === 'function') __decideReconcile('看门狗对账'); } catch (e) {}
+    /* 【2026-10-07】监督者每拍兜一次唤醒：万一哪条"等待事实结束"的路径漏了调 __aiWake，
+       最坏也只是晚 ≤2 秒（不会永久卡住）。它是监督者，不是判定函数 ⇒ 不算规则层时间。 */
+    try { if (typeof __aiWake === 'function') __aiWake(); } catch (e) {}
     if (typeof effectEngine === 'undefined' || !effectEngine) return;
     if (typeof battleState === 'undefined' || !battleState) return;
     var ee = effectEngine;
@@ -16087,7 +16117,7 @@ var ShowQueue = {
   drain: function () {
     if (this.busy) return;
     var fn = this.q.shift();
-    if (!fn) { try { window.__showBusy = false; } catch (e) {} return; }
+    if (!fn) { try { window.__showBusy = false; } catch (e) {} try { if (typeof __aiWake === 'function') __aiWake(); } catch (e) {} return; }
     this.busy = true;
     try { window.__showBusy = true; } catch (e) {}
     var self = this, done = false;
