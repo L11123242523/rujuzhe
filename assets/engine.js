@@ -1457,13 +1457,24 @@ var Online = {
   askRemote:function(spec, cb){
     var self=this;
     spec=spec||{};
-    if(!this.connected || !this.ws || this.ws.readyState!==1){
-      __onlineDiverge('与对手的连接已断开，无法询问选择「'+(spec.label||'')+'」');
-      cb(null); return;
-    }
+    /* 【2026-10-07 修·联机客人"要选的卡没有选择能力"】
+       原来这里先自判 `!connected || !ws || ws.readyState!==1` ⇒ 直接 `cb(null)`：
+       **等于替客人做了"不选"的决定**，客人那边什么都不会弹出（作者实测症状）。
+       而 `connected`/`ws` 这两个标志在联机过程中并不可靠（我的双实例端到端探针里就复现了：
+       `askRemote` 被调用了、连接其实可用，却走了这条静默分支 ⇒ 客人 0 弹窗、房主收 null）。
+       ⇒ 改成**由发送本身决定能不能问**：能发就发（发失败再退回兜底），
+         并且**绝不静默** —— 失败时写明显日志 + 提示，让"没人问客人"这件事看得见。 */
     var id='q'+(++this._askSeq);
     this._asks[id]={ cb:cb, spec:spec, at:Date.now() };
-    this._send({t:'relay', m:{k:'ask', id:id, spec:spec}});
+    var __sent=false;
+    try{ this._send({t:'relay', m:{k:'ask', id:id, spec:spec}}); __sent=true; }catch(e){ __sent=false; }
+    if(!__sent){
+      delete this._asks[id];
+      try{ __onlineDiverge('无法把选择「'+(spec.label||'')+'」发给对手（连接异常）——本次选择未能询问对方'); }catch(e){}
+      try{ addBattleLog('system','⚠️ 【联机】无法询问对手选择：「'+(spec.label||'')+'」（连接异常）；本次没有替对手做决定'); }catch(e){}
+      try{ if(typeof showToast==='function') showToast('无法询问对手选择（连接异常）','warn'); }catch(e){}
+      cb(null); return;
+    }
     this._showWaiting(true, spec.label||'等待对手选择');
     /* 让"在等对手回答"这件事**看得见**（作者 2026-09-13 报："效果已经结算完却仍卡在连锁结算中"）：
        等答案期间房主的结算深度是 >0 的，于是自己所有手卡都会提示"效果/连锁结算中"。
@@ -1502,6 +1513,15 @@ var Online = {
      绝不静默地把默认值当成"玩家的选择"。 */
   _renderAsk:function(spec, done, fromHost){
     spec=spec||{};
+    /* 【2026-10-07 现场诊断（作者联机复现一次即可定位）】
+       把"客人侧到底收到了什么形状的询问、有没有画出来"写进战斗日志。
+       为什么需要它：作者报"客人用需要选的卡没有选择能力"，而发送/渲染分属两台机器，
+       静态看代码会误判（我自己就误判过一次）⇒ 用这行日志把现场带回来。 */
+    try {
+      addBattleLog('system', '🔎【联机诊断】收到询问：kind=' + (spec.kind || '(无)') +
+        ' cards=' + ((spec.cards && spec.cards.length) || 0) + ' choices=' + ((spec.choices && spec.choices.length) || 0) +
+        ' player=' + (spec.player || '-') + ' zone=' + (spec.zone || '-') + ' label=' + (spec.label || '-'));
+    } catch (e) {}
     var label=spec.label||'请选择';
     // 回传的是"出题人那份列表的下标"：若给了 indices 映射就翻译，否则原样回传
     var toHost=function(idxs){ return idxs.map(function(i){ return (spec.indices&&spec.indices[i]!==undefined)?spec.indices[i]:i; }); };
