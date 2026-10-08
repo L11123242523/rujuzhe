@@ -66,6 +66,21 @@ function __eeDepthSub(ee, where) {
   var to = Math.max(0, (from || 1) - 1);
   ee._resolveDepth = to;
   __eeDepthBook(where, from, to);
+  /* 【2026-10-08 修·格子效果延迟结算（作者实测：有些格子效果要等好几秒）】 __TILE_EVENT_DRIVEN__
+     原来「结算结束」只能靠**计时器轮询**去猜：__drainAllWhenIdle 每 200ms 试一次（最多 40 次）、
+     __flushPendingTileEffects 每 150ms 试一次（最多 40 次）⇒ 排队的格子效果最坏要等 6~8 秒。
+     但「结算结束」本身是**确定的事件**：结算深度归零；而本函数是深度归零的**唯一收口**。
+     修法：归零这一刻**直接排空**（事件驱动，不猜时间）；下面的原轮询保留为安全网
+     —— 若还有别的「忙」来源它会补上，但正常路径不再走它。
+     用 setTimeout(0) 而非同步调用：让当前调用栈先退干净，避免在深层递归里重入结算。 */
+  if (to === 0) {
+    try {
+      setTimeout(function () {
+        try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) {}
+        try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) {}
+      }, 0);
+    } catch (e) {}
+  }
 }
 
 var __ENGINE_BUSY = null;
