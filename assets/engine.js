@@ -814,27 +814,6 @@ var Online = {
     }catch(e){}
     var self=this;
     switch(m.k){
-      /* 【2026-10-07 猜拳定先后手·联机（A 方案：各自出拳即发、房主收齐判定）】
-         ⚠ 座位语义：**本机永远是 p1、对手是 p2**（见本文件开头说明）
-           ⇒ `__rpsWinner='p2'` 恒表示"**本机后手**"；房主判定用 host/guest 表达，两边各自换算。 */
-      case 'rps': {
-        this._rpsFoe = (m.v | 0);
-        try { addBattleLog('system', '🎌 猜拳：对手已出拳'); } catch (e) {}
-        if (!this.isGuest) this._rpsHostResolve();
-        break;
-      }
-      case 'rpsResult': {
-        try { window.__rpsWinner = (m.first === 'host') ? 'p2' : 'p1'; } catch (e) {}
-        try { addBattleLog('system', '🎌 猜拳结果：' + (m.first === 'host' ? '对手' : '你') + '获得先手（开局生效）'); } catch (e) {}
-        try { if (typeof showToast === 'function') showToast('猜拳结果：' + (m.first === 'host' ? '对手先手' : '你先手'), 'info'); } catch (e) {}
-        break;
-      }
-      case 'rpsTie': {
-        this._rpsFoe = null;
-        try { addBattleLog('system', '🎌 猜拳平局，请重新出拳'); } catch (e) {}
-        try { if (typeof showToast === 'function') showToast('猜拳平局，请再出一次', 'warn'); } catch (e) {}
-        break;
-      }
       case 'deck':
         try{
           // 收到的永远是"对手那一套"：本机自己是 p1，所以写到 foeOf('p1')（1v1 = p2）
@@ -1302,40 +1281,9 @@ var Online = {
         · 旧协议房主：本地操作由它自己的引擎执行（sendIntent 是空操作，pushSnapshot 会推状态）。
         · 旧协议客人：发 {t:'relay', m:{k:'act', a}} 给房主（原样保留）。
      这三个入口（客人拦截块 / 本机 UI 点击 / sendIntent）现在都走 sendAct，行为由模式决定。 */
-  /* 【2026-10-07】联机猜拳：问本机出拳 → 发出 → 房主收齐判定（客人等结果）。
-     为什么先手要"等结果"而不在本函数返回：联机下两边必须**同一份判定**，由房主算完回发。 */
-  rpsPick:function(cb){
-    var self=this;
-    var M=[{icon:'✊',name:'石头'},{icon:'✌️',name:'剪刀'},{icon:'✋',name:'布'}];
-    var settle=function(v){
-      if(v==null||v<0||v>2){ self.rpsPick(cb); return; }     /* 没选出来 ⇒ 重问 */
-      self._rpsMine = v|0;
-      self._send({t:'relay', m:{k:'rps', v:self._rpsMine}});
-      try{ addBattleLog('system','🎌 猜拳：你出'+M[v].icon+'，等待对手出拳…'); }catch(e){}
-      if(!self.isGuest) self._rpsHostResolve();              /* 房主：若对手已出拳则立刻判定 */
-      if(cb) cb(null);                                       /* 联机下先手以 rpsResult 为准 */
-    };
-    if(typeof showChoiceModal==='function') showChoiceModal('猜拳定先后手','和对手猜拳，赢的人先手','石头胜剪刀、剪刀胜布、布胜石头；平局重出', M.map(function(m){return m.icon+' '+m.name;}), settle);
-    else settle(Math.floor(Math.random()*3));
-  },
+  
   /* 【2026-10-07】房主判定（A 方案）：收齐双方出拳 → 判胜负 → 回发结果；平局则通知重出。
      判定规则与单机**共用同一条**（石头(0)>剪刀(1)>布(2)>石头(0)），不写两套。 */
-  _rpsHostResolve:function(){
-    if(this._rpsMine==null || this._rpsFoe==null) return;
-    var ICON=['✊','✌️','✋'];
-    var mine=this._rpsMine|0, foe=this._rpsFoe|0;
-    this._rpsFoe=null;
-    if(mine===foe){
-      this._send({t:'relay', m:{k:'rpsTie'}});
-      try{ addBattleLog('system','🎌 猜拳：双方都出'+ICON[mine]+' ⇒ 平局，请重新出拳'); }catch(e){}
-      return;
-    }
-    var first = (((mine+1)%3===foe) ? 'host' : 'guest');
-    try{ window.__rpsWinner = (first==='host') ? 'p1' : 'p2'; }catch(e){}
-    this._send({t:'relay', m:{k:'rpsResult', first:first}});
-    try{ addBattleLog('system','🎌 猜拳：你出'+ICON[mine]+'，对手出'+ICON[foe]+' ⇒ '+(first==='host'?'你':'对手')+'获得先手（开局生效）'); }catch(e){}
-    try{ if(typeof showToast==='function') showToast('猜拳结果：'+(first==='host'?'你先手':'对手先手'),'info'); }catch(e){}
-  },
   sendIntent:function(a){
     /* 旧协议房主：本地已经执行完了，这里本来就是空操作。
        服务器权威：必须真的发出去（少数没有经过拦截块的调用点会走到这里）。 */
@@ -3347,9 +3295,6 @@ function onCardSearch(v) {
 }
 
 
-
-
-
 // ========== 卡组配置 ==========
 /* ============================================================
    【2026-10-03 清单③·本地先行的"多套卡组存档"】账号后端未接之前的可用版本
@@ -4259,7 +4204,6 @@ function generateRoguelikeMap() {
 }
 
 
-
 function selectRoguelikeNode(layer, index) {
   if (!roguelikeState || layer !== roguelikeState.currentLayer) return;
   var node = roguelikeState.map[layer][index];
@@ -5107,7 +5051,6 @@ function onRoguelikeBattleEnd(victory) {
 }
 
 
-
 function selectRewardCard(type, card) {
   var newCard = JSON.parse(JSON.stringify(card));
   
@@ -5396,38 +5339,16 @@ function initBattle() {
   playerIds().forEach(function (w) { __gameStartRegenDraw(w); });
 
   // 联机：后手方的本机 p1 即真实的第二位玩家——先手(主机)先行动，这里直接进入远端位回合等待
-  /* 【2026-10-07 猜拳·**接线已撤回**】作者要"猜拳定先后手"，我第一版把猜拳**塞进了开局路径**：
-     结果一旦没人回答那个弹窗（探针/自动流程/对手未出拳），**开局永远不开始** ⇒ 门禁判红
-     （probe-depth-hunt 报"深度滞留"、另一个探针 300 秒挂死，本质都是"开局没开始"）。
-     `__rpsDecide` 函数本身已写好并实测可用（回调返回先手座位），保留待用；
-     正确接法是**放在开局之前（大厅里猜完拳再点开始）**，让开局路径保持同步、不被弹窗挡住。 */
+  
   if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
     battleState.currentPlayer = 'p2';
     addBattleLog('system', '对战开始！' + (Online.oppDisplayName() || '对手') + '先手');
-  } else if (!(typeof Online !== 'undefined' && Online.active) && __rpsWinner === 'p2') {
-    /* 【2026-10-07】开局前猜拳输了 ⇒ 对手先手（单机；联机同步协议接上后再走同一判断）。
-       ⚠ 这里**只读一个变量**，没有任何弹窗 ⇒ 开局路径不会被挡住（上一版就是栽在这里）。 */
-    battleState.currentPlayer = 'p2';
-    __rpsWinner = null;                       /* 一局一用，避免带到下一局 */
-    addBattleLog('system', '对战开始！猜拳结果：对手先手');
   } else {
-    if (__rpsWinner === 'p1' && !(typeof Online !== 'undefined' && Online.active)) {
-      addBattleLog('system', '对战开始！猜拳结果：你先手');
-      __rpsWinner = null;
-    } else {
-      addBattleLog('system', '对战开始！玩家1先手');
-    }
+    addBattleLog('system', '对战开始！玩家1先手');
   }
   
   // 开始第一回合（延迟确保DOM就绪）
-  /* 【2026-10-07 作者口径】"猜拳放进游戏内"**第二次尝试也撤回**（两次都撞在同一道门槛上）：
-     第一次：加了 3 秒兜底计时器 → probe-depth-sweep 报强解；
-     第二次：去掉计时器、改成"棋盘就绪后再弹" → **仍然**报强解（绿宝之杖·择）。
-     结论（记下来，别再重复第三次）：**在开局流程里插入一个"需要人回答的决策"，会改变开局时序，
-     让随后驱动的结算流程留下锁残留** —— 这不是参数问题，是结构问题：
-     猜拳若要进游戏内，应该做成**一个显式的开局阶段（有自己的状态与结束条件）**，
-     而不是"在 startTurn 之前插一个弹窗"。在大厅做（v107 现行）不影响任何结算时序。
-     验收线（目标里写明）：probe-depth-sweep 不许出现强解 —— 未满足就不上。 */
+  
   setTimeout(function() {
     try {
       startTurn();
@@ -9562,7 +9483,6 @@ function viewHandCardDetail(index) {
     showCardDetail(battleState.p1.hand[index]);
   }
 }
-
 
 
 // 选择目标
@@ -21896,58 +21816,7 @@ function chooseZoneCard(user, who, zone, title, cb) {
   else { cb(arr.length ? arr[0] : null, arr.length ? 0 : -1); }
 }
 
-/* 【2026-10-07 新增·作者要求】**开局猜拳定先后手**（好友对战，不再"房主天然先手"）。
-   口径（用户确认 A 方案）：
-     · 双方**同时**出拳（各自看不到对方），比完一起亮；
-     · 单机：**先收下玩家这一拳、再生成对手的拳**（避免被"读心"）；
-     · 平局重出；
-     · 胜者先手（先手在自己第一回合准备阶段抽 1 ⇒ 起手 5 张，见 5215 行口径）。
-   cb(先手座位)：'p1' = 你/房主先手，'p2' = 对手先手。
-   ⚠ 本函数只负责"问出这一拳 + 判定"；先手怎么落地由调用方决定（单机/联机共用同一份判定，避免两套规则）。 */
-/* 【2026-10-07 新增·**开局前的猜拳**（不再挡开局路径）】
-   上一版我把猜拳塞进 initBattle 里 ⇒ 弹窗没人回答时**开局永远不开始**（门禁判红，探针挂死）。
-   现在改成"**开局之前**的一步"：
-     · 玩家在大厅点「🎌 猜拳定先后手」→ 出拳 → 结果存进 __rpsWinner；
-     · 开局时读 __rpsWinner：有结果就按它定先手，**没有就按原规则**（房主/玩家1 先手）；
-     · 开局路径里**没有任何弹窗** ⇒ 探针/自动流程/对手未响应都不会被挡住。
-   联机（A 方案）：各自出拳即发中继、房主收齐判定 ⇒ 结果随 start 消息下发（下一步接）。 */
-var __rpsWinner = null;
-function __rpsStart(cb) {
-  try {
-    /* 【2026-10-07】联机：走 Online.rpsPick（出拳发中继、房主判定、结果回发）——
-       单机与联机**共用同一条判定规则**，只是"对手那一拳"的来源不同（随机 / 中继）。 */
-    if (typeof Online !== 'undefined' && Online && Online.active && typeof Online.rpsPick === 'function') {
-      Online.rpsPick(cb);
-      return;
-    }
-    __rpsDecide(function (w) {
-      __rpsWinner = w;
-      try { addBattleLog('system', '🎌 猜拳结果已记录：' + (w === 'p1' ? '你' : '对手') + '先手（开局生效）'); } catch (e) {}
-      try { if (typeof showToast === 'function') showToast('猜拳结果：' + (w === 'p1' ? '你先手' : '对手先手') + '（点开始对战后生效）', 'info'); } catch (e) {}
-      if (cb) cb(w);
-    });
-  } catch (e) { console.error('猜拳启动出错', e); if (cb) cb(null); }
-}
-function __rpsDecide(cb) {
-  var M = [{ icon: '✊', name: '石头' }, { icon: '✌️', name: '剪刀' }, { icon: '✋', name: '布' }];
-  function round() {
-    var labels = M.map(function (m) { return m.icon + ' ' + m.name; });
-    var settle = function (mine) {
-      if (mine == null || mine < 0 || mine > 2) { round(); return; }          /* 没选出来 ⇒ 重来 */
-      var theirs = Math.floor(Math.random() * 3);                              /* 收下你的拳**之后**才随机 */
-      if (mine === theirs) {
-        addBattleLog('system', '🎌 猜拳：你出' + M[mine].icon + '，对手出' + M[theirs].icon + ' ⇒ 平局，重出');
-        round(); return;
-      }
-      var win = ((mine + 1) % 3 === theirs) ? 1 : 0;                           /* 石头(0)>剪刀(1)>布(2)>石头(0) */
-      addBattleLog('system', '🎌 猜拳：你出' + M[mine].icon + '，对手出' + M[theirs].icon + ' ⇒ ' + (win ? '你' : '对手') + '获得先手');
-      cb(win ? 'p1' : 'p2');
-    };
-    if (typeof showChoiceModal === 'function') showChoiceModal('猜拳定先后手', '和对手猜拳，赢的人先手', '石头胜剪刀、剪刀胜布、布胜石头；平局重出', labels, settle);
-    else settle(Math.floor(Math.random() * 3));                                 /* 没有弹窗能力时退化为随机（保证流程能走） */
-  }
-  round();
-}
+
 /* 【2026-10-07 新增·**恫吓**】作者新卡【邪恶南瓜攻击！】的新机制（引擎里原先没有）：
    受击者必须把"效果处理区"的一张**盖卡或永续卡**放回手卡；否则受到 **3 点混沌伤害**并**失去 2 点音韵值**。
    · 玩家侧：弹窗让他选交哪一张，或选"不交"；
@@ -22908,8 +22777,6 @@ try { window.__diceControlPct = __diceControlPct; } catch (e) {}
 try { window.__diceControlSteps = __diceControlSteps; } catch (e) {}
 try { window.__diceArrSlack = __diceArrSlack; } catch (e) {}
 try { window.__diceArrAdjust = __diceArrAdjust; } catch (e) {}
-try { window.__rpsDecide = __rpsDecide; } catch (e) {}
-try { window.__rpsStart = __rpsStart; } catch (e) {}
 try { window.__diceControlAsk = __diceControlAsk; } catch (e) {}
 try { window.applyDiceControl = applyDiceControl; } catch (e) {}
 try { window.moveCardToGrave = moveCardToGrave; } catch (e) {}
