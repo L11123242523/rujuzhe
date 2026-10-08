@@ -1303,6 +1303,13 @@ function showTargetCards(player, zone, title, selectable, callback, decider) {
      调用点要传 decider（出手的人）：例如【善意面具】是"从自己手牌选"⇒ decider=出手者；
      【妖刀五月雨】是"破坏对方场上1张"⇒ 区域是对方的、但决策人仍是出手者。 */
   var __askSeat = decider || player;
+  /* 【2026-10-08 修·**查看对手墓地/移出区**（作者实测：单机点了没反应；联机弹在对方屏幕上）】
+     纯查看（selectable === false）不是"要谁做决定"，**绝不能发问**：
+     原来它照样走 ENV.ask(座位)，座位不是本机时就被当成决策发给对端 ⇒ 界面弹在对手那边，本机什么都没有。
+     这里在唯一入口收口：纯查看 ⇒ 本机直接渲染（墓地/移出区是公开信息，本机已有同步数据）。 __GRAVE_VIEW_LOCAL__ */
+  if (selectable === false && typeof __askTargetCardsLocal === 'function') {
+    try { return __askTargetCardsLocal(player, zone, title, false, callback); } catch (e) { console.error('本地渲染查看列表失败，回退到原路径', e); }
+  }
   /* 【2026-10-07 目标①·**询问带上候选**（含 indices 映射）】
      原来只发 `player/zone`，客人必须靠自己本地同步状态去"就地取材"才画得出来 ——
      一旦两端状态有偏差（或客人那份区域为空），就会画不出来。
