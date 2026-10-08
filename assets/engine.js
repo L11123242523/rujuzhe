@@ -17786,9 +17786,19 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
       hold(); // 暂停步骤自动推进，等玩家选完再 finish
       function __takeOne(sel) {
         var card = sel.card;
-        if (sel.source === 'deck') battleState[user].deck.splice(sel.index, 1);
-        else if (sel.source === 'grave') battleState[user].grave.splice(sel.index, 1);
-        else if (sel.source === 'removed') battleState[user].removed.splice(sel.index, 1);
+        /* 【2026-10-08 修·**同一张卡被放进手卡两次**（作者实测：破损电子设备 + 抽卡导致手卡两张）】 __TAKE_BY_IDENTITY__
+           原来按**下标**从原区域删（sel.index）：一旦这一步之前区域内容变过
+           （最典型＝牌库空 ⇒ 墓地整体翻面成新牌组，那张卡已经被抽走），下标就指向别的卡或越界
+           ⇒ 该删的没删、不该动的动了 ⇒ 同一张卡同时存在于两个区域。
+           改为**按身份删**（indexOf 找到它才删）；若已不在原区域，明确写日志、不重复取。 */
+        var __srcArr = (sel.source === 'deck') ? battleState[user].deck
+          : (sel.source === 'grave') ? battleState[user].grave
+          : (sel.source === 'removed') ? battleState[user].removed : null;
+        if (__srcArr) {
+          var __idIx = __srcArr.indexOf(card);
+          if (__idIx >= 0) __srcArr.splice(__idIx, 1);
+          else addBattleLog('system', '【归属】要取走的【' + ((card && card.name) || '?') + '】已不在原区域（区域内容已变化）⇒ 不重复取，直接加入手卡');
+        }
         battleState[user].hand.push(card);
         effectEngine.effectLog.push({ label: '【效果结果】', text: '将【' + card.name + '】加入手卡', class: 'effect-step step-result' });
         addBattleLog('system', '加入手卡：' + card.name);
