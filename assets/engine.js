@@ -5633,6 +5633,9 @@ function __replayShowLast() {
 
 function startTurn() {
   if (battleState && battleState._over) return; // 对局已结束：不再开始新回合
+  /* 【2026-10-08 修·"减防御会一直存在"】卡面写「直到本回合结束」的降防，在这里按**回合号**统一清理
+     （不用计时器、不靠计数猜；回合号是唯一真相）。放在回合最前面，保证一定跑到。 */
+  try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) {}
   /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
      实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
      它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
@@ -7661,8 +7664,16 @@ var TW = {
     var __fin0 = (typeof done === 'function') ? done : function () { };
     try {
       if (c) {
-        c.key = c.key || (String(c.id || c.label || '?') + '|' + String((c.card && c.card.name) || ''));
-        var dup = (win.chain || []).some(function (x) { return x && x.key === c.key; });
+        /* 【2026-10-08 修·**双方同名效果被误判重复入链**】
+           作者实测：双方发动**相同的效果**时，第二方被判"已在链上 ⇒ 不再重复入链" ⇒ 一方发不出来。
+           根因：去重键只由「触发标识 + 卡名」构成，**没带归属** ⇒ 两边的同名效果算出同一个 key。
+           MD 口径（同一连锁一次）的本意是"**同一张卡的同一个触发**"只入链一次 ——
+           所以身份必须含**是谁的卡/哪一张**，否则就变成"跨玩家去重"，那是错的。
+           修法：键里加入 owner（归属）；比对时也要求 owner 相同才算重复（两道都做，防止调用方自带 key 时漏判）。 */
+        c.key = c.key || (String(c.owner || '?') + '|' + String(c.id || c.label || '?') + '|' + String((c.card && c.card.name) || ''));
+        var dup = (win.chain || []).some(function (x) {
+          return x && x.key === c.key && String(x.owner || '') === String(c.owner || '');
+        });
         if (dup) {
           /* 【2026-10-01 修·死循环】被拒的候选必须**标记为已用**，否则它仍留在候选池里，
              决策方（尤其 AI）会一次又一次重新选中它 ⇒ 实测无限循环"发动→已在链上⇒不再入链→再发动"，窗口永不关闭、
@@ -8405,8 +8416,12 @@ function queueOrRunTrigger(desc) {
       try { setTimeout(function () { try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {} }, 0); } catch (e) {}
       return 'ran-direct';
     }
-    /* P1：键 = 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃（仅窗口类触发） */
-    if (!desc.key) desc.key = String(desc.id || desc.label || '?') + '|' + String((desc.card && desc.card.name) || '');
+    /* P1：键 = **归属** + 触发 id/标签 + 卡名（缺省自动补），同一条连锁内重复的丢弃（仅窗口类触发）
+       【2026-10-08 修·**双方同名效果被误判重复**】原来键里没有归属 ⇒ 双方发动相同效果时 key 相同，
+       第二方被 __chainOnce 判为"已排过 ⇒ 丢弃重复" ⇒ **一方发不出来**（作者实测）。
+       MD 口径的"同一连锁一次"指的是**同一张卡的同一个触发**，所以身份必须含归属；这里两道都做：
+       ① 键里加 owner；② __chainOnce 改用"带归属的键"（见其内部对 owner 的处理）。 */
+    if (!desc.key) desc.key = String(desc.owner || '?') + '|' + String(desc.id || desc.label || '?') + '|' + String((desc.card && desc.card.name) || '');
     if (!__chainOnce(desc.key)) {
       addBattleLog(desc.owner || 'system', '【连锁·MD口径】「' + (desc.label || desc.key) + '」本连锁已排过 ⇒ 丢弃重复');
       return 'dup';
@@ -14913,7 +14928,7 @@ function __compileBody(t) {
   if (has('防御')) {
     var dd = __matchNum(new RegExp('降低(?:其|目标)?\\s*' + __NUM + '\\s*点防御'), t);
     var du = __matchNum(new RegExp('提升(?:自身)?\\s*' + __NUM + '\\s*点防御'), t);
-    if (dd != null) ops.push({ op: 'def_down', amount: dd }); else if (du != null) ops.push({ op: 'def_up', amount: du }); else uncovered.push('defense');
+    if (dd != null) ops.push({ op: 'def_down', amount: dd, untilTurnEnd: /直到本回合结束|本回合结束/.test(t) });   /* 【2026-10-08】时长按卡面区分 */ else if (du != null) ops.push({ op: 'def_up', amount: du }); else uncovered.push('defense');
   }
   // 下一次攻击无视N点护盾（如“你呀你呀”）
   var __pierceM = __matchNum(new RegExp('下一次(?:的)?攻击[^。；;]{0,8}?无视\\s*' + __NUM + '\\s*点?护盾'), t);
@@ -15570,8 +15585,25 @@ function applyDefenseDown(who, amount, actions) {
   var q = battleState[who]; if (!q || !amount) return;
   if (q.defenseBase === undefined || q.defenseBase === null) q.defenseBase = (q.defense || 0);
   q._defDowns = q._defDowns || [];
-  q._defDowns.push({ amount: amount, actions: (actions || 2) });
+  /* 【2026-10-08 修·**"减防御会一直存在"**（作者实测：宫樱子【杂鱼！杂鱼！】等）
+     根因：卡面写的是「降低其N点防御值（**直到本回合结束**）」，而实现一律按"**N 次行动**"计时，
+     且全文件只有一处 lapseDefenseDown 在递减 ⇒ 只要那个点没走到，减防就**永不恢复**。
+     修法：按卡面区分两种时长（都在这里收口，唯一真相）：
+       · actions == null ⇒ **直到本回合结束**：记下当前回合号，由回合开始时统一清理（见 clearTurnScopedDefDowns）
+       · actions 为数    ⇒ 仍按"N 次行动"计时（保留给卡面真这么写的效果） */
+  if (actions === null || actions === undefined) q._defDowns.push({ amount: amount, untilTurn: battleState.turn, actions: null });
+  else q._defDowns.push({ amount: amount, actions: actions, untilTurn: null });
   recalcDefense(who);
+}
+/* 【2026-10-08 新增】清理"直到本回合结束"的减防（按回合号判定，不用计时器/不用计数猜） */
+function clearTurnScopedDefDowns(who) {
+  var q = battleState[who]; if (!q || !q._defDowns || !q._defDowns.length) return;
+  var before = q._defDowns.length;
+  q._defDowns = q._defDowns.filter(function (d) { return !(d && d.untilTurn != null && d.untilTurn !== battleState.turn); });
+  if (q._defDowns.length !== before) {
+    addBattleLog(who, '「直到本回合结束」的降低防御效果已到期，防御值恢复');
+    recalcDefense(who);
+  }
 }
 
 function applyDefenseUp(who, amount) {
@@ -16614,7 +16646,7 @@ function __opsResource(op, ctx, next, env) {
     case 'gain_cost': { var __gc = op.amount; if (ctx.card && ctx.card.name === '底牌') { __gc = p._dipaiOnly ? 10 : 6; addBattleLog(user, '底牌：' + (p._dipaiOnly ? '手卡仅此一张，回复10音韵' : '全同色方式发动，只回复6音韵')); } else if (ctx && ctx.card && typeof __lvGainCost === 'function') { __gc = __lvGainCost(ctx.card, user, __gc); } p.cost = Math.min(p.cost + __gc, p.maxCost); __emitRecover(user, __gc, (ctx.card && ctx.card.name) || '效果'); break; }
     case 'lose_cost': p.cost = Math.max(0, p.cost - op.amount); break;
     case 'gain_shield': p.shield = (p.shield || 0) + op.amount; break;
-    case 'def_down': applyDefenseDown(target, op.amount, op.actions || 2); break;
+    case 'def_down': applyDefenseDown(target, op.amount, op.untilTurnEnd ? null : (op.actions || 2)); break;   /* 【2026-10-08】卡面写"直到本回合结束"的走回合清理 */
     case 'def_up': applyDefenseUp(user, op.amount); break;
     case 'heal_sync': { var __hs = op.amount; if (ctx && ctx.card && typeof __lvHealSync === 'function') __hs = __lvHealSync(ctx.card, user, __hs); p.sync = Math.min(p.sync + __hs, p.maxSync || 999); break; }
     case 'loss_sync': { var w = op.targetWho === 'self' ? user : target; battleState[w].sync = Math.max(0, battleState[w].sync - op.amount); break; }
