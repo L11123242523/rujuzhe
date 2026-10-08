@@ -7024,20 +7024,13 @@ function __ruriJudgeAfterDamage(owner) {
        它弹在**服务器**上、无人应答，实测被"AI闸门等待人类决策超时 ⇒ 放行"跳过，
        导致**客机的阶梯整个失效**（既不抽2也不弃1）。改走 ENV.ask 的**座位路由**，由该座位的客户端作答。
        非服务器权威（单机 / 普通联机）⇒ 保持原样，行为逐字不变。 */
-    var __ruriAskTier = function (pick) { if (pick === 0) { try { __ruriTierBody(); } catch (e) {} } };
-    try {
-      /* 【统一决策通道 2026-10-06】谈窗**始终**走 ENV.ask ——
-         它在本机走 __askChoiceLocal（测试床的 pickChoice 能答）、在服务器权威下走座位路由（由远端座位答）。
-         原来这里直接调 showChoiceModal、绕过统一通道 ⇒ 测试床里**没人答** ⇒ 靠"AI闸门 2.4 秒放行"掩盖；
-         真实对局里就表现为"谈窗没等到点击就被跳过 ⇒ 抽2选1弃整段消失"（作者实测）。 */
-      if (typeof ENV !== 'undefined' && ENV && typeof ENV.ask === 'function') {
-        ENV.ask(owner, { kind: 'choice', label: '琉璃被动·累计' + rp._ruriJudgeCount + '次',
-          effect: '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？',
-          choices: ['发动', '不发动'] }, __ruriAskTier);
-      } else if (typeof showChoiceModal === 'function') {
-        showChoiceModal('琉璃被动·累计' + rp._ruriJudgeCount + '次', '是否发动：抽2张、选1张送入墓地，那之后全队造成的判定伤害+1？', null, ['发动', '不发动'], __ruriAskTier);
-      } else { __ruriTierBody(); }
-    } catch (e) { try { __ruriTierBody(); } catch (e2) {} }
+    /* 【2026-10-08 修·**最简解**（作者实测：达标抽卡"不入连锁、会被卡掉"）】
+       原先这里是"结算之后用 ENV.ask **异步**问发动/不发动" ⇒ 等玩家答完，连锁窗口早已过去，
+       那次抽卡必然落在连锁之外（现象就是"被卡掉"）。
+       其实不需要另造机制：**本函数就是注册表触发 `ruri-judge-passive` 的效果本体，
+       它本身就是一条连锁条目** ⇒ 让阶梯段**直接在这里执行**，抽卡就是这条链效果的一部分 ✓
+       既在连锁里结算，也不可能被"结算后的异步弹窗"卡掉。 */
+    try { __ruriTierBody(); } catch (e) { console.error('琉璃被动阶梯段执行出错', e); }
   } catch (e) { console.error('琉璃被动·判定后处理出错', e); }
 }
 
