@@ -6983,28 +6983,17 @@ function __ruriJudgeAfterDamage(owner) {
     /* 【口径 (b) 2026-10-05】阶梯段（抽2选1弃 + 全队判定+1）必须先**谈窗询问发动**；
        "判定伤害后回1音韵"已在上方直接结算（作者口径：回音韵=直接，阶梯=谈窗）。 */
     var __ruriTierBody = function () {
-    // 到达累计阈值：抽两张卡，然后选一张卡送入墓地，那之后全队造成的判定伤害+1
-    if (typeof drawCard === 'function') { drawCard(owner); drawCard(owner); }
+    /* 【2026-10-08 卡面改·**小沙香琉璃被动**】 __LIULI_DRAW_ONE__
+       新卡面：「每次造成判定伤害后可以回复自身1点音韵值。这个效果累计触发3/6/11/14次后可以发动：
+               **抽一张卡**，那之后全队造成的判定伤害+1。」
+       旧实现是「抽两张卡，然后选一张卡送入墓地」⇒ 按新卡面简化为**只抽一张**（送墓那步整段去掉）。 */
+    if (typeof drawCard === 'function') { drawCard(owner); }
     function __ruriTier() {
       rp._judgeDamageBonus = (rp._judgeDamageBonus || 0) + 1;
-      addBattleLog(owner, '【琉璃被动】累计' + rp._ruriJudgeCount + '次：抽2选1弃完成，全队判定伤害+1（当前+' + rp._judgeDamageBonus + '）');
+      addBattleLog(owner, '【琉璃被动】累计' + rp._ruriJudgeCount + '次：抽1张完成，全队判定伤害+1（当前+' + rp._judgeDamageBonus + '）');
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
-    var dl = (typeof collectZoneCards === 'function') ? collectZoneCards(owner, ['hand'], null, null) : [];
-    if (!dl.length) { __ruriTier(); return; }
-    if (owner === 'p1' && typeof pickFromList === 'function') {
-      pickFromList('p1', dl, '琉璃被动：抽2张后选1张送入墓地（那之后全队判定+1）', 1, function (picks) {
-        picks.forEach(function (pk) {
-          var arr = rp[pk.zone], ix = arr.indexOf(pk.card);
-          if (ix >= 0) { arr.splice(ix, 1); rp.grave.push(pk.card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, pk.card, 'effect'); }
-        });
-        __ruriTier();
-      });
-    } else {
-      var pk = dl[0], arr = rp[pk.zone], ix = arr.indexOf(pk.card);
-      if (ix >= 0) { arr.splice(ix, 1); rp.grave.push(pk.card); }
-      __ruriTier();
-    }
+    __ruriTier();   /* 【2026-10-08 卡面改】新卡面无「选一张送入墓地」这一步 */
     };
     /* 谈窗询问：选"发动"才执行阶梯段；没有弹窗机制时按原样执行（兜底）。
        【S4 服务器权威 2026-10-05】服务器权威态下**不能**用 showChoiceModal ——
@@ -21922,7 +21911,7 @@ function __applyIntimidate(target, srcName, done) {
   function penalty() {
     addBattleLog(target, '【恫吓】没有交出卡 ⇒ ' + who + '受到3点混沌伤害并失去2点音韵值');
     try { tp.cost = Math.max(0, (tp.cost || 0) - 2); } catch (e) {}
-    try { dealDamageWithResponse(target, 3, '恫吓', fin, '混沌', null, { kind: 'attribute' }); } catch (e) { fin(); }
+    try { dealDamageWithResponse(target, 1, '恫吓', fin, '混沌', null, { kind: 'attribute' }); } catch (e) { fin(); }   /* 【2026-10-08 卡面改】恫吓惩罚 1 点混沌 */
   }
   function giveBack(entry) {
     try {
@@ -21957,15 +21946,17 @@ var SPECIAL_CARD_HANDLERS = {
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
+      /* 【2026-10-08 卡面改】「（可以向后移动3格）」：选发 —— 问过再动，不替玩家决定 */
+      try { if (typeof showChoiceModal === 'function') showChoiceModal(N, '可以向后移动3格', '选择是否移动', ['向后移动3格', '不移动'], function (o) { if (o === 0) { try { battleState[user].position = (((battleState[user].position - 3) % 42) + 42) % 42; addBattleLog(user, '【' + N + '】向后移动3格到第' + battleState[user].position + '格'); if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {} } }); } catch (e) {}
       var t = battleState[foe];
       var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
       /* ① 同行校验（同一行才算命中；本作 42 格环形，"同行"由统一射程函数判定） */
       var __sameRow = true;
-      try { if (typeof __inTileRange === 'function') __sameRow = __inTileRange(user, foe, { dir: 'row', range: 21 }); } catch (e) {}
+      try { if (typeof __inTileRange === 'function') __sameRow = __inTileRange(user, foe, { dir: '后方', range: 4 }); } catch (e) {}   /* 【2026-10-08 卡面改】身后4格范围内 */
       if (!__sameRow) { addBattleLog(user, '【' + N + '】目标不在同一行 ⇒ 不造成伤害，也不施加恫吓'); __fin(); return; }
       /* ② 伤害 = floor(目标**已损失**同步值 × 33%) */
       var lost = Math.max(0, (t.maxSync || 0) - (t.sync || 0));
-      var dmg = Math.floor(lost * 0.33);
+      var dmg = Math.floor(lost * 0.15) + 1;   /* 【2026-10-08 卡面改】已损失同步值15%+1 */
       if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 33% = ' + dmg + ' 点混沌伤害');
       else addBattleLog(user, '【' + N + '】目标还没损失同步值 ⇒ 本次造伤为 0');
       var __afterDmg = function () {
