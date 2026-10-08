@@ -17139,6 +17139,24 @@ function runOneOp(op, ctx, next) {
     return;
   }
   switch (op.op) {
+    /* 【2026-10-08 修·**黑卡「获取金币」永远不发生**】 __GOLD_IN_RUNONEOP__
+       该 op 的实现原先只写在**另一个不被调用的** op 执行器里，而真正执行的是 runOneOp 本 switch
+       ⇒ 编译层产出 op、运行时没人认识它 ⇒ 静默什么都不做
+       （打点证据：dispatchStep 内 ops=1 个 gain_gold_from_last_search，而金币 0→0、且无任何日志）。
+       修法：补进**真正执行的执行器**（此处），与同族的 gain_cost_if_last_match 并列。
+       语义：按上一步检索到的卡的音韵值×N 给金币；没有检索记录只记日志、不凭空给钱。 */
+    case 'gain_gold_from_last_search': {
+      var __lgCard = p && p._lastSearchCard;
+      var __lgMult = Number(op.mult) || 500;
+      if (__lgCard) {
+        var __lgAdd = (Number(__lgCard.cost) || 0) * __lgMult;
+        p.gold = (p.gold || 0) + __lgAdd;
+        addBattleLog(user, '【黑色卡片】获得【' + __lgCard.name + '】音韵值×' + __lgMult + '的金币（+' + __lgAdd + '，当前' + p.gold + '）');
+      } else {
+        addBattleLog(user, '【黑色卡片】没有检索到道具卡，本次不给金币');
+      }
+      break;
+    }
     case 'next_attack_pierce': p._nextAttackPierce = Math.max(p._nextAttackPierce || 0, op.amount); addBattleLog(user, '获得增益：下一次攻击无视' + op.amount + '点护盾'); break;
     case 'pre_next_damage_loss': p._preNextDamageLoss = { amount: op.amount }; addBattleLog(user, '下次造成伤害前先扣目标' + op.amount + '同步'); break;
     case 'gain_cost_if_last_match': {
