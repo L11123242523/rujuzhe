@@ -21364,6 +21364,19 @@ function placeAfterUse(user, card, isPerm) {
   // 若这张 C1 卡在结算期间**已被别的效果搬走**（作者允许的机制），则由那个效果决定去向，
   // 这里跳过"按种类送墓"，避免同一张卡同时出现在两个区域。
   if (card) {
+    /* 【2026-10-08 修·**事件卡"连锁其他效果使用时"会进我的墓地**（作者实测：单独使用不会）】
+       事件卡走连锁发动时，早在发动那一刻就已经放进**公共墓地**了（见 L6109-6111：
+       `publicGraveyard.event_cards.push(c); c._alreadyInPublicGrave = true;`
+       注释原话：「打标记供 useEventCardFor 跳过重复入墓」）。
+       但这个"送墓出口"的兜底分支**不看这个标记** ⇒ 结算完又 push 一次 ⇒ 卡落进玩家个人墓地。
+       修法：用代码里现成的**唯一真相**（`_alreadyInPublicGrave` 标记）——已经进过公共墓地的卡，
+       这里直接结束、不再送任何墓地，并把标记清掉（避免跨局带出去）。 */
+    if (card._alreadyInPublicGrave) {
+      card._alreadyInPublicGrave = false;
+      __chainC1Exit(user, card);
+      addBattleLog(user, '【' + (card.name || '?') + '】已在发动时放入公共墓地，不再送入个人墓地');
+      return;
+    }
     var __takenAway = __chainC1WasTakenAway(user, card);
     if (__takenAway) {
       __chainC1Exit(user, card);
@@ -21393,6 +21406,31 @@ function placeAfterUse(user, card, isPerm) {
     // 旧实现只在指令里置 _consumeOnUse，全文件没有第二处读它（死标志），两张卡照样进墓。
     card._consumeOnUse = false;   // 用完即清：避免卡对象跨局复用把标志带进下一局（小野葵 _aoiDiscountUsed 同类事故）
     addBattleLog(user, '【' + card.name + '】发动后直接销毁（不进墓）');
+  } else if (card && (card._category === 'event_cards' || card._category === 'music_cards')) {
+    /* 【2026-10-08 修·**事件卡居然进了玩家自己的墓地**（作者实测）】
+       这个"送墓出口"原来只有一个 `else` 兜底：`p.grave.push(card)` —— **没有按种类分流**。
+       而作者口径（L8242-8245 的注释、以及公共墓地系统）是：
+         「单次道具/技能/攻击卡 ⇒ 自己墓地；**事件卡、乐谱卡 ⇒ 公共墓地**（不洗牌）」。
+       ⇒ 一旦有路径把事件卡交到这里，它就会落进玩家个人墓地（正是作者看到的现象）。
+       这里在出口处按种类分流：事件卡 → publicGraveyard.event_cards，
+       乐谱卡 → publicGraveyard.music_cards；两者都不进个人墓地、不触发个人墓地的送墓触发。 */
+    try {
+      if (typeof publicGraveyard !== 'undefined' && publicGraveyard) {
+        if (card._category === 'music_cards') {
+          if (!publicGraveyard.music_cards) publicGraveyard.music_cards = [];
+          publicGraveyard.music_cards.push(card);
+          addBattleLog(user, '【' + (card.name || '?') + '】送入公共墓地（乐谱卡）');
+        } else {
+          if (!publicGraveyard.event_cards) publicGraveyard.event_cards = [];
+          publicGraveyard.event_cards.push(card);
+          addBattleLog(user, '【' + (card.name || '?') + '】送入公共墓地（事件卡）');
+        }
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+      } else {
+        p.grave.push(card);   /* 极端情况下没有公共墓地容器：宁可进个人墓地，也不丢卡 */
+        addBattleLog(user, '【' + (card.name || '?') + '】送入墓地（公共墓地不可用，回退）');
+      }
+    } catch (e) { console.error('事件卡/乐谱卡送公共墓地出错', e); }
   } else {
     // 蓝图复制的卡使用结算完毕：送入墓地前变回蓝图原本卡面与效果
     if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
