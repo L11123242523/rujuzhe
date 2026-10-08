@@ -4841,6 +4841,11 @@ function rlRenderUI() {
   /* 【2026-09-30 作者要求】对战页名字旁改用**角色头像**（角色头像/*.jpg），没有头像时回落到卡图 */
   if (p1.leader.avatar_url || p1.leader.image_url) {
     p1Portrait.innerHTML = '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + (p1.leader.avatar_url || p1.leader.image_url) + '" alt="' + p1.leader.name + '">';
+  } else {
+    /* 【2026-10-08 修·**打完一局再开一把头像还是上一把的**】
+       原来这里是 if 而没有 else ⇒ 新一把的队长若没有头像字段，就**沿用上一局留下的 innerHTML**。
+       缺字段时必须清空（宁可空白，也不显示上一局的人）。 */
+    p1Portrait.innerHTML = '';
   }
   
   // 敌人血条
@@ -4855,6 +4860,8 @@ function rlRenderUI() {
   var p2Portrait = document.getElementById('rlEnemyPortrait');
   if (p2.leader.avatar_url || p2.leader.image_url) {
     p2Portrait.innerHTML = '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + (p2.leader.avatar_url || p2.leader.image_url) + '" alt="' + p2.leader.name + '">';
+  } else {
+    p2Portrait.innerHTML = '';   /* 【2026-10-08 修·头像残留上一把】同上：缺字段必须清空 */
   }
   
   // 敌人意图
@@ -6982,7 +6989,7 @@ function __ruriJudgeAfterDamage(owner) {
     if (TH.indexOf(rp._ruriJudgeCount) < 0) return;
     /* 【口径 (b) 2026-10-05】阶梯段（抽2选1弃 + 全队判定+1）必须先**谈窗询问发动**；
        "判定伤害后回1音韵"已在上方直接结算（作者口径：回音韵=直接，阶梯=谈窗）。 */
-    var __ruriTierBody = function () {
+    var __ruriTierBodyDirect = function () {
     /* 【2026-10-08 卡面改·**小沙香琉璃被动**】 __LIULI_DRAW_ONE__
        新卡面：「每次造成判定伤害后可以回复自身1点音韵值。这个效果累计触发3/6/11/14次后可以发动：
                **抽一张卡**，那之后全队造成的判定伤害+1。」
@@ -6994,6 +7001,23 @@ function __ruriJudgeAfterDamage(owner) {
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
     __ruriTier();   /* 【2026-10-08 卡面改】新卡面无「选一张送入墓地」这一步 */
+    };
+    /* 【2026-10-08 修·**琉璃被动达标抽卡不能进连锁、会被卡掉**（作者实测）】
+       原来这里是 `drawCard(owner)` **裸调** ⇒ 这次抽卡不在连锁里，结算顺序上随时可能被打断/吞掉。
+       改成走引擎标准的**触发入链入口** __add（其它角色被动用的就是它）：
+       它会先占连锁位置（C1），再按逆顺结算执行本段 ⇒ 抽卡在连锁里完成，不会被卡掉。
+       没有 __add（异常环境）时才退回直接执行，保证效果不丢。 */
+    var __ruriTierBody = function () {
+      try {
+        if (typeof __add === 'function') {
+          __add(owner, false, '琉璃被动·与子同行（累计' + rp._ruriJudgeCount + '次）', function (next) {
+            try { __ruriTierBodyDirect(); } catch (e) { console.error('琉璃被动阶梯段执行出错', e); }
+            if (typeof next === 'function') next();
+          });
+          return;
+        }
+      } catch (e) { console.error('琉璃被动入链失败，退回直接执行', e); }
+      __ruriTierBodyDirect();
     };
     /* 谈窗询问：选"发动"才执行阶梯段；没有弹窗机制时按原样执行（兜底）。
        【S4 服务器权威 2026-10-05】服务器权威态下**不能**用 showChoiceModal ——
@@ -16271,7 +16295,11 @@ var __sfx = (function () {
     bgmTimerStop();
   }
   function bgmToggle() {
-    try { bgm.on = !bgm.on; bgmSave(); if (bgm.on) bgmStart(); else bgmStop(); try { this.refresh(); } catch (e) {} return bgm.on; } catch (e) { return false; }
+    /* 【2026-10-08 修·**残血音乐关了再开还是没声音**】
+       原来只 toggle 标志位后调 bgmStart()：而 bgmStart 内部按「当前是否已在该轨」判断，
+       关过之后内部状态没复位 ⇒ 重开时被当成"已经在播"⇒ 不出声。
+       改成：重新打开时先 bgmStop() 做一次干净复位，再 bgmStart()。 */
+    try { bgm.on = !bgm.on; bgmSave(); if (bgm.on) { try { bgmStop(); } catch (e) {} bgmStart(); } else bgmStop(); try { this.refresh(); } catch (e) {} return bgm.on; } catch (e) { return false; }
   }
   return {
     play: function (name) {
