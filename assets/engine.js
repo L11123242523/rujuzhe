@@ -7295,18 +7295,15 @@ registerTrigger({
   label: function () { return '现实间冬马·分析大师（主要阶段）'; },
   fire: function (ctx, owner) { if (typeof __tomaDeclare === 'function') __tomaDeclare(owner); }
 });
-registerTrigger({
-  id: 'lily-sp-main1',
-  timing: 'main1_start',
-  ownerOf: function (ctx) { return (ctx && ctx.player) || 'p1'; },
-  cond: function (ctx, owner) {
-    var q = battleState[owner];
-    return !!(q && q._lilySP && q._lilySPTurn !== battleState.turn && (q.grave || []).length);
-  },
-  mandatory: false,   // 卡面"每个自己回合可以发动一次" ⇒ 选发
-  label: function () { return '莉莉·回收（每回合一次）'; },
-  fire: function (ctx, owner) { if (typeof activateLilySP === 'function') activateLilySP(); }
-});
+/* 【2026-10-09 作者裁决·莉莉·回收改为**主动发动**（与里尔亚斯那两项同款：放"角色技能"菜单）】
+   这里原有的 `lily-sp-main1` 注册（timing: main1_start、mandatory:false）会在**自己回合主要阶段1开始**
+   再弹一次"是否发动" —— 与菜单项**重复**（里尔亚斯的两项都没有这种窗口候选）。
+   ⇒ 删除该注册；自己回合的入口＝角色技能菜单（useCharacterPassive 里的「莉莉·回收」），
+     对手回合的入口＝座位级连锁候选（见 collectChainable 里 `me._lilySP … seatEffect:'lily'`），两者都不动。
+   原注册（保留备查）：
+     registerTrigger({ id:'lily-sp-main1', timing:'main1_start', ownerOf: ctx.player,
+       cond: q._lilySP && q._lilySPTurn !== turn && grave.length, mandatory:false,
+       label:'莉莉·回收（每回合一次）', fire: activateLilySP }); */
 registerTrigger({
   id: 'edward-sp-main1',
   timing: 'main1_start',
@@ -11417,8 +11414,15 @@ function useCharacterPassive() {
   }
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+2 / γ回6同步+抽1馈赠 / δ献祭次数+1并造4理智', action: activateMegumiSP});
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
-  /* 莉莉·回收：**改为"自己回合开始时弹窗询问"**（作者 2026-09-27 裁决），不再挂本菜单。
-     对手回合不能主动发动，只能作为连锁响应（下一步接"非卡片的连锁候选"）。 */
+  /* 【2026-10-09 作者裁决·**莉莉·回收是玩家主动发动的技能**】⇒ 回到"角色技能"菜单
+     （与下面「琉璃(万圣祭)·回收」「羽奈(往昔)·置顶」同款写法）。
+     背景（实读）：这一项原先被注释掉，理由是"改为自己回合开始时弹窗询问"（作者 2026-09-27 口径）；
+     但那个弹窗机制 __offerOptionalEffect **已于 2026-09-28 结构性删除**（见 L13005 注释）
+     ⇒ 主动入口随之丢失：p1 侧菜单没有它，只剩 main1_start 的选发窗口候选。
+     作者 2026-10-09 明确"莉莉的技能就是玩家主动发动的" ⇒ 此处恢复菜单项。 */
+  if (p._lilySP && p._lilySPTurn !== T && (p.grave || []).length) {
+    options.push({name: '莉莉·回收', desc: '墓地最下方1张卡放回牌组最下方（每回合一次）', action: activateLilySP});
+  }
   /* 【已移除（作者 2026-09-28）】最佳化·SP **不是角色技能**，而是"墓地发动"效果：
      现在点墓地里那张卡上的 ⚡ 就能发动（见 GRAVE_SP_DEFS 里的表项），不该挂在角色技能菜单。 */
   /* 琉璃(万圣祭)·回收 —— 作者 2026-09-16 纠正：卡面"可以支付3点同步值来回收自己效果处理区的永续种类的卡"
