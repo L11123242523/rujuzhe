@@ -5420,13 +5420,14 @@ function initBattle() {
   }
   
   // 开始第一回合（延迟确保DOM就绪）
-  /* 【2026-10-07 作者口径·方案 B **撤回**】显式猜拳阶段（phase='rps'）确实过掉了原来的那道坎
-     （probe-depth-sweep：0 次强解 ✓），但**打破了卡牌预期**：
-       `乐谱碎片·尾声 自己.position 期望+5 实得+3`，且另一条探针挂死。
-     机制（已查清）：测试/自动流程的"自动回答"**只有一个槽**；猜拳开局就弹窗 ⇒ 把它吃掉 ⇒
-     卡自己的选项拿不到正确答案 ⇒ 结果错。这不是加个兜底能解决的，是"谁拥有回答权"的结构问题。
-     结论：游戏内猜拳要成立，必须先让猜拳的回答走**独立通道**（不占共用自动回答槽），
-     或按作者口径"无真人时跳过"（方案 C）。在那之前保持现状：猜拳在大厅（v107），不干扰任何流程。 */
+  /* 【2026-10-07 作者口径】"猜拳放进游戏内"**第二次尝试也撤回**（两次都撞在同一道门槛上）：
+     第一次：加了 3 秒兜底计时器 → probe-depth-sweep 报强解；
+     第二次：去掉计时器、改成"棋盘就绪后再弹" → **仍然**报强解（绿宝之杖·择）。
+     结论（记下来，别再重复第三次）：**在开局流程里插入一个"需要人回答的决策"，会改变开局时序，
+     让随后驱动的结算流程留下锁残留** —— 这不是参数问题，是结构问题：
+     猜拳若要进游戏内，应该做成**一个显式的开局阶段（有自己的状态与结束条件）**，
+     而不是"在 startTurn 之前插一个弹窗"。在大厅做（v107 现行）不影响任何结算时序。
+     验收线（目标里写明）：probe-depth-sweep 不许出现强解 —— 未满足就不上。 */
   setTimeout(function() {
     try {
       startTurn();
@@ -21900,31 +21901,9 @@ function chooseZoneCard(user, who, zone, title, cb) {
      · 双方**同时**出拳（各自看不到对方），比完一起亮；
      · 单机：**先收下玩家这一拳、再生成对手的拳**（避免被"读心"）；
      · 平局重出；
-     · 胜者先手（**手牌数量不因先后手而不同**：开局时双方都已结算过"首回合准备阶段"的自然回复与抽卡，各 5 张；先手的优势只是**先行动**）。
+     · 胜者先手（先手在自己第一回合准备阶段抽 1 ⇒ 起手 5 张，见 5215 行口径）。
    cb(先手座位)：'p1' = 你/房主先手，'p2' = 对手先手。
    ⚠ 本函数只负责"问出这一拳 + 判定"；先手怎么落地由调用方决定（单机/联机共用同一份判定，避免两套规则）。 */
-function __netFingerprint() {
-  if (typeof battleState === 'undefined' || !battleState) return '（无对局）';
-  function h(str) { var x = 5381; for (var i = 0; i < str.length; i++) { x = ((x * 33) ^ str.charCodeAt(i)) >>> 0; } return x.toString(36); }
-  function zoneSig(p, z) {
-    var arr = (p && p[z]) || [];
-    var names = '';
-    for (var i = 0; i < arr.length; i++) names += ((arr[i] && arr[i].name) || '?') + ',';
-    return arr.length + '#' + h(names);
-  }
-  var out = [];
-  ['p1', 'p2'].forEach(function (k) {
-    var p = battleState[k];
-    if (!p) { out.push(k + ':-'); return; }
-    out.push(k + ':' + [
-      'sync=' + (p.sync | 0), 'cost=' + (p.cost | 0), 'pos=' + (p.position | 0),
-      'hand=' + zoneSig(p, 'hand'), 'deck=' + zoneSig(p, 'deck'), 'grave=' + zoneSig(p, 'grave'),
-      'perm=' + zoneSig(p, 'permanent'), 'removed=' + zoneSig(p, 'removed'), 'fd=' + zoneSig(p, 'faceDownCards')
-    ].join(','));
-  });
-  return out.join(' | ');
-}
-try { window.__netFingerprint = __netFingerprint; } catch (e) {}
 /* 【2026-10-07 新增·**开局前的猜拳**（不再挡开局路径）】
    上一版我把猜拳塞进 initBattle 里 ⇒ 弹窗没人回答时**开局永远不开始**（门禁判红，探针挂死）。
    现在改成"**开局之前**的一步"：
