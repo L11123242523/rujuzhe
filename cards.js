@@ -2305,7 +2305,7 @@ window.__CARD_DATA__ = {
             "小沙香琉璃"
          ],
          "combo_notes": "领域只覆盖琉璃前后4格，全队得跟着琉璃站位：热忱克制伤害+100%、攻击力+50%、判定伤害+2都只给范围内的热忱输出。夏日海滩踢击、人格修正拳！这些热忱攻击卡在领域里打出，判定伤害+2会落在每次判定上。琉璃每动一步都要把领域往前带，别让输出位脱出范围。",
-         "image_url": "assets/images/ui2/card_biyi_lianli.webp?v=5",
+         "image_url": "assets/images/ui2/card_biyi_lianli.webp?v=6",
          "character_full": "琉璃(水着)",
          "_category": "skill_cards",
          "dims": {
@@ -2338,7 +2338,7 @@ window.__CARD_DATA__ = {
             "幸运护符"
          ],
          "combo_notes": "回3同步并让双方的下一次用卡各减1费，等于用2费把双方节奏都往前推一拍。用来抵超频扣掉的1点同步最顺手，减费还能让下一张卡提前落地；接人格修正拳！时，琉璃判定后回音韵的被动能在同回合把费用补回来，入间予的全队判定伤害+1则让这次减费买到的卡打得更重。",
-         "image_url": "assets/images/ui2/img_XLQKhlAY5H.webp?v=4",
+         "image_url": "assets/images/ui2/img_XLQKhlAY5H.webp?v=5",
          "character_full": "小沙香琉璃",
          "_category": "skill_cards",
          "dims": {
