@@ -4652,8 +4652,12 @@ var RL_FX = {
   '惊吓礼盒': function (c) { c.damage(rlAmount('1～3', c)); },
   '极夜君王之冕': function (c) { c.damage(rlRollDice('1d12')); c.markJudged(); },
   '蓝宝之杖·命': function (c) { c.damage(rlRollDice('2d6')); c.markJudged(); c.coin(2); },
-  '破损电子设备': function (c) { c.damage(rlRollDice('1d6')); },
-  '某女士爱用球棒': function (c) { c.damage(rlRollDice('2d4')); },
+  /* 【2026-10-09 对齐卡面】破损电子设备：扣除自身1点同步值 + 一次**4面骰**判定伤害
+     （旧兜底写的是 1d6、且没扣同步 ✗；文本层编译正常时走文本，这里是兜底） */
+  '破损电子设备': function (c) { c.p.sync = Math.max(0, (c.p.sync || 0) - 1); c.damage(rlRollDice('1d4')); c.markJudged(); },
+  /* 【2026-10-09 对齐卡面】某女士爱用球棒：一次**6面骰**判定伤害（旧兜底 2d4 ✗；
+     之后那次移动由文本层负责，兜底不做） */
+  '某女士爱用球棒': function (c) { c.damage(rlRollDice('1d6')); c.markJudged(); },
   '音叉': function (c) { c.draw(2); if (rlRollDice('1d20') >= 10) c.healCost(1); },
   '制裁之刃': function (c) { c.damage(3 + c.p.hand.length); },
   '搜查令': function (c) { c.damage(1 + c.graveCount('理智')); },
@@ -22046,6 +22050,13 @@ function __applyIntimidate(target, srcName, done) {
   giveBack(pool[0]);
 }
 var SPECIAL_CARD_HANDLERS = {
+  // 【本表的定位（2026-10-09 作者目标第1项）】
+  // **文本层（卡面文本 → compileStepOps）才是权威**；本表只是「文本编译不出时」的兜底。
+  // 审计（port-old/_audit-stale-handlers.cjs）：95 条按名登记项里有 **51 条**属于「文本已接管 ⇒ 此处已过时」✗。
+  // ⇒ 兜底数值一旦与卡面漂移，作者是看不见的（卡面写 5、实际扣 3 这类错 ✗）——
+  //   因此：① 与卡面明显不符的（破损电子设备/球棒等）已逐条对齐 ✓；
+  //        ② 「编译为 null 且无处理器」的审计已纳入门禁（目标第2项）✓，防止悄悄回落。
+
   // ============================================================
   // 【邪恶南瓜攻击！】（混沌·攻击·费3，琉璃(万圣祭)携带）—— 2026-10-07 作者新增
   // 卡面：来为节日增添一丝惊……喜（吓）！
