@@ -952,7 +952,9 @@ function renderZoneSlots(pl) {
       var permStyle = mine ? (permCanAct ? 'cursor:pointer;' : 'cursor:not-allowed;opacity:0.45;filter:grayscale(0.5);') : 'cursor:help;';
       // 对手永续卡点击只做只读查看，避免误触发 p1 的发动入口
       var permOnclick = mine ? (permCanAct ? ('activatePermanentCard(' + it.index + ')') : '') : ('showCardDetail(battleState.' + pl + '.permanent[' + it.index + '])');
-      html += '<div class="permanent-slot permanent-card" title="' + permTitle + '"' +
+      /* 【2026-10-09 作者目标第4项】场上永续卡：**鼠标悬停即浮出放大的原图**（通用浮层） */
+      var permPeek = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(it.card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
+      html += '<div class="permanent-slot permanent-card"' + permPeek + ' title="' + permTitle + '"' +
         (permOnclick ? ' onclick="' + permOnclick + '"' : '') + ' style="' + permStyle + '">' +
         (it.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + it.card.image_url + '" class="slot-img" alt="' + it.card.name + '">' : '') +
         '<div class="slot-name">' + it.card.name + '</div><div class="slot-type">永续' +
@@ -1219,6 +1221,9 @@ function showDeckList() {
       div.setAttribute('data-list-card', card.name || '');
       div.style.cssText = 'width:120px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;transition:all 0.2s;';
       div.onmouseover = function() { this.style.borderColor = '#feca57'; };
+      /* 【2026-10-09 作者目标第4项】列表里的卡：悬停浮出放大的原图（闭包里就有 card ⇒ 直接取名字 ✓） */
+      div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) {} };
+      div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) {} };
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
       /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
       div.onclick = function() { __openGraveCardDetail(card); };
@@ -1277,6 +1282,9 @@ function showGraveList(zone) {
         /* 【2026-10-03 作者实测】墓地和移出区的卡原来点不开、也看不到卡图 ⇒ 显示卡图 + 点击看详情 */
         div.style.cursor='pointer';
         div.onclick=function(ev){ try { ev.stopPropagation(); } catch(e){} __openGraveCardDetail(card); };
+        /* 【2026-10-09 作者目标第4项】墓地/移出区的卡：**悬停即浮出放大的原图**（闭包里有 card ⇒ 直接取名字） */
+        div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) {} };
+        div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) {} };
         div.innerHTML='<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
           '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
@@ -1497,3 +1505,42 @@ function __cardPeekShow(el, nameEnc) {
 function __cardPeekHide() { try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) {} }
 try { window.__cardPeekShow = __cardPeekShow; } catch (e) {}
 try { window.__cardPeekHide = __cardPeekHide; } catch (e) {}
+
+/* 【2026-10-09 作者目标第5项·触屏】长按 = 查看放大原图。
+   全局委托：任何"带 onmouseenter 里含 __cardPeekShow 的元素"被长按 450ms ⇒ 执行那段处理器（显示浮层）；
+   抬手/滑动即隐藏。这样**已加悬停的所有位置自动支持触屏** ✓，无需逐处再改 ✗。 */
+(function () {
+  if (typeof window === 'undefined' || window.__touchLongPressInstalled) return;
+  window.__touchLongPressInstalled = true;
+  var timer = null, target = null;
+  function clearTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+  function hide() { try { if (typeof __cardPeekHide === 'function') __cardPeekHide(); } catch (e) {} target = null; }
+  function findHandlerAttr(el) {
+    /* 往上找最近的、带 onmouseenter 且含 __cardPeekShow 的元素 */
+    var n = 0;
+    while (el && n < 6) {
+      var attr = el.getAttribute && el.getAttribute('onmouseenter');
+      if (attr && attr.indexOf('__cardPeekShow') >= 0) return attr;
+      el = el.parentElement; n++;
+    }
+    return null;
+  }
+  document.addEventListener('touchstart', function (ev) {
+    try {
+      var el = ev.target;
+      var attr = findHandlerAttr(el);
+      if (!attr) return;
+      target = el;
+      clearTimer();
+      timer = setTimeout(function () {
+        try { new Function(attr).call(el); } catch (e) {}
+      }, 450);
+    } catch (e) {}
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(function (k) {
+    document.addEventListener(k, function () { clearTimer(); hide(); }, { passive: true });
+  });
+  /* 触屏上点一下（短按）也要把浮层收掉，避免残留 */
+  document.addEventListener('click', function () { hide(); }, { passive: true });
+})();
+
