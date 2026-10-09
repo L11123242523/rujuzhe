@@ -11290,7 +11290,13 @@ function triggerTileEffect(player) {
       break;
     case 'item':
       // 易物（权威）：选自己1张卡送入墓地，然后从牌组抽1张（交互格，可选择不执行）
-      if (player === 'p1' && battleState.currentPlayer === 'p1') {
+      /* 【2026-10-09 修·**p1 在对手回合走到易物格会被"AI 式"自动送墓**】
+         原判据是 `player === 'p1' && battleState.currentPlayer === 'p1'` ⇒
+         p1 若在**对手回合**被移动效果推到易物格，这一支不成立、又落不进下面的"p2 联机"支
+         （那里写死 player === 'p2'）⇒ 直接掉进最后的 AI 分支 ⇒ 系统自己把 p1 的手牌送墓并抽卡。
+         修法：本支只认"**这块棋子是 p1**"（谁走到的就按谁的入口），不再附加"必须轮到 p1"。
+         下方 p2 联机支与 AI 支**一行未动**。 */
+      if (player === 'p1') {
         if (!battleState.p1.hand.length) { addBattleLog('p1', '易物：手牌为空，无法送墓抽牌'); break; }
         showChoiceModal('易物格', '选一张手牌送入墓地，然后从牌组抽1张（也可花费500金币直接抽1张）', '', ['选1张手牌送墓并抽1张', '花费500金币抽1张', '不执行'], function(o) {
           if (o === 2) { addBattleLog('p1', '易物：选择不执行'); updateBattleUI(); return; }
