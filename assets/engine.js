@@ -6035,10 +6035,12 @@ function collectChainable(player, effect){
         out.push({ card: { name: '露璐缇雅·破坏', cost: 0, _category: 'seat_effect', effect: '破坏一名玩家区域内的1张卡，然后其回复4点音韵值' },
           from: 'seatEffect', index: 0, seatEffect: 'edward' });
       }
-      if (me._lilySP && me._lilySPTurn !== battleState.turn && (me.grave || []).length) {
-        out.push({ card: { name: '莉莉·回收', cost: 0, _category: 'seat_effect', effect: '把墓地最下方一张卡放回牌组最下方' },
-          from: 'seatEffect', index: 0, seatEffect: 'lily' });
-      }
+      /* 【2026-10-09 作者裁决 A·按卡面】莉莉SP 卡面写的是「**每个自己回合**可以发动」
+         ⇒ 它**不该**在对手回合作为连锁响应出现。这里原有的 `seatEffect:'lily'` 候选按 A 删除；
+         自己回合的入口＝"角色技能"菜单里的「莉莉·回收」（useCharacterPassive）。
+         同排的露璐缇雅·破坏候选**不动**（作者只裁了莉莉这一条）。
+         配套：`_relaytest/chain_completeness_test.js` ④ 里"对手回合应出现连锁候选"的期望
+         已按作者授权同步改为"**不**出现"（作者 2026-10-09 明确选 A）。 */
     }
   } catch (e) { console.error('座位级连锁候选收集出错', e); }
   /* 【按卡的身份去重（作者 2026-09-27 反馈：事件卡/技能卡在连锁窗口里各占两个选项）】
