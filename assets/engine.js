@@ -8822,7 +8822,7 @@ function rioTriggerOnce(player) {
       ['支付1音韵·四面骰判定', '支付2音韵·六面骰判定', '不发动'], function (i) { if (i === 0) __fire(4, 1); else if (i === 1) __fire(6, 2); });
   } else { __fire((p.cost || 0) >= 2 ? 6 : 4, (p.cost || 0) >= 2 ? 2 : 1); } // AI：音韵充足用六面，否则四面
 }
-// 统一的“移动后被动累计”：直尺SP（每累计8格造理智伤）+ 小春（每累计5格/经过玩家得先机）。
+// 统一的“移动后被动累计”：直尺SP（每累计6格造理智伤，2026-10-09 平衡性改动 8→6）+ 小春（每累计5格/经过玩家得先机）。
 // 掷骰主移动(executeMoveEffect)与卡牌效果移动(applyMove)都必须调用，避免卡牌移动漏累计。
 function accumulateMovePassives(player, amount, oldPos) {
   var p = battleState[player]; if (!p) return;
@@ -17030,7 +17030,7 @@ function __opsCards(op, ctx, next, env) {
           return a === op.attr;
         });
       }
-      /* 【魔法清点名单】费用上限：新卡面"选一张费用不大于3的卡" ⇒ search 支持 maxCost 过滤 */
+      /* 【魔法清点名单】费用上限：卡面"选一张费用不大于**2**的卡"（2026-10-09 平衡性改动 3→2）⇒ search 支持 maxCost 过滤 */
       if (op.maxCost != null) list = list.filter(function (x) { return (Number(x.card && x.card.cost) || 0) <= Number(op.maxCost); });
       var __doSearchPick = function () {
       pickFromList(user, list, '选择' + op.need + '张卡' + (op.to === 'deck' ? '放回牌组' : '加入手卡'), op.need, function (picks) {
