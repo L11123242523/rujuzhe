@@ -4089,10 +4089,9 @@ function rlCardChip(kind, card, inBattle) {
   var extra = (kind === 'chars') ? ('同步 ' + (card.sync || '') )
             : (card.cost !== undefined && card.cost !== '' ? (card.cost + ' 费') : '');
   var tag = card.attribute || card.type || '';
-  /* 【2026-10-09 作者要求】悬停显示这张卡的**原图**（通用浮层 __cardPeekShow；卡名编码后传参，
-     避免卡名里含引号（如「先哲之"馈赠"」）把内联 HTML 截断） */
-  var __peek = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
-  return '<div class="' + cls + '"' + __peek + ' onclick="rlToggleCard(\'' + kind + '\',\'' +
+  /* 【2026-10-09 撤回】此处曾加过"悬停看原图"，但**肉鸽相关的代码作者没让动**（作者口径：
+     「我叫你弄肉鸽有关的你再弄，现在当作没有肉鸽」）⇒ 已撤回，恢复原样。 */
+  return '<div class="' + cls + '" onclick="rlToggleCard(\'' + kind + '\',\'' +
          encodeURIComponent(card.file) + '\')" title="' + (card.text || card.passive || '') + '">'
        + '<span class="rl-chip-name">' + card.name + '</span>'
        + '<span class="rl-chip-meta">' + [extra, tag].filter(Boolean).join(' · ') + '</span>'
