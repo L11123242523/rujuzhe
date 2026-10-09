@@ -22149,27 +22149,55 @@ var SPECIAL_CARD_HANDLERS = {
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
-      /* 【2026-10-08 卡面改】「（可以向后移动3格）」：选发 —— 问过再动，不替玩家决定 */
-      try { if (typeof showChoiceModal === 'function') showChoiceModal(N, '可以向后移动3格', '选择是否移动', ['向后移动3格', '不移动'], function (o) { if (o === 0) { try { battleState[user].position = (((battleState[user].position - 3) % 42) + 42) % 42; addBattleLog(user, '【' + N + '】向后移动3格到第' + battleState[user].position + '格'); if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {} } }); } catch (e) {}
       var t = battleState[foe];
       var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
-      /* ① 同行校验（同一行才算命中；本作 42 格环形，"同行"由统一射程函数判定） */
-      var __sameRow = true;
-      try { if (typeof __inTileRange === 'function') __sameRow = __inTileRange(user, foe, { dir: '后方', range: 4 }); } catch (e) {}   /* 【2026-10-08 卡面改】身后4格范围内 */
-      if (!__sameRow) { addBattleLog(user, '【' + N + '】目标不在同一行 ⇒ 不造成伤害，也不施加恫吓'); __fin(); return; }
-      /* ② 伤害 = floor(目标**已损失**同步值 × 33%) */
-      var lost = Math.max(0, (t.maxSync || 0) - (t.sync || 0));
-      var dmg = Math.floor(lost * 0.15) + 1;   /* 【2026-10-08 卡面改】已损失同步值15%+1 */
-      if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 15%+1 = ' + dmg + ' 点混沌伤害');
-      else addBattleLog(user, '【' + N + '】目标还没损失同步值 ⇒ 本次造伤为 0');
-      var __afterDmg = function () {
-        /* ③ 恫吓：目标从效果处理区交出一张盖卡/永续卡回手；不交（或没有）⇒ 3 点混沌 + 失 2 音韵值 */
-        __applyIntimidate(foe, N, __fin);
+      /* 【2026-10-10 修·**结算顺序**（作者实测）】卡面是「（可以向后移动3格）对身后4格范围内的一名其他玩家造成…」
+         ⇒ **必须先移动、再按移动后的位置判射程与造伤**。
+         旧写法把弹窗"发出去就不管了"，紧接着用**移动前**的位置算射程 ⇒ 靠后退把目标纳入身后4格的操作整段作废 ✗
+         （作者原话："本来能通过移动到达攻击范围的操作无法实施"）。
+         现在串成一条链：选发移动 →（回调里）判射程 → 造伤 → 恫吓 → 收尾（对齐卡面的先后顺序）。
+         【2026-10-10 修·归属（同一处一起修）】这个选发是**使用者自己**的 ⇒ 按引擎既有三段式分流：
+           真人 p1 → showChoiceModal；联机远端 p2 → onlineDecideModal('p2')；单机 AI → 不移动、直接结算。
+         旧写法无条件调 showChoiceModal，而它内部写死 `ENV.ask('p1', …)`（assets/ui.js:603-607，签名里没有座位）
+         ⇒ ① 对手（AI/联机远端）用这张卡时弹给**真人 p1**，回调动的是**对手的棋子**（真人替对手决定后退）；
+            ② 真人自己用时又被静默 `catch(e){}` 吞掉 ⇒ 连弹窗都看不到。
+         同一张卡的「恫吓」__applyIntimidate（L22126-22130）就是这段三段式的正解 ✓ */
+      var __afterMove = function () {
+        /* ① 射程：身后4格范围内（含自身所在格）才算命中 —— 用**移动之后**的位置判定 */
+        var __inRange = true;
+        try { if (typeof __inTileRange === 'function') __inRange = __inTileRange(user, foe, { dir: '后方', range: 4 }); } catch (e) {}
+        if (!__inRange) { addBattleLog(user, '【' + N + '】目标不在身后4格范围内 ⇒ 不造成伤害，也不施加恫吓'); __fin(); return; }
+        /* ② 伤害 = floor(目标**已损失**同步值 × 15%) + 1 */
+        var lost = Math.max(0, (t.maxSync || 0) - (t.sync || 0));
+        var dmg = Math.floor(lost * 0.15) + 1;
+        if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 15%+1 = ' + dmg + ' 点混沌伤害');
+        else addBattleLog(user, '【' + N + '】目标还没损失同步值 ⇒ 本次造伤为 0');
+        /* ③ 恫吓：目标从效果处理区交出一张盖卡/永续卡回手；不交（或没有）⇒ 1 点混沌 + 失 2 音韵值 */
+        var __afterDmg = function () { __applyIntimidate(foe, N, __fin); };
+        if (dmg > 0) {
+          try { dealDamageWithResponse(foe, dmg, N, __afterDmg, '混沌', user, { kind: 'attribute' }); }
+          catch (e) { console.error('邪恶南瓜攻击·造伤异常', e); __afterDmg(); }
+        } else __afterDmg();
       };
-      if (dmg > 0) {
-        try { dealDamageWithResponse(foe, dmg, N, __afterDmg, '混沌', user, { kind: 'attribute' }); }
-        catch (e) { console.error('邪恶南瓜攻击·造伤异常', e); __afterDmg(); }
-      } else __afterDmg();
+      var __back3 = function () {
+        try {
+          /* 走统一位移出口：日志/路障/落点格子效果/位移被动（直尺·小春）一并处理 ✓ */
+          if (typeof applyMove === 'function') applyMove(user, -3);
+          else battleState[user].position = (((battleState[user].position - 3) % 42) + 42) % 42;
+          addBattleLog(user, '【' + N + '】向后移动3格到第' + battleState[user].position + '格');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        } catch (e) { console.error('邪恶南瓜攻击·后退3格出错', e); }
+      };
+      var __backLabels = ['向后移动3格', '不移动'];
+      var __backPick = function (o) { if (o === 0) __back3(); __afterMove(); };
+      if (user === 'p1' && typeof showChoiceModal === 'function') {
+        showChoiceModal(N, '可以向后移动3格', '选择是否移动（移动后再结算伤害与恫吓）', __backLabels, __backPick);
+      } else if (typeof Online !== 'undefined' && Online.active && user === 'p2' && typeof onlineDecideModal === 'function') {
+        onlineDecideModal('p2', N + '（对手）', '可以向后移动3格', '选择是否移动（移动后再结算伤害与恫吓）', __backLabels, __backPick);
+      } else {
+        /* 单机 AI（user === 'p2' 且非联机）：不执行这个可选项、也不弹任何窗，直接结算 */
+        __afterMove();
+      }
     }
   },
   /* 【2026-10-07 新增·恫吓（作者新卡的机制，引擎里原先没有）】
