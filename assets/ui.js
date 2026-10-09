@@ -932,11 +932,14 @@ function renderZoneSlots(pl) {
     }
     if (it.type === 'facedown') {
       var canAct = mine && !(it.card._faceDownTurn === battleState.turn && it.card._faceDownPlayer === pl && battleState.currentPlayer === pl);
-      var fdTitle = mine ? (canAct ? '盖伏卡 - 点击发动' : '盖伏卡 - 本回合无法发动') : '对手的盖伏卡';
+      var fdTitle = mine ? (canAct ? '盖伏卡 - 点击发动（鼠标悬停可查看卡面）' : '盖伏卡 - 本回合无法发动（鼠标悬停可查看卡面）') : '对手的盖伏卡';
       var fdOnclick = mine ? (canAct ? ("uiActivateFaceDown(" + it.index + ")") : "showToast('盖伏当回合无法发动！', 'warn')") : '';
       var fdType = mine ? (canAct ? '可发动' : '本回合禁用') : '对手·盖伏';
+      /* 【2026-10-09 作者要求·盖卡可查询】鼠标**悬停**即显示卡面浮层（只对**自己的**盖卡生效；
+         对手的盖卡不加这两个处理器 ⇒ 不泄露）。点击行为保持不变（发动 / 本回合无法发动提示）。 */
+      var fdHover = mine ? (' onmouseenter="__fdPeekShow(this, ' + it.index + ')" onmouseleave="__fdPeekHide()"') : '';
       html += '<div class="permanent-slot permanent-card face-down" title="' + fdTitle + '"' +
-        (mine ? ' onclick="' + fdOnclick + '"' : '') +
+        (mine ? ' onclick="' + fdOnclick + '"' : '') + fdHover +
         ' style="background:linear-gradient(135deg,#2c3e50,#34495e);' + (mine ? 'cursor:pointer;' : 'cursor:default;') + '">' +
         '<div class="slot-name" style="color:#feca57;">盖伏</div><div class="slot-type">' + fdType + '</div></div>';
     } else {
@@ -1410,3 +1413,44 @@ try { window.showGraveList = showGraveList; } catch (e) {}
 try { window.showOppZone = showOppZone; } catch (e) {}
 try { window.showTargetCards = showTargetCards; } catch (e) {}
 try { window.showAttackCardSelect = showAttackCardSelect; } catch (e) {}
+
+/* 【2026-10-09 作者要求·盖卡可查询（悬停版）】
+   鼠标**悬停**在自己的盖伏卡上 ⇒ 显示卡面浮层；移开即隐藏。
+   数据取自 battleState.p1.faceDownCards[index]（与点击发动 uiActivateFaceDown(index) 同一索引口径）。
+   只对**自己的**盖卡挂 onmouseenter/onmouseleave（见盖卡渲染处）⇒ 对手的盖卡不泄露。 */
+function __fdPeekShow(el, index) {
+  try {
+    var p = battleState && battleState.p1;
+    var card = p && (p.faceDownCards || [])[index];
+    if (!card) return;
+    var box = document.getElementById('__fdPeekBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = '__fdPeekBox';
+      box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
+        'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
+        'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:210px;height:auto;">' +
+        '<div id="__fdPeekName" style="color:#feca57;font-size:12px;text-align:center;padding:4px 6px;"></div>';
+      document.body.appendChild(box);
+    }
+    var img = document.getElementById('__fdPeekImg');
+    var nm = document.getElementById('__fdPeekName');
+    if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; }
+    if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null ? '（' + card.cost + '费）' : '');
+    box.style.display = 'block';
+    var r = el.getBoundingClientRect();
+    var bw = box.offsetWidth || 214, bh = box.offsetHeight || 300;
+    var left = r.left - bw - 10;
+    if (left < 8) left = Math.min(r.right + 10, Math.max(8, window.innerWidth - bw - 8));
+    var top = r.top;
+    if (top + bh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bh - 8);
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+  } catch (e) { /* 预览失败不影响任何流程 */ }
+}
+function __fdPeekHide() {
+  try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) {}
+}
+try { window.__fdPeekShow = __fdPeekShow; } catch (e) {}
+try { window.__fdPeekHide = __fdPeekHide; } catch (e) {}
