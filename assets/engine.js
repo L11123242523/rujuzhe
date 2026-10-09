@@ -6101,6 +6101,9 @@ function applyChainCard(player,pick,effect,done){
   }
   effect._chain = effect._chain || [];
   function payAndRemove(){
+    /* 【2026-10-09 第2件】连锁发动时卡会被移出所有区域 ⇒ "用卡后被动"的归属守卫查不到它。
+       这里打一个"本次正由该玩家使用"的标记（守卫认它、placeAfterUse 里清除）。 */
+    try { if (c) c._inUseBy = player; } catch (e) {}
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
     me.cost-=(parseInt(c.cost,10)||0);
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
@@ -21362,6 +21365,8 @@ function __revertBlueprintCopy(card) {
 }
 
 function placeAfterUse(user, card, isPerm) {
+  /* 【2026-10-09 第2件】用卡结束 ⇒ 清掉"本次使用中"的归属标记（与 payAndRemove 成对，同生同灭） */
+  try { if (card) card._inUseBy = null; } catch (e) {}
   var p = battleState[user];
   // 作者口径：结算完毕才按种类送墓 —— 先把"连锁 C1 占位"从效果处理区撤掉（这张卡自己那格）。
   // 若这张 C1 卡在结算期间**已被别的效果搬走**（作者允许的机制），则由那个效果决定去向，
@@ -21488,6 +21493,8 @@ function __cardBelongsForUse(user, card) {
   try {
     if (!card) return false;
     if (card._addedByEffect) return true;
+    /* 【2026-10-09 第2件】连锁发动路径：卡已移出所有区域、正"在本次使用中" ⇒ 由 _inUseBy 提供合法归属 */
+    if (card._inUseBy && card._inUseBy === user) return true;
     var q = battleState && battleState[user];
     if (!q) return false;
     var zones = ['hand', 'grave', 'permanent', 'faceDownCards', 'removed', 'removedFromGame', 'deck'];
