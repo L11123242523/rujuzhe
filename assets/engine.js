@@ -8795,17 +8795,17 @@ function rioTriggerOnce(player) {
 function accumulateMovePassives(player, amount, oldPos) {
   var p = battleState[player]; if (!p) return;
   var amt = Math.abs(amount || 0); if (!amt) return;
-  // 设计师直尺SP：单回合每累计移动8格，对一名其他玩家造2理智（队伍≥2名[位移]角色→3）
+  // 设计师直尺SP：单回合每累计移动6格（2026-10-09 平衡性改动：8→6），对一名其他玩家造2理智（队伍≥2名[位移]角色→3）
   var __zhichiCard = (p.permanent || []).find(function (c) { return c.name && c.name.indexOf('直尺') >= 0; });
   if (__zhichiCard) {
     p._zhichiMoveCount = (p._zhichiMoveCount || 0) + amt;
     var __zteam = ((typeof deckConfig !== 'undefined') && deckConfig[player] && deckConfig[player].chars || []).filter(Boolean);
     var __zmov = __zteam.filter(function (c) { return (c.roles || []).some(function (r) { return (r || '').indexOf('位移') >= 0; }); }).length;
     var __zdmg = __zmov >= 2 ? 3 : 2, __zfoe = foeOf(player);
-    while (p._zhichiMoveCount >= 8) {
-      p._zhichiMoveCount -= 8;
-      dealDamageWithResponse(__zfoe, __zdmg, '设计师直尺SP·累计移动8格', null, '理智');
-      addBattleLog(player, '【直尺SP】单回合累计移动8格，对其他玩家造成' + __zdmg + '点理智伤害');
+    while (p._zhichiMoveCount >= 6) {
+      p._zhichiMoveCount -= 6;
+      dealDamageWithResponse(__zfoe, __zdmg, '设计师直尺SP·累计移动6格', null, '理智');
+      addBattleLog(player, '【直尺SP】单回合累计移动6格，对其他玩家造成' + __zdmg + '点理智伤害');
     }
   }
   // 小春被动：累计位移4格或经过玩家获得1点先机（上限6）
