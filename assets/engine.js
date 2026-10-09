@@ -22195,7 +22195,27 @@ var SPECIAL_CARD_HANDLERS = {
       } else if (typeof Online !== 'undefined' && Online.active && user === 'p2' && typeof onlineDecideModal === 'function') {
         onlineDecideModal('p2', N + '（对手）', '可以向后移动3格', '选择是否移动（移动后再结算伤害与恫吓）', __backLabels, __backPick);
       } else {
-        /* 单机 AI（user === 'p2' 且非联机）：不执行这个可选项、也不弹任何窗，直接结算 */
+        /* 单机 AI（user === 'p2' 且非联机）：**看局面决定**，不弹任何窗 ——
+           只有当"后退3格能把目标纳入身后4格"时才后退（严格增益）。
+           为什么不是固定不移动：作者要求"看情况智能"；而固定"总是后退"又会把**本来已经打得到**的目标
+           挪出射程（目标在 自己−0…−3 时，后退 3 格后变成 −3…−6，多数会脱靶）⇒ 两头都不对。
+           判定一律用同一个 __inTileRange（射程规则的唯一真相），不在这里重抄公式。 */
+        var __aiMove = false, __u0 = battleState[user].position, __probed = false;
+        try {
+          var __inNow = __inTileRange(user, foe, { dir: '后方', range: 4 });
+          if (!__inNow) {
+            battleState[user].position = (((__u0 - 3) % 42) + 42) % 42;   /* 试算：假设后退后的位置 */
+            __probed = true;
+            var __inAfter = __inTileRange(user, foe, { dir: '后方', range: 4 });
+            battleState[user].position = __u0;                            /* 立刻还原 —— 试算不产生副作用 */
+            __probed = false;
+            __aiMove = !!__inAfter;
+          }
+        } catch (e) {
+          if (__probed) { try { battleState[user].position = __u0; } catch (e2) {} }   /* 试算抛错也必须把位置还原 */
+          console.error('邪恶南瓜攻击·AI 试算射程出错', e);
+        }
+        if (__aiMove) __back3();
         __afterMove();
       }
     }
