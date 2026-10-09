@@ -3432,7 +3432,10 @@ function deckAutoFill(player) {
 
 function createDeckSlot(card, player, type, index) {
   if (card) {
-    var html = '<div class="deck-slot filled" onclick="openCardPicker(\'' + player + '\', \'' + type + '\', ' + index + ')">';
+    /* 【2026-10-09 作者要求】卡组编组界面：**鼠标悬停在卡上即浮出原图**（通用浮层 __cardPeekShow，
+       卡名编码后传参，避免卡名里的引号截断 HTML）。点击行为（打开选择器）不变 ✓。 */
+    var __peek = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
+    var html = '<div class="deck-slot filled"' + __peek + ' onclick="openCardPicker(\'' + player + '\', \'' + type + '\', ' + index + ')">';
     if (card.image_url) {
       html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '">';
     }
