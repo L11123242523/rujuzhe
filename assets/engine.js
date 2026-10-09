@@ -10031,6 +10031,8 @@ function aiResourceStep(done) {
       var wi = p.hand.indexOf(worst);
       if (wi >= 0) {
         var sac = p.hand.splice(wi, 1)[0];
+        /* 【2026-10-09 第3件】同上：献祭送墓前先还原蓝图复制卡 */
+        if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(sac);
         p.grave.push(sac);
         if (typeof checkGraveTrigger === 'function') checkGraveTrigger(aiSeat(), sac, p._kotaroPassive ? 'effect' : 'sacrifice');
         p._sacrificeUsedThisTurn = usedSac + 1;
@@ -11361,6 +11363,9 @@ function doSacrifice() {
     if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
     if (idx >= p.hand.length) { showToast('手牌已变化，请重新选择献祭的手卡', 'warn'); updateBattleUI(); return; } // 弹窗期间手牌变化：防止越界/误删
     var sacCard = p.hand.splice(idx, 1)[0];
+    /* 【2026-10-09 第3件】蓝图复制的卡被献祭时也要变回蓝图原貌
+       （献祭是人手直接送墓，绕过了唯一会还原的 moveCardToGrave 出口） */
+    if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(sacCard);
     p.grave.push(sacCard);
     // 光太郎被动：献祭的卡视为因卡的效果送入墓地（一回合只触发一次）
     var __kotaroEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
