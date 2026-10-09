@@ -4681,7 +4681,9 @@ var RL_FX = {
   '永奏进行曲': function (c) { c.draw(2); c.mill(1); },
   '妖刀五月雨': function (c) { c.damage(5, '混沌'); },
   '血之佑戒·红泪拉克莎': function (c) { c.healCost(3); },
-  '贪欲者的烙印': function (c) { c.p.sync = Math.max(0, c.p.sync - 3); c.draw(1); },
+  /* 【2026-10-09 平衡性改动】卡面：对自己造成**5**点混沌属性伤害（原 3 点），那之后抽一张。
+     本卡的效果文本编译为 null ⇒ 走这里，所以这里的数字必须与卡面同步。 */
+  '贪欲者的烙印': function (c) { c.p.sync = Math.max(0, c.p.sync - 5); c.draw(1); },
   '黑色卡片': function (c) { c.draw(1); },
   '钢笔': function (c) { c.search(); },
   '“巧匠之手”': function (c) { c.mill(1); }
