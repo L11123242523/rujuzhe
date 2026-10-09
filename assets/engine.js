@@ -15116,7 +15116,14 @@ function __compileBody(t) {
     var sources = __parseSources(t); if (!sources.length) sources = ['deck'];
     var tags = __parseTags(t), cats = __parseCats(t);
     var need = __matchNum(new RegExp('(?:选|将)?[^。；，]{0,8}' + __NUM + '\\s*张'), t) || 1;
-    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, attr: __posAttr, excludeAttr: exm ? exm[1] : null, excludeSelf: /这张卡以外|自身以外|此卡以外/.test(t), need: need, maxCost: (function(){ var m = t.match(/费用\s*(?:不大于|不超过|≤|<=)\s*(\d+)/); return m ? +m[1] : null; })(), to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
+    /* 【2026-10-09 修·**祓禊用自己的效果把自己从墓地回收了**（作者实测）】
+       原来 excludeSelf 只看卡面有没有"这张卡以外/自身以外/此卡以外"；
+       而"从**墓地**回收一张…卡"这类子句即便不写这些字样，也**绝不可能**包含正在结算的这张卡
+       —— 结算中的卡在**效果处理区**，不在自己的墓地里。
+       ⇒ 来源含 'grave' 时一律置 true（消费端 L16965 会据此 `list.filter(x => x.card !== ctx.card)`）。
+       范围仅限"从墓地取卡"这一类子句，不影响牌组/手卡等其它来源。 */
+    var __srcHasGrave = sources.indexOf('grave') >= 0;
+    ops.push({ op: 'search', sources: sources, tags: tags, cats: cats, attr: __posAttr, excludeAttr: exm ? exm[1] : null, excludeSelf: (/这张卡以外|自身以外|此卡以外/.test(t) || __srcHasGrave), need: need, maxCost: (function(){ var m = t.match(/费用\s*(?:不大于|不超过|≤|<=)\s*(\d+)/); return m ? +m[1] : null; })(), to: 'hand', who: /对手|其他玩家/.test(t) ? 'target' : 'self' });
   }
   // 下次造伤附带判定
   var nj = t.match(/下一次造伤害附带(硬币|四面骰|六面骰|4面骰|6面骰)判定伤害/);
