@@ -15920,15 +15920,9 @@ function computeDamageValue(user, target, opt) {
   if (__lhwOk) { final += 1; logs.push('琉璃(万圣祭)被动·费用≤3最终+1'); }
   // XHZD被动·"这是我的招式"：自己使用的攻击卡最终伤害+1
   if (ap._xhzdPassive && isAtk) { final += 1; logs.push('XHZD被动·攻击卡最终+1'); }
-  /* 【task2 补齐 2026-10-05】Huginn&Muninn（福金与穆宁）卡面第 2 句：
-     「使用混沌属性的卡造成的最终伤害+1，属性克制伤害+1。」
-     ——"属性克制伤害+1"无需新增代码（混沌克制规则见 __attrBeats 14327-14331）；
-        这里只补"使用**混沌属性**的卡造成的最终伤害+1"（卡面属性以 card.attribute === '混沌' 为准）。
-     位置选在**统一伤害公式的最终加算区**：所有伤害路径共用，不会只对某一条路径生效。 */
-  if (sc && String(sc.attribute || '') === '混沌' && (ap.permanent || []).some(function (c) { return c && /Huginn|穆宁|福金/.test(String(c.name || '')); })) {
-    final += 1;
-    logs.push('Huginn&Muninn·混沌卡最终+1');
-  }
+  /* 【2026-10-09 平衡性改动·**已移除**】原 task2 为 Huginn&Muninn 补的
+     「使用混沌属性的卡造成的最终伤害+1，属性克制伤害+1」这两句，在新卡面里已被作者删除
+     （现卡面只有：攻击力+3 / 一局一次支付3音韵回收[侵略] / **那之后**造成的最终伤害+1）⇒ 整段移除。 */
   // 羽奈(往昔)SP：自己每有一张公开的卡，全队造成的最终伤害+1（公开的卡=正面朝上留在牌组顶/墓地/效果处理区的卡）
   if (ap._yunaiPastSP) {
     var __pubN = (typeof __publicCardCount === 'function') ? __publicCardCount(ap) : 0;
@@ -20521,7 +20515,7 @@ function aiActivateFaceDown(index, done, seat) {
 
 var PERMANENT_STRUCT = [
   { match: ['臂章'], onPlay: ['给予一名玩家3理智伤害'], onPlayHandler: 'armband', active: null },
-  { match: ['Huginn', '穆宁', '福金'], onPlay: ['对一名其他玩家造成3点混沌属性伤害并让自身攻击力+3'], onPlayHandler: 'huginnPlay',
+  { match: ['Huginn', '穆宁', '福金'], onPlay: ['自身攻击力+3'], onPlayHandler: 'huginnPlay',
     active: { once: 'game', flag: '_huginnUsedGame', handler: 'huginn' } },
   { match: ['钢笔'],
     /* 【task2 对齐 2026-10-05】卡面写「从牌组、墓地**或者移出游戏的卡中**…」，原注册表漏了"移出游戏"
@@ -20691,14 +20685,13 @@ var PERMANENT_ONPLAY_HANDLERS = {
   armband: function (card, user, cb) {
     dealDamageWithResponse(permOther(user), 3, card.name, function () { cb && cb(); });
   },
-  // 福金与穆宁：3 混沌伤害 + 自身攻击力+3
+  /* 【2026-10-09 平衡性改动·新卡面】发动时作为效果处理 ⇒ **只有「自身攻击力+3」**；
+     旧卡面那句「对一名其他玩家造成3点混沌属性伤害」已被作者删除 ⇒ 这里同步删掉那次伤害调用。 */
   huginnPlay: function (card, user, cb) {
     var p = battleState[user];
-    dealDamageWithResponse(permOther(user), 3, card.name, function () {
-      p.attackBuff = (p.attackBuff || 0) + 3;
-      addBattleLog(user, '【福金与穆宁】自身攻击力+3（当前+' + p.attackBuff + '）');
-      updateBattleUI(); cb && cb();
-    });
+    p.attackBuff = (p.attackBuff || 0) + 3;
+    addBattleLog(user, '【福金与穆宁】自身攻击力+3（当前+' + p.attackBuff + '）');
+    updateBattleUI(); cb && cb();
   },
   // 善意面具：选手牌一张攻击卡免费打出（最终伤害+1）；AI 不做交互直接完成
   kindMask: function (card, user, cb) {
