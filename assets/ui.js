@@ -783,7 +783,9 @@ function __updateBattleUI_impl() {
             var phaseHint = canClick ? '' : '（不可用：' + pv.reason + '）';
             var typeBadge = (card._category === 'characters') ? '角色' : (card._category === 'attack_cards' ? '攻击' : (card._category === 'skill_cards' ? '技能' : (card._category === 'gift_cards' ? '馈赠' : (card._category === 'item_permanent' ? '永续道具' : (card._category === 'item_single' ? '道具' : '')))));
             if (card._blueprintCopy) typeBadge = '📐 蓝图复制';
-            return '<div class="hand-card' + (canClick ? ' playable' : '') + '" onclick="' + clickHandler + '" oncontextmenu="handCardContextMenu(' + i + ');return false;" style="' + cardStyle + '" data-block-reason="' + (canClick ? '' : __escHtml(pv.reason || '未知原因')) + '" title="左键使用，右键查看效果：' + card.name + phaseHint + '">' +
+            /* 【2026-10-09 作者要求】手牌：**鼠标悬停即浮出放大的原图**（通用浮层 __cardPeekShow；卡名编码后传参） */
+            var __peek1 = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
+            return '<div class="hand-card' + (canClick ? ' playable' : '') + '"' + __peek1 + ' onclick="' + clickHandler + '" oncontextmenu="handCardContextMenu(' + i + ');return false;" style="' + cardStyle + '" data-block-reason="' + (canClick ? '' : __escHtml(pv.reason || '未知原因')) + '" title="左键使用，右键查看效果：' + card.name + phaseHint + '">' +
               (card.cost !== undefined ? '<div class="hand-card-cost">' + card.cost + '</div>' : '') +
               (card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" class="hand-card-img" alt="' + card.name + '" >' : '') +
               '<div class="hand-card-name">' + card.name + '</div>' +
@@ -803,7 +805,9 @@ function __updateBattleUI_impl() {
               var evCanClick = isMusic ? (isActionPhase && isPlayerTurn) : ((isActionPhase && isPlayerTurn) || !isPlayerTurn);
               var evStyle = evCanClick ? '' : 'opacity:0.4;cursor:not-allowed;';
               var evClick = evCanClick ? clickHandler : '';
-              return '<div class="hand-card event-card" onclick="' + evClick + '" style="' + evStyle + '" title="【' + cardType + '】' + card.name + ' - ' + (card.effect||'').substring(0,80) + '（' + cardType + '不占用手牌上限）">' +
+              /* 【2026-10-09 作者要求】事件卡/乐谱卡同样悬停看放大原图 */
+              var __peek2 = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
+              return '<div class="hand-card event-card"' + __peek2 + ' onclick="' + evClick + '" style="' + evStyle + '" title="【' + cardType + '】' + card.name + ' - ' + (card.effect||'').substring(0,80) + '（' + cardType + '不占用手牌上限）">' +
                 '<div class="hand-card-cost" style="background:' + badgeColor + ';">' + badge + '</div>' +
                 '<div class="hand-card-img" style="background:' + bgGradient + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;">' + icon + '</div>' +
                 '<div class="hand-card-name">' + card.name + '</div></div>';
