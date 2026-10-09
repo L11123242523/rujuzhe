@@ -22023,9 +22023,9 @@ function __applyIntimidate(target, srcName, done) {
   try { (tp.permanent || []).forEach(function (c) { if (c) pool.push({ c: c, zone: 'permanent' }); }); } catch (e) {}
   try { (tp.faceDownCards || []).forEach(function (c) { if (c) pool.push({ c: c, zone: 'faceDownCards' }); }); } catch (e) {}
   var who = (target === 'p1') ? '你' : '对手';
-  addBattleLog(target, '【恫吓】' + who + '必须把效果处理区的一张盖卡/永续卡放回手卡，否则将受到3点混沌伤害并失去2点音韵值');
+  addBattleLog(target, '【恫吓】' + who + '必须把效果处理区的一张盖卡/永续卡放回手卡，否则将受到1点混沌伤害并失去2点音韵值');
   function penalty() {
-    addBattleLog(target, '【恫吓】没有交出卡 ⇒ ' + who + '受到3点混沌伤害并失去2点音韵值');
+    addBattleLog(target, '【恫吓】没有交出卡 ⇒ ' + who + '受到1点混沌伤害并失去2点音韵值');
     try { tp.cost = Math.max(0, (tp.cost || 0) - 2); } catch (e) {}
     try { dealDamageWithResponse(target, 1, '恫吓', fin, '混沌', null, { kind: 'attribute' }); } catch (e) { fin(); }   /* 【2026-10-08 卡面改】恫吓惩罚 1 点混沌 */
   }
@@ -22035,17 +22035,17 @@ function __applyIntimidate(target, srcName, done) {
       if (i >= 0) arr.splice(i, 1);
       entry.c._addedByEffect = true;
       (tp.hand = tp.hand || []).push(entry.c);
-      addBattleLog(target, '【恫吓】把【' + (entry.c.name || '卡') + '】放回手卡（因此避开3点混沌伤害与2点音韵）');
+      addBattleLog(target, '【恫吓】把【' + (entry.c.name || '卡') + '】放回手卡（因此避开1点混沌伤害与2点音韵）');
     } catch (e) { console.error('恫吓·放回手卡出错', e); }
     fin();
   }
   if (!pool.length) { addBattleLog(target, '【恫吓】' + who + '的效果处理区没有可交的盖卡/永续卡'); penalty(); return; }
   var labels = pool.map(function (x) { return '交出【' + (x.c.name || '卡') + '】'; });
-  labels.push('不交（受3点混沌伤害并失去2点音韵值）');
+  labels.push('不交（受1点混沌伤害并失去2点音韵值）');
   var pick = function (i) { if (i == null || i < 0 || i >= pool.length) penalty(); else giveBack(pool[i]); };
-  if (target === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('恫吓', '受击者必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到3点混沌伤害并失去2点音韵值', labels, pick); return; }
+  if (target === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('恫吓', '受击者必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到1点混沌伤害并失去2点音韵值', labels, pick); return; }
   if (typeof Online !== 'undefined' && Online.active && target === 'p2' && typeof onlineDecideModal === 'function') {
-    onlineDecideModal('p2', '恫吓（对手）', '必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到3点混沌伤害并失去2点音韵值', labels, pick); return;
+    onlineDecideModal('p2', '恫吓（对手）', '必须把效果处理区的一张盖卡或永续卡放回手卡', '不交则会受到1点混沌伤害并失去2点音韵值', labels, pick); return;
   }
   giveBack(pool[0]);
 }
@@ -22062,7 +22062,7 @@ var SPECIAL_CARD_HANDLERS = {
   // 卡面：来为节日增添一丝惊……喜（吓）！
   //   •（可以向后移动5格）对同行的一名其他玩家造成目标（已损失同步值的33%）点混沌属性伤害，并对目标施加恫吓。
   //   •恫吓：受击者必须将效果处理区的一张盖卡或者永续卡放回手卡，否则将受到3点混沌属性伤害并失去2点音韵值。
-  // 为什么必须走特判：编译器对"**已损失同步值的33%**"这种"结算时才知数值"的伤害没有对应 op
+  // 为什么必须走特判：编译器对"**已损失同步值15%+1**"这种"结算时才知数值"的伤害没有对应 op
   //   （实测该子句 compileStepOps 返回 null），通用兜底会把文本里的 **33** 当固定伤害
   //   ⇒ 实测打出 36（33 + baseDamage 2 + 琉璃(万圣祭)被动 +1）。架构闸（getSpecialHandler）在存在 null 步时自动让本特判生效。
   // ============================================================
@@ -22080,7 +22080,7 @@ var SPECIAL_CARD_HANDLERS = {
       /* ② 伤害 = floor(目标**已损失**同步值 × 33%) */
       var lost = Math.max(0, (t.maxSync || 0) - (t.sync || 0));
       var dmg = Math.floor(lost * 0.15) + 1;   /* 【2026-10-08 卡面改】已损失同步值15%+1 */
-      if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 33% = ' + dmg + ' 点混沌伤害');
+      if (dmg > 0) addBattleLog(user, '【' + N + '】按目标已损失同步值计算：已损失 ' + lost + ' × 15%+1 = ' + dmg + ' 点混沌伤害');
       else addBattleLog(user, '【' + N + '】目标还没损失同步值 ⇒ 本次造伤为 0');
       var __afterDmg = function () {
         /* ③ 恫吓：目标从效果处理区交出一张盖卡/永续卡回手；不交（或没有）⇒ 3 点混沌 + 失 2 音韵值 */
