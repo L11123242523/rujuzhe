@@ -162,6 +162,24 @@ function renderDeckBuilder() {
   renderDeckSide('p2');
 }
 
+/* 【2026-10-09 作者目标第6项·卡组编辑】一键清空：把该玩家的 3 名角色 / 8 张道具 / 4 张携带全部置空。
+   与"删除单张"同一套数据口径（deckConfig[player][type][index] = null）✓，清完立即重绘并落盘 ✓。 */
+function deckClear(player) {
+  try {
+    var cfg = deckConfig[player]; if (!cfg) return;
+    if (typeof closeCardPicker === 'function') { try { closeCardPicker(); } catch (e) {} }
+    ['chars', 'items', 'carries'].forEach(function (k) {
+      var arr = cfg[k] || [];
+      var len = arr.length || ({ chars: 3, items: 8, carries: 4 }[k] || 0);
+      cfg[k] = new Array(len).fill(null);
+    });
+    if (typeof renderDeckSide === 'function') renderDeckSide(player);
+    if (typeof saveDeckConfig === 'function') saveDeckConfig();
+    if (typeof updateBattleUI === 'function') { try { updateBattleUI(); } catch (e) {} }
+    if (typeof showToast === 'function') showToast('已清空该卡组（可重新编组）', 'warn');
+  } catch (e) { console.error('deckClear 出错', e); }
+}
+
 function renderAttrBar(player) {
   var itemContainer = document.getElementById(player + 'Items');
   if (!itemContainer) return;
@@ -184,6 +202,26 @@ function renderAttrBar(player) {
   if (info.flexSlots > 0) h += '<span style="background:rgba(183,139,255,.15);border:1px solid #b78bff;border-radius:10px;padding:1px 8px;color:#d3b8ff">灵活位×' + info.flexSlots + '（混沌角色，任意属性）</span>';
   var filled = (cfg.items || []).filter(Boolean).length;
   h += '<button onclick="deckAutoFill(\'' + player + '\')" style="margin-left:auto;background:linear-gradient(135deg,#5b8cff,#8a6bff);color:#fff;border:0;border-radius:10px;padding:3px 10px;font-size:12px;cursor:pointer">一键补全空缺（' + filled + '/8）</button>';
+  /* 【2026-10-09 作者目标第6项】在这条信息栏里补：**费用曲线** + **一键清空** */
+  try {
+    var __costs = [];
+    (cfg.items || []).concat(cfg.carries || []).forEach(function (c) {
+      if (!c) return;
+      var k = (c.cost === undefined || c.cost === null || c.cost === '') ? '?' : String(c.cost);
+      __costs.push(k);
+    });
+    var __hist = {};
+    __costs.forEach(function (k) { __hist[k] = (__hist[k] || 0) + 1; });
+    var __keys = Object.keys(__hist).sort(function (x, y) {
+      if (x === '?') return 1; if (y === '?') return -1; return (+x) - (+y);
+    });
+    var __curve = __keys.map(function (k) { return k + '费×' + __hist[k]; }).join('  ');
+    h += '<span style="margin-left:12px;color:#9fb0d0">费用曲线：</span><span style="color:#fff">' +
+         (__curve || '（空）') + '</span>';
+    h += '<span style="margin-left:12px;color:#9fb0d0">共 ' + __costs.length + ' 张</span>';
+    h += '<button onclick="deckClear(\'' + player + '\')" style="margin-left:12px;padding:4px 10px;font-size:12px;' +
+         'background:rgba(255,90,90,.85);color:#fff;border:none;border-radius:6px;cursor:pointer;">🧹 一键清空</button>';
+  } catch (e) {}
   bar.innerHTML = h;
 }
 
@@ -1399,6 +1437,7 @@ try { window.showViewerCardDetail = showViewerCardDetail; } catch (e) {}
 try { window.renderDeckBuilder = renderDeckBuilder; } catch (e) {}
 try { window.renderAttrBar = renderAttrBar; } catch (e) {}
 try { window.renderDeckSide = renderDeckSide; } catch (e) {}
+try { window.deckClear = deckClear; } catch (e) {}
 try { window.showPickerTip = showPickerTip; } catch (e) {}
 try { window.renderRogueDeck = renderRogueDeck; } catch (e) {}
 try { window.renderRoguelikeMap = renderRoguelikeMap; } catch (e) {}
