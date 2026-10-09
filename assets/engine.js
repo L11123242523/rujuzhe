@@ -6012,7 +6012,19 @@ function collectChainable(player, effect){
          **从该回合结束起即为全时点**（与技能卡同权）⇒ 这里**只跳过阶段过滤**（原条件里的 __matchStage）。
          其余检查一律照旧走下面的统一流程：有效对象/分类（上面这行）、**费用**（下一处 cost 检查）、
          盖放回合拦截、以及最后的入列 —— 绝不绕过费用。 */
-      if (!isChainOnlyCard(c) || !hasChainTarget(c)) return;
+      /* 【2026-10-10 作者裁决 A·**保留原限制**】反制类盖卡（negate_effect，如崩塌之乌托邦）
+         必须仍走它自己的窗口限制：仅"效果将执行前"窗口，且被反制的源效果含 加手/送墓/抽卡/检索 ✓
+         ⇒ 这里先判它，**不让它进入"全时点"路径** ✗（其余盖卡照旧全时点 ✓）。 */
+      if (__kd === 'negate_effect') {
+        if (stage !== 'effect_activate') return;
+        var __srcFd = ((effect && effect.card && (effect.card.effect || effect.card.text)) || (effect && effect.description) || '');
+        if (!/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__srcFd)) return;
+        /* 与原反制分支**逐条一致**：时点被卡（灰流丽类）时也不能发动 ✓ */
+        if (typeof __negateTimingMissed === 'function' && __negateTimingMissed(__srcFd)) {
+          try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) {}
+          return;
+        }
+      } else if (!isChainOnlyCard(c) || !hasChainTarget(c)) return;
     } else if(__kd==='negate_effect'){
       // 反制整效（崩塌之乌托邦类）：仅在“效果将执行前”窗口，且被反制的源效果含 加手/送墓/抽卡/检索
       if(stage!=='effect_activate') return;
