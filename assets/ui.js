@@ -1454,3 +1454,42 @@ function __fdPeekHide() {
 }
 try { window.__fdPeekShow = __fdPeekShow; } catch (e) {}
 try { window.__fdPeekHide = __fdPeekHide; } catch (e) {}
+/* 【2026-10-09 作者要求】**通用**卡面悬停浮层：鼠标放到卡上即显示其原图（编组/背包等界面用）。
+   卡名经 encodeURIComponent 传入并在此解码（卡名可能含引号，直接内联会截断）。 */
+function __cardPeekShow(el, nameEnc) {
+  try {
+    var name = '';
+    try { name = decodeURIComponent(String(nameEnc || '')); } catch (e) { name = String(nameEnc || ''); }
+    var list = (typeof allCards !== 'undefined' && allCards) ? allCards : [];
+    var card = null;
+    for (var i = 0; i < list.length; i++) { if (list[i] && list[i].name === name) { card = list[i]; break; } }
+    if (!card) return;
+    var box = document.getElementById('__fdPeekBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = '__fdPeekBox';
+      box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
+        'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
+        'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:210px;height:auto;">' +
+        '<div id="__fdPeekName" style="color:#feca57;font-size:12px;text-align:center;padding:4px 6px;"></div>';
+      document.body.appendChild(box);
+    }
+    var img = document.getElementById('__fdPeekImg');
+    var nm = document.getElementById('__fdPeekName');
+    if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; }
+    if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null && card.cost !== '' ? '（' + card.cost + '费）' : '');
+    box.style.display = 'block';
+    var r = el.getBoundingClientRect();
+    var bw = box.offsetWidth || 214, bh = box.offsetHeight || 300;
+    var left = r.left - bw - 10;
+    if (left < 8) left = Math.min(r.right + 10, Math.max(8, window.innerWidth - bw - 8));
+    var top = r.top;
+    if (top + bh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bh - 8);
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+  } catch (e) {}
+}
+function __cardPeekHide() { try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) {} }
+try { window.__cardPeekShow = __cardPeekShow; } catch (e) {}
+try { window.__cardPeekHide = __cardPeekHide; } catch (e) {}
