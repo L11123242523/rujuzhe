@@ -5986,6 +5986,13 @@ function collectChainable(player, effect){
     }
     if (from === 'event') {
       // 事件卡=最高时点/全时点：任意卡/效果将执行前均可连锁发动，不受连锁分类/对象/阶段过滤限制
+    } else if (from === 'faceDown') {
+      /* 【2026-10-09 作者口径】盖卡**只在"盖放的那个回合"不能发动**（那道拦截在下面：
+         `from==='faceDown' && _faceDownTurn===本回合 && _faceDownPlayer===player ⇒ return`），
+         **从该回合结束起即为全时点**（与技能卡同权）⇒ 这里**只跳过阶段过滤**（原条件里的 __matchStage）。
+         其余检查一律照旧走下面的统一流程：有效对象/分类（上面这行）、**费用**（下一处 cost 检查）、
+         盖放回合拦截、以及最后的入列 —— 绝不绕过费用。 */
+      if (!isChainOnlyCard(c) || !hasChainTarget(c)) return;
     } else if(__kd==='negate_effect'){
       // 反制整效（崩塌之乌托邦类）：仅在“效果将执行前”窗口，且被反制的源效果含 加手/送墓/抽卡/检索
       if(stage!=='effect_activate') return;
