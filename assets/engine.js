@@ -7322,7 +7322,12 @@ registerTrigger({
   id: 'aoi-gospel-second-roll',
   timing: 'second_roll',
   ownerOf: function (ctx) { return (ctx && ctx.player) || null; },
-  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._gospelPassive); },
+  /* 卡面"是否发动" ⇒ 选发（窗口候选即询问）
+     【2026-10-09 修·**葵被动永远不触发**（作者实测）】这里原来读的是 `q._gospelPassive`，
+     而全引擎**没有任何地方设置过该标志**（基线 v112 与当前版本都一样 ⇒ 长期存在的错配）。
+     实际置上、并被 L9095 / L21304 读取的都是 **`_aoiPassive`**（见 L18746 `p._aoiPassive = true`）
+     ⇒ 统一到 `_aoiPassive` 这个唯一真相（只改这一处，不动其它）。 */
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._aoiPassive); },
   mandatory: false,   // 卡面"是否发动" ⇒ 选发（窗口候选即询问）
   label: function () { return '小野葵·福音雅颂（本回合第二次投掷后）'; },
   /* 效果本体 __gRun 是调用点闭包（要读那一掷的池子）⇒ 经 ctx 传入，与我处理 __dealSegment 同一手法。 */
