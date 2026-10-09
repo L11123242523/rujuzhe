@@ -7,7 +7,10 @@
 /* 【阶段1·数据外置】启动时尝试拉取 data/cards.json（异步、失败静默；内联快照始终是兜底） */
 try {
   if (typeof fetch === 'function' && typeof window !== 'undefined') {
-    fetch('data/cards.json?v=1', { cache: 'force-cache' })
+    /* 【2026-10-10 同步母本】缓存键 1 → 2：CF 按**完整 URL** 缓存 ⇒ 线上 data/cards.json?v=1 实测
+       cf=HIT、age≈9.7 小时（那份旧母本被粘住）⇒ 母本换了必须升这个键，否则拉到的还是旧数据 ✗。
+       注：下面 data/rogue-cards.json 那一行**不动**（肉鸽，未经点名不碰）。 */
+    fetch('data/cards.json?v=2', { cache: 'force-cache' })
       .then(function (r) { return r && r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.characters) { window.__cardDataAsync = j; } })
       .catch(function () {});
