@@ -14963,7 +14963,14 @@ function __compileBody(t) {
     var cm = __matchNum(new RegExp('(?:回复|回)\\s*(?:自身|自己|其|目标)?\\s*' + __NUM + '\\s*点?音韵'), t);
     var lc = __matchNum(new RegExp('(?:失去|和|与|、)\\s*(?:其|目标|自身|自己)?\\s*' + __NUM + '\\s*点?音韵'), t);
     var pay = t.match(/付\s*(\d+)\s*[-–~至到]\s*(\d+)\s*音韵/);
-    if (cm != null) ops.push({ op: 'gain_cost', amount: cm });
+    /* 【2026-10-09 作者实测·**绿宝之杖·择 三效果"不管满不满足条件都能回复1音韵"**】
+       该句卡面是「…那两张卡**同色或同费**的场合自己**可以**回复1点音韵值」⇒ 属**有条件**回复，
+       由下面的 `gain_cost_if_last_match`（L15213-15214，条件在结算时判定）负责；
+       但本处通用规则也会命中「回复1点音韵」⇒ **多发了一条无条件版** ⇒ 无论是否同色/同费都会回复。
+       修法（窄）：本句若属「同色或同费…回复音韵」这一族 ⇒ 此处**不再**发无条件版，两者互斥。
+       只影响这一族子句；其它"回复音韵"的卡照旧走无条件版。 */
+    var __isCondCostClause = /同色或同费[^。；]*回复\s*\d+\s*点音韵/.test(t);
+    if (cm != null && !__isCondCostClause) ops.push({ op: 'gain_cost', amount: cm });
     if (lc != null) ops.push({ op: 'lose_cost', amount: lc });
     if (pay) {
       // 红宝之杖·运等“付N-M音韵造等额伤害”：伤害属性随文本，增伤/克制统一走伤害公式
