@@ -13725,12 +13725,80 @@ function initRules() {
   container.innerHTML = html;
 }
 
+/* ===== 公告（作者 2026-10-10 需求）=====
+   ① 把最近的平衡性调整做成游戏内公告；② 历史公告：可查询历次平衡性调整。
+   【唯一真相】就下面这一个 ANNOUNCEMENTS 数组：新增一次公告 ⇒ 往**头部**加一条（新的在最前），
+   渲染顺序 = 数组顺序（下标 0 即"最新"）。字段：date 日期 / title 标题 / pub 发布号 / note 说明 /
+   items 改动条目（card 卡名 + chg 改动）。
+   数值一律以母本 data/cards.json 与玩家可见的 cards.js / 内联表为准（不许凭记忆写）。 */
+var ANNOUNCEMENTS = [
+  {
+    date: '2026-10-09',
+    title: '平衡性调整 · 10 张道具卡',
+    pub: '6b04dc96 / 2a4057d0 / e7209317',
+    note: '依据《平衡性报告》的性价比异常清单：偏强的 3 张（先哲之"馈赠"、永奏进行曲、贪欲者的烙印）下调，偏弱的 1 张（设计师的直尺）加强，其余为费用与文本口径调整。10 张卡的卡面文字与卡图已一并更新。',
+    items: [
+      { card: '贪欲者的烙印', chg: '对自己造成的混沌属性伤害 3 → 5' },
+      { card: '经文', chg: '费用 3 → 2' },
+      { card: '魔法清点名单', chg: '可加入手卡的费用上限 3 → 2' },
+      { card: '某女士爱用球棒', chg: '费用 5 → 4' },
+      { card: '拦路者', chg: '费用 3 → 1' },
+      { card: '崩塌之乌托邦', chg: '费用 1+ → 1' },
+      { card: '先哲之"馈赠"', chg: 'SP 造成的热忱属性伤害 4 → 2' },
+      { card: 'Huginn&Muninn', chg: '费用 5 → 6；删除「对一名其他玩家造成 3 点混沌属性伤害」；删除「使用混沌属性的卡造成的最终伤害 +1，属性克制伤害 +1」' },
+      { card: '永奏进行曲', chg: '费用 5 → 6；SP 抽卡 2 → 1' },
+      { card: '设计师的直尺', chg: 'SP 触发所需移动 8 格 → 6 格' }
+    ]
+  }
+];
+
+function renderAnnouncements() {
+  var body = document.getElementById('announceBody');
+  if (!body) return;
+  var html = '';
+  /* 顶部：历史公告索引（点日期跳到那一条） */
+  html += '<div class="rules-section"><h3>📢 平衡性调整公告</h3>';
+  html += '<p>共 ' + ANNOUNCEMENTS.length + ' 条历史公告，新的在最上面；点日期可直接跳到那一条：</p><p>';
+  for (var i = 0; i < ANNOUNCEMENTS.length; i++) {
+    html += '<button type="button" onclick="document.getElementById(\'ann-' + i + '\').scrollIntoView({behavior:\'smooth\',block:\'start\'})"'
+      + ' style="margin:2px 6px 2px 0;padding:4px 10px;font-size:12px;background:#54a0ff;color:#fff;border:none;border-radius:4px;cursor:pointer;">'
+      + ANNOUNCEMENTS[i].date + (i === 0 ? '（最新）' : '') + '</button>';
+  }
+  html += '</p></div>';
+  /* 逐条公告（下标 0 最新） */
+  for (var k = 0; k < ANNOUNCEMENTS.length; k++) {
+    var a = ANNOUNCEMENTS[k];
+    html += '<div class="rules-section" id="ann-' + k + '">';
+    html += '<h3>' + a.date + ' · ' + a.title
+      + (k === 0 ? '　<span style="font-size:12px;color:#1dd1a1;">← 最新</span>' : '') + '</h3>';
+    if (a.pub) html += '<p style="font-size:12px;color:rgba(255,255,255,0.55);">发布号 ' + a.pub + '</p>';
+    if (a.note) html += '<p>' + a.note + '</p>';
+    var items = a.items || [];
+    for (var j = 0; j < items.length; j++) {
+      html += '<p>• <b style="color:#fff;">' + items[j].card + '</b>：' + items[j].chg + '</p>';
+    }
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+function openAnnouncements() {
+  var m = document.getElementById('announceModal');
+  if (m) m.classList.add('active');
+}
+
+function closeAnnouncements() {
+  var m = document.getElementById('announceModal');
+  if (m) m.classList.remove('active');
+}
+
 // 页面加载完成后初始化
 window.addEventListener('load', function() {
   initCards();
   __captureCardDefs();          // 载入期冻下"干净的"卡牌定义主数据（新实例各持一份深拷贝）
   tryLoadDeckConfig();
   initRules();
+  renderAnnouncements();        // 公告（含历史公告）与规则页同一时机渲染一次，点按钮直接显示
   console.log('游戏加载完成，共 ' + allCards.length + ' 张卡牌');
   // 调试/自动化钩子：?debug3d=1 直接进入对战（便于无头浏览器截图检查 3D 地图）
   try {
