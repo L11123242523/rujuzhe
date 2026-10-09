@@ -1430,8 +1430,8 @@ function __fdPeekShow(el, index) {
       box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
         'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
         'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
-      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:210px;height:auto;">' +
-        '<div id="__fdPeekName" style="color:#feca57;font-size:12px;text-align:center;padding:4px 6px;"></div>';
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;">' +
+        '<div id="__fdPeekName" style="color:#feca57;font-size:13px;text-align:center;padding:5px 6px;"></div>';
       document.body.appendChild(box);
     }
     var img = document.getElementById('__fdPeekImg');
@@ -1471,8 +1471,8 @@ function __cardPeekShow(el, nameEnc) {
       box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
         'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
         'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
-      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:210px;height:auto;">' +
-        '<div id="__fdPeekName" style="color:#feca57;font-size:12px;text-align:center;padding:4px 6px;"></div>';
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;">' +
+        '<div id="__fdPeekName" style="color:#feca57;font-size:13px;text-align:center;padding:5px 6px;"></div>';
       document.body.appendChild(box);
     }
     var img = document.getElementById('__fdPeekImg');

@@ -3509,7 +3509,10 @@ function openCardPicker(player, type, index) {
       var idx = allCards.indexOf(card);
       var __disReason = (type === 'items' && pickerState.disabled) ? (pickerState.disabled[card.name] || '') : '';
       var __onClick = __disReason ? ('showPickerTip("' + __disReason + '")') : ('selectCard(' + idx + ')');
-      html += '<div class="card-picker-item' + (__disReason ? ' picker-disabled' : '') + '"' + (__disReason ? ' title="' + __disReason + '"' : '') + ' onclick="' + __onClick + '">';
+      /* 【2026-10-09 作者要求】选卡弹窗里的卡格：**鼠标悬停即浮出原图**（通用浮层 __cardPeekShow；
+         卡名编码后传参，避免卡名里的引号截断 HTML）。点击选择的行为不变 ✓。 */
+      var __peekAttr = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
+      html += '<div class="card-picker-item' + (__disReason ? ' picker-disabled' : '') + '"' + __peekAttr + (__disReason ? ' title="' + __disReason + '"' : '') + ' onclick="' + __onClick + '">';
       if (card.image_url) {
         html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '">';
       }
