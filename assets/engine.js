@@ -17099,31 +17099,50 @@ function __opsMove(op, ctx, next, env) {
         else applyMove(user, __pick * (op.dir || 1));
         next();
       }
+      /* 【2026-10-11 作者要求：所有"移动类"都要提示落点】区间移动的每个候选都补 `→ 第N格【格名】：效果`
+         （原来这里只有"前进N格"文字 ✗；地图高亮单机分支本来就有 ✓，联机分支缺 ✓ ⇒ 一并补上） */
+      var __mvrTip = function (n) {
+        try {
+          var id = __previewLandingTile(user, n);
+          var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+          return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+        } catch (e) { return ''; }
+      };
       if (user === 'p1' && typeof showChoiceModal === 'function') {
         var __rr = [], __pv = [];
-        if (op.both) { for (var __bi = op.min; __bi <= op.max; __bi++) { __rr.push('前进' + __bi + '格'); __pv.push({ n: __bi, color: 0x9fe3a0 }); __rr.push('后退' + __bi + '格'); __pv.push({ n: -__bi, color: 0xffd166 }); } }
-        else { for (var __ri = op.min; __ri <= op.max; __ri++) { __rr.push((op.dir < 0 ? '后退' : '前进') + __ri + '格'); __pv.push({ n: __ri * (op.dir || 1), color: 0x9fd8ff }); } }
+        if (op.both) { for (var __bi = op.min; __bi <= op.max; __bi++) { __rr.push('前进' + __bi + '格' + __mvrTip(__bi)); __pv.push({ n: __bi, color: 0x9fe3a0 }); __rr.push('后退' + __bi + '格' + __mvrTip(-__bi)); __pv.push({ n: -__bi, color: 0xffd166 }); } }
+        else { for (var __ri = op.min; __ri <= op.max; __ri++) { __rr.push((op.dir < 0 ? '后退' : '前进') + __ri + '格' + __mvrTip(__ri * (op.dir || 1))); __pv.push({ n: __ri * (op.dir || 1), color: 0x9fd8ff }); } }
         __movePreviewBegin('p1', __pv);   /* 作者 2026-10-10：弹窗贴底 + 地图上高亮候选落点 */
         showChoiceModal('选择移动格数', (ctx.card && ctx.card.name) || '', '在 ' + op.min + '-' + op.max + ' 格内选择', __rr, function (oi) { __movePreviewEnd(); __applyRangeChoice(oi); });
       } else if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
         var __rr2 = [];
-        if (op.both) { for (var __bi2 = op.min; __bi2 <= op.max; __bi2++) { __rr2.push('前进' + __bi2 + '格'); __rr2.push('后退' + __bi2 + '格'); } }
-        else { for (var __ri2 = op.min; __ri2 <= op.max; __ri2++) __rr2.push((op.dir < 0 ? '后退' : '前进') + __ri2 + '格'); }
+        if (op.both) { for (var __bi2 = op.min; __bi2 <= op.max; __bi2++) { __rr2.push('前进' + __bi2 + '格' + __mvrTip(__bi2)); __rr2.push('后退' + __bi2 + '格' + __mvrTip(-__bi2)); } }
+        else { for (var __ri2 = op.min; __ri2 <= op.max; __ri2++) __rr2.push((op.dir < 0 ? '后退' : '前进') + __ri2 + '格' + __mvrTip(__ri2 * (op.dir || 1))); }
         onlineDecideModal('p2', '选择移动格数（对手）', (ctx.card && ctx.card.name) || '', '在 ' + op.min + '-' + op.max + ' 格内选择', __rr2, __applyRangeChoice);
       } else __autoRange();
       return;
     }
-    case 'move_choice':
+    case 'move_choice': {
+      /* 【2026-10-11 作者要求：所有"移动类"都要提示落点】方向二选一也补 `→ 第N格【格名】：效果` ✓ */
+      var __mcTip = function (n) {
+        try {
+          var id = __previewLandingTile(user, n);
+          var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+          return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+        } catch (e) { return ''; }
+      };
+      var __mcOpts = ['前进' + op.steps + '格' + __mcTip(op.steps), '后退' + op.steps + '格' + __mcTip(-op.steps)];
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
-        onlineDecideModal('p2', '选择移动方向（对手）', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
+        onlineDecideModal('p2', '选择移动方向（对手）', '', '', __mcOpts, function (o) { applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
         return;
       }
       if (user === 'p1' && typeof showChoiceModal === 'function') {
         __movePreviewBegin('p1', [{ n: op.steps, color: 0x9fe3a0 }, { n: -op.steps, color: 0xffd166 }]);
-        showChoiceModal('选择移动方向', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { __movePreviewEnd(); applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
+        showChoiceModal('选择移动方向', '', '', __mcOpts, function (o) { __movePreviewEnd(); applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
       }
       else { applyMove(user, op.steps); break; }
       return;
+    }
     case 'move_pay_extra': {
       // 基础 base 格，方向二选一；可额外投入音韵，每 perCost 点 +perStep 格
       var __pe = op, __maxExtra = Math.min(p.cost, 8);
