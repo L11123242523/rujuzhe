@@ -1517,7 +1517,20 @@ function __cardPeekShow(el, nameEnc) {
     var list = (typeof allCards !== 'undefined' && allCards) ? allCards : [];
     var card = null;
     for (var i = 0; i < list.length; i++) { if (list[i] && list[i].name === name) { card = list[i]; break; } }
-    if (!card) return;
+    /* 【2026-10-11 同类 bug 一并修】查不到卡（联机里客人侧持有的是**遮蔽占位**：对手手牌 `{name:'？？？',__unknown:true}`）
+       时原来直接 `return` ⇒ 浮层里**留着上一张的图** ✗：既显示错卡、又等于**偷看对手手牌**。
+       浮层内容必须永远对应"当前悬停的这一张" ⇒ 查不到就**清掉并隐藏**（图 + 文字一起清，不留残影、不泄露）。 */
+    if (!card) {
+      try {
+        var __box0 = document.getElementById('__fdPeekBox');
+        var __img0 = document.getElementById('__fdPeekImg');
+        var __nm0 = document.getElementById('__fdPeekName');
+        if (__img0) { try { __img0.removeAttribute('src'); } catch (e) {} __img0.style.display = 'none'; }
+        if (__nm0) __nm0.textContent = '';
+        if (__box0) __box0.style.display = 'none';
+      } catch (e) {}
+      return;
+    }
     var box = document.getElementById('__fdPeekBox');
     if (!box) {
       box = document.createElement('div');
