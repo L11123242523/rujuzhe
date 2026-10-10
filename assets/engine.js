@@ -9512,15 +9512,36 @@ function rollDiceForPlayer(player) {
         var __oppDice = __sides + 1 - finalDice;
         if (__oppDice === finalDice || (__rp._lastRolls && __rp._lastRolls.length > 1)) { done(); return; } // 多枚骰点数相加无“对立面”语义，跳过
         var __lilyApply = function (o) {
+          try { __movePreviewEnd(); } catch (e) {}      // 选完立刻清掉地图高亮 ✓
           if (o === 1) { finalDice = __oppDice; __rp._lastRoll = __oppDice; addBattleLog(player, '【莉莉被动】选择对立面值 ' + __oppDice + ' 作为最终结果'); }
           else addBattleLog(player, '【莉莉被动】保留 ' + finalDice + ' 点');
           done();
         };
+        /* 【2026-10-11 作者要求：所有"移动类/改点类"都要给落点，不只是控骰弹窗】
+           莉莉被动·逝者之眼改的是**移动点数** ⇒ 属移动类 ⇒ 照抄控骰弹窗同一套格式与配色：
+           `第N格【格名】：效果前20字`、原点数落点=蓝、对立面落点=黄、选完清理 ✓ */
+        var __lilyOpts = ['保留 ' + finalDice + ' 点', '改为对立面 ' + __oppDice + ' 点'];
+        try {
+          var __lilyTip = function (id) {
+            try {
+              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+              return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+            } catch (e) { return '第' + id + '格'; }
+          };
+          var __lilyTileA = __previewLandingTile(player, finalDice);
+          var __lilyTileB = __previewLandingTile(player, __oppDice);
+          __lilyOpts[0] = __lilyOpts[0] + ' → ' + __lilyTip(__lilyTileA);
+          __lilyOpts[1] = __lilyOpts[1] + ' → ' + __lilyTip(__lilyTileB);
+          if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
+            Map3D.previewTiles([{ id: __lilyTileA, color: 0x9fd8ff }, { id: __lilyTileB, color: 0xffd166 }]);
+          }
+          try { __busSetChooserUi(true); } catch (e) {}
+        } catch (e) { console.error('莉莉被动落点预览出错（忽略）', e); }
         if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-          onlineDecideModal('p2', '莉莉被动·逝者之眼（对手）', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', ['保留 ' + finalDice + ' 点', '改为对立面 ' + __oppDice + ' 点'], __lilyApply);
+          onlineDecideModal('p2', '莉莉被动·逝者之眼（对手）', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', __lilyOpts, __lilyApply);
           return;
         }
-        showChoiceModal('莉莉被动·逝者之眼', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', ['保留 ' + finalDice + ' 点', '改为对立面 ' + __oppDice + ' 点'], __lilyApply);
+        showChoiceModal('莉莉被动·逝者之眼', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', __lilyOpts, __lilyApply);
       }
       function __ioriAsk(done) {
         if (!__ioriOn || finalDice === 2) { done(); return; }
