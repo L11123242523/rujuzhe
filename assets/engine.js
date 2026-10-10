@@ -8002,6 +8002,18 @@ var TW = {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
       else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
     };
+    /* 【2026-10-10 作者实测"在战斗日志里关闭了连锁询问，仍然会问"】
+       根因：这个开关只在 `showChainChoice`（ui.js:421）里被读到，而本函数有**三条渲染路径** ——
+         · `win.useChoiceModal` 声明的窗口 → `showChoiceModal`（不读开关 ✗）
+         · 联机 → `onlineDecideModal`（不读开关 ✗）
+         · 其余 → `showChainChoice`（读开关 ✓）
+       ⇒ 前两条照样弹窗。结构修：把判据**提到渲染之前一处**（三条路径共用），
+       语义与开关自身的说明一致（"此后所有连锁都会自动放弃"）：一律按 PASS 处理并留日志。 */
+    if (__chainNeverAsk) {
+      try { addBattleLog('system', '【连锁】本会话已关闭连锁询问 ⇒ 自动放弃：「' + __title + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
+      pickP1(null);
+      return;
+    }
     if (typeof Online !== 'undefined' && Online.active) {
       onlineDecideModal('p1', __title, __body, __hint, opts, pickP1);
       return;
@@ -15537,6 +15549,50 @@ function resolveBarrierOnMove(user, oldPos, newPos, dir) {
   return newPos;
 }
 
+/* 【2026-10-10 作者要求"移动前能看地图 + 落点高亮预览"】
+   · `__previewLandingTile`：算"这一步会落到哪一格"，**只读**、绝不改状态 ——
+     算式与 `applyMove` 同源（`((pos+n)%42+42)%42`、大风 debuff 的 -2 也照算），
+     ⚠ 路障**不能**调 `resolveBarrierOnMove` 试算：那个函数会 `splice` 消耗路障、把路障主人推 3 格、
+     还会打日志（副作用一串 ✗）⇒ 这里按**同一条规则只读预判**（沿路径找第一块非落点路障）。
+   · `__movePreviewBegin/End`：弹窗打开时①走公交/地铁那套"半透明贴底"（`.bus-chooser`）让地图不被挡，
+     ②把候选落点在地图上高亮；选完/关闭立刻清掉。 */
+function __previewLandingTile(player, signedN) {
+  var p = battleState && battleState[player];
+  if (!p) return null;
+  var n = Math.max(-20, Math.min(20, signedN));
+  var dir = n >= 0 ? 1 : -1;
+  /* 大风影响：下一次位移 -2（与 applyMove 同款，只算不写） */
+  if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) n = (Math.abs(n) >= 2) ? (n - 2 * dir) : 0;
+  if (n === 0) return p.position;                       // 位移 0 = 原地跳一下（位置不变）
+  var dest = ((p.position + n) % 42 + 42) % 42;
+  try {
+    var bs = battleState._barriers || [];
+    if (bs.length) {
+      var steps = (((dir < 0 ? p.position - dest : dest - p.position) % 42) + 42) % 42;
+      for (var k = 1; k <= steps; k++) {
+        var g = ((p.position + dir * k) % 42 + 42) % 42, hit = false;
+        for (var x = 0; x < bs.length; x++) if (bs[x] && bs[x].pos === g) { hit = true; break; }
+        if (hit && g !== dest) return g;                // 会被拦在这里（条件与 resolveBarrierOnMove 一致）
+      }
+    }
+  } catch (e) {}
+  return dest;
+}
+function __movePreviewBegin(player, list) {
+  try { __busSetChooserUi(true); } catch (e) {}         // 半透明贴底：选的时候地图始终看得见
+  try {
+    if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
+      Map3D.previewTiles((list || []).map(function (it) {
+        return { id: __previewLandingTile(player, it.n), color: it.color, opacity: it.opacity };
+      }));
+    }
+  } catch (e) { console.error('移动落点预览出错（忽略）', e); }
+}
+function __movePreviewEnd() {
+  try { if (typeof Map3D !== 'undefined' && Map3D && Map3D.clearPreview) Map3D.clearPreview(); } catch (e) {}
+  try { __busSetChooserUi(false); } catch (e) {}
+}
+
 function applyMove(user, signedN) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
   /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
@@ -16965,10 +17021,11 @@ function __opsMove(op, ctx, next, env) {
         next();
       }
       if (user === 'p1' && typeof showChoiceModal === 'function') {
-        var __rr = [];
-        if (op.both) { for (var __bi = op.min; __bi <= op.max; __bi++) { __rr.push('前进' + __bi + '格'); __rr.push('后退' + __bi + '格'); } }
-        else { for (var __ri = op.min; __ri <= op.max; __ri++) __rr.push((op.dir < 0 ? '后退' : '前进') + __ri + '格'); }
-        showChoiceModal('选择移动格数', (ctx.card && ctx.card.name) || '', '在 ' + op.min + '-' + op.max + ' 格内选择', __rr, __applyRangeChoice);
+        var __rr = [], __pv = [];
+        if (op.both) { for (var __bi = op.min; __bi <= op.max; __bi++) { __rr.push('前进' + __bi + '格'); __pv.push({ n: __bi, color: 0x9fe3a0 }); __rr.push('后退' + __bi + '格'); __pv.push({ n: -__bi, color: 0xffd166 }); } }
+        else { for (var __ri = op.min; __ri <= op.max; __ri++) { __rr.push((op.dir < 0 ? '后退' : '前进') + __ri + '格'); __pv.push({ n: __ri * (op.dir || 1), color: 0x9fd8ff }); } }
+        __movePreviewBegin('p1', __pv);   /* 作者 2026-10-10：弹窗贴底 + 地图上高亮候选落点 */
+        showChoiceModal('选择移动格数', (ctx.card && ctx.card.name) || '', '在 ' + op.min + '-' + op.max + ' 格内选择', __rr, function (oi) { __movePreviewEnd(); __applyRangeChoice(oi); });
       } else if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
         var __rr2 = [];
         if (op.both) { for (var __bi2 = op.min; __bi2 <= op.max; __bi2++) { __rr2.push('前进' + __bi2 + '格'); __rr2.push('后退' + __bi2 + '格'); } }
@@ -16982,7 +17039,10 @@ function __opsMove(op, ctx, next, env) {
         onlineDecideModal('p2', '选择移动方向（对手）', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
         return;
       }
-      if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('选择移动方向', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
+      if (user === 'p1' && typeof showChoiceModal === 'function') {
+        __movePreviewBegin('p1', [{ n: op.steps, color: 0x9fe3a0 }, { n: -op.steps, color: 0xffd166 }]);
+        showChoiceModal('选择移动方向', '', '', ['前进' + op.steps + '格', '后退' + op.steps + '格'], function (o) { __movePreviewEnd(); applyMove(user, o === 1 ? -op.steps : op.steps); next(); });
+      }
       else { applyMove(user, op.steps); break; }
       return;
     case 'move_pay_extra': {
@@ -17001,14 +17061,19 @@ function __opsMove(op, ctx, next, env) {
           return;
         }
         if (user === 'p1' && typeof showChoiceModal === 'function') {
-          showChoiceModal('额外消耗音韵', '基础' + __pe.base + '格，每' + __pe.perCost + '音韵+' + __pe.perStep + '格（当前' + p.cost + '音韵）', '', __opts, function (oi) { __go(oi || 0); });
+          var __pv2 = []; for (var __k2 = 0; __k2 <= __maxExtra; __k2++) __pv2.push({ n: (__pe.base + __k2 * (__pe.perStep || 1)) * dir, color: (__k2 === 0 ? 0x9fd8ff : 0x9fe3a0) });
+          __movePreviewBegin('p1', __pv2);
+          showChoiceModal('额外消耗音韵', '基础' + __pe.base + '格，每' + __pe.perCost + '音韵+' + __pe.perStep + '格（当前' + p.cost + '音韵）', '', __opts, function (oi) { __movePreviewEnd(); __go(oi || 0); });
         } else __go(0);
       }
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
         onlineDecideModal('p2', '选择移动方向（对手）', '', '', ['前进', '后退'], function (o) { __peMove(o === 1 ? -1 : 1); });
         return;
       }
-      if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('选择移动方向', '', '', ['前进', '后退'], function (o) { __peMove(o === 1 ? -1 : 1); });
+      if (user === 'p1' && typeof showChoiceModal === 'function') {
+        __movePreviewBegin('p1', [{ n: __pe.base, color: 0x9fe3a0 }, { n: -__pe.base, color: 0xffd166 }]);
+        showChoiceModal('选择移动方向', '', '', ['前进', '后退'], function (o) { __movePreviewEnd(); __peMove(o === 1 ? -1 : 1); });
+      }
       else __peMove(1);
       return;
     }
