@@ -9593,16 +9593,37 @@ function rollDiceForPlayer(player) {
         if (!__rp._nextRollAdjustable) { done(); return; }
         __rp._nextRollAdjustable = false;
         var __ttApply = function (o) {
+          try { __movePreviewEnd(); } catch (e) {}      // 选完立刻清掉地图高亮 ✓
           if (o === 0 && finalDice < __sides) { finalDice += 1; __rp._lastRoll = finalDice; addBattleLog(player, '【逃脱·Lv4】下次投掷点数+1，最终 ' + finalDice + ' 点'); }
           else if (o === 1 && finalDice > 1) { finalDice -= 1; __rp._lastRoll = finalDice; addBattleLog(player, '【逃脱·Lv4】下次投掷点数-1，最终 ' + finalDice + ' 点'); }
           else addBattleLog(player, '【逃脱·Lv4】保持 ' + finalDice + ' 点');
           done();
         };
+        /* 【2026-10-11 作者要求：所有"移动类/改点类"都给落点】逃脱·Lv4 也是改**移动点数** ⇒ 同款处理 ✓ */
+        var __ttOpts = ['+1 点', '-1 点', '不变'];
+        try {
+          var __ttTip = function (id) {
+            try {
+              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+              return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+            } catch (e) { return '第' + id + '格'; }
+          };
+          var __ttTile0 = __previewLandingTile(player, finalDice);
+          var __ttTileA = (finalDice < __sides) ? __previewLandingTile(player, finalDice + 1) : __ttTile0;
+          var __ttTileB = (finalDice > 1) ? __previewLandingTile(player, finalDice - 1) : __ttTile0;
+          __ttOpts[0] = __ttOpts[0] + ' → ' + __ttTip(__ttTileA);
+          __ttOpts[1] = __ttOpts[1] + ' → ' + __ttTip(__ttTileB);
+          __ttOpts[2] = __ttOpts[2] + ' → ' + __ttTip(__ttTile0);
+          if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
+            Map3D.previewTiles([{ id: __ttTile0, color: 0x9fd8ff }, { id: __ttTileA, color: 0xffd166 }, { id: __ttTileB, color: 0xffd166 }]);
+          }
+          try { __busSetChooserUi(true); } catch (e) {}
+        } catch (e) { console.error('逃脱Lv4落点预览出错（忽略）', e); }
         if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-          onlineDecideModal('p2', '逃脱·Lv4（对手）', '下一次投掷点数可以增减1点（当前' + finalDice + '）', '', ['+1 点', '-1 点', '不变'], __ttApply);
+          onlineDecideModal('p2', '逃脱·Lv4（对手）', '下一次投掷点数可以增减1点（当前' + finalDice + '）', '', __ttOpts, __ttApply);
           return;
         }
-        showChoiceModal('逃脱·Lv4', '下一次投掷点数可以增减1点（当前' + finalDice + '）', '', ['+1 点', '-1 点', '不变'], __ttApply);
+        showChoiceModal('逃脱·Lv4', '下一次投掷点数可以增减1点（当前' + finalDice + '）', '', __ttOpts, __ttApply);
       }
       // 控骰（规则书第五章）：每 20% 控骰能力 = 骰子点数 ±1；移动投掷属「普通投掷」，最多适用 100% 控骰（±5）
       var __ctrlSteps = (typeof __diceControlSteps === 'function') ? __diceControlSteps(player, __CTRL_PCT_NORMAL) : 0;
