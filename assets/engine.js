@@ -9262,7 +9262,8 @@ function rollPlayerDice(player) {
   // 里绪(水着)SP：首次投掷后回复与点数相同的音韵值
   if (p._rioMizugiSP && !p._rioMizugiFirstRoll) { p._rioMizugiFirstRoll = true; p.cost = Math.min(p.cost + d, p.maxCost); addBattleLog(player, '【里绪(水着)SP】首次投掷回复' + d + '点音韵值'); }
   // 予(普通)被动·解构与求索（2026-09-26 新卡面）：**每进行一次投掷后回复自身1点音韵值**（不再限 Lv7）
-  if (p._yuPassive) { recoverCost(player, 1, '予被动'); addBattleLog(player, '【入间予被动】每次投掷后回复自身1点音韵值'); }
+  // 【2026-10-11】改用统一出口 `__rollForAfter` ✓（与判定/校准骰同一份实现 ⇒ 不会分叉 ✗；注意在骰子循环**外**调用 ⇒ 多骰相加只算"一次投掷"✓）
+  __rollForAfter(player, '移动投掷');
   // 【小野葵】被动·福音雅颂（新卡面）：一轮内每名玩家限一次 —— 有玩家**在同一个回合进行了第二次投掷**后，
   //   其可以从自己墓地取一张**单次种类**的卡加入手卡（用后放回牌组最下方），那之后双方各回复2点音韵值。
   try {
@@ -11010,7 +11011,8 @@ function actCalibrate() {
     checkBattleEnd();
     updateBattleUI();
   };
-  var __calRaw = GameRNG.dice(20);
+  /* 【2026-10-11】格子校准也是"一次投掷" ⇒ 走唯一出口（予的被动等"投掷后"效果 ✓；投掷者固定为 p1 ✓） */
+  var __calRaw = __rollFor('p1', 20, '20面骰校准(≥14)');
   if (typeof __diceControlAsk === 'function') __diceControlAsk('p1', __calRaw, 20, '20面骰校准(≥14)', __calSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
   else __calSettle(typeof applyDiceControl === 'function' ? applyDiceControl('p1', __calRaw, 20, __CTRL_PCT_NORMAL) : __calRaw);
 }
@@ -11093,7 +11095,8 @@ function __busBoard(player, tile, __kasumi) {
   if (typeof updateBattleUI === 'function') updateBattleUI();
   if (p._busRolledThisAction) { addBattleLog(player, '本次行动已经投过四面骰 ⇒ 只能停在锚点上'); return; }
   if (__kasumi) { p._busRolledThisAction = true; __busChooseStep(player, 1, true, tile.id); return; }   // 免判定：直接选下车点
-  var raw = GameRNG.dice(4);
+  /* 【2026-10-11】公交站四面骰也是"一次投掷" ⇒ 走唯一出口（投掷者 = 当前玩家 player ✓） */
+  var raw = __rollFor(player, 4, '公交站·四面骰');
   var settle = function (v) {
     p._busRolledThisAction = true;
     addBattleLog(player, '【' + tile.name + '】四面骰 ' + v + ' 点 ⇒ 可以在锚点间移动 ' + v + ' 格（转乘不消耗步数）');
@@ -12957,7 +12960,7 @@ function performCalibration(player, difficulty, reduce, cb) {
       function (finalVal, cancelled) { __settle(finalVal, cancelled); });
     return undefined;   // 已转为异步：结果只通过 cb 交付
   }
-  return __settle(GameRNG.dice(20), false);
+  return __settle(__rollFor(player, 20, '20面骰校准(' + difficulty + ')'), false);   // 【2026-10-11】走唯一投骰出口（触发予的被动 ✓）
 }
 
 // 触发事件卡
@@ -17979,11 +17982,12 @@ function __psDamageClause(user, target, effectText, context, hold, finish) {
           if (coinResult !== '正面') { damage = 0; __coinFail = true; }
           else __ruriMaxJudgeSP(user, 'coin', coinResult);                      // 琉璃SP：硬币最大=正面2点
         } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
-          damage = applyDiceControl(user, GameRNG.dice(4), 4);
+          /* 【2026-10-11】判定伤害的伤害判定也是"一次投掷" ⇒ 走唯一出口（予的被动等"投掷后"效果 ✓） */
+          damage = applyDiceControl(user, __rollFor(user, 4, '判定伤害·4面骰'), 4);
           if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 4, fixed: damage, label: __judgeLabel }, function () {});
           __ruriMaxJudgeSP(user, 'd4', damage);
         } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
-          damage = applyDiceControl(user, GameRNG.dice(6), 6);
+          damage = applyDiceControl(user, __rollFor(user, 6, '判定伤害·6面骰'), 6);
           if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 6, fixed: damage, label: __judgeLabel }, function () {});
           __ruriMaxJudgeSP(user, 'd6', damage);
         }
@@ -18623,7 +18627,8 @@ function __eventCasesB(card, player, p, done, env) {
         updateBattleUI();
         checkBattleEnd();
       };
-      var __jzRaw = GameRNG.dice(20);
+      /* 【2026-10-11】独奏的 20 面骰也是"一次投掷" ⇒ 走唯一出口（投掷者 = player ✓） */
+      var __jzRaw = __rollFor(player, 20, '独奏·20面骰');
       if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __jzRaw, 20, '独奏·20面骰', __jzSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
       else __jzSettle(__jzRaw);
       break;
@@ -20285,8 +20290,11 @@ function judgeAnimate(user, spec, cb) {
   var isCoin = spec.kind === 'coin';
   var __isFixed = (spec.fixed !== undefined && spec.fixed !== null);
   function __roll() {
+    /* 硬币判定不是"骰子投掷" ⇒ 不触发"投掷后"类被动 ✓（作者口径：只有用了骰子才算 ✓） */
     if (isCoin) return GameRNG.coin() ? '正面' : '反面';
-    return GameRNG.dice(spec.sides || 6); // 只取原始点数：控骰已改为由玩家手动决定
+    /* 【2026-10-11 作者要求】所有判定/校准骰（判定伤害 / Noise·和声校准 / 回音韵判定…）都走唯一投骰出口 ✓
+       ⇒ 予的"每进行一次投掷后回复1点音韵值"在这里统一触发 ✓（投掷者 = user ✓ 自己投才回 ✓） */
+    return __rollFor(user, spec.sides || 6, spec.label || '判定');
   }
   var finalVal = __isFixed ? spec.fixed : __roll();
   // 控骰【手动按钮】：点数已知后询问玩家是否 ±N（不再替玩家自动选"更有利"的结果）
@@ -21781,6 +21789,35 @@ function __lvCost(card, level) {
   var best = th[0];
   for (var j = 0; j < th.length; j++) { if (level >= th[j].lv) best = th[j]; }
   return best.cost;
+}
+
+/* ============================================================
+   【2026-10-11 作者要求·结构修】**唯一投骰出口**
+   ------------------------------------------------------------
+   规则（作者原话）："只要使用了骰子投掷都应该能触发予的每进行一次投掷后回复1点音韵值"
+     —— 判定伤害的伤害判定 / Noise·和声校准 / 音叉校准 / 各类卡的骰子…**全都算** ✓
+   口径（作者确认）：**自己投掷才回**（`who` 是投掷者；只有他自己编组了予才回自己的 1 点 ✓）
+   为什么要一个出口：引擎里原有 26 处直接调 `GameRNG.dice(...)`（没有共同包装 ✗）⇒
+     被动只能挂在其中一条流程上（原来只挂在"移动投掷" ✓）⇒ 其它骰子全都不触发 ✗。
+     这里提供 `__rollFor(who, sides, tag)`：**一次投掷 = 一次调用**（多骰相加的卡在大循环外调一次 ✓，
+     与"移动投掷"现有行为一致 ✓），内部 = 掷骰 + 触发"投掷后"类被动 ✓。
+   ⚠ 玩家侧可见的掷骰动画/控制（控骰弹窗）仍由各调用点自己走原流程，本函数只管"掷 + 被动" ✓
+   ============================================================ */
+function __rollForAfter(who, tag) {
+  /* 投掷后触发的被动（目前只有予）——放这里，所有走 __rollFor 的站点自动获得 ✓ */
+  try {
+    var p = battleState && battleState[who];
+    if (!p) return;
+    if (p._yuPassive && typeof recoverCost === 'function') {
+      recoverCost(who, 1, '予被动');
+      addBattleLog(who, '【入间予被动】每次投掷后回复自身1点音韵值' + (tag ? ('（' + tag + '）') : ''));
+    }
+  } catch (e) { console.error('投掷后被动出错（忽略）', e); }
+}
+function __rollFor(who, sides, tag) {
+  var v = GameRNG.dice(sides || 6);
+  __rollForAfter(who, tag);
+  return v;
 }
 
 /* 【2026-10-11 作者要求·规则层必须分开的两个概念】
