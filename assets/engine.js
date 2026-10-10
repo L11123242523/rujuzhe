@@ -18362,7 +18362,15 @@ function __eventCasesA(card, player, p, done, env) {
             addBattleLog(player, '即兴演出：=8，回复' + (o === 0 ? '自己' : '对手') + '1点入迷值');
             updateBattleUI(); checkBattleEnd();
           }
+          /* 【2026-10-11 结构修（作者实测：AI 用事件卡永久卡在效果处理区 + 一直"效果结算中"）】
+             原来非联机的 p2（单机 AI）走下面那个 else ⇒ **给玩家弹窗替 AI 决定** ✗；
+             而本卡的收尾（送公共墓地 / 撤掉 C1 占位）挂在 __jxSettle 这条链上 ⇒ 只要这个窗口没人回答，
+             链条就永远不往下走 ⇒ 卡永久留在效果处理区 ✗（正是作者日志里 `C1 置于效果处理区：【即兴演出】` 之后没有下文的原因）
+             修法：照抄引擎既有约定（`__diceControlAsk` 对非 p1 就是"自动取最优、不弹窗"）——
+             单机 AI 自己决定、立刻结算，不再出现"等一个没人回答的窗" ✗；
+             取值口径与引擎自己的 AI 实现一致（L10002：AI 把 +1 入迷给**对手**）⇒ 取 __jxApply(1)「对手」✓ */
           if (__ecOL && player === 'p2') { onlineDecideModal('p2', '即兴演出（对手）', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply); }
+          else if (!__ecOL && player !== 'p1') { __jxApply(1); }
           else showChoiceModal('即兴演出', '=8点', '回复1名玩家1点入迷值', __jxOpts, __jxApply);
         } else {
           p.fascination = Math.max(0, p.fascination - 1);
