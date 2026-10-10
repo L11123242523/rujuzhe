@@ -2683,9 +2683,17 @@ function __overclockLoanCap(who) {
 function __costAffordable(player, card) {
   var p = battleState && battleState[player];
   if (!p) return false;
-  var cost = parseInt(card && card.cost, 10) || 0;
-  /* 区间费用卡（"1-3"这种）：费用在效果内支付 ⇒ 不在这里拦（与 evaluatePlayable 同口径） */
-  if (card && typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0;
+  /* 【2026-10-11 作者要求·两概念必须分开】判"能不能发动"要用**所需要的音韵值**（小野葵/钢笔/宁雨清/等级缩放… ✓），
+     **不**含"所消耗的音韵值-1"类（魔法蓝图·SP）✗ —— 作者原话：前者"只有 2 费可以用 3 费的卡"，后者不行 ✓。
+     走**无副作用**的 `computeRequiredCost` ✓（不会把小野葵的"首次使用"标记用掉 ✓ 资格检查会反复调用 ✓）。 */
+  var cost;
+  if (typeof computeRequiredCost === 'function') {
+    cost = computeRequiredCost(card, player);
+  } else {
+    cost = parseInt(card && card.cost, 10) || 0;
+    /* 区间费用卡（"1-3"这种）：费用在效果内支付 ⇒ 不在这里拦（与 evaluatePlayable 同口径） */
+    if (card && typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0;
+  }
   var cap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
   return (p.cost + cap) >= cost;
 }
@@ -21766,8 +21774,17 @@ function __lvCost(card, level) {
   return best.cost;
 }
 
-function computeActualCost(card, user) {
-  var p = battleState[user];
+/* 【2026-10-11 作者要求·规则层必须分开的两个概念】
+   · 「所需要的音韵值 -1」类（小野葵被动 / 钢笔 / 宁雨清SP / 等级缩放 / 每次使用+1）⇒ **改变"能不能发动"** ✓
+     作者原话：前者"只有 2 费可以用 3 费的卡" ✓
+   · 「所消耗的音韵值 -1」类（魔法蓝图·SP 的 `_nextCostReduction`）⇒ **只减少实际扣的数值，不改变能否发动** ✗
+   所以这里拆成两个出口：
+     computeRequiredCost(card,user) = 判定用（**无副作用** ⇒ 可以在 UI 灰显/资格检查里反复调用 ✓）
+     computeActualCost(card,user)   = 真正扣费用（= 前者 + "所消耗"类减免，并在这一刻消费"首次使用"标记 ✓）
+   ⚠ 关键：小野葵的 `_aoiDiscountUsed` 标记**只在 computeActualCost 里置位** ✗
+     —— 否则资格检查一跑就把"首次"用掉了 ✓（这正是拆分的意义所在 ✓） */
+function computeRequiredCost(card, user) {
+  var p = battleState[user] || {};
   // 费用统一数值化：部分卡 cost 为 "1+"/"2+" 这类字符串（至少X费、可多付），parseInt 取基数；此前 typeof!=='number' 直接当0导致这些卡免费
   var cost = parseInt(card.cost, 10) || 0;
   // 区间费用卡（"1-10"等，如红宝之杖·运）：支付在效果内完成（pay_n_deal_n），使用时不另扣
@@ -21776,27 +21793,42 @@ function computeActualCost(card, user) {
   // 等级费用缩放：COST 随等级降低（如 Lv1/4: 3/2 —— Lv4起费用2）
   if (card.lv && /Lv/i.test(String(card.lv))) {
     var __lvC = (typeof __lvCost === 'function') ? __lvCost(card, p.level || 1) : null;
-    if (__lvC != null && __lvC !== actual) { actual = __lvC; addBattleLog(user, '【等级费用】' + (card.name || '') + ' 当前Lv' + (p.level || 1) + '，费用 ' + cost + '→' + actual); }
+    if (__lvC != null && __lvC !== actual) actual = __lvC;      // 日志留给 computeActualCost（避免资格检查刷屏 ✓）
   }
-  // “费用随使用次数增加，每用一次+1”（幸运护符/怪怪幽灵吊坠等）：基数+已使用次数
+  // "费用随使用次数增加，每用一次+1"（幸运护符/怪怪幽灵吊坠等）：基数+已使用次数
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     actual = cost + (card._escalateCount || 0);
   }
-  // 小野葵：整副牌组（8道具 + 4角色携带卡 = 12张）每张的"首次使用"费用-1
-  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) {
-    actual = Math.max(0, cost - 1);
-    card._aoiDiscountUsed = true;
-    addBattleLog(user, '【小野葵被动】携带卡首次使用费用-1（原' + cost + '费，现' + actual + '费）');
-  }
+  // 小野葵：整副牌组（8道具 + 4角色携带卡 = 12张）每张的"首次使用"费用-1 ⇒ 属「所需要的音韵值-1」✓
+  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) actual = Math.max(0, actual - 1);
   // 宁雨清SP：因效果加入手卡的卡费用-1
-  if (p._ningSP && card._addedByEffect && actual > 0) { actual -= 1; addBattleLog(user, '【宁雨清SP】因效果加入手卡的卡费用-1（现' + actual + '费）'); }
+  if (p._ningSP && card._addedByEffect && actual > 0) actual -= 1;
   // 钢笔：攻击卡、技能卡所需音韵-1
-  if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; }) && (card._category === 'attack_cards' || card._category === 'skill_cards') && actual > 0) { actual -= 1; addBattleLog(user, '【钢笔】攻击/技能卡费用-1（现' + actual + '费）'); }
+  if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; }) && (card._category === 'attack_cards' || card._category === 'skill_cards') && actual > 0) actual -= 1;
+  return actual;
+}
+function computeActualCost(card, user) {
+  var p = battleState[user] || {};
+  var actual = computeRequiredCost(card, user);
+  /* 等级费用缩放/递增的日志放这里打（资格检查会反复调用上层 ⇒ 日志只在实际扣费时出现 ✓ 不刷屏 ✓） */
+  try {
+    var __baseCost = parseInt(card.cost, 10) || 0;
+    if (card.lv && /Lv/i.test(String(card.lv)) && (typeof __lvCost === 'function')) {
+      var __lvC2 = __lvCost(card, p.level || 1);
+      if (__lvC2 != null && __lvC2 !== __baseCost) addBattleLog(user, '【等级费用】' + (card.name || '') + ' 当前Lv' + (p.level || 1) + '，费用 ' + __baseCost + '→' + __lvC2);
+    }
+  } catch (e) {}
+  // —— 以下属「所消耗的音韵值 -1」：只改实际扣多少，不改"能否发动" ✗ ——
+  // 小野葵「首次使用」的消费点：只有真正扣费时才算用过 ✓（资格检查走上面的无副作用版本 ✓）
+  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) {
+    card._aoiDiscountUsed = true;
+    addBattleLog(user, '【小野葵被动】携带卡首次使用费用-1（现' + actual + '费）');
+  }
   if (p._nextCostReduction && p._nextCostReduction > 0) {
     var reduced = Math.min(actual, p._nextCostReduction);
     actual = Math.max(0, actual - reduced);
     p._nextCostReduction = 0;
-    addBattleLog(user, '减费效果生效：费用-' + reduced + '（原' + cost + '费，现' + actual + '费）');
+    addBattleLog(user, '减费效果生效：费用-' + reduced + '（现' + actual + '费）');
   }
   return actual;
 }
