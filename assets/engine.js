@@ -276,6 +276,18 @@ function rwMirror(type){
 }
 
 function setGameSeed(seed){ if(GameRNG&&GameRNG.reseed) GameRNG.reseed(seed); return GameRNG; }
+/* 【2026-10-10 作者要求（参考 MD）：联机开局硬币 ⇒ 随机决定先后手】
+   结构要点：**不消耗锁步随机流**（两边调用次序一差就分叉）—— 硬币结果由双方**共享的 `Online.seed`**
+   做稳定散列派生 ⇒ 两台机器各自算、结果必然一致，**不需要新增任何协议消息** ✓
+   （房主是权威：它把结果写进 `battleState.currentPlayer`，快照会按收件人换座位，客人跟着走 ✓） */
+function __onlineCoinFlip() {
+  var s = '';
+  try { s = String((typeof Online !== 'undefined' && Online && Online.seed != null) ? Online.seed : '0'); } catch (e) { s = '0'; }
+  var h = 2166136261;                                  // FNV-1a
+  for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  var hostFirst = (h % 2) === 0;
+  return { hostFirst: hostFirst, face: hostFirst ? '正面' : '反面' };
+}
 
 var Online = {
   active:false, isHost:false, connected:false,
@@ -1182,6 +1194,14 @@ var Online = {
       this._enteredBattle=true;
       try{ showScreen('battleScreen'); }catch(e){}
     }
+    /* 【2026-10-10 联机开局硬币】权威方把硬币结果随快照带过来（`battleState._olCoin`）
+       ⇒ 客人**也播同一个面**的动画（同一份数据、同一面 ⇒ 两边看到的硬币一致 ✓）。 */
+    try {
+      if (battleState && battleState._olCoin && !this._olCoinShown) {
+        this._olCoinShown = true;
+        if (typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', fixed: battleState._olCoin.face, label: '先后手硬币' }, function () {});
+      }
+    } catch (e) { console.error('客人侧开局硬币动画出错（忽略）', e); }
     try{ this._ensureSurrenderBtn(); }catch(e){}
     // 房主判定投降后，客人会在快照里看到 _over（且 _winner 已随之换位）
     if(battleState && battleState._over && !this._wasOver){
@@ -5394,11 +5414,27 @@ function initBattle() {
   // 游戏开始：为每个座位结算首回合的自然回复音韵与抽卡（口径：首回合准备阶段不再回复/抽卡）
   playerIds().forEach(function (w) { __gameStartRegenDraw(w); });
 
-  // 联机：后手方的本机 p1 即真实的第二位玩家——先手(主机)先行动，这里直接进入远端位回合等待
-  
-  if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
-    battleState.currentPlayer = 'p2';
-    addBattleLog('system', '对战开始！' + (Online.oppDisplayName() || '对手') + '先手');
+  /* 【2026-10-10 作者要求（参考 MD）：联机开局用**硬币**随机决定先后手】
+     结构：唯一真相 = 权威方（房主）引擎里的 `battleState.currentPlayer`。
+       · 硬币结果由双方**共享的 `Online.seed`** 派生（`__onlineCoinFlip()`，不消耗 GameRNG 随机流）
+         ⇒ 两台机器各自算、结果必然一致，**不需要新增任何协议消息** ✓；
+       · 房主引擎里 p1 = 房主、p2 = 客人；`NetSync.buildSnapshot` 会按收件人换座位（`swapSeats`）
+         ⇒ 客人侧跟着快照走，"自己恒为 p1"的视图约定不变 ✓（原来那行 `mySide === 'p2'` 永远不成立，
+         等于**房主天然先手** —— 那正是这次要改掉的口径）；
+       · 动画复用现有 `judgeAnimate({kind:'coin', fixed:面})`：用 `fixed` 保证**动画显示的面 = 判定结果**；
+         刻意不用 `judgePerform`（它会开"判定连锁窗"，开局硬币不该被连锁响应 ✗）。 */
+  if (typeof Online !== 'undefined' && Online.active) {
+    var __olFirst = battleState.currentPlayer;                 // 默认（p1 = 房主）
+    var __olCoinR = { hostFirst: true, face: '正面' };
+    try { __olCoinR = __onlineCoinFlip(); } catch (e) { console.error('开局硬币派生失败（回退房主先手）', e); }
+    __olFirst = __olCoinR.hostFirst ? 'p1' : 'p2';
+    battleState.currentPlayer = __olFirst;
+    /* 硬币结果随快照带给客人（客人侧据此**播同一个面**的动画；`NetSync` 会整体编码 battleState） */
+    battleState._olCoin = { face: __olCoinR.face, first: __olFirst };
+    addBattleLog(__olFirst, '对战开始！🪙 硬币掷出「' + __olCoinR.face + '」⇒ ' + (__olCoinR.hostFirst ? '房主' : '客人') + '先手');
+    try {
+      if (typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', fixed: __olCoinR.face, label: '先后手硬币' }, function () {});
+    } catch (e) { console.error('开局硬币动画出错（忽略）', e); }
   } else {
     addBattleLog('system', '对战开始！玩家1先手');
   }
