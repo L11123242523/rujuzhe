@@ -7997,17 +7997,23 @@ var TW = {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
       else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
     };
-    /* 【2026-10-10 作者实测"在战斗日志里关闭了连锁询问，仍然会问"】
-       根因：这个开关只在 `showChainChoice`（ui.js:421）里被读到，而本函数有**三条渲染路径** ——
-         · `win.useChoiceModal` 声明的窗口 → `showChoiceModal`（不读开关 ✗）
-         · 联机 → `onlineDecideModal`（不读开关 ✗）
-         · 其余 → `showChainChoice`（读开关 ✓）
-       ⇒ 前两条照样弹窗。结构修：把判据**提到渲染之前一处**（三条路径共用），
-       语义与开关自身的说明一致（"此后所有连锁都会自动放弃"）：一律按 PASS 处理并留日志。 */
+    /* 【2026-10-11 口径修正（作者按 MD 裁定）：这个开关**只关"非必发（选发）"的询问，必发照旧**】
+       历史：2026-10-10 作者实测"在战斗日志里关闭了连锁询问，仍然会问" ⇒ 我当时的修法是把判据提到渲染之前、
+       并**无条件**按 PASS 处理（语义写成"此后所有连锁都会自动放弃" ✗）——那会让**必发效果也被一并放弃** ✗，
+       属于规则性错误（必发必须处理），也正是"关掉之后怪事变多"的来源之一。
+       现在按 MD 口径分流（位置不变：三条渲染路径之前共用这一处 ✓）：
+         · 本批**全是非必发** ⇒ 开关打开时自动放弃 + 写日志 ✓
+         · 本批**含必发**（如"决定连锁顺序"这类必发同批） ⇒ 开关**不适用**，照常往下询问 ✓ */
     if (__chainNeverAsk) {
-      try { addBattleLog('system', '【连锁】本会话已关闭连锁询问 ⇒ 自动放弃：「' + __title + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
-      pickP1(null);
-      return;
+      var __poolMandatory = false;
+      try { __poolMandatory = (pool || []).some(function (c) { return !!(c && c.mandatory); }); } catch (e) {}
+      if (!__poolMandatory) {
+        try { addBattleLog('system', '【连锁】已关闭连锁询问 ⇒ 自动放弃非必发：「' + __title + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
+        pickP1(null);
+        return;
+      }
+      try { addBattleLog('system', '【连锁】本批含必发效果 ⇒「关闭连锁询问」不适用，照常询问：「' + __title + '」'); } catch (e) {}
+      /* 含必发 ⇒ 不返回，继续走下面的三条渲染路径（照常询问）✓ */
     }
     if (typeof Online !== 'undefined' && Online.active) {
       onlineDecideModal('p1', __title, __body, __hint, opts, pickP1);
