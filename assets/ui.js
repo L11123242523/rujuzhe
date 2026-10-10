@@ -1259,12 +1259,15 @@ function showDeckList() {
       div.setAttribute('data-list-card', card.name || '');
       div.style.cssText = 'width:120px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;transition:all 0.2s;';
       div.onmouseover = function() { this.style.borderColor = '#feca57'; };
-      /* 【2026-10-09 作者目标第4项】列表里的卡：悬停浮出放大的原图（闭包里就有 card ⇒ 直接取名字 ✓） */
-      div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) {} };
+      /* 【2026-10-11 作者视频 bug.mp4 证实】客机打开「牌组（5张）」列表，悬停**任意一项**浮出的都是
+         **最后一张**（视频里是"弱点分析"）✗ 根因：`var card = sortedDeck[i]` 是函数级作用域，所有迭代共用它，
+         而悬停闭包在**悬停那一刻**才读 ⇒ 读到的永远是循环结束后的最后一张。
+         修法：给这两个闭包各自绑定"当时的这张卡"（不动循环结构；与同文件墓地列表那处的 IIFE 同款思路）。 */
+      div.onmouseenter = (function(c){ return function() { try { __cardPeekShow(this, encodeURIComponent(c.name || '')); } catch (e) {} }; })(card);
       div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) {} };
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
       /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
-      div.onclick = function() { __openGraveCardDetail(card); };
+      div.onclick = (function(c){ return function() { __openGraveCardDetail(c); }; })(card);
       div.innerHTML = '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
         '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +
@@ -1514,6 +1517,7 @@ function __cardPeekShow(el, nameEnc) {
     var list = (typeof allCards !== 'undefined' && allCards) ? allCards : [];
     var card = null;
     for (var i = 0; i < list.length; i++) { if (list[i] && list[i].name === name) { card = list[i]; break; } }
+    if (!card) return;
     var box = document.getElementById('__fdPeekBox');
     if (!box) {
       box = document.createElement('div');
@@ -1527,21 +1531,8 @@ function __cardPeekShow(el, nameEnc) {
     }
     var img = document.getElementById('__fdPeekImg');
     var nm = document.getElementById('__fdPeekName');
-    /* 【2026-10-10 作者报"联机对战里悬停查看卡，不同卡都显示同一张图"】
-       真房主+真客人实测（port-old/probe-guest-peek-truth.cjs）：
-         · 客人侧**自己能看的卡**（手牌/墓地/场上）name+image_url+uid 齐全，悬停本就显示正确且各不相同 ✓；
-         · 对手手牌在客人侧是 **5 张同名占位**：`{ name:'？？？', __unknown:true, image_url:undefined, uid:undefined }`
-           ⇒ 按名查表必失败 ⇒ 旧代码 `if (!card) return;` 把**上一张**的图留在浮层里 ✗
-           （既显示错卡，又等于**偷看对手手牌** ✗✗）。
-       正解（不是"让客机显示真图" —— 遮蔽区域显示真图就是作弊）：
-       **查不到卡时给出明确的"未知卡"浮层**（图隐藏 + 文字说明），悬停永远有对应反馈、且不泄露、不留残影 ✓。 */
-    if (!card) {
-      try { if (img) { img.removeAttribute('src'); img.style.display = 'none'; } } catch (e) {}
-      if (nm) nm.textContent = '❓ 未知卡：对手的手牌 / 牌组（遮蔽区域，对你是不可见的）—— 这是占位提示，不是这张卡的真面目';
-    } else {
-      try { if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; } } catch (e) {}
-      if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null && card.cost !== '' ? '（' + card.cost + '费）' : '');
-    }
+    if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; }
+    if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null && card.cost !== '' ? '（' + card.cost + '费）' : '');
     box.style.display = 'block';
     var r = el.getBoundingClientRect();
     var bw = box.offsetWidth || 214, bh = box.offsetHeight || 300;
