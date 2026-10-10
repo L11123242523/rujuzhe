@@ -7972,11 +7972,16 @@ var TW = {
       if (typeof Online !== 'undefined' && Online.active) {
         var fp2 = pool.map(__labelOf);
         fp2.push(__passLabel);
+        /* 【2026-10-11 修正】只有**本批每个候选都显式写了 `mandatory === false`（真·选发）**才带 `chainAsk` 标记 ✓
+           —— 否则客人端会把"必发/未标 mandatory"的排队效果（如格子效果 `__tile`）当成非必发自动 PASS ✗，
+           与房主端同一类回归（作者日志：「初始候选 1 → 共 0 环 ⇒ 排队却没有处理」）✓ */
+        var __p2AllOptional = false;
+        try { __p2AllOptional = pool.length > 0 && pool.every(function (c) { return !!(c && c.mandatory === false); }); } catch (e) { __p2AllOptional = false; }
         onlineDecideModal('p2', __title, __body,
           __hint, fp2, function (idx) {
             if (idx === null || idx === undefined || idx >= pool.length) pass();
             else { activate(pool[idx]); }
-          }, { chainAsk: true });   // ⇐ 连锁窗询问：让客人端按**它自己的**"关闭连锁询问"开关决定弹不弹 ✓
+          }, { chainAsk: __p2AllOptional });
         return;
       }
       var aiIdx = -1;
@@ -8018,23 +8023,27 @@ var TW = {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
       else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
     };
-    /* 【2026-10-11 口径修正（作者按 MD 裁定）：这个开关**只关"非必发（选发）"的询问，必发照旧**】
-       历史：2026-10-10 作者实测"在战斗日志里关闭了连锁询问，仍然会问" ⇒ 我当时的修法是把判据提到渲染之前、
-       并**无条件**按 PASS 处理（语义写成"此后所有连锁都会自动放弃" ✗）——那会让**必发效果也被一并放弃** ✗，
-       属于规则性错误（必发必须处理），也正是"关掉之后怪事变多"的来源之一。
-       现在按 MD 口径分流（位置不变：三条渲染路径之前共用这一处 ✓）：
-         · 本批**全是非必发** ⇒ 开关打开时自动放弃 + 写日志 ✓
-         · 本批**含必发**（如"决定连锁顺序"这类必发同批） ⇒ 开关**不适用**，照常往下询问 ✓ */
+    /* 【2026-10-11 修正·按引擎自己的候选约定】候选的 mandatory 约定见 L6829：
+       「`mandatory: false` 表示选发（**缺省 = 必发**）」✓
+       —— 我上一版写成 `!!c.mandatory` ✗，把"**没写 mandatory**"的**必发**候选当成了非必发 ✗。
+       实测后果（作者日志）：排队的格子效果候选（L11236 `__tq.push({id:'__tile',…})` 没有该字段 ✗）
+       在开关打开时被自动 PASS ⇒「【时点窗口】打开（simultaneous，初始候选 1）→ 关闭（共 0 环）」
+       ⇒ **排队的效果被整个丢掉** ✗（作者原话："这个排队却没有处理"）。
+       现在改成：**只有本批每个候选都显式写了 `mandatory === false`** 才允许自动放弃 ✓；
+       只要有必发（或没标）就照常询问 ✓。 */
     if (__chainNeverAsk) {
-      var __poolMandatory = false;
-      try { __poolMandatory = (pool || []).some(function (c) { return !!(c && c.mandatory); }); } catch (e) {}
-      if (!__poolMandatory) {
+      var __poolAllOptional = false;
+      try {
+        var __pl = pool || [];
+        __poolAllOptional = __pl.length > 0 && __pl.every(function (c) { return !!(c && c.mandatory === false); });
+      } catch (e) { __poolAllOptional = false; }
+      if (__poolAllOptional) {
         try { addBattleLog('system', '【连锁】已关闭连锁询问 ⇒ 自动放弃非必发：「' + __title + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
         pickP1(null);
         return;
       }
-      try { addBattleLog('system', '【连锁】本批含必发效果 ⇒「关闭连锁询问」不适用，照常询问：「' + __title + '」'); } catch (e) {}
-      /* 含必发 ⇒ 不返回，继续走下面的三条渲染路径（照常询问）✓ */
+      try { addBattleLog('system', '【连锁】本批含必发（或未标选发）⇒「关闭连锁询问」不适用，照常询问：「' + __title + '」'); } catch (e) {}
+      /* 含必发/未标 ⇒ 不返回，继续走下面的三条渲染路径（照常询问）✓ */
     }
     if (typeof Online !== 'undefined' && Online.active) {
       onlineDecideModal('p1', __title, __body, __hint, opts, pickP1);
