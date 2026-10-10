@@ -17153,7 +17153,18 @@ function __opsMove(op, ctx, next, env) {
           addBattleLog(user, '额外投入' + extra + '点音韵，' + (dir > 0 ? '前进' : '后退') + Math.abs(__steps) + '格');
           applyMove(user, __steps); next();
         }
-        var __opts = []; for (var __k = 0; __k <= __maxExtra; __k++) __opts.push(__k === 0 ? '不额外投入（' + __pe.base + '格）' : '投入' + __k + '音韵，多移' + (__k * (__pe.perStep || 1)) + '格');
+        /* 【2026-10-11 作者要求：所有"移动类"都给落点】"不额外投入/投入k音韵"每一档都补落点（按当前方向 ✓） */
+        var __opts = [], __peTip = function (steps) {
+          try {
+            var id = __previewLandingTile(user, steps);
+            var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+            return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+          } catch (e) { return ''; }
+        };
+        for (var __k = 0; __k <= __maxExtra; __k++) {
+          var __peSteps = (__pe.base + __k * (__pe.perStep || 1)) * dir;
+          __opts.push((__k === 0 ? '不额外投入（' + __pe.base + '格）' : '投入' + __k + '音韵，多移' + (__k * (__pe.perStep || 1)) + '格') + __peTip(__peSteps));
+        }
         if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
           onlineDecideModal('p2', '额外消耗音韵（对手）', '基础' + __pe.base + '格，每' + __pe.perCost + '音韵+' + __pe.perStep + '格（当前' + p.cost + '音韵）', '', __opts, function (oi) { __go(oi == null ? 0 : oi); });
           return;
@@ -17164,13 +17175,22 @@ function __opsMove(op, ctx, next, env) {
           showChoiceModal('额外消耗音韵', '基础' + __pe.base + '格，每' + __pe.perCost + '音韵+' + __pe.perStep + '格（当前' + p.cost + '音韵）', '', __opts, function (oi) { __movePreviewEnd(); __go(oi || 0); });
         } else __go(0);
       }
+      /* 【2026-10-11 同批】方向二选一也补落点 ✓（基础格数按 __pe.base 算） */
+      var __peDirOpts = ['前进' + __peTip2(__pe.base), '后退' + __peTip2(-__pe.base)];
+      function __peTip2(n) {
+        try {
+          var id = __previewLandingTile(user, n);
+          var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+          return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+        } catch (e) { return ''; }
+      }
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
-        onlineDecideModal('p2', '选择移动方向（对手）', '', '', ['前进', '后退'], function (o) { __peMove(o === 1 ? -1 : 1); });
+        onlineDecideModal('p2', '选择移动方向（对手）', '', '', __peDirOpts, function (o) { __peMove(o === 1 ? -1 : 1); });
         return;
       }
       if (user === 'p1' && typeof showChoiceModal === 'function') {
         __movePreviewBegin('p1', [{ n: __pe.base, color: 0x9fe3a0 }, { n: -__pe.base, color: 0xffd166 }]);
-        showChoiceModal('选择移动方向', '', '', ['前进', '后退'], function (o) { __movePreviewEnd(); __peMove(o === 1 ? -1 : 1); });
+        showChoiceModal('选择移动方向', '', '', __peDirOpts, function (o) { __movePreviewEnd(); __peMove(o === 1 ? -1 : 1); });
       }
       else __peMove(1);
       return;
