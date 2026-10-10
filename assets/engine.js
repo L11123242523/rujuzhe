@@ -19533,12 +19533,36 @@ function __diceControlAsk(user, rawVal, diceMax, label, done, opts) {
   if (!moves.length) { done(rawVal, 0); return; }
   var opts_ = ['不使用控骰（保留 ' + rawVal + ' 点）'];
   moves.forEach(function (mv) { opts_.push('控骰 ' + (mv.d > 0 ? '+' : '') + mv.d + ' → ' + mv.v + ' 点'); });
+  /* 【2026-10-11 作者要求·口径已确认】控骰弹窗要给"改前 / 改后各自会到哪一格"，并且**所有控骰都给**（不只是移动投掷）✓
+     落点用**只读**的 `__previewLandingTile()`（与 applyMove 同源：环形跨0、大风 debuff、路障拦截都算）。
+     说明：判定类骰子的点数按"若按该点数前进"给出落点（作者口径：都给）✓ */
+  var __movePeek = true;
+  if (__movePeek && typeof __previewLandingTile === 'function') {
+    var __tileTip = function (id) {
+      try {
+        var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+        return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+      } catch (e) { return '第' + id + '格'; }
+    };
+    var __pvList = [];
+    var __land0 = __previewLandingTile(user, rawVal);
+    opts_[0] = opts_[0] + ' → ' + __tileTip(__land0);
+    __pvList.push({ id: __land0, color: 0x9fd8ff });                  // 原点数落点（蓝）
+    moves.forEach(function (mv, __i2) {
+      var __land = __previewLandingTile(user, mv.v);
+      opts_[__i2 + 1] = opts_[__i2 + 1] + ' → ' + __tileTip(__land);
+      __pvList.push({ id: __land, color: 0xffd166 });                // 各候选落点（黄）
+    });
+    try { if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) Map3D.previewTiles(__pvList); } catch (e) {}
+    try { __busSetChooserUi(true); } catch (e) {}                    // 弹窗半透明贴底：看地图不被挡
+  }
   var title = '控骰 · ' + (label || '投掷');
   var desc = '本次投出 ' + rawVal + ' 点。你有 ' + Math.round(pct * 100) + '% 控骰能力，每 20% 可将骰子点数 ±1，'
     + '本次最多 ±' + steps + '（适用 ' + Math.round(Math.min(pct, capPct) * 100) + '% 控骰）'
     + ((capPct <= __CTRL_PCT_JUDGE_DMG + 1e-9) ? '。判定伤害最多只适用 20% 控骰' : '')
     + '。点数范围 ' + minVal + '~' + diceMax + '。';
   var apply = function (o) {
+    try { if (__movePeek) { if (typeof Map3D !== 'undefined' && Map3D && Map3D.clearPreview) Map3D.clearPreview(); __busSetChooserUi(false); } } catch (e) {}
     if (o >= 1 && o <= moves.length) {
       var mv = moves[o - 1];
       if (arr) { __diceArrAdjust(arr, mv.d, arrSides); done(__sumArr(), mv.d); }
