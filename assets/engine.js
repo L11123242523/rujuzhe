@@ -6167,13 +6167,13 @@ function collectChainable(player, effect){
 var __chainAutoPassSec = 20;         // 倒计时秒数（0 = 关闭自动 PASS）
 var __chainNeverAsk = false;         // 本会话自动放弃连锁
 function setChainAutoPass(sec) { __chainAutoPassSec = sec; showToast('连锁窗口自动放弃倒计时：' + (sec ? sec + '秒' : '关闭'), 'info'); }
-function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话将自动放弃连锁询问' : '已恢复连锁询问', 'info'); try { __chainAskRefresh(); } catch (e) {} }
+function setChainNeverAsk(v) { __chainNeverAsk = !!v; showToast(v ? '本会话只自动放弃「非必发」连锁询问（必发照常询问）' : '已恢复连锁询问', 'info'); try { __chainAskRefresh(); } catch (e) {} }
 /* 【2026-10-03】连锁询问开关：一眼看到当前状态、随时恢复（避免"本会话不再询问"静默丢掉自己的触发） */
 function __chainAskToggle() {
   try {
     __chainNeverAsk = !__chainNeverAsk;
     __chainAskRefresh();
-    showToast(__chainNeverAsk ? '本会话已关闭连锁询问（此后所有连锁都会自动放弃）' : '已恢复连锁询问', __chainNeverAsk ? 'warn' : 'info');
+    showToast(__chainNeverAsk ? '本会话已关闭连锁询问（只关「非必发」；必发照常询问）' : '已恢复连锁询问', __chainNeverAsk ? 'warn' : 'info');
   } catch (e) {}
 }
 function __chainAskRefresh() {
@@ -9559,15 +9559,35 @@ function rollDiceForPlayer(player) {
       function __ioriAsk(done) {
         if (!__ioriOn || finalDice === 2) { done(); return; }
         var __ioriApply = function (o) {
+          try { __movePreviewEnd(); } catch (e) {}      // 选完立刻清掉地图高亮 ✓
           if (o === 1) { finalDice = 2; __rp._lastRoll = 2; addBattleLog(player, '【伊织被动】选择2作为最终结果'); }
           else addBattleLog(player, '【伊织被动】保留 ' + finalDice + ' 点');
           done();
         };
+        /* 【2026-10-11 作者要求：所有"移动类/改点类"都要给落点】伊织被动·恩典改的同样是**移动点数**
+           ⇒ 与莉莉被动同一套处理：文案 `第N格【格名】：效果前20字`、原点数落点=蓝、改为2的落点=黄、选完清理 ✓ */
+        var __ioriOpts = ['保留 ' + finalDice + ' 点', '改为 2 点'];
+        try {
+          var __ioriTip = function (id) {
+            try {
+              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+              return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+            } catch (e) { return '第' + id + '格'; }
+          };
+          var __ioriTileA = __previewLandingTile(player, finalDice);
+          var __ioriTileB = __previewLandingTile(player, 2);
+          __ioriOpts[0] = __ioriOpts[0] + ' → ' + __ioriTip(__ioriTileA);
+          __ioriOpts[1] = __ioriOpts[1] + ' → ' + __ioriTip(__ioriTileB);
+          if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
+            Map3D.previewTiles([{ id: __ioriTileA, color: 0x9fd8ff }, { id: __ioriTileB, color: 0xffd166 }]);
+          }
+          try { __busSetChooserUi(true); } catch (e) {}
+        } catch (e) { console.error('伊织被动落点预览出错（忽略）', e); }
         if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-          onlineDecideModal('p2', '伊织被动·恩典（对手）', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', ['保留 ' + finalDice + ' 点', '改为 2 点'], __ioriApply);
+          onlineDecideModal('p2', '伊织被动·恩典（对手）', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', __ioriOpts, __ioriApply);
           return;
         }
-        showChoiceModal('伊织被动·恩典', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', ['保留 ' + finalDice + ' 点', '改为 2 点'], __ioriApply);
+        showChoiceModal('伊织被动·恩典', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', __ioriOpts, __ioriApply);
       }
       function __taotuoAsk(done) {
         if (!__rp._nextRollAdjustable) { done(); return; }
