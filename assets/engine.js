@@ -2642,6 +2642,20 @@ function __overclockLoanCap(who) {
   if (!p || typeof StatusSys === 'undefined' || !StatusSys.has(who, 'overclock')) return 0;
   return ((p.level || 1) >= 7) ? 7 : 5;
 }
+/* 【2026-10-10 结构修·**费用判据的唯一出口**（作者实测"cost 越界"，最深受害 -44）
+   原来"能不能付得起"这条判据只写在出牌资格闸 `evaluatePlayable`（L2800-2801）里，而
+   **连锁发动**走的是另一个付费出口 `payAndRemove()`（L6144-6150），那里只有一句
+   `me.cost -= cost` ⇒ 连锁里反复发动就能把音韵值扣到任意深（实测 -4 → -7 → … → -44，上限本该 0）✗
+   ⇒ 把判据抽成一个函数，出牌闸与连锁闸**共用同一份口径**（余额 + 超频透支额度 ≥ 费用）。 */
+function __costAffordable(player, card) {
+  var p = battleState && battleState[player];
+  if (!p) return false;
+  var cost = parseInt(card && card.cost, 10) || 0;
+  /* 区间费用卡（"1-3"这种）：费用在效果内支付 ⇒ 不在这里拦（与 evaluatePlayable 同口径） */
+  if (card && typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0;
+  var cap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
+  return (p.cost + cap) >= cost;
+}
 // 扣费后音韵值为负时：登记透支日志 + Lv7 扣除3点同步
 function __settleOverclockLoan(who) {
   var p = battleState && battleState[who];
@@ -2798,7 +2812,7 @@ function evaluatePlayable(card,player,opts){
   var cost=parseInt(card.cost,10)||0;
   if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
   var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
-  if(me.cost + __loanCap < cost) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
+  if (!__costAffordable(player, card)) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
   /* 【2026-10-01 作者裁决】"扣除自身 N 点同步值"**不再前置拦截**：允许发动，
      代价按 0 下限扣（不足不补）；若因此归零则由"同步值归零 ⇒ 败北"规则处理（无回复手段时才判负）。
      ⚠ 音韵值（费用）不足仍然拦（上面的 __loanCap 那段不受影响）。 */
@@ -6140,6 +6154,20 @@ function applyChainCard(player,pick,effect,done){
     setTimeout(function () { if (typeof done === 'function') done(); }, 200);
     return;
   }
+  /* 【2026-10-10 结构修·**连锁费用闸（真付费层）**】
+     上面 `seatEffect`（座位级 SP/角色能力）已提前返回 ⇒ 走到这里的都是**会调 payAndRemove 付费**的发动。
+     而 `payAndRemove()` 只有一句 `me.cost -= cost`，没有出牌闸那道"余额 + 超频透支额度 ≥ 费用"的判据 ⇒
+     实测能把音韵值扣到 -44（上限本该 0）✗。这里用与出牌闸**同一个** `__costAffordable()` 拦下，
+     并照常回调 `done()` 让连锁状态机继续（拒绝 ≠ 卡住）。
+     ⚠ 注意：还有一条**绕过链路状态机**的付费入口 —— "阶段时点发动卡"（`__runTimingTriggers` 里的
+     `fire → applyChainCard`）不过 `_addChain`，所以闸必须在这层，而不能只放在 `_addChain`。 */
+  if (c && c.cost && !__costAffordable(player, c)) {
+    var __cc0 = parseInt(c.cost, 10) || 0;
+    addBattleLog(player, '【连锁·费用闸】「' + name + '」需要 ' + __cc0 + ' 点音韵值，当前 ' + me.cost
+      + '（可透支 ' + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0) + '）⇒ 本次不能发动');
+    setTimeout(function () { if (typeof done === 'function') done(); }, 0);
+    return;
+  }
   effect._chain = effect._chain || [];
   function payAndRemove(){
     /* 【2026-10-09 第2件】连锁发动时卡会被移出所有区域 ⇒ "用卡后被动"的归属守卫查不到它。
@@ -7764,6 +7792,27 @@ var TW = {
         }
       }
     } catch (e) { console.error('咒文速度校验出错（放行）', e); }
+    /* 【2026-10-10 结构修·**连锁费用闸**（作者实测"cost 越界"，最深到 -44）
+       根因：连锁发动走的是另一个付费出口 `payAndRemove()`（`applyChainCard` 内），那里只有一句
+       `me.cost -= cost`，**没有**出牌资格闸 `evaluatePlayable` 那道"余额 + 超频透支额度 ≥ 费用"的判据 ⇒
+       在连锁里反复发动就能把音韵值扣到任意深（实测同一回合 -1 → -4 → -7 → … → -44，上限本该 0）✗
+       ⚠ **闸只能加在"真的会付费"的候选上**（作者 2026-10-10 裁定：SP 效果不花费）：
+         · 有 `onAdd` 的候选 = 响应卡（发动即付费 + 移出原区域）⇒ **判费用**；
+         · 只有 `fire` 的候选 = 同时触发（如"送入墓地触发"的盒子SP）⇒ **不付费，一律放行**；
+         · `seatEffect`（座位级 SP/角色能力）没有 `card` ⇒ 由 `c.card &&` 直接跳过。
+       判据与出牌闸共用唯一出口 `__costAffordable()`；处理方式与去重/速度两道闸同款
+       （打日志 + 标记候选已用，否则 AI 会反复重选 ⇒ 死循环 + 不入链）。 */
+    try {
+      if (c && c.owner && c.card && typeof c.onAdd === 'function' && !__costAffordable(c.owner, c.card)) {
+        var __cp = battleState[c.owner] || {};
+        var __cc = parseInt(c.card.cost, 10) || 0;
+        try { c._chainDisabled = true; } catch (e) {}
+        addBattleLog((c.owner || 'system'), '【连锁·费用闸】「' + (c.label || c.card.name || c.key) + '」需要 ' + __cc
+          + ' 点音韵值，当前 ' + __cp.cost + '（可透支 '
+          + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(c.owner) : 0) + '）⇒ 本次不能发动');
+        return __fin0();
+      }
+    } catch (e) { console.error('连锁费用闸出错（放行）', e); }
     /* A2：记录该环建立时，发动者的"每回合一次"类标记（若本环最终被发动无效 ⇒ 还原） */
     try { if (c && c.owner && !c._onceSnap && typeof __snapshotOncePerTurn === 'function') c._onceSnap = __snapshotOncePerTurn(c.owner); } catch (e) { console.error('A2 快照失败（忽略）', e); }
     if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
