@@ -18748,10 +18748,21 @@ function __eventCasesB(card, player, p, done, env) {
         else { __xtJump(); if (__rioXT) __xtMove(1); }
         updateBattleUI();
       };
+      /* 【2026-10-11 作者要求：所有"移动类"都给落点】闲庭信步的"前进/后退1格"同样是移动 ⇒ 补落点 ✓ */
+      var __xtOpts = (function () {
+        var __xtT = function (n) {
+          try {
+            var id = __previewLandingTile(player, n);
+            var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+            return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+          } catch (e) { return ''; }
+        };
+        return ['前进1格并回复2点音韵' + __xtT(1), '后退1格并回复2点音韵' + __xtT(-1), '原地跳跃一次'];
+      })();
       if (__ecOL && player === 'p2') {
-        onlineDecideModal('p2', '闲庭信步（对手）', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', ['前进1格并回复2点音韵', '后退1格并回复2点音韵', '原地跳跃一次'], __xtApply);
+        onlineDecideModal('p2', '闲庭信步（对手）', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', __xtOpts, __xtApply);
       } else {
-        showChoiceModal('闲庭信步', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', ['前进1格并回复2点音韵', '后退1格并回复2点音韵', '原地跳跃一次'], __xtApply);
+        showChoiceModal('闲庭信步', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', __xtOpts, __xtApply);
       }
       break;
     }
@@ -18954,9 +18965,20 @@ function useMusicCardFor(player, index, name, done) {
           applyMove(player, moveAmount * dir);
           __finishMusic();
         }
-        if (__muOL && isRemoteSeat(player)) onlineDecideModal('p2', '乐谱卡（对手）', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
+        /* 【2026-10-11 作者要求：所有"移动类"都给落点】乐谱卡的前进/后退也补落点 ✓ */
+        var __musicOpts = (function () {
+          var __muT = function (n) {
+            try {
+              var id = __previewLandingTile(player, n);
+              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
+              return ' → 第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
+            } catch (e) { return ''; }
+          };
+          return ['前进' + moveAmount + '格' + __muT(moveAmount), '后退' + moveAmount + '格' + __muT(-moveAmount)];
+        })();
+        if (__muOL && isRemoteSeat(player)) onlineDecideModal('p2', '乐谱卡（对手）', '前进还是后退' + moveAmount + '格？', '', __musicOpts, __musicDir);
         else if (isAISeat(player)) __musicDir(0); // AI 自动选前进（离线不再误弹玩家弹窗；A5：非 p1 座位都算 AI）
-        else showChoiceModal('乐谱卡', '前进还是后退' + moveAmount + '格？', '', ['前进', '后退'], __musicDir);
+        else showChoiceModal('乐谱卡', '前进还是后退' + moveAmount + '格？', '', __musicOpts, __musicDir);
       } else {
         opt.action(); __finishMusic();
       }
@@ -21216,7 +21238,17 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var p = battleState[user], foe = foeOf(user);
     if (p.cost <= 0) { if (user === 'p1') showToast('【设计师的直尺】音韵值不足，无法支付前进。', 'warn'); return false; }
     var opts = [];
-    for (var k = 1; k <= p.cost; k++) opts.push('支付 ' + k + ' 音韵，前进 ' + Math.min(k, 20) + ' 格');
+    /* 【2026-10-11 作者要求：所有"移动类"都给落点】每档"支付 k 音韵前进 min(k,20) 格"都补落点 ✓
+       （与控骰弹窗同款文案：`→ 第N格【格名】：效果前20字`，落点走只读 __previewLandingTile ✓） */
+    for (var k = 1; k <= p.cost; k++) {
+      var __rulerMv = Math.min(k, 20), __rulerTip = '';
+      try {
+        var __rulerId = __previewLandingTile(user, __rulerMv);
+        var __rulerT = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[__rulerId] : null;
+        __rulerTip = ' → 第' + __rulerId + '格' + (__rulerT && __rulerT.name ? ('【' + __rulerT.name + '】') : '') + (__rulerT && __rulerT.desc ? ('：' + String(__rulerT.desc).slice(0, 20)) : '');
+      } catch (e) { __rulerTip = ''; }
+      opts.push('支付 ' + k + ' 音韵，前进 ' + __rulerMv + ' 格' + __rulerTip);
+    }
     function __applyRuler(oi) {
       if (oi == null || oi < 0) { updateBattleUI(); return; }
       var pay = oi + 1; p.cost -= pay; var old = p.position, mv = Math.min(pay, 20);
