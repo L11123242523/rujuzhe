@@ -1145,6 +1145,19 @@ var Online = {
     this._engineAsks++;
     if(m.seat) this.mySeat=this.mySeat||m.seat;
     var spec=this._normalizeAskSpec(m.spec);
+    /* 【2026-10-11 作者实测：客人端"关时点（关闭连锁询问）"在联机里照样被问】
+       原因：远端询问一律走"收到就画出来"（下面这行 ✗），**从不看本机的开关**。
+       口径（作者裁定·参考 MD）：开关**只管本机**，且只关**非必发（选发）**的连锁询问。
+       ⇒ 房主发来的**连锁窗询问**带 `chainAsk` 标记 ✓ ⇒ 本机开关关着时**不弹窗**，
+         直接回 PASS（连锁窗的选项表约定：**最后一项 = PASS** ✓ 与 ui.js 的 finish(choices.length-1) 同源），
+         并写一行日志让"为什么没问"看得见 ✓。
+       · 必发同批（"决定连锁顺序"）与所有非连锁类询问（改点/选卡/造伤响应…）**不带标记** ⇒ 照常弹 ✓ */
+    if (spec && spec.chainAsk && (typeof __chainNeverAsk !== 'undefined') && __chainNeverAsk) {
+      var __autoPassIdx = (spec.choices && spec.choices.length) ? (spec.choices.length - 1) : null;
+      try { addBattleLog('system', '【连锁】本机已关闭连锁询问 ⇒ 自动放弃（联机远端询问）：「' + (spec.label || '') + '」'); } catch (e) {}
+      try { this._sendEngine({k:'ans', id:m.id, v:__autoPassIdx}); } catch (e) {}
+      return;
+    }
     this._renderAsk(spec, function(v){ self._sendEngine({k:'ans', id:m.id, v:v}); });
   },
   /* 服务器发来的 spec 与旧路径形状略有差别，统一归一化：
@@ -7955,7 +7968,7 @@ var TW = {
           __hint, fp2, function (idx) {
             if (idx === null || idx === undefined || idx >= pool.length) pass();
             else { activate(pool[idx]); }
-          });
+          }, { chainAsk: true });   // ⇐ 连锁窗询问：让客人端按**它自己的**"关闭连锁询问"开关决定弹不弹 ✓
         return;
       }
       var aiIdx = -1;
@@ -12589,7 +12602,7 @@ function __guestPlayVerdict(i, card) {
   } catch (e) {}
   return (typeof Online !== 'undefined' && Online && typeof Online.playableOf === 'function') ? Online.playableOf(i) : { ok: true, reason: '' };
 }
-function onlineDecideModal(side, title, cardName, effect, choices, callback) {
+function onlineDecideModal(side, title, cardName, effect, choices, callback, opts) {
   /* 【2026-10-05】联机远端决策同样算"有人在决策" */
   try { callback = __decideWrapped(callback, 'onlineDecide'); } catch (e) {}
   var __OL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
@@ -12600,8 +12613,11 @@ function onlineDecideModal(side, title, cardName, effect, choices, callback) {
   }
   // 房主：把整个问题（含选项文字）原样发给客人，客人画出来选，选完把下标回传。
   // 不再依赖"两台机器在同一流程位置分配同一序列号" —— 那正是旧架构失步的根源。
+  // 【2026-10-11】opts.chainAsk：这是"连锁窗的询问" ⇒ 让客人端能按**它自己的**"关闭连锁询问"开关
+  // 决定是否弹窗（开关是本机偏好，房主无从代判 ⇒ 只传标记，不替对方决定 ✓）
   Online.askRemote({ kind:'choice', label:title, cardName:cardName||'', effect:effect||'',
-                     choices:(choices||[]).slice() }, function (v) {
+                     choices:(choices||[]).slice(),
+                     chainAsk: !!(opts && opts.chainAsk) }, function (v) {
     if (callback) callback((v === null || v === undefined) ? null : v);
   });
 }
