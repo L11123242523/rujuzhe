@@ -6190,20 +6190,15 @@ function applyChainCard(player,pick,effect,done){
     setTimeout(function () { if (typeof done === 'function') done(); }, 200);
     return;
   }
-  /* 【2026-10-10 结构修·**连锁费用闸（真付费层）**】
-     上面 `seatEffect`（座位级 SP/角色能力）已提前返回 ⇒ 走到这里的都是**会调 payAndRemove 付费**的发动。
-     而 `payAndRemove()` 只有一句 `me.cost -= cost`，没有出牌闸那道"余额 + 超频透支额度 ≥ 费用"的判据 ⇒
-     实测能把音韵值扣到 -44（上限本该 0）✗。这里用与出牌闸**同一个** `__costAffordable()` 拦下，
-     并照常回调 `done()` 让连锁状态机继续（拒绝 ≠ 卡住）。
-     ⚠ 注意：还有一条**绕过链路状态机**的付费入口 —— "阶段时点发动卡"（`__runTimingTriggers` 里的
-     `fire → applyChainCard`）不过 `_addChain`，所以闸必须在这层，而不能只放在 `_addChain`。 */
-  if (c && c.cost && !__costAffordable(player, c)) {
-    var __cc0 = parseInt(c.cost, 10) || 0;
-    addBattleLog(player, '【连锁·费用闸】「' + name + '」需要 ' + __cc0 + ' 点音韵值，当前 ' + me.cost
-      + '（可透支 ' + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0) + '）⇒ 本次不能发动');
-    setTimeout(function () { if (typeof done === 'function') done(); }, 0);
-    return;
-  }
+  /* 【2026-10-11 撤回·流程不安全（作者报：AI 事件卡留在效果处理区 / 一直"效果结算中" / 永续卡进墓地）】
+     这里原有一道"连锁费用闸"（余额+超频额度 ≥ 费用，否则 return 不发动）—— 它位于**调用方已经决定发动之后**：
+     调用方（连锁窗 / 时点候选的 onAdd）已把这一环当成"已上链"，我却在 payAndRemove() 之前 return
+     ⇒ 卡没上链、没付费、也没移出原区域 ⇒ 状态与流程不一致 ✗（正是上面那三个症状的形态）
+     ⇒ 撤回该闸，恢复"一发动就照原流程走"（付费 → 移出原区域 → 入链 → 逆结算）✓
+     · 越界保护改由 _addChain 里那道闸承担（它在**入链之前**判、打日志 + 标记候选，不产生任何副作用 ✓）
+     · ⚠ 已知遗留：绕过 _addChain 的"阶段时点发动卡"那一类仍可能把 cost 扣到超出超频额度（原 bug 会回来），
+       但**宁可有数值越界，也不能让对局流程错乱** ✗；该遗留应当用"付费封顶到允许下限（不拒绝发动）"安全修。
+     —— 原闸代码：if (c && c.cost && !__costAffordable(player, c)) { …本次不能发动…; return; } */
   effect._chain = effect._chain || [];
   function payAndRemove(){
     /* 【2026-10-09 第2件】连锁发动时卡会被移出所有区域 ⇒ "用卡后被动"的归属守卫查不到它。
