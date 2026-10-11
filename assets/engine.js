@@ -20617,6 +20617,10 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
     val: initVal, _chain: [], cancelled: false
   };
   rwOpen('rand', je);
+  /* 【2026-10-12 今晚修·作者报"没有投骰也能用②修改掷骰结果"】⇒ 建立**唯一真相**：
+     "当前是否有待定掷骰结果" = `battleState._openRollWindow`（开窗置位 ✓、关窗清空 ✓）
+     供①特制手套的选项② ✓、②人类侧"改点卡/重判卡"的可用性判定 ✓ 共同读取（不再各自猜 ✗） */
+  try { battleState._openRollWindow = 'rand'; } catch (e) { try { console.error('[catch] assets/engine.js:20619 开窗标记', e); } catch (e2) {} }
   function __settleNow() {
     if (je.cancelled) { addBattleLog(user, '本次判定被连锁无效，不适用结果'); applyFn(null, true); return; }
     /* "最终点数"以 je.val 为准（重判落地时已写回）；_newDiceResult 只是某些路径的兜底 */
@@ -20626,6 +20630,8 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
   }
   function __close() {
     rwClose('rand');
+    /* 【2026-10-12 今晚修】关窗 ⇒ 清掉"待定掷骰结果"的唯一真相标记 ✓（与开窗同生同灭 ✓） */
+    try { battleState._openRollWindow = null; } catch (e) { try { console.error('[catch] assets/engine.js:20628 关窗清标记', e); } catch (e2) {} }
     /* 【2026-10-01 修】重判（Twice 等）是异步的：进行中就先别结算，等它的回调把 je.val 写好后兑现本函数 */
     if (je._rerollPending) { je._deferredClose = __settleNow; return; }
     __settleNow();
@@ -23186,18 +23192,23 @@ var SPECIAL_CARD_HANDLERS = {
       }
     }
   },
-  // 特制手套：三选一
+  // 特制手套：三选一（②只在**有待定掷骰结果**时提供 ✓ —— 作者 2026-10-12 今晚报的"没有对象也能用"）
   '特制手套': {
     play: function (card, user, done) {
-      var opts = ['从牌组选1张卡加入手卡', '修改一次掷骰结果', '选对手墓地1张卡放回其牌组'];
+      var __rollOpen = false;
+      try { __rollOpen = !!battleState._openRollWindow; } catch (e) {}
+      var opts = ['从牌组选1张卡加入手卡'];
+      if (__rollOpen) opts.push('修改一次掷骰结果');   /* ← 无待定结果时**不提供**该选项 ✓（原来是标记"下一次" ✗） */
+      opts.push('选对手墓地1张卡放回其牌组');
       function apply(ci) {
         var p = battleState[user], foe = foeOf(user);
-        if (ci === 0) {
+        var __pick = String(opts[ci] || '');
+        if (__pick.indexOf('从牌组') >= 0) {
           chooseZoneCard(user, user, 'deck', '特制手套：从牌组选1张卡加入手卡', function (c, i) {
             if (i >= 0) { p.deck.splice(i, 1); p.hand.push(c); __emitAddHand(user, c, 'deck'); addBattleLog(user, '【特制手套】将【' + c.name + '】加入手卡'); }
             done();
           });
-        } else if (ci === 1) {
+        } else if (__pick.indexOf('修改一次掷骰') >= 0) {
           p._modifyDiceNext = true;
           addBattleLog(user, '【特制手套】标记下一次可修改掷骰结果');
           done();
