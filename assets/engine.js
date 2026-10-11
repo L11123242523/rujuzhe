@@ -10111,16 +10111,15 @@ function aiMaybeUseEvent(done) {
     L('闲庭信步[对手]：前进1格回2音韵' + (rioXT ? '（现实间里绪：追加原地跳跃一次）' : ''));
     __finished(); return;
   }
-  // --- 躁动之心：3次校准(12/8/6面≥6)，成功N次降N入迷；予每次+1费 ---
+  // --- 躁动之心：3次校准(12/8/6面≥6)，成功N次降N入迷 ---
   if (nm === '躁动之心') {
-    var yu2 = hasChar('予') && !hasChar('予(水着)');
+    /* 【2026-10-11 去重复计费】原来这里自带"予每次+1费"（`yu2`）✗ ——
+       现予的被动按作者裁定"**有就行**"生效，且三次校准都走唯一投骰出口 ✓
+       ⇒ 保留 `yu2` 会变成每次校准回2点 ✗✗ ⇒ 删除自带那份，统一由出口触发 ✓ */
     var sc = 0;
-    if (GameRNG.dice(12) >= 6) sc++;
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    if (GameRNG.dice(8) >= 6) sc++;
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    if (GameRNG.dice(6) >= 6) sc++;
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
+    if (__rollFor(aiSeat(), 12, '躁动之心·第1次校准(12面骰)') >= 6) sc++;
+    if (__rollFor(aiSeat(), 8, '躁动之心·第2次校准(8面骰)') >= 6) sc++;
+    if (__rollFor(aiSeat(), 6, '躁动之心·第3次校准(6面骰)') >= 6) sc++;
     if (sc > 0) p.fascination = Math.max(0, p.fascination - sc);
     L('躁动之心[对手]：校准成功' + sc + '次，降低' + sc + '点入迷（当前' + p.fascination + '）');
     __finished(); return;
@@ -18744,16 +18743,17 @@ function __eventCasesB(card, player, p, done, env) {
     }
       
     case '躁动之心': {
-      // 3次校准（12面≥6，8面≥6，6面≥6）；入间予在场每次校准回1音韵
+      // 3次校准（12面≥6，8面≥6，6面≥6）
       // 每次校准都是独立「投掷」：逐次询问控骰（每20%=±1，最多±5），AI/远端按同一顺序询问
-      var __yu2 = false;
-      try { __yu2 = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('予') >= 0 && c.name.indexOf('水着') < 0; }); } catch (e) {}
+      /* 【2026-10-11 去重复计费】原来这里自带一份"入间予在场每次校准回1音韵"（`__yu2`）✗ ——
+         现在予的被动已按作者裁定"**有就行**"生效（见 `_yuPassive` 的设置处 ✓），
+         且本函数的三次校准都改走唯一投骰出口 `__rollFor` ✓ ⇒ 若保留 `__yu2` 会变成**每次校准回2点** ✗✗
+         ⇒ 删除自带的那份，统一由出口触发 ✓ */
       var successCount = 0;
       var __calStep = function (sides, idx, next) {
-        var __raw = GameRNG.dice(sides);
+        var __raw = __rollFor(player, sides, '躁动之心·第' + idx + '次校准(' + sides + '面骰)');
         var __apply = function (v) {
           if (v >= 6) successCount++;
-          if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
           addBattleLog(player, '躁动之心：第' + idx + '次校准' + sides + '面骰出' + v + '点，' + (v >= 6 ? '成功' : '失败'));
           next();
         };
@@ -18763,7 +18763,6 @@ function __eventCasesB(card, player, p, done, env) {
       __calStep(12, 1, function () {
         __calStep(8, 2, function () {
           __calStep(6, 3, function () {
-            if (__yu2) addBattleLog(player, '躁动之心[入间予]：每次校准回复1点音韵值');
             if (successCount > 0) {
               p.fascination = Math.max(0, p.fascination - successCount);
               addBattleLog(player, '躁动之心：成功' + successCount + '次，降低' + successCount + '点入迷值，当前' + p.fascination + '点');
@@ -19339,13 +19338,26 @@ function __captainPassives(player, p, env) {
         addBattleLog(player, '【现实间冬马】被动·分析大师的游刃有余（声明属性公开暗置卡）；SP·卡不因使用离场时造4点无序伤害');
       }
       
-      // 予(普通)被动【解构与求索】（仅队长）：初始20%控骰；编组光太郎/葵/莉莉/霞任一+20%（可叠加）；编组琉璃/里绪/枫任一+40%（不可叠加）；Lv7追加：每次投掷后回1音韵
+      // 予(普通)被动【解构与求索】：每进行一次投掷后回1音韵 + 准备阶段结束按手卡最多属性四选一
+      /* 【2026-10-11 作者裁定："有就行"】原文回复："有就行，所有类似的都是有就行"
+         ⇒ 不再要求"**队长**是予" ✗，只要**这个座位编组里有予（非水着）**就生效 ✓
+         （与引擎里同类写法一致：如躁动之心的 `__yu2` = 队伍里有予 ✓；也消除了两处判定不一致 ⇒ 可安全去掉它的重复计费 ✓） */
       if (charName.indexOf('予') >= 0 && charName.indexOf('水着') < 0) {
         p._yuPassive = true;
-        // 2026-09-26 新卡面：**不再有控骰**（旧卡面才有"初始20%控骰+队友加成"）。
-        // 新被动 = 每次投掷后回1音韵（上面的投掷出口）+ 准备阶段结束按手卡最多属性四选一（__yuPrepareEnd）。
         p._rollCountTurn = 0;
         addBattleLog(player, '【入间予被动·解构与求索】每次投掷后回1音韵；准备阶段结束时公开手卡，按数量最多的属性四选一');
+      } else {
+        /* 予在**队员位**的情况：`__captainPassives` 只按队长名调进来 ⇒ 这里补一次"队伍里有予"的判定 ✓ */
+        try {
+          var __hasYu = ((typeof deckConfig !== 'undefined' && deckConfig[player] && deckConfig[player].chars) || []).some(function (c) {
+            return c && c.name && c.name.indexOf('予') >= 0 && c.name.indexOf('水着') < 0;
+          });
+          if (__hasYu && !p._yuPassive) {
+            p._yuPassive = true;
+            p._rollCountTurn = p._rollCountTurn || 0;
+            addBattleLog(player, '【入间予被动·解构与求索】（队员位编组）每次投掷后回1音韵；准备阶段结束时公开手卡四选一');
+          }
+        } catch (e) { console.error('予被动(队员位)判定出错（忽略）', e); }
       }
       
       // ===== 琉璃(万圣祭)被动【来点喜欢的】（仅队长）=====
