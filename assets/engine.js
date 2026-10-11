@@ -21176,6 +21176,17 @@ function resolvePermanentOnPlay(card, user, cb) {
   }
   // 架构闸：onPlay 文本若能被结构化指令层精确编译，则优先走指令层（数值以卡面为准）；
   // 仅当指令层无法编译(null)时，才用具名 handler 兜底复杂交互，杜绝旧硬编码数值过时
+  /* 【2026-10-12 作者新规则（参照 MD）】永续卡在发动效果时若**离开效果处理区**，则"发动的那些效果"不处理 ✗
+     例：永奏进行曲发动时"抽2丢1"，若此时被连锁破坏/以其他手段离开效果处理区 ⇒ 不抽不丢 ✓
+     判定用现成的唯一真相 `__chainC1WasTakenAway` ✓（语义：这张卡是连锁中正在结算的 C1、且已不在效果处理区 ✓）
+     ⚠ 正常出牌时该卡**尚未**放进处理区（`permanent.push` 在结算之后，见 L22010 ✓），但那时 `_chainC1` 为假
+       ⇒ 判定为 false ⇒ **不会误杀**正常发动 ✓（这一点先读过代码才敢这么写 ✓）
+     位置：唯一收口 —— 所有永续卡的"发动时效果"都从这里派发（具名 handler 或卡面指令层 ✓） */
+  if (typeof __chainC1WasTakenAway === 'function' && __chainC1WasTakenAway(user, card)) {
+    addBattleLog(user, '【' + ((card && card.name) || '?') + '】发动时已离开效果处理区 ⇒ 本次发动的效果不处理');
+    if (cb) cb();
+    return;
+  }
   var __opsOk = false;
   if (text && typeof compileStepOps === 'function') {
     var __ss = parseEffect(text); __opsOk = __ss.length > 0;
