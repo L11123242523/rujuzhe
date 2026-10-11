@@ -8484,7 +8484,10 @@ function resolveChainStack(effect, onDone) {
       else {
         actionAlive = false; effect.cancelled = true; __doneSet[i] = true;
         battleState._stopAllMove = true;
-        __windDebuffAll(e.by);
+        /* 【2026-10-12 今晚修·双扣】这里**不再**自行挂 debuff ✗ ——
+           大风统一由卡面编译出的 op `adjust_next_move_all` 实现 ✓（免疫判据也收口在它的执行器里 ✓）
+           原来这里也设 `nextMoveMinus2` ⇒ 与 op 叠加 ⇒ 同一次大风扣两次（作者实测 8→4 ✓ 已修 ✓） */
+        void 0;
         addBattleLog(e.by, '【' + e.name + '】终止所有移动动作，本次移动被阻止；双方下次执行的位移效果-2');
       }
     } else if (e.kind === 'event') {
@@ -8495,7 +8498,10 @@ function resolveChainStack(effect, onDone) {
       if (__evStop2 && (effect._stage === 'move' || effect.type === 'move' || effect._stage === 'dice_result')) { actionAlive = false; effect.cancelled = true; }
       if (__evStop2) {
         battleState._stopAllMove = true;
-        __windDebuffAll(e.by);   /* 【2026-10-12】免疫判据收口在 __windDebuffAll 里 ✓（原来这里无条件给所有人挂 ✗） */
+        /* 【2026-10-12 今晚修·双扣】这里**不再**自行挂 debuff ✗ ——
+           大风统一由卡面编译出的 op `adjust_next_move_all` 实现 ✓（免疫判据也收口在它的执行器里 ✓）
+           原来这里也设 `nextMoveMinus2` ⇒ 与 op 叠加 ⇒ 同一次大风扣两次（作者实测 8→4 ✓ 已修 ✓） */
+        void 0;   /* 【2026-10-12】免疫判据收口在 __windDebuffAll 里 ✓（原来这里无条件给所有人挂 ✗） */
         addBattleLog(e.by, '【大风】终止所有移动动作；双方下次执行的位移效果-2');
       }
       if (__evCard) {
@@ -17523,7 +17529,29 @@ function __opsBuff(op, ctx, next, env) {
     case 'buff_double_move': p.moveBuff = p.moveBuff || {}; p.moveBuff.doubleMove = true; p.moveBuff.maxBonus = 6; break;
     case 'buff_bonus_move_after': p.moveBuff = p.moveBuff || {}; p.moveBuff.bonusMoveAfter = op.amount; break;
     case 'adjust_next_move': p._nextMoveAdjust = (p._nextMoveAdjust || 0) + op.delta; break;
-    case 'adjust_next_move_all': playerIds().forEach(function (w) { if (op.delta < 0 && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, w)) return; var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta; }); addBattleLog(user, '所有玩家下次位移' + (op.delta > 0 ? '+' : '') + op.delta + '格'); break;
+    /* 【2026-10-12 作者报"只有大风、没使用侦探放大镜，却也减了两次"——真机定位的根因 ✓】
+       大风同时被**两套机制**实现：①卡面编译出的 `adjust_next_move_all(-2)`（本行 ✓，日志「所有玩家下次位移-2格」✓）
+       与 ②连锁/事件分支里**硬编码**的 `moveDebuff.nextMoveMinus2 = true`（日志「大风影响：本次位移-2」✓）
+       ⇒ 同一次大风扣两次 ✓（作者实测 8→4 ✓）
+       修法（今晚 ✓）：**只保留本 op 这一套** ✓；并把免疫（里绪/光太郎 ✓）收口到**这里** ✓（唯一真相 ✓）
+       —— 卡面写的是"所有玩家下次执行的位移效果-2" ✓，正是本 op 的语义 ✓ */
+    case 'adjust_next_move_all':
+      playerIds().forEach(function (w) {
+        if (op.delta < 0) {
+          if (typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, w)) return;
+          /* 里绪 / 光太郎 免疫大风（与事件卡结算同一口径 ✓，见 engine.js:18917 那段 ✓） */
+          var __windImm = false;
+          try {
+            __windImm = (((deckConfig || {})[w] || {}).chars || []).some(function (c) {
+              return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0);
+            });
+          } catch (e1) {}
+          if (__windImm) { addBattleLog(user, '大风：【' + w + '】编入里绪/光太郎，不受影响'); return; }
+        }
+        var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta;
+      });
+      addBattleLog(user, '所有玩家下次位移' + (op.delta > 0 ? '+' : '') + op.delta + '格');
+      break;
     case 'fix_next_move': p._fixedNextMove = op.n; break;
     case 'change_direction': p._nextMoveReverse = true; break;
     case 'apply_status': StatusSys.add(target, { type: op.status, value: op.value, actions: op.actions, addedBy: user }); break;
@@ -18937,8 +18965,9 @@ function __eventCasesB(card, player, p, done, env) {
         try { __im = ((deckConfig[pl].chars || [])).some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); }); } catch (e) { try { console.error('[catch] assets/engine.js:18630', e); } catch (e2) {} }
         if (__im) { addBattleLog(player, '大风：【' + pl + '】编入里绪/光太郎，不受影响'); return; }
         var __dp = battleState[pl];
-        if (typeof frostImmune === 'function' && frostImmune(pl)) { addBattleLog(pl, '【霜烬被动】同步高于26，免疫大风位移减益'); }
-        else { if (!__dp.moveDebuff) __dp.moveDebuff = {}; __dp.moveDebuff.nextMoveMinus2 = true; }
+        if (typeof frostImmune === 'function' && frostImmune(pl)) { addBattleLog(pl, '【霜烬被动】同步高于26，免疫大风位移减益'); return; }
+        /* 【2026-10-12 今晚修·双扣】这里不再设 nextMoveMinus2（大风统一由 op adjust_next_move_all 实现，含免疫） */
+        void 0;
       });
       addBattleLog(player, '大风：所有玩家下次位移效果-2（里绪/光太郎免疫）');
       break;
