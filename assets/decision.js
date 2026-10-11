@@ -36,12 +36,12 @@
   function now() { return Date.now(); }
   function keys() { return Object.keys(S.tags); }
   function count() { return keys().length; }
-  function log(msg) { try { if (typeof addBattleLog === 'function') addBattleLog('system', msg); } catch (e) {} }
+  function log(msg) { try { if (typeof addBattleLog === 'function') addBattleLog('system', msg); } catch (e) { try { console.error('[catch] assets/decision.js:39', e); } catch (e2) {} } }
   function mirror() {
-    try { if (typeof battleState !== 'undefined' && battleState) battleState._awaitingDecision = count() > 0 ? count() : null; } catch (e) {}
+    try { if (typeof battleState !== 'undefined' && battleState) battleState._awaitingDecision = count() > 0 ? count() : null; } catch (e) { try { console.error('[catch] assets/decision.js:41', e); } catch (e2) {} }
   }
   function startWatch() { if (S.timer || typeof setInterval !== 'function') return; S.timer = setInterval(tick, TICK_MS); }
-  function stopWatch() { if (S.timer) { try { clearInterval(S.timer); } catch (e) {} S.timer = null; } }
+  function stopWatch() { if (S.timer) { try { clearInterval(S.timer); } catch (e) { try { console.error('[catch] assets/decision.js:44', e); } catch (e2) {} } S.timer = null; } }
 
   /** 观测：只把"活得异常久"的 tag 写进日志，**不动账** ✓ */
   function tick() {
@@ -74,12 +74,12 @@
       /* 【2026-10-07】账一释放就**唤醒 AI 闸门**（它改用事件唤醒，不再靠 200ms 轮询）。
          放在这里是因为**所有**释放路径最终都走这一处（窗口关闭、精确按类释放、对账收账…），
          一处接住就全覆盖，不用在每个调用点各写一次（那正是"同一件事多份实现"的老毛病）。 */
-      var __wake = function () { try { if (typeof __aiWake === 'function') __aiWake(); } catch (e) {} };
+      var __wake = function () { try { if (typeof __aiWake === 'function') __aiWake(); } catch (e) { try { console.error('[catch] assets/decision.js:77', e); } catch (e2) {} } };
       if (!S.tags[tag]) {
         /* 关键：错配**什么都不做**。绝不再"不管存不存在都减" —— 那会把别人的账一起抹掉。
            只在"确实还有别的窗口开着"时才提醒（这时错配才可能有影响；否则纯噪声）。 */
         if (count() > 0) {
-          try { log('【决策·配对提醒】leave("' + tag + '") 没有对应的 enter ⇒ 不动作（当前开着：' + keys().join('、') + '）'); } catch (e) {}
+          try { log('【决策·配对提醒】leave("' + tag + '") 没有对应的 enter ⇒ 不动作（当前开着：' + keys().join('、') + '）'); } catch (e) { try { console.error('[catch] assets/decision.js:82', e); } catch (e2) {} }
         }
         return count();
       }
@@ -127,8 +127,8 @@
     _tick: tick        /* 供探针手动触发，不依赖真实定时器 ✓ */
   };
 
-  try { root.Decision = Decision; } catch (e) {}
-  try { if (typeof window !== 'undefined') window.Decision = Decision; } catch (e) {}
+  try { root.Decision = Decision; } catch (e) { try { console.error('[catch] assets/decision.js:130', e); } catch (e2) {} }
+  try { if (typeof window !== 'undefined') window.Decision = Decision; } catch (e) { try { console.error('[catch] assets/decision.js:131', e); } catch (e2) {} }
   if (typeof module !== 'undefined' && module.exports) module.exports = Decision;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));
 
@@ -169,8 +169,8 @@ if (typeof module !== 'undefined' && require.main === module) {
   chk(D.isOpen() === false, '仍然由 leave 结束');
 
   console.log('   —— ⑤ 旧字段不再影响判据 ——');
-  try { globalThis.battleState = {}; } catch (e) {}
-  try { battleState._awaitingDecision = { seat: 'p1', since: Date.now() }; } catch (e) {}
+  try { globalThis.battleState = {}; } catch (e) { try { console.error('[catch] assets/decision.js:172', e); } catch (e2) {} }
+  try { battleState._awaitingDecision = { seat: 'p1', since: Date.now() }; } catch (e) { try { console.error('[catch] assets/decision.js:173', e); } catch (e2) {} }
   chk(D.isOpen() === false, '外部直接赋值 battleState._awaitingDecision 不再让判据为真', String(D.isOpen()));
 
   console.log('   —— ⑥ reset 显式全清 ——');

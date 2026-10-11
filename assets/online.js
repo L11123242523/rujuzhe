@@ -244,7 +244,7 @@ var NetSync = {
 
   // 原地覆盖：保持 battleState 对象身份不变（引擎里到处持有它的引用）
   _overwrite: function (target, src) {
-    for (var k in target) { if (Object.prototype.hasOwnProperty.call(target, k) && !(k in src)) { try { delete target[k]; } catch (e) {} } }
+    for (var k in target) { if (Object.prototype.hasOwnProperty.call(target, k) && !(k in src)) { try { delete target[k]; } catch (e) { try { console.error('[catch] assets/online.js:247', e); } catch (e2) {} } } }
     for (var k2 in src) { if (Object.prototype.hasOwnProperty.call(src, k2)) target[k2] = src[k2]; }
     return target;
   },
@@ -287,11 +287,11 @@ var NetSync = {
     NetSync._lastPlayable = snap.playable || [];
     try {
       if (snap.grave && typeof publicGraveyard !== 'undefined') NetSync._overwrite(publicGraveyard, NetSync.decode(snap.grave));
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] assets/online.js:290', e); } catch (e2) {} }
     try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) { console.error('NetSync 重绘失败', e); }
     // 联机反馈①：把权威战斗日志补画进面板（客人侧唯一能看到"对手干了什么"的通道）
-    try { if (typeof __renderBattleLogFromState === 'function') __renderBattleLogFromState(); } catch (e) {}
-    try { if (typeof NetSync.onApplied === 'function') NetSync.onApplied(snap); } catch (e) {}
+    try { if (typeof __renderBattleLogFromState === 'function') __renderBattleLogFromState(); } catch (e) { try { console.error('[catch] assets/online.js:293', e); } catch (e2) {} }
+    try { if (typeof NetSync.onApplied === 'function') NetSync.onApplied(snap); } catch (e) { try { console.error('[catch] assets/online.js:294', e); } catch (e2) {} }
     return true;
   },
 
@@ -328,7 +328,7 @@ var NetSync = {
     var r = __origUpdateBattleUI.apply(this, arguments);
     try {
       if (typeof Online !== 'undefined' && Online.active && !Online.isGuest) Online.pushSnapshot();
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] assets/online.js:331', e); } catch (e2) {} }
     return r;
   };
 })();
@@ -393,7 +393,7 @@ var NetSync = {
           var a = ACTS[fn].apply(null, arguments);
           if (a) { Online.sendAct(a); return; }
         }
-      } catch (e) {}
+      } catch (e) { try { console.error('[catch] assets/online.js:396', e); } catch (e2) {} }
       return orig.apply(this, arguments);
     };
     window[fn] = wrapped;
@@ -469,9 +469,9 @@ var NetSync = {
           else {
             el.textContent = String(__to);
             el.__rolling = 0; el.__rollTo = null;
-            setTimeout(function () { try { el.style.color = ''; el.style.textShadow = ''; } catch (e2) { } }, 220);
+            setTimeout(function () { try { el.style.color = ''; el.style.textShadow = ''; } catch (e2) { try { console.error('[catch] assets/online.js:472', e2); } catch (e2) {} } }, 220);
           }
-        } catch (e2) { try { el.textContent = String(to); el.__rolling = 0; el.__rollTo = null; } catch (e3) { } }
+        } catch (e2) { try { el.textContent = String(to); el.__rolling = 0; el.__rollTo = null; } catch (e3) { try { console.error('[catch] assets/online.js:474', e3); } catch (e2) {} } }
       };
       requestAnimationFrame(step);
       /* 兜底：requestAnimationFrame 被隐藏标签页/节流拖住时，时间到就强制落到真值
@@ -481,7 +481,7 @@ var NetSync = {
           if (!el.__rolling || el.__rollGen !== __rollGen) return;   // 新一轮已经开始 ⇒ 本次兜底作废
           el.textContent = String(el.__rollTo == null ? to : el.__rollTo);
           el.__rolling = 0; el.__rollTo = null;
-        } catch (e3) { }
+        } catch (e3) { try { console.error('[catch] assets/online.js:484', e3); } catch (e2) {} }
       }, dur + 150);
     } catch (e) { console.error('数字滚动失败（忽略）', e); }
   }
