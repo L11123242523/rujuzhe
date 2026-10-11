@@ -9929,18 +9929,29 @@ function drawByCost() {
   // 核心规则：自己回合的主要阶段(main1/main2)，支付3音韵抽1；走 drawCard 以触发牌库倒置重置与抽牌被动
   if (battleState.currentPlayer !== 'p1') { addBattleLog('system', '只能在自己回合使用音韵抽卡'); showToast('只能在自己回合使用音韵抽卡', 'warn'); return; }
   if (battleState.phase !== 'main1' && battleState.phase !== 'main2') { addBattleLog('system', '只能在主要阶段使用音韵抽卡'); showToast('只能在主要阶段使用音韵抽卡', 'warn'); return; }
+  /* 【2026-10-12 作者纠正 ✓】比翼恋理 ③ 是「每回合**首次音韵抽卡**的消耗音韵值-N」✓（域内友方 ✓）
+     ⇒ 减免**只作用在音韵抽卡上** ✓（不是用卡 ✗ —— 我原来错加在用卡费用上，已撤 ✓）
+     每回合**首次**一次 ⇒ 用 `_domCostDrawTurn` 记账 ✓（只在真扣费时消费 ✓） */
+  var __dcCut = 0;
+  try {
+    if (battleState.p1._domCostDrawTurn !== battleState.turn && typeof getDomainBuff === 'function') {
+      __dcCut = Math.max(0, (getDomainBuff('p1') || {}).firstCostCut || 0);
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js:9934 音韵抽卡领域减免', e); } catch (e2) {} }
+  var __dcNeed = Math.max(0, 3 - __dcCut);
   var __dcLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p1') : 0;
-  if (battleState.p1.cost + __dcLoan < 3) { addBattleLog('system', '音韵值不足，需要3点音韵值' + (__dcLoan > 0 ? '（[超频]可透支' + __dcLoan + '点）' : '')); showToast('音韵值不足，需要3点音韵', 'warn'); return; }
+  if (battleState.p1.cost + __dcLoan < __dcNeed) { addBattleLog('system', '音韵值不足，需要' + __dcNeed + '点音韵值' + (__dcLoan > 0 ? '（[超频]可透支' + __dcLoan + '点）' : '')); showToast('音韵值不足，需要' + __dcNeed + '点音韵', 'warn'); return; }
   if (battleState.p1.deck.length === 0 && (!battleState.p1.grave || battleState.p1.grave.length === 0)) { addBattleLog('system', '牌库与墓地均已空，无卡可抽'); showToast('牌库与墓地均已空，无卡可抽', 'warn'); return; }
   // 联机：广播音韵抽卡意图（对方远端位重放）
   if (typeof Online !== 'undefined' && Online.active) {
     Online.sendIntent({ type: 'drawCost' });
   }
-  battleState.p1.cost -= 3;
+  battleState.p1.cost -= __dcNeed;
+  if (__dcCut > 0) { battleState.p1._domCostDrawTurn = battleState.turn; addBattleLog('p1', '【领域·比翼恋理】本回合首次音韵抽卡，所消耗音韵值-' + __dcCut + '（现' + __dcNeed + '费）'); }
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
   var card = drawCard('p1');
   if (!card) return;
-  addBattleLog('p1', '支付3点音韵值抽了1张卡：' + (card.name || '未知卡牌'));
+  addBattleLog('p1', '支付' + __dcNeed + '点音韵值抽了1张卡：' + (card.name || '未知卡牌'));
   updateBattleUI();
   checkHandLimit();
 }
@@ -13206,7 +13217,7 @@ function getActiveBuffs(user) {
     if (__domShown.counterAdd) __domParts.push('克制伤害+' + Math.round(__domShown.counterAdd * 100) + '%');
     if (__domShown.judgeBonus) __domParts.push('判定伤害+' + __domShown.judgeBonus);
     if (__domShown.regen) __domParts.push('自然回复+' + __domShown.regen);
-    if (__domShown.firstCostCut) __domParts.push('首次用卡-' + __domShown.firstCostCut + '费');
+    if (__domShown.firstCostCut) __domParts.push('首次音韵抽卡-' + __domShown.firstCostCut + '费');
     P('stat', '🌊', '领域', (__domShown.actionsLeft ? ('剩' + __domShown.actionsLeft + '次行动') : '生效中'),
       '比翼恋理领域（前后' + (__domShown.range != null ? __domShown.range : '?') + '格内友方）：' + __domParts.join(' · '), 'dom');
   }
@@ -22208,13 +22219,8 @@ function computeRequiredCost(card, user) {
   if (p._ningSP && card._addedByEffect && actual > 0) actual -= 1;
   // 钢笔：攻击卡、技能卡所需音韵-1
   if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; }) && (card._category === 'attack_cards' || card._category === 'skill_cards') && actual > 0) actual -= 1;
-  /* 【2026-10-12 作者点名·比翼恋理领域 ③】每回合**首次**用卡所消耗的音韵值 -N（域内友方 ✓）
-     口径与上面几条"所消耗的音韵值-1"同族 ⇒ 这里只算"要花多少"（无副作用 ✓，资格检查会反复调它 ✗）；
-     "本回合已用过首次"的标记在 computeActualCost 里**真扣费时**才消费 ✓ */
-  if (actual > 0 && p._domFirstCostTurn !== battleState.turn) {
-    var __domCut = (typeof getDomainBuff === 'function') ? ((getDomainBuff(user) || {}).firstCostCut || 0) : 0;
-    if (__domCut > 0) actual = Math.max(0, actual - __domCut);
-  }
+  /* 【2026-10-12 作者纠正 ✓】比翼恋理 ③ 是「每回合**首次音韵抽卡**的消耗音韵值-1」✓，**不是**首次用卡 ✗
+     ⇒ 原先加在这里的"首次用卡减费"**已删除** ✗；正确落点 = `drawByCost()`（音韵抽卡动作 ✓，见该函数） */
   return actual;
 }
 function computeActualCost(card, user) {
@@ -22240,12 +22246,8 @@ function computeActualCost(card, user) {
     p._nextCostReduction = 0;
     addBattleLog(user, '减费效果生效：费用-' + reduced + '（现' + actual + '费）');
   }
-  /* 【2026-10-12·比翼恋理领域 ③】每回合"首次用卡减费"的**消费点**：只有真扣费时才算用过 ✓
-     （`computeRequiredCost` 只是预测 ✓，不消费标记 ✓ ⇒ 资格检查不会把当回合的首次用掉 ✗） */
-  if (p._domFirstCostTurn !== battleState.turn) {
-    var __domCut2 = (typeof getDomainBuff === 'function') ? ((getDomainBuff(user) || {}).firstCostCut || 0) : 0;
-    if (__domCut2 > 0) { p._domFirstCostTurn = battleState.turn; addBattleLog(user, '【领域·比翼恋理】本回合首次用卡，所消耗音韵值-' + __domCut2 + '（现' + actual + '费）'); }
-  }
+  /* 【2026-10-12 作者纠正 ✓】比翼恋理 ③ 管的是**音韵抽卡** ✓，不是用卡 ⇒ 原先在这里消费
+     "首次用卡"标记的逻辑**已删除** ✗；正确落点 = `drawByCost()` ✓ */
   return actual;
 }
 
