@@ -19883,10 +19883,9 @@ function __yongzouGraveHit() {
     if (!has) return false;
     tpp._yongzouCount = (tpp._yongzouCount || 0) + 1;
     var n = tpp._yongzouCount;
-    /* 【2026-10-11 紧急平衡性调整】新卡面：「每有 **3** 张卡进入墓地就可以对一名玩家造成 **4** 点无序属性伤害。
-       这个效果单回合触发 **3/6** 次后造成的基础伤害提升至 **5/6** 点」
-       （旧实现：每 1 张卡就触发、伤害 1/2/3、阈值 7/14 ✗ ⇒ 全部替换 ✓） */
-    if (n % 3 !== 0) return false;
+    /* 【2026-10-12 作者口径修正】改为在**候选生成处**就卡住：
+       只有"每 3 张卡进墓"这一张才产生候选 ⇒ 第 1、2 张**不开连锁窗** ✓（原来每张都开窗、只有第 3 张造伤 ✗）
+       ⚠ 计数已在 `checkGraveTrigger` 的收口处累加 ✓ ⇒ 这里**不再自增** ✗（否则会重复计数 ✓ 已删） */
     var __yzTimes = n / 3, dmg = __yzTimes >= 6 ? 6 : (__yzTimes >= 3 ? 5 : 4);
     function __hit(t) {
       dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp);
@@ -19905,6 +19904,9 @@ function __yongzouGraveApplies(ctx) {
     if (String(ctx.reason || '') === 'remove') return false;   // 回收 / 移出游戏：不经过墓地
     var tp = battleState && battleState.currentPlayer; if (!tp) return false;
     var tpp = battleState[tp]; if (!tpp) return false;
+    /* 【2026-10-12 作者口径修正】每 3 张卡进墓才放行 ⇒ 第 1、2 张**不产生候选、不开连锁窗** ✓
+       （计数由 `checkGraveTrigger` 收口处累加 ✓；这里只读不写 ✓ 保持判定函数无副作用 ✓） */
+    if ((tpp._yongzouCount || 0) % 3 !== 0) return false;
     return !!(tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
   } catch (e) { return false; }
 }
@@ -20016,6 +20018,18 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      同一张卡的**同一次离场事件**正在处理中（批次/窗口已建、还没轮到它的本体节点）⇒ 再来一次调用
      一律**只跑本体**（__graveBody），绝不再收集/再排队。标记在"本体真正执行"时消费掉。 */
   if (battleState && battleState._graveEventCard === card) { battleState._graveEventCard = null; __graveBody(); return; }
+  /* 【2026-10-12 作者口径修正】永奏进行曲：**每有 3 张卡进入墓地**才开一次连锁、并在那次结算里造伤 ✓
+     （旧口径错误在于"每张进墓都开一次窗、只有第 3 张造伤" ✗ —— 作者实测指出 ✓）
+     计数放这里的原因：①每次"卡进墓事件"只加一次 ✓；②在两道防重入守卫**之后** ⇒ 重入的那次不会重复计数 ✓；
+     ③候选生成处 `__yongzouGraveApplies` 只在"计数为 3 的倍数"时放行 ⇒ 第 1、2 张**根本不产生候选、不开窗** ✓ */
+  if (!skipYongzou) {
+    try {
+      var __yp = battleState && battleState[player];
+      if (__yp && (__yp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; })) {
+        __yp._yongzouCount = (__yp._yongzouCount || 0) + 1;
+      }
+    } catch (e) { try { console.error('[catch] assets/engine.js:20019', e); } catch (e2) {} }
+  }
   /* 【2026-09-27 回滚一半】上一版在"非结算中"也调 __tryDrainTriggers() 想统一成"一批一窗口"，
      结果**献祭选卡时网页卡死**（排空 → fire → 再收集 → 再排空的重入死循环）。
      先保住不卡死：非结算中恢复旧行为（就地执行 body）；只在**结算中**才收集成批。
