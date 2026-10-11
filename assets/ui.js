@@ -1339,7 +1339,21 @@ function showGraveList(zone) {
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">'+(card.effect||'').substring(0,50)+'...</div>'+spBtn;
         div.title=card.name+'\n费用:'+(card.cost||0)+'\n'+(card.effect||'');
-        if (canSP) { var btn=div.querySelector('[data-sp]'); btn.onclick=function(ev){ev.stopPropagation();activateGraveSP(zcur,idx);}; }
+        if (canSP) { var btn=div.querySelector('[data-sp]'); btn.onclick=function(ev){
+          ev.stopPropagation();
+          /* 【2026-10-12 作者报："墓地移出还是会留在墓地而不是手牌区"，且是**所有**墓地移出卡的通病 ✓】
+             根因（读码确认 ✓）：这个 ⚡ 的处理**只发动 SP、从不关闭列表弹窗** ✗；
+             列表的显示 = 上面那句 `modal.classList.add('active')`（同一个 `#cardListModal` ✓）。
+             旧代码只在【小恶魔的投喂】那一张卡的结算末尾去关 ✗ ⇒ 覆盖面根本不对 ✓
+             ⇒ 在**唯一入口**收口：按下 ⚡ 就关闭列表 ✓（所有墓地/移出区发动的卡一次性都对 ✓），
+               后续的检索/选择弹窗才不会被它盖住 ✓，视角也回到手牌区 ✓
+             ⚠ 只remove('active') 并把内联 display 复位成 '' ✓ —— 绝不写死 display:none ✗（那会让该弹窗此后**再也弹不出来** ✗） */
+          try {
+            var __mm = document.getElementById('cardListModal');
+            if (__mm) { try { __mm.classList.remove('active'); } catch (e1) {} __mm.style.display = ''; }
+          } catch (e2) {}
+          activateGraveSP(zcur, idx);
+        }; }
         grid.appendChild(div);
       })(list[i],i);
     }
