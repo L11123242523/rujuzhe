@@ -5936,6 +5936,12 @@ function startTurn() {
         if ((__p.sync || 0) < 14) { __reg += 4; __p._frostAtkBonus = 4; __p.attackBuff = (__p.attackBuff || 0) + 4; addBattleLog(player, '【霜烬被动】同步低于14：本回合自然回复+4、攻击力+4'); }
         else if ((__p.sync || 0) > 26) { addBattleLog(player, '【霜烬被动】同步高于26：全队免疫其他玩家施加的负面效果'); }
       }
+      /* 【2026-10-12 作者点名·比翼恋理领域 ②】每回合自然回复的音韵值 +N（域内友方才算 ✓；
+         领域被新领域覆盖或行动次用完 ⇒ getDomainBuff 不再返回 ⇒ 自动失效 ✓，不需要额外清理 ✓） */
+      try {
+        var __domReg = (typeof getDomainBuff === 'function') ? ((getDomainBuff(player) || {}).regen || 0) : 0;
+        if (__domReg > 0) { __reg += __domReg; addBattleLog(player, '【领域·比翼恋理】每回合自然回复音韵值 +' + __domReg); }
+      } catch (e) { console.error('[catch] assets/engine.js:5940 领域自然回复', e); }
       recoverCost(player, __reg, '回合开始自然回复');
       __p._lastNaturalRegen = __reg;
     })();
@@ -13096,6 +13102,18 @@ function getActiveBuffs(user) {
   var __shownAtk = Math.floor(((p.attackBuff || 0) + (p._tempAttack || 0)) * (1 + (((__domShown && __domShown.atkPct) || 0))));
   if (__shownAtk > 0) P('stat','⚔️','攻击力','+'+__shownAtk,'攻击力上升 '+__shownAtk + (((__domShown && __domShown.atkPct) || 0) ? '（含领域攻击力+50%）' : ''),'atk');
   if (__shownAtk < 0) P('debuff','⚔️','攻击力',''+__shownAtk,'攻击力下降','debuff');
+  /* 【2026-10-12 作者要求】领域**独立**一条状态栏标识（原来只在上面"攻击力"行里带出一句 ✗）
+     数据全部来自唯一真相 `getDomainBuff` ✓（被新领域覆盖 / 行动次数用完 ⇒ 自动不再显示 ✓） */
+  if (__domShown && __domShown.has) {
+    var __domParts = [];
+    if (__domShown.atkPct) __domParts.push('攻击+' + Math.round(__domShown.atkPct * 100) + '%');
+    if (__domShown.counterAdd) __domParts.push('克制伤害+' + Math.round(__domShown.counterAdd * 100) + '%');
+    if (__domShown.judgeBonus) __domParts.push('判定伤害+' + __domShown.judgeBonus);
+    if (__domShown.regen) __domParts.push('自然回复+' + __domShown.regen);
+    if (__domShown.firstCostCut) __domParts.push('首次用卡-' + __domShown.firstCostCut + '费');
+    P('stat', '🌊', '领域', (__domShown.actionsLeft ? ('剩' + __domShown.actionsLeft + '次行动') : '生效中'),
+      '比翼恋理领域（前后' + (__domShown.range != null ? __domShown.range : '?') + '格内友方）：' + __domParts.join(' · '), 'dom');
+  }
   if ((p.defense||0) > 0) P('stat','🛡️','防御','+'+p.defense,'防御值上升，受到的伤害减少','def');
   if ((p.defense||0) < 0) P('debuff','🛡️','防御',''+p.defense,'防御值下降（为负），受到的伤害增加','debuff');
   if (p._intellectBonus) P('stat','🔷','理智伤害','+'+p._intellectBonus,'理智属性伤害增加 '+p._intellectBonus,'san');
@@ -16185,15 +16203,20 @@ function __xhzdEndPhaseOffer(player, done) {
 
 function parseDomainBuff(text) {
   text = text || '';
-  var b = { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 }, m;
+  var b = { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0, regen: 0, firstCostCut: 0 }, m;
   if ((m = text.match(/攻击力增加?\s*(\d+)\s*%/))) b.atkPct = (+m[1]) / 100;
   if ((m = text.match(/(热忱|理智|无序|混沌)?属性?(?:的)?克制伤害增加?\s*(\d+)\s*%/))) { b.counterAttr = m[1] || null; b.counterAdd = Math.round((+m[2]) / 100); }
   if ((m = text.match(/造成的判定伤害[+＋]\s*(\d+)/))) b.judgeBonus = +m[1];
+  /* 【2026-10-12 作者点名·比翼恋理新卡面 ②③】
+     ②「每回合自然回复的音韵值+1」⇒ b.regen（自然回复结算时加 ✓，离开领域/被新领域覆盖即失效 ✓）
+     ③「每回合首次音韵抽卡的消耗音韵值-1」⇒ b.firstCostCut（每回合**首次**用卡的费用减免 ✓，当回合一次 ✓） */
+  if ((m = text.match(/每回合自然回复的音韵值\s*[+＋]\s*(\d+)/))) b.regen = +m[1];
+  if ((m = text.match(/每回合首次音韵抽卡的消耗音韵值\s*-\s*(\d+)/))) b.firstCostCut = +m[1];
   return b;
 }
 
 function getDomainBuff(player) {
-  var agg = { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0 };
+  var agg = { atkPct: 0, counterAdd: 0, counterAttr: null, judgeBonus: 0, regen: 0, firstCostCut: 0, actionsLeft: 0, has: false, range: null };
   if (!battleState || !battleState[player]) return agg;
   playerIds().forEach(function (w) {
     var wp = battleState[w]; if (!wp) return;
@@ -16206,6 +16229,12 @@ function getDomainBuff(player) {
       var db = d.buff || {};
       agg.atkPct += (db.atkPct || 0); agg.judgeBonus += (db.judgeBonus || 0);
       if (db.counterAdd) { agg.counterAdd += db.counterAdd; agg.counterAttr = db.counterAttr; }
+      /* 【2026-10-12】②自然回复+1（可累加 ✓）③首次用卡费用-N（取最大，不叠 ✓）；并带出剩余行动/范围供状态栏显示 ✓ */
+      agg.regen += (db.regen || 0);
+      agg.firstCostCut = Math.max(agg.firstCostCut, db.firstCostCut || 0);
+      agg.has = true;
+      if (d.actions != null && d.actions > 0) agg.actionsLeft = Math.max(agg.actionsLeft, d.actions);
+      if (d.range != null) agg.range = d.range;
     });
   });
   return agg;
@@ -21948,6 +21977,13 @@ function computeRequiredCost(card, user) {
   if (p._ningSP && card._addedByEffect && actual > 0) actual -= 1;
   // 钢笔：攻击卡、技能卡所需音韵-1
   if ((p.permanent || []).some(function (c) { return c.name && c.name.indexOf('钢笔') >= 0; }) && (card._category === 'attack_cards' || card._category === 'skill_cards') && actual > 0) actual -= 1;
+  /* 【2026-10-12 作者点名·比翼恋理领域 ③】每回合**首次**用卡所消耗的音韵值 -N（域内友方 ✓）
+     口径与上面几条"所消耗的音韵值-1"同族 ⇒ 这里只算"要花多少"（无副作用 ✓，资格检查会反复调它 ✗）；
+     "本回合已用过首次"的标记在 computeActualCost 里**真扣费时**才消费 ✓ */
+  if (actual > 0 && p._domFirstCostTurn !== battleState.turn) {
+    var __domCut = (typeof getDomainBuff === 'function') ? ((getDomainBuff(user) || {}).firstCostCut || 0) : 0;
+    if (__domCut > 0) actual = Math.max(0, actual - __domCut);
+  }
   return actual;
 }
 function computeActualCost(card, user) {
@@ -21972,6 +22008,12 @@ function computeActualCost(card, user) {
     actual = Math.max(0, actual - reduced);
     p._nextCostReduction = 0;
     addBattleLog(user, '减费效果生效：费用-' + reduced + '（现' + actual + '费）');
+  }
+  /* 【2026-10-12·比翼恋理领域 ③】每回合"首次用卡减费"的**消费点**：只有真扣费时才算用过 ✓
+     （`computeRequiredCost` 只是预测 ✓，不消费标记 ✓ ⇒ 资格检查不会把当回合的首次用掉 ✗） */
+  if (p._domFirstCostTurn !== battleState.turn) {
+    var __domCut2 = (typeof getDomainBuff === 'function') ? ((getDomainBuff(user) || {}).firstCostCut || 0) : 0;
+    if (__domCut2 > 0) { p._domFirstCostTurn = battleState.turn; addBattleLog(user, '【领域·比翼恋理】本回合首次用卡，所消耗音韵值-' + __domCut2 + '（现' + actual + '费）'); }
   }
   return actual;
 }
