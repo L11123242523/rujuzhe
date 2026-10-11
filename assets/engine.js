@@ -2444,8 +2444,8 @@ function onlineSacrificeP2(idx, name, done) {
     addBattleLog('p2', '献祭【' + sacCard.name + '】送入墓地，回复' + recover + '点音韵值');
     if (isFirst && p._kotaroSP) {
       // 光太郎SP三选一：与 p1 弹窗同流位同选项
-      onlineDecideModal('p2', '木原光太郎 SP（对手）', '首次献祭后三选一', '', ['获得500金币', '攻击力+1', '对一名其他玩家造成1点无序伤害'], function (o) {
-        if (o === 0) { p.gold = (p.gold || 0) + 500; addBattleLog('p2', '【光太郎SP】获得500金币'); }
+      onlineDecideModal('p2', '木原光太郎 SP（对手）', '首次献祭后三选一', '', ['获得700金币', '攻击力+1', '对一名其他玩家造成1点无序伤害'], function (o) {
+        if (o === 0) { p.gold = (p.gold || 0) + 700; addBattleLog('p2', '【光太郎SP】获得700金币'); }   // 【2026-10-11 第二次平衡性调整】500 → 700
         else if (o === 1) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog('p2', '【光太郎SP】攻击力+1'); }
         else { dealDamageWithResponse('p1', 1, '光太郎SP', function () {}, '无序', 'p2'); addBattleLog('p2', '【光太郎SP】对对手造成1点无序属性伤害'); }
         if (done) done();
@@ -5934,14 +5934,8 @@ function startTurn() {
     __rg.turns--; if (__rg.turns <= 0) { battleState[player]._regen = null; addBattleLog(player, '持续回复结束'); }
   }
   
-  // 光太郎被动：每个自己回合开始时额外抽取1张卡
-  if (battleState[player]._kotaroPassive) {
-    var extraDraw = drawCard(player);
-    if (extraDraw) {
-      addBattleLog(player, '【光太郎被动·千金之势】回合开始额外抽1张卡：【' + extraDraw.name + '】');
-      playPrepDrawAnim(player, extraDraw);   // 同样是准备阶段抽卡：同样给飞卡动画
-    }
-  }
+  /* 【2026-10-11 第二次平衡性调整】新卡面·光太郎被动已**删掉**"每个自己回合开始时额外抽取1张卡" ✗
+     ⇒ 这里整段移除（旧实现是每回合白抽 1 张，属旧卡面残留 ✗） */
   
   // 重置光太郎献祭标记（一回合一次的“视为因卡效果送墓”窗口）
   if (battleState[player]._kotaroPassive) {
@@ -7064,13 +7058,15 @@ registerTrigger({
   timing: 'after-damage',
   direct: true,   // B3 SP：伴随主效果一起结算（不开窗、不排队）
   ownerOf: function (ctx) { return (ctx && ctx.attacker) || null; },
-  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._sakuraHealSync && ctx.hit); },
-  mandatory: true,   // 卡面"造成伤害后回1同步"（无"可以"）⇒ 必发
+  /* 【2026-10-11 第二次平衡性调整】新卡面：「造成**大于3点**的伤害后回复1点同步值」⇒ 条件补 `(ctx.value || 0) > 3`
+     （`ctx.value` = after-damage 扫描器传的实际伤害，见 L20642 `value: actual` ✓；旧版是任何伤害都回 ✗） */
+  cond: function (ctx, owner) { var q = battleState[owner]; return !!(q && q._sakuraHealSync && ctx.hit && (ctx.value || 0) > 3); },
+  mandatory: true,   // 卡面"造成大于3点的伤害后回1同步"（无"可以"）⇒ 必发
   label: function () { return '宫樱子SP·回复1同步'; },
   fire: function (ctx, owner) {
     var q = battleState[owner]; if (!q) return;
     q.sync = Math.min(q.sync + 1, q.maxSync || 999);
-    addBattleLog(owner, '【宫樱子SP】造成伤害后回复1点同步');
+    addBattleLog(owner, '【宫樱子SP】造成大于3点的伤害后回复1点同步');
   }
 });
 registerTrigger({
@@ -11637,8 +11633,8 @@ function doSacrifice() {
 
     // 光太郎SP：首次献祭三选一（可视化）
     if (isFirst && p._kotaroSP) {
-      showChoiceModal('木原光太郎 SP', '首次献祭后三选一', '', ['获得500金币', '攻击力+1', '对一名其他玩家造成1点无序伤害'], function(o) {
-        if (o === 0) { p.gold = (p.gold||0) + 500; addBattleLog('p1', '【光太郎SP】获得500金币（当前' + p.gold + '）'); }
+      showChoiceModal('木原光太郎 SP', '首次献祭后三选一', '', ['获得700金币', '攻击力+1', '对一名其他玩家造成1点无序伤害'], function(o) {
+        if (o === 0) { p.gold = (p.gold||0) + 700; addBattleLog('p1', '【光太郎SP】获得700金币（当前' + p.gold + '）'); }   // 【2026-10-11】500 → 700
         else if (o === 1) { p.attackBuff = (p.attackBuff||0) + 1; addBattleLog('p1', '【光太郎SP】攻击力+1（当前+' + p.attackBuff + '）'); }
         else { dealDamageWithResponse('p2', 1, '光太郎SP', function () {}, '无序', 'p1'); addBattleLog('p1', '【光太郎SP】对对手造成1点无序属性伤害'); }
         updateBattleUI();
@@ -13039,7 +13035,7 @@ function triggerEventCard(player) {
 // ========== 增益/效果栏：集中登记当前生效的被动、SP、数值增益、待命效果与进度记录 ==========
 // 角色SP生效标志 -> [角色, 简述]
 var BUFF_SP_FLAGS = [
-  ['_tomaSP','冬马','有玩家的卡不因使用离场时：造成4点无序伤害；自己因此受伤则回4音韵；墓地无序卡最多则抽1'],
+  ['_tomaSP','冬马','有玩家的卡不因使用离场时：造成4点无序伤害；自己因此受伤则回2音韵；墓地无序卡最多则抽1'],
   ['_kaedeSP','入间枫','开局从3项效果中选2项适用'],
   ['_kaedeMizugiSP','枫(水着)','自然回费+50%，理智伤害+1'],
   ['_kotaroSP','光太郎','每回合献祭次数+1，首次献祭后三选一'],
@@ -13201,9 +13197,10 @@ function __yuPrepareEnd(player) {
       p._yuSanityThisTurn = true;
       addBattleLog(player, '【解构与求索·理智】本回合使用单次种类的卡后抽1张，然后送墓1张');
     } else {
-      recoverCost(player, 4, '予被动·混沌');
-      p.attackBuff = (p.attackBuff || 0) + 2;
-      addBattleLog(player, '【解构与求索·混沌】回复4点音韵值，队伍攻击力+2（当前攻击+' + p.attackBuff + '）');
+      /* 【2026-10-11 第二次平衡性调整】新卡面·混沌（紫）：回复 **3** 音韵 + 增加 **1** 点队伍攻击力（旧：4 / +2 ✗） */
+      recoverCost(player, 3, '予被动·混沌');
+      p.attackBuff = (p.attackBuff || 0) + 1;
+      addBattleLog(player, '【解构与求索·混沌】回复3点音韵值，队伍攻击力+1（当前攻击+' + p.attackBuff + '）');
     }
     if (typeof updateBattleUI === 'function') updateBattleUI();
   } catch (e) { console.error('予被动·准备阶段四选一出错', e); }
@@ -16097,13 +16094,13 @@ function __tomaSPLeaveHit(w, owner, card, how) {
     dealDamageWithResponse(owner, 4, '冬马SP', function () {
       try {
         if ((d.sync || 0) < __before) {
-          recoverCost(w, 4, '冬马SP');
+          recoverCost(w, 2, '冬马SP');   // 【2026-10-11 第二次平衡性调整】新卡面：回 2 点（旧 4 ✗）
           var __cnt = {};
           (d.grave || []).forEach(function (c) { var a = c && c.attribute; if (a) __cnt[a] = (__cnt[a] || 0) + 1; });
           var __max = 0, __attr = null;
           Object.keys(__cnt).forEach(function (a) { if (__cnt[a] > __max) { __max = __cnt[a]; __attr = a; } });
-          if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵；墓地无序卡最多 → 再抽1张'); }
-          else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复4音韵（墓地无序卡不是最多，不抽卡）');
+          if (__attr === '无序') { drawCard(w); addBattleLog(w, '【冬马SP】自己因此受到伤害：回复2音韵；墓地无序卡最多 → 再抽1张'); }
+          else addBattleLog(w, '【冬马SP】自己因此受到伤害：回复2音韵（墓地无序卡不是最多，不抽卡）');
           if (typeof updateBattleUI === 'function') updateBattleUI();
         }
       } catch (e) { console.error('冬马SP后续出错', e); }
@@ -19342,7 +19339,7 @@ function __captainPassives(player, p, env) {
       if (charName.indexOf('冬马') >= 0) {
         // 2026-09-26 新卡面（整套换设计）：
         //   被动 = 主要阶段发动一次：声明属性 → 公开一名玩家的一张暗置卡 → 相同放牌组底并造4点无序伤害 / 不同强制使用
-        //   SP   = 有玩家的卡不因使用离开原本区域 → 对其造成4点无序伤害；自己因此受伤则回4音韵、墓地无序卡最多再抽1张
+        //   SP   = 有玩家的卡不因使用离开原本区域 → 对其造成4点无序伤害；自己因此受伤则回2音韵、墓地无序卡最多再抽1张
         p._tomaPassive = true; p._tomaDeclareTurn = 0; p._tomaSP = true;
         addBattleLog(player, '【现实间冬马】被动·分析大师的游刃有余（声明属性公开暗置卡）；SP·卡不因使用离场时造4点无序伤害');
       }
@@ -19462,7 +19459,7 @@ function processCharacterPassives(player) {
     {
       var __team = (deckConfig[player].chars || []).filter(Boolean);
       // 1 冬马：用攻击/技能卡后前进1-3（钩子读 _tomaSP）
-      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【现实间冬马SP】有卡不因使用离开原本区域时对其造成4点无序伤害（自己因此受伤则回4音韵；墓地无序卡最多则再抽1张）'); }
+      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【现实间冬马SP】有卡不因使用离开原本区域时对其造成4点无序伤害（自己因此受伤则回2音韵；墓地无序卡最多则再抽1张）'); }
       // 2 入间枫（普通）：开局3选2
       if (charName.indexOf('枫') >= 0 && charName.indexOf('水着') < 0) {
         p._kaedeSP = true; p._kaedeSPPending = true;
@@ -19475,7 +19472,7 @@ function processCharacterPassives(player) {
       }
       // 3 光太郎：每回合献祭次数+1，首次献祭后三选一（钩子）
       if (charName.indexOf('光太郎') >= 0) {
-        p._kotaroSP = true; p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
+        p._kotaroSP = true;   // 【2026-10-11 第二次平衡性调整】新卡面：SP 不再有"每回合献祭次数+1" ✗（旧实现加了 `_sacrificeBonus` ⇒ 已移除 ✓）
         addBattleLog(player, '【木原光太郎SP】每回合献祭次数+1，首次献祭后三选一');
       }
       // 4 松山惠：乐曲α/β/γ/δ（主动发动，标志）
@@ -19529,10 +19526,11 @@ function processCharacterPassives(player) {
       if (charName.indexOf('小春') >= 0) { p._koharuSP = true; addBattleLog(player, '【椎名小春SP】可消耗先机追加掷骰阶段'); }
       // 16 小野伊织：到达神社回5音韵抽1馈赠（钩子）
       if (charName.indexOf('伊织') >= 0) { p._ioriSP = true; addBattleLog(player, '【小野伊织SP】到达神社回5音韵并抽1馈赠卡'); }
-      // 17 宫樱子：队伍攻击+2，克制伤害+1，造成伤害后回1同步
+      // 17 宫樱子：属性克制伤害+1；造成**大于3点**的伤害后回1同步
+      /* 【2026-10-11 第二次平衡性调整】新卡面：①删掉"队伍攻击+2"（旧 ✗）②回同步的条件加上"造成大于3点的伤害" ✓ */
       if (charName.indexOf('樱子') >= 0) {
-        p._sakuraSP = true; p.attackBuff = (p.attackBuff || 0) + 2; p._attrBonus = (p._attrBonus || 0) + 1; p._sakuraHealSync = true;
-        addBattleLog(player, '【宫樱子SP】队伍攻击+2，克制伤害+1，造成伤害后回1同步');
+        p._sakuraSP = true; p._attrBonus = (p._attrBonus || 0) + 1; p._sakuraHealSync = true;
+        addBattleLog(player, '【宫樱子SP】队伍属性克制伤害+1，造成大于3点的伤害后回1同步');
       }
       // 18 入间予（普通）：全队判定+1，每名无序成员自然回复+1（回费在准备阶段统一结算）
       if (charName.indexOf('予') >= 0 && charName.indexOf('水着') < 0) {
@@ -19605,16 +19603,16 @@ function kaedeSPSelect(player) {
   // 等于让本机玩家替 AI 座位选 SP；改成「不是本机人类座位（p1）的座位一律走 AI 自动选择」。
   // 1v1 等价：那时能走到这里的非 p1 座位只有 p2，行为逐字不变。
   if (player !== 'p1') {
-    p.cost = Math.min(p.cost + 6, p.maxCost);
-    for (var ai = 0; ai < 2; ai++) { var __tcAI = takeTopCard(player); if (__tcAI) p.hand.push(__tcAI); }
+    p.cost = Math.min(p.cost + 4, p.maxCost);   // 【2026-10-11 第二次平衡性调整】新卡面：①回 4 音韵（旧 6 ✗）
+    for (var ai = 0; ai < 1; ai++) { var __tcAI = takeTopCard(player); if (__tcAI) p.hand.push(__tcAI); }   // ②抽 1 张（旧 2 ✗）
     p._kaedeSPPending = false;
-    addBattleLog(player, '【入间枫SP·AI】自动选择①回复6音韵、②抽2张卡');
+    addBattleLog(player, '【入间枫SP·AI】自动选择①回复4音韵、②抽1张卡');
     return;
   }
   
   var allOptions = [
-    {id: 1, label: '①回复6点音韵值', applied: false},
-    {id: 2, label: '②抽2张卡', applied: false},
+    {id: 1, label: '①回复4点音韵值', applied: false},   // 【2026-10-11】新卡面：4（旧 6 ✗）
+    {id: 2, label: '②抽1张卡', applied: false},          // 【2026-10-11】新卡面：1（旧 2 ✗）
     {id: 3, label: '③每回合献祭次数+1', applied: false}
   ];
   p._kaedeSPOptions = allOptions;
@@ -19634,10 +19632,10 @@ function kaedeSPSelect(player) {
       selected.applied = true;
       p._kaedeSPSelected.push(selected);
       if (selected.id === 1) {
-        recoverCost(player, 6, '入间枫SP');   // 【2026-10-01 修·队列②】先发时点再打日志
-        addBattleLog(player, '【入间枫SP】回复6点音韵值，当前' + p.cost + '音韵');
+        recoverCost(player, 4, '入间枫SP');   // 【2026-10-01 修·队列②】先发时点再打日志；【2026-10-11】回 4（旧 6 ✗）
+        addBattleLog(player, '【入间枫SP】回复4点音韵值，当前' + p.cost + '音韵');
       } else if (selected.id === 2) {
-        for (var j = 0; j < 2; j++) {
+        for (var j = 0; j < 1; j++) {   // 【2026-10-11】抽 1 张（旧 2 ✗）
           var c = takeTopCard(player);
           if (c) {
             p.hand.push(c);
@@ -22138,7 +22136,7 @@ function postUsePassiveHooks(user, card, done) {
           p._tempAttack = (p._tempAttack || 0) + 1;
           recoverCost(user, 1, '爱德华被动·别眨眼！');
           addBattleLog(user, '【爱德华被动·别眨眼！】同费触发第' + cnt + '次：攻击力+1（本回合结束为止）、回复1音韵（当前攻击+' + ((p.attackBuff || 0) + p._tempAttack) + '，音韵' + p.cost + '）');
-          if (cnt % 3 !== 0) { next(); return; }
+          if (cnt % 4 !== 0) { next(); return; }   // 【2026-10-11 第二次平衡性调整】新卡面：每触发 **4** 次（旧 3 ✗）
           // 每触发3次：可以破坏一名玩家的一张手卡（玩家弹窗选人+选卡，AI 自动破坏对手）
           function __doDestroy(who) {
             var __wp = battleState[who];
