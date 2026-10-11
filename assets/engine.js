@@ -17921,6 +17921,12 @@ function runOps(ops, ctx, done) {
 }
 
 function __resolveOptionalParens(text, ctx, done) {
+  /* 【2026-10-12 作者点名·小恶魔的投喂】**先**把"说明性括号"整段剥掉 ✓，再进入任何分支 ✓
+     （上一版我把判定放在中间 ⇒ 实测仍会弹「可选效果 / 是否执行该附带效果？」✗ ⇒ 改为入口处预处理，不可能再漏 ✓）
+     说明性括号 = 规则解释，不是"可选效果"：可叠加 / 不叠加 / 新领域覆盖 / 上限N / 一回合一次 … ✓ */
+  text = String(text == null ? '' : text).replace(/[（(]([^）)]*)[）)]/g, function (all, t) {
+    return /可叠加|可叠|不叠加|覆盖原有|新获得的领域|上限\s*\d|一回合一次|每回合一次/.test(t) ? '' : all;
+  });
   var re = /[（(]\s*可以?\s*([^）)]*)[）)]/;
   var m = text.match(re);
   if (!m) { done(text); return; }
