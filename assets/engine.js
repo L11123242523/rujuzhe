@@ -13135,6 +13135,8 @@ function getActiveBuffs(user) {
   }
   /* 【2026-10-01 作者要求】贪欲者的烙印：状态栏标记（每枚：获音韵+1 / 受最终伤害+1，上限 7） */
   if (p._greedMark > 0) P('stat','🩸','贪欲烙印', p._greedMark + '/7', '贪欲者的烙印：每持有一枚 ⇒ 每次获取音韵值+1、每次受到的最终伤害+1（可叠加，上限7）','san');
+  /* 【2026-10-12 作者点名·小恶魔的投喂】状态栏：3 次行动内造成的最终伤害 +N%（重复发动**累加**、不覆盖 ✓） */
+  if ((p._devilFeed || 0) > 0) P('stat','🍬','投喂','+'+p._devilFeed+'%','小恶魔的投喂：剩余 ' + (p._devilFeedActions||0) + ' 次行动内，造成的最终伤害 +' + p._devilFeed + '%（这张卡重复发动会**累加**，不会丢效果）','jud');
   if (p._overload) P('stat','🎼','过载',(p._overload.until===-1?'永久':('剩'+p._overload.until+'行动')),'过载：持续期间内每因使用而让卡进入墓地的场合抽1张','fire');
   if (typeof StatusSys !== 'undefined' && StatusSys.has(user, 'overclock')) {
     var __ocs = StatusSys.all(user).filter(function (s) { return s.type === 'overclock'; });
@@ -15599,6 +15601,12 @@ function __compileBody(t) {
     ops.push({ op: 'overload', duration: /直到本场?游戏结束/.test(t) ? -1 : (__ovd || 0) });
   }
 
+  /* 【2026-10-12 作者点名·小恶魔的投喂】「在 N 次行动内造成的最终伤害 +X%（可叠加）」
+     ⚠ 口径（作者明确 ✓）：不是问玩家是否叠加 ✗，而是**这张卡重复发动时效果累加、不丢、不覆盖** ✓
+     ⇒ 登记成一个 op，执行层给目标挂累加器（`_devilFeed += X` ✓、行动次数取不缩短 ✓） */
+  var __dfm = t.match(/在\s*(\d+)\s*次行动内造成的最终伤害\s*[+＋]\s*(\d+)\s*%/);
+  if (__dfm) ops.push({ op: 'devil_feed', actions: +__dfm[1], pct: +__dfm[2] });
+
   if (uncovered.length) return null;
   if (!ops.length) return __looksActionable(t) ? null : [];
     // 可额外耗音韵增伤（水枪攻击等）：给 damage op 挂 payExtra，执行时选择投入点数
@@ -15641,6 +15649,15 @@ function advanceActionLapse(player) {
   if (p._overload && p._overload.until > 0) {
     p._overload.until -= 1;
     if (p._overload.until <= 0) { p._overload = null; addBattleLog(player, '过载状态持续行动数到期结束'); }
+  }
+  /* 【2026-10-12 作者点名·小恶魔的投喂】3 次行动内的最终伤害 +N%：每次行动递减 ✓，归零即失效 ✓
+     （数值 `_devilFeed` 是**累加**的 ✓，到期时一起清掉 ✓；重复发动时行动次数取 max ⇒ 不会被缩短 ✓） */
+  if ((p._devilFeed || 0) > 0 && p._devilFeedActions != null) {
+    p._devilFeedActions -= 1;
+    if (p._devilFeedActions <= 0) {
+      addBattleLog(player, '【小恶魔的投喂】' + p._devilFeed + '% 最终伤害加成到期结束');
+      p._devilFeed = 0; p._devilFeedActions = 0;
+    }
   }
 }
 
@@ -16374,6 +16391,14 @@ function computeDamageValue(user, target, opt) {
     ap._lilithFirstCardTurn = battleState.turn;
     final += 1;
     logs.push('里尔亚斯被动·首张卡最终+1');
+  }
+  /* 【2026-10-12 作者点名·小恶魔的投喂】「在 3 次行动内造成的最终伤害 +25%（可叠加）」
+     ⚠ 口径（作者明确 ✓）：**不是**问玩家是否叠加 ✗ —— 而是**这张卡重复发动时效果累加、不丢、不覆盖** ✓
+     ⇒ 百分比做**乘算**叠加：每次发动 `_devilFeed += 25` ✓（`_devilFeedActions` = 剩余行动次数 ✓，归零自动失效 ✓） */
+  if ((ap._devilFeed || 0) > 0) {
+    var __dfPct = ap._devilFeed;
+    final = Math.floor(final * (1 + __dfPct / 100));
+    logs.push('小恶魔的投喂·最终伤害+' + __dfPct + '%（剩' + (ap._devilFeedActions || 0) + '次行动）');
   }
   if (final < 0) final = 0;
   return { value: final, logs: logs, attr: attr, core: core, defense: def, atk: atk, base: base, kind: kind, tags: tags, isAtk: isAtk, isItem: isItem, isSkill: isSkill, pierce: pierce, judge: !!opt.judge };
@@ -17785,6 +17810,20 @@ function runOneOp(op, ctx, next) {
       if (user === 'p1' && typeof showChoiceModal === 'function') showChoiceModal(op.title || '选择一项效果', op.subtitle || '', op.hint || '', __choiceLabels, function (ci) { runOps(branches[ci] || branches[0], ctx, next); });
       else runOps(branches[0], ctx, next);
       return;
+    }
+    /* 【2026-10-12 作者点名·小恶魔的投喂】主动效果：选一名玩家 ⇒ 其回复 2 点同步值，且 3 次行动内最终伤害 +X%（可叠加 ✓） */
+    case 'devil_feed': {
+      var __dfT = target || foeOf(user);
+      var __dfP = battleState[__dfT];
+      if (__dfP) {
+        __dfP.sync = Math.min((__dfP.sync || 0) + 2, __dfP.maxSync || 999);          // 回给**目标**（卡面"其回复2点同步值" ✓）
+        __dfP._devilFeed = (__dfP._devilFeed || 0) + (op.pct || 0);                  // 累加，不覆盖 ✓（作者口径 ✓）
+        __dfP._devilFeedActions = Math.max(__dfP._devilFeedActions || 0, op.actions || 0);  // 重复发动不缩短 ✓
+        addBattleLog(user, '【小恶魔的投喂】' + (__dfT === user ? '自己' : '对手') + '回复2点同步值（现' + __dfP.sync + '），'
+          + (op.actions || 0) + '次行动内造成的最终伤害+' + (op.pct || 0) + '%（现共+' + __dfP._devilFeed + '%，可叠加）');
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+      }
+      next(); return;
     }
     case 'register_mechanic':
       if (op.kind === 'duel') { startDuel(user, target, next); return; }
