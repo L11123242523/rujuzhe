@@ -2746,7 +2746,35 @@ function checkCardResource(card,me,bs){
   // （排除“不去墓地/不进墓地”与“从移出游戏回收”类描述：巧匠之手等卡的去向说明不是从墓地取卡）
   if(eff.indexOf('墓地')>=0 && eff.indexOf('牌组')<0 && /加入手卡|加入手牌|回收|返回手卡|拿回/.test(eff) && !/其他玩家|对手|其墓地|一名玩家/.test(eff) && !/不去墓地|不进墓地|被移出游戏的卡加入手卡|移出游戏的卡加入手卡/.test(eff)){
     var m=eff.match(/墓地\D{0,4}(\d+)\s*张/); var need=m?parseInt(m[1],10):(/一张|1张/.test(eff)?1:0);
-    if(need>0 && L(me.grave)<need) return {ok:false,reason:'需要自己墓地中有至少'+need+'张卡（当前'+L(me.grave)+'张）'};
+    /* 【2026-10-12 作者点名修法②：判据要准确，不许误拦整卡 ✓】
+       卡面写「从墓地**或移出游戏**的卡中选…」时，可取对象 = **两个区之和** ✓（卡面自己就是这么写的 ✓）
+       根因实证（probe-canuse-huginn.cjs ✓）：【Huginn&Muninn】在 墓地0/移出区非空 时被误拦 ✗ ——
+       而它的真实实现在 engine.js:21521 明明是**同时**从 grave 与 removed 里找[侵略]卡 ✓；
+       旧卡面文本因含「对一名玩家…」触发了上面的逃生口而放行 ✓，文本改短后逃生口消失 ⇒ 才暴露出来 ✓
+       移出游戏区 = `removed` + `removedFromGame`（见 engine.js:19243「removed 区 = 两者之和」✓） */
+    /* 【2026-10-12 作者裁决 1/2/3/4（原话要点 ✓）】
+       ① 永续卡**还在手上**时，只看「**发动时效果**」这一段 ✗（不再拿整段卡面去判 ✓）
+       ② 那一段**没有合法对象就不能发动** ✓（继续拦 ✓）
+       ③ **保留且拦** ✓（复核：我上一版写的"不拦整卡"是**错的** ✗，本条已改回"拦" ✓）
+       ④ 同一段里另外三条检查（牌组检索 / 看手牌 / 破坏区域内卡）**暂不动** ✗
+          —— 作者原话："现在没发现bug，乱改可能会出bug" ✓
+       ⇒ 这就是【Huginn&Muninn】墓地与移出区**都空时仍能打出**的原因 ✓：
+          它的「发动时作为效果处理：自身攻击力+3」里没有任何"取卡"需求 ✓；
+          而"从墓地或移出游戏的卡中选一张[侵略]卡加入手卡"属于**另一个**效果（「一局游戏只能使用一次：…」）✓ ⇒ 不拦整卡 ✓
+       注：没有「发动时」标记的卡 ⇒ 沿用今天的行为（按整段判 ✓），不在本次改动范围内 ✗ */
+    var __actSeg = eff;
+    var __ai = eff.indexOf('发动时');
+    if (__ai >= 0) {
+      var __end = eff.indexOf('。', __ai);
+      __actSeg = (__end > __ai) ? eff.slice(__ai, __end + 1) : eff.slice(__ai);
+    }
+    if (__actSeg.indexOf('墓地') >= 0 && __actSeg.indexOf('牌组') < 0 && /加入手卡|加入手牌|回收|返回手卡|拿回/.test(__actSeg)) {
+      var m = __actSeg.match(/墓地\D{0,4}(\d+)\s*张/); var need = m ? parseInt(m[1], 10) : (/一张|1张/.test(__actSeg) ? 1 : 0);
+      /* 「从墓地**或移出游戏**的卡中选…」⇒ 可取对象 = 两区之和 ✓（移出区 = removed + removedFromGame ✓，见 engine.js:19243） */
+      var __alsoRemoved = /墓地[^。；]{0,24}?或[^。；]{0,16}?移出/.test(__actSeg);
+      var __avail = L(me.grave) + (__alsoRemoved ? (L(me.removed) + L(me.removedFromGame)) : 0);
+      if (need > 0 && __avail < need) return { ok: false, reason: '需要自己墓地' + (__alsoRemoved ? '或移出游戏区' : '') + '中有至少' + need + '张卡（当前' + __avail + '张）' };
+    }
   }
   // 查看/选择手牌
   if(eff.indexOf('手牌')>=0 && /查看|选其中|一张手牌|手牌中/.test(eff)){
