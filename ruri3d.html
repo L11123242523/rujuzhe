@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>琉璃 · 3D 小人预览（未接入游戏）</title>
+<style>
+  html,body{margin:0;height:100%;background:#070b14;color:#dfe8ff;font-family:"Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
+  #hud{position:fixed;left:14px;top:12px;font-size:13px;line-height:1.7;z-index:5;background:rgba(10,14,26,.72);border:1px solid rgba(140,170,255,.25);border-radius:10px;padding:10px 14px;max-width:330px}
+  #hud b{color:#ffd166}
+  #hud .k{color:#8fd0ff}
+  #stage{position:fixed;inset:0}
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;color:#8fa6d8;z-index:6}
+</style>
+</head>
+<body>
+<div id="loading">正在载入 three.js 与模型…</div>
+<div id="hud">
+  <div><b>琉璃（普通形态）· 蔚蓝档案式 Q 版小人</b></div>
+  <div>状态：<span class="k">预览中 —— 尚未接入游戏</span>（作者过目同意后再放进去）</div>
+  <div>操作：<span class="k">拖拽</span>旋转 · <span class="k">滚轮</span>缩放 · <span class="k">空格</span>暂停/继续自转</div>
+  <div>模型：<span class="k">assets/ruri3d.js</span>（纯 three.js 图元 + canvas 画的脸）</div>
+</div>
+<div id="stage"></div>
+
+<script src="vendor/three.min.js"></script>
+<script src="assets/ruri3d.js?v=3"></script>
+<script>
+(function () {
+  'use strict';
+  var host = document.getElementById('stage');
+  var loading = document.getElementById('loading');
+  function fail(msg) { loading.textContent = '无法预览：' + msg; }
+  if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) { fail('three.js 未加载'); return; }
+  if (typeof window.buildRuri3D !== 'function') { fail('assets/ruri3d.js 未加载'); return; }
+  var T = THREE, W = host.clientWidth || 900, H = host.clientHeight || 640;
+
+  var renderer = new T.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(W, H);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  host.appendChild(renderer.domElement);
+
+  var scene = new T.Scene();
+  scene.background = new T.Color(0x070b14);
+  scene.fog = new T.Fog(0x070b14, 9, 22);
+
+  scene.add(new T.AmbientLight(0x9fb8e8, 0.66));
+  scene.add(new T.HemisphereLight(0xd8e6ff, 0x141a2a, 0.85));
+  var key = new T.DirectionalLight(0xfff3dd, 2.0); key.position.set(3.2, 6.5, 4.2); key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  var d = 5; key.shadow.camera.left = -d; key.shadow.camera.right = d; key.shadow.camera.top = d; key.shadow.camera.bottom = -d;
+  key.shadow.camera.near = 0.5; key.shadow.camera.far = 24; key.shadow.bias = -0.0006;
+  if (key.shadow.normalBias !== undefined) key.shadow.normalBias = 0.02;
+  scene.add(key);
+  var fill = new T.DirectionalLight(0x6fa8ff, 0.8); fill.position.set(-4.5, 4, -3.5); scene.add(fill);
+  var rim = new T.DirectionalLight(0xffb27a, 0.6); rim.position.set(-2.5, 3, 6); scene.add(rim);
+
+  /* 地面：一圈柔光圆台（方便判断比例与投影 ✓） */
+  var floor = new T.Mesh(new T.CircleGeometry(2.6, 64),
+    new T.MeshStandardMaterial({ color: 0x111a2e, roughness: 0.95, metalness: 0 }));
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  var grid = new T.GridHelper(5.2, 26, 0x2a3a63, 0x1b2540);
+  grid.position.y = 0.004; scene.add(grid);
+
+  var model = window.buildRuri3D(T, { side: 'p1' });
+  if (!model) { fail('buildRuri3D 返回 null（模型构建失败）'); return; }
+  scene.add(model);
+  loading.style.display = 'none';
+
+  var cam = new T.PerspectiveCamera(38, W / H, 0.05, 200);
+  var yaw = 0.7, pitch = 0.18, dist = 4.6, target = new T.Vector3(0, 0.86, 0);
+  function place() {
+    cam.position.set(
+      target.x + Math.sin(yaw) * Math.cos(pitch) * dist,
+      target.y + Math.sin(pitch) * dist,
+      target.z + Math.cos(yaw) * Math.cos(pitch) * dist
+    );
+    cam.lookAt(target);
+  }
+  place();
+
+  /* 自转 + 拖拽 + 滚轮（手写，不依赖 OrbitControls —— 项目的 three.min.js 里没有 ✓） */
+  var spin = true, dragging = false, lx = 0, ly = 0;
+  renderer.domElement.addEventListener('pointerdown', function (e) { dragging = true; lx = e.clientX; ly = e.clientY; try { renderer.domElement.setPointerCapture(e.pointerId); } catch (er) {} });
+  renderer.domElement.addEventListener('pointerup', function (e) { dragging = false; try { renderer.domElement.releasePointerCapture(e.pointerId); } catch (er) {} });
+  renderer.domElement.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    yaw -= (e.clientX - lx) * 0.008; pitch = Math.max(-0.35, Math.min(1.15, pitch + (e.clientY - ly) * 0.006));
+    lx = e.clientX; ly = e.clientY; place();
+  });
+  renderer.domElement.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    dist = Math.max(1.6, Math.min(11, dist + (e.deltaY > 0 ? 0.45 : -0.45))); place();
+  }, { passive: false });
+  window.addEventListener('keydown', function (e) { if (e.code === 'Space') { spin = !spin; e.preventDefault(); } });
+  window.addEventListener('resize', function () {
+    W = host.clientWidth || W; H = host.clientHeight || H;
+    cam.aspect = W / H; cam.updateProjectionMatrix(); renderer.setSize(W, H);
+  });
+
+  var last = 0;
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    var dt = last ? Math.min(0.05, (ts - last) / 1000) : 0.016; last = ts;
+    if (spin && !dragging) { yaw += dt * 0.35; place(); }
+    try { if (typeof window.updateRuri3D === 'function') window.updateRuri3D(model, dt, { camera: cam }); } catch (e) {}
+    renderer.render(scene, cam);
+  }
+  requestAnimationFrame(frame);
+  /* 供 e2e 探针断言 ✓（只读 ✓） */
+  window.__ruriPreview = { scene: scene, camera: cam, model: model, setView: function (y, p, dd) { yaw = y; pitch = p; dist = dd; spin = false; place(); } };
+})();
+</script>
+</body>
+</html>
