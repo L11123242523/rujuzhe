@@ -6606,6 +6606,15 @@ var CardAnim = {
       if (typeof document === 'undefined' || !document.body) return;
       var from = this._handRect(), to = this._targetRect();
       var src = (card && (card.image_url || card.avatar_url)) || '';
+      /* 【2026-10-12 作者报"连锁动画里很多卡只有名字没有卡图"】渲染层自己兜底按名字查图 ✓
+         （原来只认 push 时回填过的 `_cards[i]` ✗；`settlePrebuilt` 等其它入链路径没经过回填 ⇒ 只能显示名字 ✗）
+         兜底入口用引擎既有的 `__deckCardByName`（查 allCards / window.cardData 各分区 / 肉鸽 ✓）✓ */
+      if (!src && card && card.name && typeof __deckCardByName === 'function') {
+        try {
+          var __fb = __deckCardByName(card.name);
+          if (__fb) src = __fb.image_url || __fb.avatar_url || '';
+        } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
+      }
       var el = document.createElement('div');
       el.className = 'md-card-fly';
       el.style.width = from.w + 'px'; el.style.height = from.h + 'px';
@@ -6764,6 +6773,15 @@ var ChainAnim = {
       el.className = 'md-chain-resolve';
       el.style.width = w + 'px'; el.style.height = h + 'px';
       var src = (card && (card.image_url || card.avatar_url)) || '';
+      /* 【2026-10-12 作者报"连锁动画里很多卡只有名字没有卡图"】渲染层自己兜底按名字查图 ✓
+         （原来只认 push 时回填过的 `_cards[i]` ✗；`settlePrebuilt` 等其它入链路径没经过回填 ⇒ 只能显示名字 ✗）
+         兜底入口用引擎既有的 `__deckCardByName`（查 allCards / window.cardData 各分区 / 肉鸽 ✓）✓ */
+      if (!src && card && card.name && typeof __deckCardByName === 'function') {
+        try {
+          var __fb = __deckCardByName(card.name);
+          if (__fb) src = __fb.image_url || __fb.avatar_url || '';
+        } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
+      }
       el.innerHTML = src ? ('<img src="' + src + '" alt="">')
         : ('<div class="md-chain-resolve-name">' + String(label || (card && card.name) || '') + '</div>');
       var bg = document.createElement('div'); bg.className = 'md-chain-resolve-badge'; bg.textContent = 'C' + (i + 1) + ' 结算';
@@ -17809,19 +17827,37 @@ function runOneOp(op, ctx, next) {
       else runOps(branches[0], ctx, next);
       return;
     }
-    /* 【2026-10-12 作者点名·小恶魔的投喂】主动效果：选一名玩家 ⇒ 其回复 2 点同步值，且 3 次行动内最终伤害 +X%（可叠加 ✓） */
+    /* 【2026-10-12 作者点名·小恶魔的投喂】主动效果：选一名玩家 ⇒ 其回复 2 点同步值，且 3 次行动内最终伤害 +X%（可叠加 ✓）
+       卡面是"**选择一名玩家**使用"（可给自己 ✓）⇒ 必须真的问选谁 ✗（上一版默认打给对手 ✗，是隐患 ✓）
+       p2/对手侧同样要有路：联机走 onlineDecideModal ✓、AI 自动选自己 ✓ */
     case 'devil_feed': {
-      var __dfT = target || foeOf(user);
-      var __dfP = battleState[__dfT];
-      if (__dfP) {
-        __dfP.sync = Math.min((__dfP.sync || 0) + 2, __dfP.maxSync || 999);          // 回给**目标**（卡面"其回复2点同步值" ✓）
-        __dfP._devilFeed = (__dfP._devilFeed || 0) + (op.pct || 0);                  // 累加，不覆盖 ✓（作者口径 ✓）
-        __dfP._devilFeedActions = Math.max(__dfP._devilFeedActions || 0, op.actions || 0);  // 重复发动不缩短 ✓
-        addBattleLog(user, '【小恶魔的投喂】' + (__dfT === user ? '自己' : '对手') + '回复2点同步值（现' + __dfP.sync + '），'
-          + (op.actions || 0) + '次行动内造成的最终伤害+' + (op.pct || 0) + '%（现共+' + __dfP._devilFeed + '%，可叠加）');
-        if (typeof updateBattleUI === 'function') updateBattleUI();
+      var __dfApply = function (__dfT) {
+        var __dfP = battleState[__dfT];
+        if (__dfP) {
+          __dfP.sync = Math.min((__dfP.sync || 0) + 2, __dfP.maxSync || 999);          // 回给**被选中的那名玩家** ✓
+          __dfP._devilFeed = (__dfP._devilFeed || 0) + (op.pct || 0);                  // 累加，不覆盖 ✓（作者口径 ✓）
+          __dfP._devilFeedActions = Math.max(__dfP._devilFeedActions || 0, op.actions || 0);  // 重复发动不缩短 ✓
+          addBattleLog(user, '【小恶魔的投喂】' + (__dfT === user ? '自己' : playerDisplayName(__dfT)) + '回复2点同步值（现' + __dfP.sync + '），'
+            + (op.actions || 0) + '次行动内造成的最终伤害+' + (op.pct || 0) + '%（现共+' + __dfP._devilFeed + '%，可叠加）');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        }
+        next();
+      };
+      var __dfIds = playerIds();
+      var __dfAuto = (typeof isAISeat === 'function' && isAISeat(user)) || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
+      if (__dfAuto || __dfIds.length < 2) { __dfApply(user); return; }                  // AI：给自己（回复+增伤都是收益 ✓）
+      if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
+        onlineDecideModal('p2', '小恶魔的投喂（对手）', '选择一名玩家', '其回复2点同步值，并在3次行动内造成的最终伤害+25%（可叠加）',
+          __dfIds.map(playerDisplayName), function (oi) { __dfApply(__dfIds[oi == null ? 0 : oi] || user); });
+        return;
       }
-      next(); return;
+      if (typeof showChoiceModal === 'function') {
+        showChoiceModal('小恶魔的投喂', '选择一名玩家', '其回复2点同步值，并在3次行动内造成的最终伤害+25%（可叠加）',
+          __dfIds.map(playerDisplayName), function (oi) { __dfApply(__dfIds[oi == null ? 0 : oi] || user); });
+        return;
+      }
+      __dfApply(user);
+      return;
     }
     case 'register_mechanic':
       if (op.kind === 'duel') { startDuel(user, target, next); return; }
