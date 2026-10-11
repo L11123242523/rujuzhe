@@ -15601,13 +15601,11 @@ function __compileBody(t) {
     ops.push({ op: 'overload', duration: /直到本场?游戏结束/.test(t) ? -1 : (__ovd || 0) });
   }
 
-  /* 【2026-10-12 作者点名·小恶魔的投喂】「在 N 次行动内造成的最终伤害 +X%（可叠加）」
-     ⚠ 口径（作者明确 ✓）：不是问玩家是否叠加 ✗，而是**这张卡重复发动时效果累加、不丢、不覆盖** ✓
-     ⇒ 登记成一个 op，执行层给目标挂累加器（`_devilFeed += X` ✓、行动次数取不缩短 ✓） */
+  if (uncovered.length) return null;
+  /* 【2026-10-12 作者点名·小恶魔的投喂】「在 N 次行动内造成的最终伤害 +X%（可叠加）」 */
   var __dfm = t.match(/在\s*(\d+)\s*次行动内造成的最终伤害\s*[+＋]\s*(\d+)\s*%/);
   if (__dfm) ops.push({ op: 'devil_feed', actions: +__dfm[1], pct: +__dfm[2] });
 
-  if (uncovered.length) return null;
   if (!ops.length) return __looksActionable(t) ? null : [];
     // 可额外耗音韵增伤（水枪攻击等）：给 damage op 挂 payExtra，执行时选择投入点数
   var __dpe = t.match(/每额外(?:消耗|耗)\s*(\d+)\s*点?音韵[^。）)]*?增加\s*(\d+)\s*点?[^。）)]*?伤害(?:[^。）)]*?最多额外(?:消耗|耗)\s*(\d+)\s*点?)?/);
@@ -17929,6 +17927,10 @@ function __resolveOptionalParens(text, ctx, done) {
   var inner = m[1].trim();
   // 盖伏说明注"（可以将这张卡盖伏来在其他玩家回合使用）"是卡牌属性说明，不是可选效果：直接剥离、不弹询问
   if (/盖伏/.test(inner)) { applyText(false); return; }
+  /* 【2026-10-12 作者点名·小恶魔的投喂】括号里的**说明性文字**不是"可选效果" ⇒ 直接剥离、**不弹询问** ✗
+     作者实测：卡面「（可叠加）」被弹成「可选效果 / 是否执行该附带效果？ → 执行：可叠加」✗✗
+     同类规则解释还有「（新获得的领域效果会覆盖原有的领域效果）」等 ✓ ⇒ 一并按"说明"处理 ✓ */
+  if (/可叠加|可叠|不叠加|覆盖原有|新获得的领域|上限\s*\d|一回合一次|每回合一次/.test(inner)) { applyText(false); return; }
   var isAuto = (ctx && isAISeat(ctx.user)) || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
   function applyText(doIt) {
     var rep = doIt ? (inner + '，') : '';
