@@ -12179,7 +12179,7 @@ function checkLevelUp(player) {
           var __tgt = foeOf(player);
           if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
           else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
-          else { dealDamageWithResponse(__tgt, 1 + GameRNG.dice(4), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }
+          else { dealDamageWithResponse(__tgt, 1 + __rollFor(player, 4, '供给者四面骰'), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }   // 【2026-10-11】走唯一投骰出口 ✓
         }
       };
       if (__supOL) {
@@ -16411,7 +16411,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
       else { var __sx2 = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; judgeAnimate(user, { kind: 'dice', sides: __sx2, label: __sx2 + '面骰判定伤害' }, __afterRoll); }
     } else {
       if (op.dice === 'coin') __afterRoll(GameRNG.coin() ? '正面' : '反面');
-      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __afterRoll(applyDiceControl(user, GameRNG.dice(__m), __m)); }
+      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __afterRoll(applyDiceControl(user, __rollFor(user, __m, __m + '面骰判定伤害'), __m)); }   // 【2026-10-11】走唯一投骰出口 ✓
     }
   } else __settle(op.base || 0);
 }
@@ -17228,7 +17228,7 @@ function __opsDice(op, ctx, next, env) {
   var user = env.user, target = env.target, p = env.p, q = env.q;
   switch (op.op) {
     case 'modify_dice': p._modifyDiceNext = true; break;
-    case 'roll_dice': { var __sd = op.sides || 6; var __rv = GameRNG.dice(__sd); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }
+    case 'roll_dice': { var __sd = op.sides || 6; var __rv = __rollFor(user, __sd, '掷骰判定·' + __sd + '面骰'); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) {} } break; }   // 【2026-10-11】走唯一投骰出口 ✓
     case 'buff_next_judge': p._nextAttackJudge = { dice: op.dice, front: op.front }; addBattleLog(user, '获得增益：下一次造伤害附带' + (op.dice==='coin'?'硬币':(op.dice==='d4'?'四面骰':'六面骰')) + '判定（正面/' + (op.front||2) + '点）'); break;
   }
   env.pendingNext = true;
@@ -17675,7 +17675,7 @@ function runOneOp(op, ctx, next) {
       };
       if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定', ctrlFull: true }, __settleJB);
       else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定' }, __settleJB);
-      else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, GameRNG.dice(__sides), __sides) : GameRNG.dice(__sides); __settleJB(__rr); }
+      else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, __rollFor(user, __sides, op.label || '效果判定'), __sides) : __rollFor(user, __sides, op.label || '效果判定'); __settleJB(__rr); }   // 【2026-10-11】走唯一投骰出口 ✓
       return;
     }
     case 'optional': {
@@ -18490,6 +18490,7 @@ function __eventCasesA(card, player, p, done, env) {
       try { __megumi = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('惠') >= 0; }); } catch (e) {}
       var __dN = __megumi ? 3 : 2, __rolls = [], __sum = 0;
       for (var __ri = 0; __ri < __dN; __ri++) { var __r = GameRNG.dice(6); __rolls.push(__r); __sum += __r; }
+      __rollForAfter(player, '即兴演出·' + __dN + '枚六面骰');   // 【2026-10-11】多骰相加算**一次投掷** ⇒ 循环外触发一次"投掷后"被动 ✓
       // 点数相加的投骰属普通投掷：控骰最多适用 100%（每20%=±1，点数下限=骰子枚数）
       var __jxSettle = function (__sum) {
         addBattleLog(player, '即兴演出：投出' + __rolls.join('+') + '=' + __sum + '点' + (__megumi ? '（松山惠：3枚骰）' : ''));
@@ -18713,6 +18714,7 @@ function __eventCasesB(card, player, p, done, env) {
       var __diceN = __muyuan ? 4 : 3;
       var diceArr = [];
       for (var __dk = 0; __dk < __diceN; __dk++) diceArr.push(GameRNG.dice(6));
+      __rollForAfter(player, '赌徒游戏·' + __diceN + '枚六面骰');   // 【2026-10-11】多骰相加算**一次投掷** ⇒ 触发一次 ✓
       // 多枚骰投掷：控骰最多适用 100%（每20%=±1），调整分摊到各骰（每枚保持 1~6）
       var __gtSettle = function () {
         addBattleLog(player, '赌徒游戏：支付' + __pay + '金币，投出' + diceArr.join('+') + (__muyuan ? '（木原家族：4枚骰）' : ''));
