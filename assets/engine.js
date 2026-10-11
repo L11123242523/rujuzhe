@@ -2891,6 +2891,17 @@ function evaluatePlayable(card,player,opts){
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
   // 6) 通用资源条件（检索/回收/看手牌/破坏区域 需对应区域非空）
   var __res=checkCardResource(card,me,battleState); if(__res&&__res.ok===false) return __res;
+  /* 【2026-10-12 作者确认"按你说的改"】"没有合法对象也能用"的通用门控（第一张 ✓）：
+     **遥控骰子**（单次 ✓）的唯一用途就是"修改一次投掷动作中的所有点数" ✓
+     ⇒ **没有待定掷骰结果时整卡不可用** ✓；唯一真相 = `battleState._openRollWindow`
+        （由 `judgeSettleWindow` 开窗置位 / 关窗清空 ✓，与窗口同生同灭 ✓ —— 见 engine.js:20619/20628 ✓）
+     ⚠ 按作者确认的清单，**只挂遥控骰子** ✓：
+        · 特制手套 ⇒ 不在此列 ✗（三选一 ✓，无待定时只是不提供② ✓，整卡仍可用 ✓ —— 已在它的 play 里处理 ✓）
+        · 颠倒骰子 / 幸运护符 ⇒ 效果是"改方向 / 抵消+前进" ✓，不属于这一类 ✗（不动 ✓）
+        · Twice ⇒ 只门控"重新进行一次判定"那一半 ✓（下一步做 ✓） */
+  if (name === '遥控骰子' && !battleState._openRollWindow) {
+    return {ok:false, reason:'当前没有待定的掷骰结果，无法修改点数'};
+  }
   // 7) 特例卡条件
   var cond=CARD_PLAY_CONDITIONS[name];
   if(cond){ var r=cond(card,me,battleState); if(r&&r.ok===false) return r; }
