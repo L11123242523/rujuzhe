@@ -2,7 +2,7 @@
    导出：文件末尾用 window.<name> 挂回全局，供 game.html 内联代码继续直接调用。 */
 function showScreen(id) {
   /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
-  try { if (typeof window !== 'undefined') window.__screenId = id; } catch (e) {}
+  try { if (typeof window !== 'undefined') window.__screenId = id; } catch (e) { try { console.error('[catch] assets/ui.js:5', e); } catch (e2) {} }
   var screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) {
     screens[i].classList.remove('active');
@@ -12,18 +12,18 @@ function showScreen(id) {
     target.classList.add('active');
   }
   if (id === 'cardViewer') renderCardGrid();
-  if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) {} }
+  if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) { try { console.error('[catch] assets/ui.js:15', e); } catch (e2) {} } }
   /* 回到主菜单/联机大厅 = 明确已经不在战斗里了 → 把战斗残留的浮层与临时状态清干净。
      （线上实测：对局结束后回主界面，效果框/结算框还挂在上面。）
      刻意**只在这两个界面**清：查卡器（cardViewer）等界面可能在对局中打开，那时清掉
      正在结算的窗口反而会把结算弄坏。 */
   if (id === 'mainMenu' || id === 'onlineLobby') {
-    try { __clearTransientBattleState('离开战斗界面'); } catch (e) {}
+    try { __clearTransientBattleState('离开战斗界面'); } catch (e) { try { console.error('[catch] assets/ui.js:21', e); } catch (e2) {} }
     /* 【2026-10-03】离开战斗 ⇒ 立刻停掉 BGM（作者实测：退到主界面还在放） */
-    try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) {}
+    try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) { try { console.error('[catch] assets/ui.js:23', e); } catch (e2) {} }
     /* BGM 双保险【批次3】：上方判据已改状态权威 ⇒ bgmSync 会正确判"不在战斗"并停 ✓；
        这里再直接暂停当前元素（模块内引用丢了也不怕 ✓） */
-    try { if (typeof window !== 'undefined' && window.__bgmEl && window.__bgmEl.pause && !window.__bgmEl.paused) window.__bgmEl.pause(); } catch (e) {}
+    try { if (typeof window !== 'undefined' && window.__bgmEl && window.__bgmEl.pause && !window.__bgmEl.paused) window.__bgmEl.pause(); } catch (e) { try { console.error('[catch] assets/ui.js:26', e); } catch (e2) {} }
   }
   // 进入对战界面时初始化 3D 地图（WebGL 不可用则自动回退 2D 地图）
   if (id === 'battleScreen' && typeof Map3D !== 'undefined') {
@@ -167,7 +167,7 @@ function renderDeckBuilder() {
 function deckClear(player) {
   try {
     var cfg = deckConfig[player]; if (!cfg) return;
-    if (typeof closeCardPicker === 'function') { try { closeCardPicker(); } catch (e) {} }
+    if (typeof closeCardPicker === 'function') { try { closeCardPicker(); } catch (e) { try { console.error('[catch] assets/ui.js:170', e); } catch (e2) {} } }
     ['chars', 'items', 'carries'].forEach(function (k) {
       var arr = cfg[k] || [];
       var len = arr.length || ({ chars: 3, items: 8, carries: 4 }[k] || 0);
@@ -175,7 +175,7 @@ function deckClear(player) {
     });
     if (typeof renderDeckSide === 'function') renderDeckSide(player);
     if (typeof saveDeckConfig === 'function') saveDeckConfig();
-    if (typeof updateBattleUI === 'function') { try { updateBattleUI(); } catch (e) {} }
+    if (typeof updateBattleUI === 'function') { try { updateBattleUI(); } catch (e) { try { console.error('[catch] assets/ui.js:178', e); } catch (e2) {} } }
     if (typeof showToast === 'function') showToast('已清空该卡组（可重新编组）', 'warn');
   } catch (e) { console.error('deckClear 出错', e); }
 }
@@ -221,7 +221,7 @@ function renderAttrBar(player) {
     h += '<span style="margin-left:12px;color:#9fb0d0">共 ' + __costs.length + ' 张</span>';
     h += '<button onclick="deckClear(\'' + player + '\')" style="margin-left:12px;padding:4px 10px;font-size:12px;' +
          'background:rgba(255,90,90,.85);color:#fff;border:none;border-radius:6px;cursor:pointer;">🧹 一键清空</button>';
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] assets/ui.js:224', e); } catch (e2) {} }
   bar.innerHTML = h;
 }
 
@@ -412,17 +412,17 @@ function __renderDeckPile() {
         if (label) label.textContent = '牌组';
       }
     });
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] assets/ui.js:415', e); } catch (e2) {} }
 }
 
 function showChainChoice(title, cardName, effectText, choices, onPick) {
   /* 【2026-10-05】连锁窗本来就会设置 _awaitingDecision；这里再包一层保证"应答即清" */
-  try { onPick = __decideWrapped(onPick, 'chainChoice'); } catch (e) {}
+  try { onPick = __decideWrapped(onPick, 'chainChoice'); } catch (e) { try { console.error('[catch] assets/ui.js:420', e); } catch (e2) {} }
   if (__chainNeverAsk) {
     /* 【2026-10-03】这个开关很容易误点，一旦打开所有连锁问都瞬间自动放弃 ⇒ 每次留一条日志，
        玩家在战斗日志里能看到"是因为本会话关闭了连锁询问"，而不是以为"AI 抢跑不让我连锁"。
        恢复：控制台 setChainNeverAsk(false)。 */
-    try { addBattleLog('system', '【连锁】本会话已关闭连锁询问 ⇒ 自动放弃：「' + (title || '') + '」（恢复：setChainNeverAsk(false)）'); } catch (e) {}
+    try { addBattleLog('system', '【连锁】本会话已关闭连锁询问 ⇒ 自动放弃：「' + (title || '') + '」（恢复：setChainNeverAsk(false)）'); } catch (e) { try { console.error('[catch] assets/ui.js:425', e); } catch (e2) {} }
     onPick(choices.length - 1); return;
   }
   var modal = document.getElementById('choiceModal');
@@ -442,8 +442,8 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     if (settled) return; settled = true;
     if (timer) clearInterval(timer);
     pendingChoiceCallback = null;
-    try { closeChoiceModal(); } catch (e) {}
-    try { __dequeueChoice(); } catch (e) {}
+    try { closeChoiceModal(); } catch (e) { try { console.error('[catch] assets/ui.js:445', e); } catch (e2) {} }
+    try { __dequeueChoice(); } catch (e) { try { console.error('[catch] assets/ui.js:446', e); } catch (e2) {} }
     onPick(idx);
   }
   pendingChoiceCallback = finish; // 保持与全局单槽回调一致（其他入口不会覆盖）
@@ -470,7 +470,7 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     /* 【2026-10-03】二次确认：一点就静默关掉所有连锁询问，很容易误触成"AI 抢跑"。 */
     try {
       if (typeof confirm === 'function' && !confirm('确定本会话内不再弹出连锁询问？\n（此后所有连锁都会自动放弃；可随时用 setChainNeverAsk(false) 恢复）')) return;
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] assets/ui.js:473', e); } catch (e2) {} }
     __chainNeverAsk = true; finish(choices.length - 1);
   };
   bar.appendChild(never);
@@ -602,7 +602,7 @@ function showCardModal(card, inputType, label, min, max, canFaceDown) {
 
 function showChoiceModal(title, cardName, effect, choices, callback) {
   /* 【2026-10-05】选项弹窗 = 玩家决策 ⇒ 必须让闸门看见 */
-  try { callback = __decideWrapped(callback, 'choiceModal'); } catch (e) {}
+  try { callback = __decideWrapped(callback, 'choiceModal'); } catch (e) { try { console.error('[catch] assets/ui.js:605', e); } catch (e2) {} }
   return ENV.ask('p1', { kind: 'choice', label: title, cardName: cardName, effect: effect, choices: choices }, callback);
 }
 
@@ -629,9 +629,9 @@ function renderBuffBar(user) {
 function __updateBattleUI_impl() {
   if (!battleState) return;
   // 牌组堆模型：把"是否公开了牌组最上方那张卡"画出来（模型本身在 .deck-zone 里）
-  try { if (typeof __renderDeckPile === 'function') __renderDeckPile(); } catch (e) {}
+  try { if (typeof __renderDeckPile === 'function') __renderDeckPile(); } catch (e) { try { console.error('[catch] assets/ui.js:632', e); } catch (e2) {} }
   // 回音韵时点兜底（补齐绕过 recoverCost 的直接改费路径）
-  try { if (typeof __syncRecoverTiming === 'function') __syncRecoverTiming(); } catch (e) {}
+  try { if (typeof __syncRecoverTiming === 'function') __syncRecoverTiming(); } catch (e) { try { console.error('[catch] assets/ui.js:634', e); } catch (e2) {} }
   
   // 宫樱子被动：队伍同步降至阈值(20/15/10/5)时各+1次免费用卡（各阈值仅触发一次）
   try {
@@ -646,7 +646,7 @@ function __updateBattleUI_impl() {
         }
       });
     }
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] assets/ui.js:649', e); } catch (e2) {} }
   
   try {
     // 状态显示
@@ -756,7 +756,7 @@ function __updateBattleUI_impl() {
     flashStat('p1ShieldCenter', battleState.p1.shield || 0);
     // 增益/效果栏刷新
     renderBuffBar('p1'); renderBuffBar('p2');
-    try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) {}   /* 【2026-10-03】残血自动切 BGM */
+    try { if (typeof __sfx !== 'undefined' && __sfx.bgmSync) __sfx.bgmSync(); } catch (e) { try { console.error('[catch] assets/ui.js:759', e); } catch (e2) {} }   /* 【2026-10-03】残血自动切 BGM */
     
     var turnInfoEl = document.getElementById('turnInfo');
     if (turnInfoEl) turnInfoEl.textContent = '回合 ' + battleState.turn;
@@ -766,7 +766,7 @@ function __updateBattleUI_impl() {
     // 阶段保护（设计口径）：投掷阶段由玩家主动点击“进入下个阶段”结算推进到主要阶段2，不做任何自动推进
     try {
       battleState._moveResolved = !!battleState._moveResolved; // 仅规范化，不推进
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] assets/ui.js:769', e); } catch (e2) {} }
     if (phaseInfoEl) phaseInfoEl.textContent = phaseNames[battleState.phase] || battleState.phase;
     
     // 回合切换横幅（currentPlayer 或回合数变化时）
@@ -1164,7 +1164,7 @@ function __renderBattleLogFromState() {
 
 function showCardPickerMulti(cards, title, callback, needCount, allowLess, allowCancel) {
   /* 【2026-10-05】选卡 = 玩家决策 ⇒ 让闸门看见 */
-  try { callback = __decideWrapped(callback, 'cardPicker'); } catch (e) {}
+  try { callback = __decideWrapped(callback, 'cardPicker'); } catch (e) { try { console.error('[catch] assets/ui.js:1167', e); } catch (e2) {} }
   /* allowCancel（2026-10-01）：允许玩家点"取消"放弃这次选卡（如献祭，防止误触浪费每回合次数）。
      默认 false ⇒ 其它"必须选卡"的效果流程完全不受影响。 */
   return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess, allowCancel: !!allowCancel }, callback);
@@ -1271,8 +1271,8 @@ function showDeckList() {
          **最后一张**（视频里是"弱点分析"）✗ 根因：`var card = sortedDeck[i]` 是函数级作用域，所有迭代共用它，
          而悬停闭包在**悬停那一刻**才读 ⇒ 读到的永远是循环结束后的最后一张。
          修法：给这两个闭包各自绑定"当时的这张卡"（不动循环结构；与同文件墓地列表那处的 IIFE 同款思路）。 */
-      div.onmouseenter = (function(c){ return function() { try { __cardPeekShow(this, encodeURIComponent(c.name || '')); } catch (e) {} }; })(card);
-      div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) {} };
+      div.onmouseenter = (function(c){ return function() { try { __cardPeekShow(this, encodeURIComponent(c.name || '')); } catch (e) { try { console.error('[catch] assets/ui.js:1274', e); } catch (e2) {} } }; })(card);
+      div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1275', e); } catch (e2) {} } };
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
       /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
       div.onclick = (function(c){ return function() { __openGraveCardDetail(c); }; })(card);
@@ -1330,10 +1330,10 @@ function showGraveList(zone) {
         var spBtn = def ? ('<button data-sp="1" style="width:100%;margin-top:6px;padding:5px;font-size:11px;border:none;border-radius:4px;cursor:'+(canSP?'pointer':'not-allowed')+';'+(canSP?'background:#feca57;color:#2d3436;font-weight:bold;':'background:#555;color:#aaa;')+'">'+__spTxt+'</button>') : '';
         /* 【2026-10-03 作者实测】墓地和移出区的卡原来点不开、也看不到卡图 ⇒ 显示卡图 + 点击看详情 */
         div.style.cursor='pointer';
-        div.onclick=function(ev){ try { ev.stopPropagation(); } catch(e){} __openGraveCardDetail(card); };
+        div.onclick=function(ev){ try { ev.stopPropagation(); } catch (e) { try { console.error('[catch] assets/ui.js:1333', e); } catch (e2) {} } __openGraveCardDetail(card); };
         /* 【2026-10-09 作者目标第4项】墓地/移出区的卡：**悬停即浮出放大的原图**（闭包里有 card ⇒ 直接取名字） */
-        div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) {} };
-        div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) {} };
+        div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) { try { console.error('[catch] assets/ui.js:1335', e); } catch (e2) {} } };
+        div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1336', e); } catch (e2) {} } };
         div.innerHTML='<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
           '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
@@ -1517,7 +1517,7 @@ function __fdPeekShow(el, index) {
   } catch (e) { /* 预览失败不影响任何流程 */ }
 }
 function __fdPeekHide() {
-  try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) {}
+  try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) { try { console.error('[catch] assets/ui.js:1520', e); } catch (e2) {} }
 }
 try { window.__fdPeekShow = __fdPeekShow; } catch (e) {}
 try { window.__fdPeekHide = __fdPeekHide; } catch (e) {}
@@ -1538,10 +1538,10 @@ function __cardPeekShow(el, nameEnc) {
         var __box0 = document.getElementById('__fdPeekBox');
         var __img0 = document.getElementById('__fdPeekImg');
         var __nm0 = document.getElementById('__fdPeekName');
-        if (__img0) { try { __img0.removeAttribute('src'); } catch (e) {} __img0.style.display = 'none'; }
+        if (__img0) { try { __img0.removeAttribute('src'); } catch (e) { try { console.error('[catch] assets/ui.js:1541', e); } catch (e2) {} } __img0.style.display = 'none'; }
         if (__nm0) __nm0.textContent = '';
         if (__box0) __box0.style.display = 'none';
-      } catch (e) {}
+      } catch (e) { try { console.error('[catch] assets/ui.js:1544', e); } catch (e2) {} }
       return;
     }
     var box = document.getElementById('__fdPeekBox');
@@ -1568,9 +1568,9 @@ function __cardPeekShow(el, nameEnc) {
     if (top + bh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bh - 8);
     box.style.left = left + 'px';
     box.style.top = top + 'px';
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] assets/ui.js:1571', e); } catch (e2) {} }
 }
-function __cardPeekHide() { try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) {} }
+function __cardPeekHide() { try { var b = document.getElementById('__fdPeekBox'); if (b) b.style.display = 'none'; } catch (e) { try { console.error('[catch] assets/ui.js:1573', e); } catch (e2) {} } }
 try { window.__cardPeekShow = __cardPeekShow; } catch (e) {}
 try { window.__cardPeekHide = __cardPeekHide; } catch (e) {}
 
@@ -1582,7 +1582,7 @@ try { window.__cardPeekHide = __cardPeekHide; } catch (e) {}
   window.__touchLongPressInstalled = true;
   var timer = null, target = null;
   function clearTimer() { if (timer) { clearTimeout(timer); timer = null; } }
-  function hide() { try { if (typeof __cardPeekHide === 'function') __cardPeekHide(); } catch (e) {} target = null; }
+  function hide() { try { if (typeof __cardPeekHide === 'function') __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1585', e); } catch (e2) {} } target = null; }
   function findHandlerAttr(el) {
     /* 往上找最近的、带 onmouseenter 且含 __cardPeekShow 的元素 */
     var n = 0;
@@ -1601,9 +1601,9 @@ try { window.__cardPeekHide = __cardPeekHide; } catch (e) {}
       target = el;
       clearTimer();
       timer = setTimeout(function () {
-        try { new Function(attr).call(el); } catch (e) {}
+        try { new Function(attr).call(el); } catch (e) { try { console.error('[catch] assets/ui.js:1604', e); } catch (e2) {} }
       }, 450);
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] assets/ui.js:1606', e); } catch (e2) {} }
   }, { passive: true });
   ['touchend', 'touchmove', 'touchcancel'].forEach(function (k) {
     document.addEventListener(k, function () { clearTimer(); hide(); }, { passive: true });
