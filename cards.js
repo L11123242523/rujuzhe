@@ -808,7 +808,7 @@ window.__CARD_DATA__ = {
             "辅助"
          ],
          "sp_member": false,
-         "image_url": "assets/images/ui2/card_face_yujianyu.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_yujianyu.webp?v=8",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -3116,7 +3116,7 @@ window.__CARD_DATA__ = {
             "资源运转队",
             "快攻侵略队"
          ],
-         "image_url": "assets/images/ui2/img_LPcsEHSUna.webp?v=8",
+         "image_url": "assets/images/ui2/img_LPcsEHSUna.webp?v=9",
          "recommended_with": [
             "智能手机",
             "黑色卡片",
