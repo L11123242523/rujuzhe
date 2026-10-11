@@ -9,8 +9,10 @@ try {
   if (typeof fetch === 'function' && typeof window !== 'undefined') {
     /* 【2026-10-10 同步母本】缓存键 1 → 2：CF 按**完整 URL** 缓存 ⇒ 线上 data/cards.json?v=1 实测
        cf=HIT、age≈9.7 小时（那份旧母本被粘住）⇒ 母本换了必须升这个键，否则拉到的还是旧数据 ✗。
+       【2026-10-11 又一次踩到同一个坑】卡图 URL 键升位后母本内容变了 ⇒ 键 7 → **8** ✓
+       （实测 `data/cards.json?v=6` 原样取回 194448B ≠ 本地 194449B ⇒ 旧母本仍在 CDN 上 ✓）
        注：下面 data/rogue-cards.json 那一行**不动**（肉鸽，未经点名不碰）。 */
-    fetch('data/cards.json?v=7', { cache: 'force-cache' })
+    fetch('data/cards.json?v=9', { cache: 'force-cache' })
       .then(function (r) { return r && r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.characters) { window.__cardDataAsync = j; } })
       .catch(function () {});
