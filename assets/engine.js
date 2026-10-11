@@ -8333,7 +8333,7 @@ function resolveChainStack(effect, onDone) {
     } else if (e.kind === 'reroll') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else {
-        var __nr = GameRNG.dice(effect._diceSides || 6);
+        var __nr = __rollFor(e.by, effect._diceSides || 6, '重新判定/投掷');   // 【2026-10-11】重掷也是"一次投掷" ⇒ 走唯一出口（投掷者 = 施加重掷者 e.by ✓）
         cur = __nr; effect._newDiceResult = __nr; __doneSet[i] = true;
         addBattleLog(e.by, '【' + e.name + '】重新判定/投掷，新点数 ' + __nr);
       }
@@ -9323,7 +9323,7 @@ function enterExtraRollPhase(player, cb) {
   if (player !== 'p1' && !(typeof Online!=='undefined' && Online.active)) {
     setTimeout(function () {
       try { if (typeof aiRioPreRoll === 'function') aiRioPreRoll('p2'); } catch (e) {}
-      var d = (typeof rollPlayerDice === 'function') ? rollPlayerDice('p2') : GameRNG.dice(6);
+      var d = (typeof rollPlayerDice === 'function') ? rollPlayerDice('p2') : __rollFor('p2', 6, '追加投掷');   // 【2026-10-11】兜底路径走唯一出口（主路径 rollPlayerDice 本身就是移动投掷出口 ✓ 二者只会走一个 ⇒ 不会双触发 ✓）
       battleState._diceRolledThisPhase = true;
       addBattleLog('p2', '追加投掷投出' + d + '点');
       var __goExtra = function () { if (typeof aiExecuteMove === 'function') aiExecuteMove(d, cb); else if (cb) cb(); };
@@ -10083,7 +10083,7 @@ function aiMaybeUseEvent(done) {
   function __applyAiEvent() {
   // --- 独奏：20面骰，条件全部适用；回费/降自己入迷（越近0越接近破局胜利） ---
   if (nm === '独奏') {
-    var d20 = GameRNG.dice(20);
+    var d20 = __rollFor(aiSeat(), 20, '独奏[对手]·20面骰');   // 【2026-10-11】走唯一投骰出口 ✓（本卡无自带予处理 ⇒ 不会双触发 ✓）
     if (d20 % 2 === 0) recoverCost(aiSeat(), 2, '独奏[对手]');
     if (d20 % 10 === 4) p.fascination = Math.max(0, p.fascination - 1);
     if (d20 % 4 === 0) recoverCost(aiSeat(), 2, '独奏[对手]');
@@ -10096,6 +10096,7 @@ function aiMaybeUseEvent(done) {
   if (nm === '即兴演出') {
     var meg = hasChar('惠'); var dN = meg ? 3 : 2, sum = 0, rolls = [];
     for (var ri = 0; ri < dN; ri++) { var rr = GameRNG.dice(6); rolls.push(rr); sum += rr; }
+    __rollForAfter(aiSeat(), '即兴演出[对手]·' + dN + '枚六面骰');   // 【2026-10-11】多骰相加算一次投掷 ⇒ 循环外触发一次 ✓
     if (meg) recoverCost(aiSeat(), 3, '即兴演出[松山惠][对手]');
     if (sum < 8) recoverCost(aiSeat(), 3, '即兴演出[对手]');
     else if (sum === 8) { foe.fascination = Math.min((foe.fascination || 0) + 1, 6); L('即兴演出[对手]：' + sum + '点，回复对手1点入迷'); }
@@ -10157,6 +10158,7 @@ function aiMaybeUseEvent(done) {
     p.gold -= payD;
     var myN = hasChar('木原') ? 4 : 3, arr = [], counts = {};
     for (var dk = 0; dk < myN; dk++) { var dv = GameRNG.dice(6); arr.push(dv); counts[dv] = (counts[dv] || 0) + 1; }
+    __rollForAfter(aiSeat(), '赌徒游戏[对手]·' + myN + '枚六面骰');   // 【2026-10-11】多骰相加算一次投掷 ⇒ 循环外触发一次 ✓
     var mx = 1;
     for (var kk in counts) mx = Math.max(mx, counts[kk]);
     if (mx >= 3) { p.gold += 3000; L('赌徒游戏[对手]：三同，+3000金币（现' + p.gold + '）'); }
