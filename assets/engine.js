@@ -18103,6 +18103,31 @@ function __resolveOptionalParens(text, ctx, done) {
 
 function dispatchStep(text, ctx, next) {
   __resolveOptionalParens(text, ctx, function (finalText) {
+    /* 【2026-10-12 作者报"比翼恋理没有领域标识（效果就是没实现）"——真机打点定位到的根因 ✓】
+       卡面原文：「…②每回合自然回复的音韵值+1③每回合首次音韵抽卡的消耗音韵值-1…」
+       「+1」与「③」**之间没有任何标点** ✗ ⇒ 出现"未覆盖片段" ⇒ `compileStepOps` 返回 **null** ✗
+       ⇒ `dispatchStep` 整步退回**文本引擎**（`processSingleEffect`）⇒ 该句的 op（领域登记 ✓）被静默丢弃 ✓
+       打点实录 ✓：calls = getMainEffectText → parseEffect → dispatchStep → classifyClause → compileStepOps
+                          → classifyClause×6 → **processSingleEffect**；domCount = 0 ✗
+       修法（通用、最小 ✓）：编译前给"**紧跟非标点字符的 ①②③… 或 (1)(2)…**"补一个「，」✓
+         —— 只改这一种粘接 ✓，不动其它文本 ✓；本函数是两条编译路径的共用入口 ⇒ 一并受益 ✓ */
+    try {
+      finalText = String(finalText)
+        .replace(/([^。；;，,、：:\s（(])\s*(?=[①②③④⑤⑥⑦⑧⑨⑩])/g, '$1，')
+        .replace(/([^。；;，,、：:\s（(])\s*(?=（\d+）|\(\d+\))/g, '$1，');
+    } catch (e) { try { console.error('[catch] assets/engine.js:18057 编号粘接归一化', e); } catch (e2) {} }
+    /* 【2026-10-12 ②根因·二分实证 ✓】领域句是"一条机制说明 + ①②③ 子项"的结构：
+         · seg0「展开…前后4格的领域，持续3次行动。…获得以下效果：」 ⇒ ["register_mechanic/domain"] ✓
+         · seg1「①热忱属性的克制伤害增加100%…」 ⇒ **null** ✗　· seg2「②每回合自然回复的音韵值+1」 ⇒ **null** ✗
+       `compileStepOps` 是**全有或全无** ⇒ 子项编不出 ⇒ 整步 null ⇒ 退回文本引擎 ⇒ **领域 op 被一起丢掉** ✗
+       ⇒ 修法：只对"展开…前后N格的领域…"这类**机制句**，在**第一个 ①②③… 编号处截断**后再编译 ✓
+         （领域增益的数值由 `register_mechanic` 执行器从**卡面原文** `parseDomainBuff` 取得 ✓，与这里截断无关 ⇒ 行为不变 ✓）
+       只作用于带该句式者 ✓，不动其它文本 ✓。 */
+    try {
+      if (/展开[^。；]{0,40}?前后\s*\d+\s*格的?领域/.test(finalText)) {
+        finalText = String(finalText).split(/(?=[①②③④⑤⑥⑦⑧⑨⑩])/)[0];
+      }
+    } catch (e) { try { console.error('[catch] assets/engine.js:18057 领域机制句截断', e); } catch (e2) {} }
     var cls = classifyClause(finalText);
     var perm = ctx && ctx.card && ctx.card._category === 'item_permanent';
     if (cls === 'flavor' || cls === 'trigger') { next(); return; }
