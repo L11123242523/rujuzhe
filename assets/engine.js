@@ -8462,11 +8462,29 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】对象动作/伤害已不存在，不重复处理'); }
       else { actionAlive = false; effect.cancelled = true; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】' + (e.kind === 'cancelDamage' ? '抵消本次伤害' : '打断本次动作')); if (typeof e.extra === 'function') { try { e.extra(); } catch (err) { try { console.error('[catch] assets/engine.js:8338', err); } catch (e2) {} } } }
     } else if (e.kind === 'stop_move') {
+      /* 【2026-10-12 作者报"我队伍里有里绪不应该免疫大风吗"——真机定位到的根因 ✓】
+         `__eventCasesB` 里的大风结算（`engine.js:18917-18923` ✓）**有**免疫检查 ✓（实测 `deckConfig['p1'].chars`
+         确实含「现实间里绪」✓），但**这里**（以及下面 `e.kind==='event'` 那一支 ✓）给**所有玩家**直接设
+         `nextMoveMinus2 = true` ✗ —— **完全没有免疫检查** ✗ ⇒ 大风一旦走连锁/事件路径就把 debuff 盖到
+         里绪/光太郎头上 ✓ = 作者看到的现象 ✓
+         ⇒ 结构修法：把"给双方挂大风 debuff"收成**同一个函数** ✓，免疫判据只在它里面写**一次** ✓（唯一真相 ✓） */
+      var __windDebuffAll = function (by) {
+        try {
+          playerIds().forEach(function (w) {
+            var __wp = battleState[w]; if (!__wp) return;
+            var __imm = false;
+            try { __imm = (((deckConfig || {})[w] || {}).chars || []).some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); }); } catch (e3) {}
+            if (__imm) { addBattleLog(by, '大风：【' + w + '】编入里绪/光太郎，不受影响'); return; }
+            if (!__wp.moveDebuff) __wp.moveDebuff = {};
+            __wp.moveDebuff.nextMoveMinus2 = true;
+          });
+        } catch (e4) { try { console.error('[catch] assets/engine.js:8464 大风 debuff', e4); } catch (e5) {} }
+      };
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，不重复处理'); }
       else {
         actionAlive = false; effect.cancelled = true; __doneSet[i] = true;
         battleState._stopAllMove = true;
-        playerIds().forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
+        __windDebuffAll(e.by);
         addBattleLog(e.by, '【' + e.name + '】终止所有移动动作，本次移动被阻止；双方下次执行的位移效果-2');
       }
     } else if (e.kind === 'event') {
@@ -8477,7 +8495,7 @@ function resolveChainStack(effect, onDone) {
       if (__evStop2 && (effect._stage === 'move' || effect.type === 'move' || effect._stage === 'dice_result')) { actionAlive = false; effect.cancelled = true; }
       if (__evStop2) {
         battleState._stopAllMove = true;
-        playerIds().forEach(function (w) { var __wp = battleState[w]; if (!__wp) return; if (!__wp.moveDebuff) __wp.moveDebuff = {}; __wp.moveDebuff.nextMoveMinus2 = true; });
+        __windDebuffAll(e.by);   /* 【2026-10-12】免疫判据收口在 __windDebuffAll 里 ✓（原来这里无条件给所有人挂 ✗） */
         addBattleLog(e.by, '【大风】终止所有移动动作；双方下次执行的位移效果-2');
       }
       if (__evCard) {
