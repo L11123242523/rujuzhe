@@ -18068,8 +18068,18 @@ function __resolveOptionalParens(text, ctx, done) {
   /* 【2026-10-12 作者点名·小恶魔的投喂】**先**把"说明性括号"整段剥掉 ✓，再进入任何分支 ✓
      （上一版我把判定放在中间 ⇒ 实测仍会弹「可选效果 / 是否执行该附带效果？」✗ ⇒ 改为入口处预处理，不可能再漏 ✓）
      说明性括号 = 规则解释，不是"可选效果"：可叠加 / 不叠加 / 新领域覆盖 / 上限N / 一回合一次 … ✓ */
-  text = String(text == null ? '' : text).replace(/[（(]([^）)]*)[）)]/g, function (all, t) {
-    return /可叠加|可叠|不叠加|覆盖原有|新获得的领域|上限\s*\d|一回合一次|每回合一次/.test(t) ? '' : all;
+  text = String(text == null ? '' : text).replace(/[（(]([^）)]*)[）)]/g, function (all, t, off) {
+    if (!/可叠加|可叠|不叠加|覆盖原有|新获得的领域|上限\s*\d|一回合一次|每回合一次/.test(t)) return all;
+    /* 【2026-10-12 作者报"比翼恋理没有领域标识"——真机定位到的根因 ✓】
+       卡面：「…每回合首次音韵抽卡的消耗音韵值-1（新获得的领域效果会覆盖原有的领域效果）」
+       这个括号是「-1」与后文的**唯一分隔符** ✗ ⇒ 我之前把它**直接删成空串** ✗
+       ⇒ 文本变成「…-1③每回合…」粘在一起 ⇒ `compileStepOps` 编译不过（返回 null ✗）
+       ⇒ `dispatchStep` 整步退回**文本引擎**（processSingleEffect）⇒ 领域 op 被静默丢掉 ✓✓
+       （打点实证：calls = … → compileStepOps → processSingleEffect，domCount=0 ✓；去掉粘接后 ops=["register_mechanic/domain"] ✓）
+       修法：剥离说明括号时，**前后都不是标点就补一个「，」** ✓（只影响被剥离的说明括号 ✓，不动别的文本 ✓） */
+    var before = text.charAt(off - 1), after = text.charAt(off + all.length);
+    var punc = /[。；;，,、：:\s]/;
+    return (before && after && !punc.test(before) && !punc.test(after)) ? '，' : '';
   });
   var re = /[（(]\s*可以?\s*([^）)]*)[）)]/;
   var m = text.match(re);
