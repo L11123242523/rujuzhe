@@ -19106,6 +19106,16 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
   else if (zone === 'grave') cards = p.grave;
   else if (zone === 'deck') cards = p.deck;
   else if (zone === 'removed') cards = (p.removed || []).concat(p.removedFromGame || []);
+  /* 【2026-10-11 作者要求】公共墓地（事件卡 + 乐谱卡）也要能被玩家查看 ✓
+     —— 它不是任何座位的区域（是 `publicGraveyard` 全局 ✓），所以单独给一个 zone 名 ✓ */
+  else if (zone === 'public_grave') {
+    cards = [];
+    try {
+      if (typeof publicGraveyard !== 'undefined' && publicGraveyard) {
+        cards = (publicGraveyard.event_cards || []).concat(publicGraveyard.music_cards || []);
+      }
+    } catch (e) { cards = []; }
+  }
   
   // AI 自动结算：可选类直接挑费用最高的回调；纯查看类直接跳过不弹窗
   if (effectEngine.autoResolve) {

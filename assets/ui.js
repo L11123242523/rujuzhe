@@ -777,6 +777,14 @@ function __updateBattleUI_impl() {
     var handCountEl = document.getElementById('handCount');
     if (deckCountEl) deckCountEl.textContent = battleState.p1.deck.length;
     if (graveCountEl) graveCountEl.textContent = battleState.p1.grave.length;
+    /* 【2026-10-11】公共墓地入口的张数 = 事件卡 + 乐谱卡（打出后进这里 ✓） */
+    var publicGraveEl = document.getElementById('publicGraveCount');
+    if (publicGraveEl) {
+      try {
+        var __pg = (typeof publicGraveyard !== 'undefined' && publicGraveyard) ? publicGraveyard : null;
+        publicGraveEl.textContent = __pg ? (((__pg.event_cards || []).length) + ((__pg.music_cards || []).length)) : 0;
+      } catch (e) { publicGraveEl.textContent = 0; }
+    }
     // 手牌计数只算普通手牌，不算事件卡（事件卡不占用手牌上限）
     var normalHandCount = battleState.p1.hand.length;
     var eventCardCount = (battleState.p1.eventCards || []).length;
@@ -1345,6 +1353,11 @@ function showOppZone(zone) {
   if (zone !== 'grave' && zone !== 'removed') return;
   var title = '对手' + (zone === 'grave' ? '墓地' : '移出游戏区');
   if (typeof showTargetCards === 'function') showTargetCards('p2', zone, title, false, null);
+}
+/* 【2026-10-11 作者要求】公共墓地入口：事件卡 + 乐谱卡（打出后放这里，原来玩家完全看不到 ✗）
+   —— 纯查看（selectable=false ⇒ 本机直接渲染 ✓ 不发问 ✓），复用现成的只读列表弹窗与悬停浮层 ✓ */
+function showPublicGraveList() {
+  if (typeof showTargetCards === 'function') showTargetCards('p1', 'public_grave', '公共墓地（事件卡 / 乐谱卡）', false, null);
 }
 
 function showTargetCards(player, zone, title, selectable, callback, decider) {
