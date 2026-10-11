@@ -2434,7 +2434,7 @@ function onlineSacrificeP2(idx, name, done) {
     if (typeof checkGraveTrigger === 'function') checkGraveTrigger('p2', sacCard, __kotaroEff ? 'effect' : 'sacrifice');
     p._sacrificeUsedThisTurn = usedSac + 1;
     var recover = 2, isFirst = usedSac === 0;
-    if (isFirst && p._kotaroPassive) { recover += 2; addBattleLog('p2', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
+    if (isFirst && p._kotaroPassive) { recover += 1; addBattleLog('p2', '【光太郎被动·千金之势】首次献祭额外回复1点音韵值'); }   // 【2026-10-11】新卡面：回 1（旧 2 ✗）
     if (isFirst && p.permanent) {
       for (var pi = 0; pi < p.permanent.length; pi++) {
         if (p.permanent[pi].name && p.permanent[pi].name.indexOf('黑色卡片') >= 0) { recover += 1; addBattleLog('p2', '【黑色卡片】首次献祭额外回复1点音韵值'); break; }
@@ -2469,7 +2469,7 @@ function onlineSacrificeP2(idx, name, done) {
 function onlineUseSkillP2(done) {
   var p = battleState.p2, T = battleState.turn;
   var options = [];
-  if (p._kasumiPassive && !p._kasumiUsedThisTurn) options.push({ name: '霞·整肃', desc: '选至多2张手卡和1张永续区卡放回牌组洗切，抽相同数量，放回3张回1音韵', run: function (n) { onlineKasumiP2(n); } });
+  if (p._kasumiPassive && !p._kasumiUsedThisTurn) options.push({ name: '霞·整肃', desc: '选至多2张手卡和1张永续区卡放回牌组洗切，抽相同数量，放回3张回3音韵', run: function (n) { onlineKasumiP2(n); } });
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({ name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+2 / γ回6同步+抽1馈赠 / δ献祭次数+1并造4理智', run: function (n) { onlineMegumiP2(n); } });
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({ name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', run: function (n) { onlineKoharuP2(n); } });
   if (p._lilySP && p._lilySPTurn !== T) options.push({ name: '莉莉·回收', desc: '墓地最下方1卡回牌组最下方，单次且新最下方非单次时视为使用并回1音韵', run: function (n) { onlineLilyP2(n); } });
@@ -2553,7 +2553,7 @@ function onlineKasumiP2(done) {
     if (returnCount > 0) {
       shuffleArray(p.deck);
       for (var i = 0; i < returnCount; i++) { var d = drawCard('p2'); if (d) addBattleLog('p2', '【霞被动·整肃】抽到【' + d.name + '】'); }
-      if (returnCount >= 3) { recoverCost('p2', 1, '霞被动·整肃'); addBattleLog('p2', '【霞被动·整肃】放回3张，回复1点音韵值'); }
+      if (returnCount >= 3) { recoverCost('p2', 3, '霞被动·整肃'); addBattleLog('p2', '【霞被动·整肃】放回3张，回复3点音韵值'); }   // 【2026-10-11】新卡面：回 3 点（旧 1 ✗）
       p._kasumiUsedThisTurn = true;
     } else {
       addBattleLog('p2', '【霞被动·整肃】未放回任何卡，本次不消耗每回合次数');
@@ -7101,7 +7101,7 @@ registerTrigger({
   fire: function (ctx, owner) { __ruriJudgeAfterDamage(owner); }
 });
 
-/* 琉璃被动（判定伤害后）：回1音韵；每累计 3/6/11/14 次进入阶梯——抽2张、选1张送墓，之后全队判定伤害+1。
+/* 琉璃被动（判定伤害后）：回1音韵；每累计 4/7/11/14 次进入阶梯——抽2张、选1张送墓，之后全队判定伤害+1。
    2026-09-28 从 __finish 的手工 __cands.push 抽出，作为注册表触发 ruri-judge-passive 的效果本体。 */
 function __ruriJudgeAfterDamage(owner) {
   try {
@@ -7109,13 +7109,13 @@ function __ruriJudgeAfterDamage(owner) {
     recoverCost(owner, 1, '琉璃被动');
     addBattleLog(owner, '【琉璃被动】判定伤害后回复1音韵');
     rp._ruriJudgeCount = (rp._ruriJudgeCount || 0) + 1;
-    var TH = [3, 6, 11, 14];
+    var TH = [4, 7, 11, 14];   // 【2026-10-11 第二次平衡性调整】新卡面：4/7/11/14（旧 4/7/11/14 ✗）
     if (TH.indexOf(rp._ruriJudgeCount) < 0) return;
     /* 【口径 (b) 2026-10-05】阶梯段（抽2选1弃 + 全队判定+1）必须先**谈窗询问发动**；
        "判定伤害后回1音韵"已在上方直接结算（作者口径：回音韵=直接，阶梯=谈窗）。 */
     var __ruriTierBodyDirect = function () {
     /* 【2026-10-08 卡面改·**小沙香琉璃被动**】 __LIULI_DRAW_ONE__
-       新卡面：「每次造成判定伤害后可以回复自身1点音韵值。这个效果累计触发3/6/11/14次后可以发动：
+       新卡面：「每次造成判定伤害后可以回复自身1点音韵值。这个效果累计触发4/7/11/14次后可以发动：
                **抽一张卡**，那之后全队造成的判定伤害+1。」
        旧实现是「抽两张卡，然后选一张卡送入墓地」⇒ 按新卡面简化为**只抽一张**（送墓那步整段去掉）。 */
     if (typeof drawCard === 'function') { drawCard(owner); }
@@ -8920,7 +8920,8 @@ function rioAccumulateMove(player, delta) {
   var p = battleState[player];
   if (!p || !p._rioPassive) return;
   p._rioMoveCount = (p._rioMoveCount || 0) + Math.abs(delta || 0);
-  while (p._rioMoveCount >= 8) { p._rioMoveCount -= 8; rioTriggerOnce(player); }
+  /* 【2026-10-11 第二次平衡性调整】新卡面：单回合每累计移动 **7 格**（旧 8 格 ✗）后触发 ✓ */
+  while (p._rioMoveCount >= 7) { p._rioMoveCount -= 7; rioTriggerOnce(player); }
   if (typeof updateBattleUI === 'function') updateBattleUI();
 }
 function rioTriggerOnce(player) {
@@ -10270,7 +10271,7 @@ function aiResourceStep(done) {
         p.grave.push(sac);
         if (typeof checkGraveTrigger === 'function') checkGraveTrigger(aiSeat(), sac, p._kotaroPassive ? 'effect' : 'sacrifice');
         p._sacrificeUsedThisTurn = usedSac + 1;
-        var rec = 2 + ((usedSac === 0 && p._kotaroPassive) ? 2 : 0) +
+        var rec = 2 + ((usedSac === 0 && p._kotaroPassive) ? 1 : 0) +   // 【2026-10-11】新卡面：首次献祭回 1（旧 2 ✗）
           ((usedSac === 0 && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('黑色卡片') >= 0; })) ? 1 : 0);
         /* 【2026-10-01】改走唯一回费出口 recoverCost：否则"回音韵时点"（烙印+1 等）要等到下次刷新才补，
            而下一行日志已经把 **补发前** 的 p.cost 打出去了 ⇒ 日志里的"当前N"与实际对不上。 */
@@ -11621,7 +11622,7 @@ function doSacrifice() {
        所以"每段增加"类效果（贪欲者的烙印：每段+1）在这上面只加一次。
        而【鸣奏之"圣音"】这类卡的 SP 回2 是**另一段**（它在 checkGraveTrigger 里单独执行 recoverCost）
        ⇒ 两段各自吃一次"每段+1"（作者原话：所以圣音才能是 2+1+2+1）。 */
-    if (isFirst && p._kotaroPassive) { recover += 2; addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复2点音韵值'); }
+    if (isFirst && p._kotaroPassive) { recover += 1; addBattleLog('p1', '【光太郎被动·千金之势】首次献祭额外回复1点音韵值'); }   // 【2026-10-11】新卡面：回 1（旧 2 ✗）
     if (isFirst && p.permanent) {
       for (var pi = 0; pi < p.permanent.length; pi++) {
         if (p.permanent[pi].name && p.permanent[pi].name.indexOf('黑色卡片') >= 0) {
@@ -11667,7 +11668,7 @@ function useCharacterPassive() {
   if (battleState.phase === 'roll') { showToast('投掷阶段不能发动角色技能', 'warn'); return; }
   var p = battleState.p1, options = [], T = battleState.turn;
   if (p._kasumiPassive && !p._kasumiUsedThisTurn) {
-    options.push({name: '霞·整肃', desc: '选至多2张手卡和1张永续区卡放回牌组洗切，抽相同数量，放回3张回1音韵', action: activateKasumiPassive});
+    options.push({name: '霞·整肃', desc: '选至多2张手卡和1张永续区卡放回牌组洗切，抽相同数量，放回3张回3音韵', action: activateKasumiPassive});
   }
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+2 / γ回6同步+抽1馈赠 / δ献祭次数+1并造4理智', action: activateMegumiSP});
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', action: activateKoharuSP});
@@ -12088,7 +12089,7 @@ function activateKasumiPassive() {
     if (returnCount > 0) {
       shuffleArray(p.deck);
       for (var i = 0; i < returnCount; i++) { var d = drawCard('p1'); if (d) addBattleLog('p1', '【霞被动·整肃】抽到【' + d.name + '】'); }
-      if (returnCount >= 3) { recoverCost('p1', 1, '霞被动·整肃'); addBattleLog('p1', '【霞被动·整肃】放回3张，回复1点音韵值'); }
+      if (returnCount >= 3) { recoverCost('p1', 3, '霞被动·整肃'); addBattleLog('p1', '【霞被动·整肃】放回3张，回复3点音韵值'); }   // 【2026-10-11】新卡面：回 3 点（旧 1 ✗）
       p._kasumiUsedThisTurn = true;
     } else {
       addBattleLog('p1', '【霞被动·整肃】未放回任何卡，本次不消耗每回合次数');
@@ -13086,13 +13087,13 @@ function getActiveBuffs(user) {
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
   if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加'+p._shenleStack+'层（上限9，使用不消耗，每次使用最终伤害+'+p._shenleStack+'）','san');
   /* 【2026-10-03 作者要求】原皮琉璃：显示"已造成多少次判定伤害"，便于确认累计了多少判定伤害加成。
-     琉璃被动阶梯：每累计 3/6/11/14 次 ⇒ 抽2选1弃 + 全队判定伤害+1（进度条按下一档显示）。 */
+     琉璃被动阶梯：每累计 4/7/11/14 次 ⇒ 抽2选1弃 + 全队判定伤害+1（进度条按下一档显示）。 */
   if (p._ruriJudgeCount) {
-    var __rjTh = [3, 6, 11, 14], __rjTier = 0, __rjNext = null;
+    var __rjTh = [4, 7, 11, 14], __rjTier = 0, __rjNext = null;   // 【2026-10-11】与 TH 同步改成 4/7/11/14 ✓
     __rjTh.forEach(function (t) { if (p._ruriJudgeCount >= t) __rjTier++; else if (__rjNext == null) __rjNext = t; });
     var __rjProg = __rjNext ? { v: (p._ruriJudgeCount - (__rjTier ? __rjTh[__rjTier - 1] : 0)), thr: (__rjNext - (__rjTier ? __rjTh[__rjTier - 1] : 0)) } : null;
     P('progress','🔎','琉璃·判定伤害', p._ruriJudgeCount + ' 次',
-      '琉璃被动：每累计 3/6/11/14 次判定伤害进入阶梯（抽2选1弃，全队判定伤害+1）。已完成 ' + __rjTier + '/4 档' +
+      '琉璃被动：每累计 4/7/11/14 次判定伤害进入阶梯（抽2选1弃，全队判定伤害+1）。已完成 ' + __rjTier + '/4 档' +
       (__rjNext ? ('，下一档还需 ' + (__rjNext - p._ruriJudgeCount) + ' 次') : '（已满）'), 'jud', __rjProg);
   }
   /* 【2026-10-01 作者要求】贪欲者的烙印：状态栏标记（每枚：获音韵+1 / 受最终伤害+1，上限 7） */
@@ -13121,7 +13122,7 @@ function getActiveBuffs(user) {
     P('progress', icon, name, v+'/'+thr, '本回合已累计移动 '+v+' 格，再移动 '+Math.max(0,thr-v)+' 格触发效果', 'prog', { v: v, thr: thr });
   }
   var __capIsRio = p.captain && (p.captain.name||'') === '现实间里绪';
-  PROG('_rioMoveCount', 8, '📈', '里绪累计', !!p._rioPassive);
+  PROG('_rioMoveCount', 7, '📈', '里绪累计', !!p._rioPassive);   // 【2026-10-11】新卡面：7 格触发（旧 8 ✗）
   PROG('_zhichiMoveCount', 8, '📏', '直尺累计', (p.permanent||[]).some(function(c){return c.name&&c.name.indexOf('直尺')>=0;}));
   PROG('_koharuMoveCount', 4, '🌀', '小春累计', !!p._koharuSP);
   return out;
@@ -16444,7 +16445,7 @@ function sacrificeCards(user, picks, thenDraw, next) {
     used++; p._sacrificeUsedThisTurn = used;
     var recover = 2;
     if (p._meiSPBeta) { recover += 2; p._meiSPBeta = false; addBattleLog(user, '【松山惠SP·乐曲β】本次献祭回复音韵+2'); }
-    if (used === 1 && p._kotaroPassive) { recover += 2; addBattleLog(user, '【光太郎被动】首次献祭额外+2音韵'); }
+    if (used === 1 && p._kotaroPassive) { recover += 1; addBattleLog(user, '【光太郎被动】首次献祭额外+1音韵'); }   // 【2026-10-11】新卡面：回 1（旧 2 ✗）
     if (used === 1 && (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('黑色卡片') >= 0; })) { recover += 1; addBattleLog(user, '【黑色卡片】首次献祭额外+1音韵'); }
     p.cost = Math.min(p.cost + recover, p.maxCost);
     if (p._lilithSP) { p._skillCostMinus = 1; addBattleLog(user, '【里尔亚斯SP】本次献祭后，下一次使用的技能卡音韵值-1（新减免替换旧减免）'); }
