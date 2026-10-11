@@ -1997,7 +1997,25 @@ window.__CARD_DATA__ = {
          "lv": "COST：2",
          "image_url": "assets/images/ui2/img_sk_liuli_halloween.webp?v=1",
          "character_full": "琉璃(万圣祭)",
-         "_category": "skill_cards"
+         "_category": "skill_cards",
+         "score": 6.9,
+         "grade": "B+",
+         "archetypes": [
+            "快攻侵略队"
+         ],
+         "recommended_with": [
+            "琉璃(万圣祭)",
+            "人格修正拳！",
+            "夏日海滩踢击",
+            "小沙香琉璃"
+         ],
+         "combo_notes": "2 费给一名玩家回 2 点同步 + 3 次行动内最终伤害 +25%（可叠加）⇒ 叠给同一个输出位收益最高，配合多段/判定输出卡在三次行动里连打。SP 把墓地这张卡移出游戏，从牌组拿一张永续卡入手（自付 2 点同步）⇒ 缺效果处理区组件时用它补牌，注意错开需要同步值的回合。",
+         "dims": {
+            "cost": 8,
+            "flex": 7,
+            "synergy": 5.5,
+            "stable": 5.5
+         }
       },
       {
          "name": "弱点分析",
