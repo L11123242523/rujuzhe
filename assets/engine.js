@@ -5459,6 +5459,29 @@ function initBattle() {
   } else {
     addBattleLog('system', '对战开始！玩家1先手');
   }
+
+  /* 【2026-10-11 紧急平衡性调整 · 首回合先后手补偿】作者点名：先手第一回合获取的音韵值 -1、后手第一回合能抽卡 ✓
+     · 先手：从"游戏开始自然回复"里**扣掉 1 点**（削弱先手起手优势 ✗）
+     · 后手：**额外抽 1 张**（补偿后手 ✓）
+     执行时机：必须在**先后手已确定之后**（联机硬币在上一块里才定 ✓）、第一次 startTurn() 之前 ✓ */
+  (function __firstTurnHandicap() {
+    try {
+      var __first = battleState.currentPlayer || 'p1';
+      var __second = (__first === 'p1') ? 'p2' : 'p1';
+      var __fp = battleState[__first];
+      if (__fp) {
+        var __cut = Math.min(1, __fp.cost || 0);
+        __fp.cost = (__fp.cost || 0) - __cut;
+        addBattleLog(__first, '【首回合补偿】先手第一回合获取的音韵值 -1（当前音韵 ' + (__fp.cost || 0) + '）');
+      }
+      var __sp = battleState[__second];
+      if (__sp && typeof drawCard === 'function') {
+        var __d2 = drawCard(__second);
+        addBattleLog(__second, '【首回合补偿】后手第一回合额外抽 1 张卡' + (__d2 ? '【' + __d2.name + '】' : '（牌组为空）'));
+      }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+    } catch (e) { console.error('首回合先后手补偿出错（忽略）', e); }
+  })();
   
   // 开始第一回合（延迟确保DOM就绪）
   
@@ -19859,13 +19882,18 @@ function __yongzouGraveHit() {
     var has = (tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
     if (!has) return false;
     tpp._yongzouCount = (tpp._yongzouCount || 0) + 1;
-    var n = tpp._yongzouCount, dmg = n >= 14 ? 3 : (n >= 7 ? 2 : 1);
+    var n = tpp._yongzouCount;
+    /* 【2026-10-11 紧急平衡性调整】新卡面：「每有 **3** 张卡进入墓地就可以对一名玩家造成 **4** 点无序属性伤害。
+       这个效果单回合触发 **3/6** 次后造成的基础伤害提升至 **5/6** 点」
+       （旧实现：每 1 张卡就触发、伤害 1/2/3、阈值 7/14 ✗ ⇒ 全部替换 ✓） */
+    if (n % 3 !== 0) return false;
+    var __yzTimes = n / 3, dmg = __yzTimes >= 6 ? 6 : (__yzTimes >= 3 ? 5 : 4);
     function __hit(t) {
       dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp);
-      addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓，对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害');
+      addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓（第' + __yzTimes + '次触发），对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害');
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
-    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地，选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
+    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地（第' + __yzTimes + '次触发），选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
     else __hit(foeOf(tp));
     return true;
   } catch (e) { console.error('永奏进行曲进墓触发出错', e); return false; }
@@ -21848,8 +21876,13 @@ function __rollForAfter(who, tag) {
     var p = battleState && battleState[who];
     if (!p) return;
     if (p._yuPassive && typeof recoverCost === 'function') {
-      recoverCost(who, 1, '予被动');
-      addBattleLog(who, '【入间予被动】每次投掷后回复自身1点音韵值' + (tag ? ('（' + tag + '）') : ''));
+      /* 【2026-10-11 紧急平衡性调整】新卡面：「每进行**3次投掷**后回复自身1点音韵值」（旧：每 1 次投掷就回 ✗）
+         ⇒ 累计计数取模 3 ✓（文本没写"每回合重置" ⇒ 整局累计 ✓） */
+      p._yuRollCount = (p._yuRollCount || 0) + 1;
+      if (p._yuRollCount % 3 === 0) {
+        recoverCost(who, 1, '予被动');
+        addBattleLog(who, '【入间予被动】每3次投掷后回复自身1点音韵值（累计第' + p._yuRollCount + '次投掷）' + (tag ? ('（' + tag + '）') : ''));
+      }
     }
   } catch (e) { console.error('投掷后被动出错（忽略）', e); }
 }
