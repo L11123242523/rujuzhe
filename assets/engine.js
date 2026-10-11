@@ -3493,8 +3493,20 @@ function __deckLibRenderBar() {
     var arr = __deckLibAll();
     var opts = arr.map(function (r) { return '<option value="' + r.id + '">' + String(r.name).replace(/[<>&]/g, '') + '</option>'; }).join('');
     host.innerHTML =
+      /* 【2026-10-12 作者报："卡组配置我的卡组那里选保存的卡组，卡组名字和选择栏的背景色一致导致不好分辨" ✓】
+         原来 `<select>` 背景 `#1b2237` 与栏底/下拉底色一致 ✗ ⇒ 卡组名和"选择栏"糊成一块 ✓
+         修法（**只动这一条栏** ✓，别处界面不碰 ✗）：
+           ① select 背景抬亮一档 + 亮边框 + 内侧阴影 ⇒ 一眼读作"可点的选择栏" ✓
+           ② 文字纯白 + 略加字重 ✓
+           ③ 展开的下拉项单独上色（见后面那段 <style> ✓）
+           ④ 整条栏给一层"面板感"（比页面底稍亮 + 圆角 + 描边 ✓）⇒ 标签/按钮与下拉的关系清楚 ✓ */
+      '<style>' +
+        '#deckLibSel{background:#2a3550 !important;color:#fff !important;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 -6px 12px rgba(0,0,0,.28);}' +
+        '#deckLibSel option{background:#1b2237;color:#fff;font-weight:400;}' +
+        '#deckLibBar{padding:6px 8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(140,180,255,.22);display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px;}' +
+      '</style>' +
       '<span style="font-size:12px;color:#cde;margin-right:6px;">📚 我的卡组（' + arr.length + '）</span>' +
-      '<select id="deckLibSel" style="max-width:190px;padding:3px 6px;border-radius:6px;background:#1b2237;color:#e8eefc;border:1px solid rgba(255,255,255,.2);">' + (opts || '<option value="">（还没有存档）</option>') + '</select>' +
+      '<select id="deckLibSel" style="max-width:190px;padding:3px 6px;border-radius:6px;background:#2a3550;color:#fff;border:1px solid rgba(140,180,255,.55);">' + (opts || '<option value="">（还没有存档）</option>') + '</select>' +
       '<button type="button" onclick="__deckLibSavePrompt()" style="margin-left:6px;">💾 存为…</button>' +
       '<button type="button" onclick="var s=document.getElementById(\'deckLibSel\'); if(s&&s.value)__deckLibApply(s.value);" style="margin-left:4px;">📂 读取</button>' +
       '<button type="button" onclick="var s=document.getElementById(\'deckLibSel\'); if(s&&s.value){if(confirm(\'删除这套卡组存档？\'))__deckLibDelete(s.value);}" style="margin-left:4px;">🗑 删除</button>';
@@ -17183,9 +17195,39 @@ function __opsDamage(op, ctx, next, env) {
     case 'prevent_next_damage': p._preventNextDamage = true; addBattleLog(user, '登记：抵消下一次即将受到的伤害'); break;
     case 'threat_sacrifice': {
       var tc = (q.hand || []).find(function (c) { return c.attribute === op.attr || (c.tags && c.tags.indexOf(op.attr) >= 0) || (c.type && c.type.indexOf(op.attr) >= 0); });
-      if (tc) { var ti = q.hand.indexOf(tc); q.hand.splice(ti, 1); moveCardToGrave(target, tc, 'sacrifice'); q.cost = Math.min(q.cost + 2, q.maxCost); addBattleLog(user, '对手献祭【' + tc.name + '】视为一次献祭，回2音韵，免除伤害'); break; }
+      /* 【2026-10-12 作者报："得分！只有目标手里有混沌卡就强制送入墓地（视为一次献祭）根本没得选，
+         但是原卡面上的描述明显就是可以选择的" ✓】
+         卡面原文：「…那之后**对手除非**将一张混沌属性的卡送入墓地（视为一次献祭），**否则**将再次受到2点混沌属性伤害。」
+         ⇒ "除非…否则…" = **由对手自己选** ✓；原实现（有卡就直接送 ✗）漏了询问 ✓。
+         修法：**先问持有者** ✓ ——
+           · 接受 ⇒ 沿用原来的献祭路径（送墓 + 视为一次献祭 + 回2音韵 + 免除伤害 ✓）
+           · 不接受 ⇒ 走**本来就有的**"无卡可献祭"那条路（`applyDamageOps … op.elseDamage` ✓）⇒ 不新增任何规则逻辑 ✓
+           · AI 目标 ⇒ 沿用原来的取舍（会送就送 ✓），不打扰玩家 ✓
+           · 联机对手 ⇒ `onlineDecideModal('p2', …)` ✓；本机 ⇒ `showChoiceModal` ✓ */
+      function __tsSacrifice() {
+        var ti = q.hand.indexOf(tc); if (ti >= 0) q.hand.splice(ti, 1);
+        moveCardToGrave(target, tc, 'sacrifice');
+        q.cost = Math.min(q.cost + 2, q.maxCost);
+        addBattleLog(user, '对手献祭【' + tc.name + '】视为一次献祭，回2音韵，免除伤害');
+      }
+      function __tsElseDamage() {
+        applyDamageOps(user, target, { judge: false, base: op.elseDamage, kind: __kindOf(op.kind) }, next);
+      }
+      if (tc) {
+        var __tsOpts = ['送墓【' + tc.name + '】（视为一次献祭，免除这次伤害）', '不送（再次受到' + op.elseDamage + '点伤害）'];
+        if (typeof isAISeat === 'function' && isAISeat(target)) { __tsSacrifice(); break; }
+        if (typeof Online !== 'undefined' && Online.active && target === 'p2') {
+          onlineDecideModal('p2', '得分！（对手）', '是否将一张' + op.attr + '属性的卡送入墓地（视为一次献祭）？', '不送则再次受到' + op.elseDamage + '点伤害', __tsOpts, function (oi) { if (oi === 0) __tsSacrifice(); else __tsElseDamage(); });
+          return;
+        }
+        if (typeof showChoiceModal === 'function') {
+          showChoiceModal('得分！', '是否将一张' + op.attr + '属性的卡送入墓地（视为一次献祭）？', '不送则再次受到' + op.elseDamage + '点伤害', __tsOpts, function (oi) { if (oi === 0) __tsSacrifice(); else __tsElseDamage(); });
+          return;
+        }
+        __tsSacrifice(); break;
+      }
       // 无卡可献祭时造成 else 伤害：伤害结算的 next 已接管推进，直接返回，避免底部 next() 二次推进
-      applyDamageOps(user, target, { judge: false, base: op.elseDamage, kind: __kindOf(op.kind) }, next);
+      __tsElseDamage();
       return;
     }
   }
@@ -22529,8 +22571,12 @@ function postUsePassiveHooks(user, card, done) {
     });
   }
 
-  // 琉璃(水着)被动①：用热忱卡后造1热忱伤+回1同步（必发）
-  if (p._ruriMizugiPassive && card && (card.attribute || '') === '热忱') {
+  // 琉璃(水着)被动①：用**热忱属性的角色携带卡（攻击卡/技能卡）**后造1热忱伤+回1同步（必发）
+  /* 【2026-10-12 作者报："ai使用水着琉璃还是用一张热忱属性卡就造伤（旧版），新版卡面写的是使用热忱属性的
+     **角色携带卡（攻击卡和技能卡）**" ✓】根因：这里原来只判 `attribute === '热忱'` ✗ ⇒ 任何热忱卡（道具/事件/乐谱…）
+     都会触发 ✓ ⇒ 补上"角色携带卡"限定 ✓，与紧邻的被动②（下面那一块 ✓）同形 ✓ */
+  if (p._ruriMizugiPassive && card && (card.attribute || '') === '热忱'
+      && (card._category === 'attack_cards' || card._category === 'skill_cards')) {
     __add(user, true, '琉璃(水着)被动·热忱卡', function (next) {
       var __rmFoe = foeOf(user);
       dealDamageWithResponse(__rmFoe, 1, '琉璃(水着)被动·使用热忱卡', null, '热忱', user);
