@@ -6652,6 +6652,18 @@ var CardAnim = {
       if (!src && card && card.name && typeof __deckCardByName === 'function') {
         try {
           var __fb = __deckCardByName(card.name);
+          /* 【2026-10-12 作者报"连锁动画里有卡图的卡又不显示卡图"——真机实测根因 ✓】
+             链上的卡对象常带后缀名（「…·SP」「…SP」「…（水着）」✓），而 `__deckCardByName` 要求**完全相等** ✗
+             ⇒ 精确查名必然落空 ⇒ 回落成"只显示名字" ✓（实测：即兴演出 ✓有图；即兴演出·SP / 即兴演出SP / 即兴演出（水着）⇒ 全 none ✗）
+             修法：**先精确、后归一化**（去掉 `·SP`/`SP`/`（…）` 后缀再查一次 ✓）—— 精确优先 ⇒ 不会误配 ✓ */
+          if (!__fb) {
+            var __base = String(card.name)
+              .replace(/[·・]\s*SP\s*$/i, '')
+              .replace(/\s*SP\s*$/i, '')
+              .replace(/[（(][^）)]*[）)]\s*$/, '')
+              .trim();
+            if (__base && __base !== card.name) __fb = __deckCardByName(__base);
+          }
           if (__fb) src = __fb.image_url || __fb.avatar_url || '';
         } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
       }
@@ -6819,6 +6831,18 @@ var ChainAnim = {
       if (!src && card && card.name && typeof __deckCardByName === 'function') {
         try {
           var __fb = __deckCardByName(card.name);
+          /* 【2026-10-12 作者报"连锁动画里有卡图的卡又不显示卡图"——真机实测根因 ✓】
+             链上的卡对象常带后缀名（「…·SP」「…SP」「…（水着）」✓），而 `__deckCardByName` 要求**完全相等** ✗
+             ⇒ 精确查名必然落空 ⇒ 回落成"只显示名字" ✓（实测：即兴演出 ✓有图；即兴演出·SP / 即兴演出SP / 即兴演出（水着）⇒ 全 none ✗）
+             修法：**先精确、后归一化**（去掉 `·SP`/`SP`/`（…）` 后缀再查一次 ✓）—— 精确优先 ⇒ 不会误配 ✓ */
+          if (!__fb) {
+            var __base = String(card.name)
+              .replace(/[·・]\s*SP\s*$/i, '')
+              .replace(/\s*SP\s*$/i, '')
+              .replace(/[（(][^）)]*[）)]\s*$/, '')
+              .trim();
+            if (__base && __base !== card.name) __fb = __deckCardByName(__base);
+          }
           if (__fb) src = __fb.image_url || __fb.avatar_url || '';
         } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
       }
