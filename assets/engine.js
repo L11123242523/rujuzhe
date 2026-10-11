@@ -15256,7 +15256,11 @@ function __parseSources(t) { var s = []; if (/牌组|卡组|牌库/.test(t)) s.p
 
 function __parseTags(t) { return (t.match(/\[[^\]]+\]/g) || []).map(function (x) { return x.slice(1, -1); }); }
 
-function __parseCats(t) { var c = []; if (/攻击卡/.test(t)) c.push('attack_cards'); if (/技能卡/.test(t)) c.push('skill_cards'); if (/单次种类|单次卡|道具/.test(t)) c.push('item_single'); if (/永续/.test(t)) c.push('item_permanent'); return c; }
+/* 【2026-10-12 作者报·夏日畅饮时间！①】卡面只写「[战术]或[移动]**道具**卡」——**没有种类限制** ✓，
+   只有标签限制（无序以外 ✓）。而原来 `/单次种类|单次卡|道具/` 把光秃秃的「道具」也算作**单次** ✗
+   ⇒ 永续道具（如设计师的直尺 ✓）被排除 ⇒「无法加入则不处理」⇒ 检索被整段跳过 ✓（作者实测 ✓）
+   ⇒ 修法：**只有明确写「单次种类 / 单次卡」才限单次** ✓；只写「道具」⇒ **单次 + 永续都算** ✓ */
+function __parseCats(t) { var c = []; if (/攻击卡/.test(t)) c.push('attack_cards'); if (/技能卡/.test(t)) c.push('skill_cards'); if (/单次种类|单次卡/.test(t)) c.push('item_single'); else if (/道具/.test(t)) { c.push('item_single'); c.push('item_permanent'); } if (/永续/.test(t)) c.push('item_permanent'); return c; }
 
 function matchCardQuery(c, tags, cats, exclude) {
   if (cats && cats.length && cats.indexOf(c._category) < 0) return false;
