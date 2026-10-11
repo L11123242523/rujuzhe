@@ -6757,6 +6757,20 @@ var ChainAnim = {
           && typeof __deckCardByName === 'function') {
         try {
           var __full0 = __deckCardByName(__cc0.name);
+          /* 【2026-10-12 作者报"连锁动画里有卡图的卡又不显示卡图"——真机实测根因 ✓】
+             链上的名字常带后缀（「…·SP」「…SP」「…（形态）」✓），而 `__deckCardByName` 要求**完全相等** ✗
+             ⇒ 精确查名落空 ⇒ 动画记录里 image_url 为空 ⇒ 只显示名字 ✓
+             （实测：即兴演出 ✓有图；即兴演出·SP / 即兴演出SP / 即兴演出（水着）⇒ 全 none ✗）
+             修法：**先精确、后归一化**（去掉 `·SP`/`SP`/`（…）` 后缀再查一次 ✓）—— 精确优先 ⇒ 不误配 ✓
+             ⚠ 这里（入链补图 ✓）才是动画渲染真正读的数据源 ⇒ 与另两处渲染兜底**同样处理** ✓ */
+          if (!__full0) {
+            var __base0 = String(__cc0.name)
+              .replace(/[·・]\s*SP\s*$/i, '')
+              .replace(/\s*SP\s*$/i, '')
+              .replace(/[（(][^）)]*[）)]\s*$/, '')
+              .trim();
+            if (__base0 && __base0 !== __cc0.name) __full0 = __deckCardByName(__base0);
+          }
           if (__full0 && (__full0.image_url || __full0.avatar_url)) {
             __cc0 = Object.assign({}, __cc0, { image_url: __full0.image_url, avatar_url: __full0.avatar_url });
           }
