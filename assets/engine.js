@@ -13246,6 +13246,16 @@ function getActiveBuffs(user) {
   if (__shownAtk < 0) P('debuff','⚔️','攻击力',''+__shownAtk,'攻击力下降','debuff');
   /* 【2026-10-12 作者要求】领域**独立**一条状态栏标识（原来只在上面"攻击力"行里带出一句 ✗）
      数据全部来自唯一真相 `getDomainBuff` ✓（被新领域覆盖 / 行动次数用完 ⇒ 自动不再显示 ✓） */
+  /* 【2026-10-12 作者要求："这个最终伤害+1你记得在状态栏加显示" ✓】
+     `_teamFinalDmgUp` 有两个来源 ✓：
+       · 【福金与穆宁】回收后「那之后造成的最终伤害+1」（`huginnPlay`/`huginn` 一族 ✓，2026-10-12 由攻击力改到本通道 ✓）
+       · 【小试身手！堆沙堡】配对 7 次以上「全队造成的最终伤害+1」（`engine.js:23179` ✓）
+     伤害出口在 `engine.js:16515`（`final += ap._teamFinalDmgUp`，按**攻击者本人**读取 ✓）
+     ⇒ 这里照实展示累计值 ✓（措辞两处来源都点明 ✓，不含糊 ✗） */
+  if ((p._teamFinalDmgUp || 0) > 0) {
+    P('stat', '💥', '最终伤害', '+' + p._teamFinalDmgUp, '之后造成的最终伤害 +' + p._teamFinalDmgUp + '（来源：【福金与穆宁】回收 与/或 【堆沙堡】配对7次以上）', 'dmg');
+  }
+  /* ⚠ 这一行是**领域状态栏块的开头**，必须原样保留 ✓（我上一步插入新条目时误把它替换掉了，已补回 ✗） */
   if (__domShown && __domShown.has) {
     var __domParts = [];
     if (__domShown.atkPct) __domParts.push('攻击+' + Math.round(__domShown.atkPct * 100) + '%');
