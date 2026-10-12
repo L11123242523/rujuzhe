@@ -16525,27 +16525,6 @@ function computeDamageValue(user, target, opt) {
   // 口径：判定伤害不吃（与既有"判定伤害只吃判定增伤"规则一致）
   if (!opt.judge && (tp._greedMark || 0) > 0) { final += (tp._greedMark || 0); logs.push('贪欲烙印·受创最终+' + tp._greedMark); }
   // 堆沙堡（小试身手！堆沙堡·7次以上）：全队造成的最终伤害+1（可累计）
-/* 【2026-10-12 作者点名 + 口径确认 A（常驻 ✓）】某女士爱用球棒 的 SP：
-   「队伍中每有一名[突破手]角色造成的最终伤害便+1。」
-   ⇒ 数值 = 该玩家**队伍里 [突破手] 角色的人数** ✓（标签判定沿用 `tagBonus` 的同款口径：`ch.tags` 字符串 或 `ch.roles` 数组 ✓）
-   ⇒ 作者口径 A = **常驻** ✓（不依赖这张卡在哪 ✓），但仍是**这张卡的 SP** ⇒ 必须**拥有这张卡**（手卡/牌组/墓地/移出/效果处理区任一 ✓）才算 ✓
-   ⚠ 唯一真相 ✓：**这一个函数**同时供两处消费 ——
-     ① 伤害出口（`final += …`，与既有的「羽奈SP·[侵略]道具最终+1」同族 ✓）
-     ② 本卡自身「位移量为本次附加的伤害值」的位移量（`move_by_roll` ✓）
-   ⇒ 两处不再各自猜数值 ✗ */
-function __batSpBonus(seat) {
-  try {
-    var p = battleState[seat];
-    if (!p) return 0;
-    var owns = ['hand', 'deck', 'grave', 'removed', 'removedFromGame', 'permanent'].some(function (z) {
-      return (p[z] || []).some(function (c) { return c && String(c.name || '').indexOf('某女士爱用球棒') >= 0; });
-    });
-    if (!owns) return 0;
-    return (p.chars || []).filter(function (ch) {
-      return ch && (((ch.tags || '').indexOf('突破手') >= 0) || ((ch.roles || []).indexOf('突破手') >= 0));
-    }).length;
-  } catch (e) { return 0; }
-}
   if (ap._teamFinalDmgUp > 0) { final += ap._teamFinalDmgUp; logs.push('堆沙堡·全队最终+' + ap._teamFinalDmgUp); }
   /* 【2026-10-12】某女士爱用球棒 SP：队伍中每有一名[突破手]角色，造成的最终伤害 +1（常驻 ✓ 口径 A ✓） */
   var __batSp = (typeof __batSpBonus === 'function') ? __batSpBonus(ap === battleState.p1 ? 'p1' : 'p2') : 0;
@@ -22357,6 +22336,25 @@ function computeRequiredCost(card, user) {
   /* 【2026-10-12 作者纠正 ✓】比翼恋理 ③ 是「每回合**首次音韵抽卡**的消耗音韵值-1」✓，**不是**首次用卡 ✗
      ⇒ 原先加在这里的"首次用卡减费"**已删除** ✗；正确落点 = `drawByCost()`（音韵抽卡动作 ✓，见该函数） */
   return actual;
+}
+/* 【2026-10-12 作者点名 + 口径 A（常驻 ✓）】某女士爱用球棒 的 SP：
+   「队伍中每有一名[突破手]角色造成的最终伤害便+1。」
+   ⇒ 数值 = 该玩家**队伍里 [突破手] 角色的人数** ✓（标签口径与 `tagBonus` 一致：`ch.tags` 字符串 或 `ch.roles` 数组 ✓）
+   ⇒ 口径 A＝**常驻** ✓（不依赖这张卡在哪个区域 ✓），但仍是这张卡的 SP ⇒ 必须**拥有这张卡**（手卡/牌组/墓地/移出/效果处理区任一 ✓）
+   ⚠ **必须放在顶层** ✓ —— 两个消费点分处两个函数（伤害出口 / `runOneOp` 的 `move_by_roll`）⇒ 放函数内部会变成局部，位移那处读不到 ✗（我第一版就踩了这个 ✓）
+   ⚠ 唯一真相 ✓：两处共用这一个函数，不再各自算/各自猜 ✗ */
+function __batSpBonus(seat) {
+  try {
+    var p = battleState[seat];
+    if (!p) return 0;
+    var owns = ['hand', 'deck', 'grave', 'removed', 'removedFromGame', 'permanent'].some(function (z) {
+      return (p[z] || []).some(function (c) { return c && String(c.name || '').indexOf('某女士爱用球棒') >= 0; });
+    });
+    if (!owns) return 0;
+    return (p.chars || []).filter(function (ch) {
+      return ch && (((ch.tags || '').indexOf('突破手') >= 0) || ((ch.roles || []).indexOf('突破手') >= 0));
+    }).length;
+  } catch (e) { return 0; }
 }
 function computeActualCost(card, user) {
   var p = battleState[user] || {};
