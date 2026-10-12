@@ -3605,6 +3605,10 @@ function openCardPicker(player, type, index) {
     });
   }
   
+  /* 【2026-10-12 作者报·结构修】把"这次渲染用的那份候选表"存进 pickerState ✓ ——
+     selectCard 将按**表内下标**取卡 ✓（唯一真相：渲染与取卡同一份数组 ⇒ 不可能错位 ✗），
+     不再依赖可能随时被重建/重排的全局 `allCards` 下标 ✗（作者实测：点了没反应、无任何提示 ✓） */
+  pickerState.cards = availableCards;
   if (availableCards.length === 0) {
     var msg = type === 'carries' ? '请先选择角色卡，携带卡需与已选角色对应' : '暂无可用卡牌';
     grid.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.5);padding:40px;">' + msg + '</div>';
@@ -3612,7 +3616,13 @@ function openCardPicker(player, type, index) {
     var html = '';
     for (var i = 0; i < availableCards.length; i++) {
       var card = availableCards[i];
-      var idx = allCards.indexOf(card);
+      /* 【2026-10-12 作者报·结构修】原来传的是 `allCards.indexOf(card)`（**全局数组下标** ✗）——
+         该数组会（异步载入 data/cards.json 等）被重建 ⇒ 下标失配 ⇒ `selectCard` 首行 `allCards[idx]`
+         取不到卡 ⇒ 静默 return ⇒ 表现"点添加没反应、无任何提示"✓（作者实测 ✓，真机探针复现 ✓：
+         pickerState 正确、selectCard 不抛错、槽位仍为空、选择器仍 active ✓）
+         ⇒ 改为传**本候选表内的下标** ✓（与下面渲染用的 availableCards 同一份数组 ✓ 唯一真相 ✓）
+         同类修法本项目已有先例：特制手套联机分支「候选表是 attackCards2，索引就必须映射回 attackCards2」✓ */
+      var idx = i;
       var __disReason = (type === 'items' && pickerState.disabled) ? (pickerState.disabled[card.name] || '') : '';
       var __onClick = __disReason ? ('showPickerTip("' + __disReason + '")') : ('selectCard(' + idx + ')');
       /* 【2026-10-09 作者要求】选卡弹窗里的卡格：**鼠标悬停即浮出原图**（通用浮层 __cardPeekShow；
@@ -3636,7 +3646,10 @@ function openCardPicker(player, type, index) {
 }
 
 function selectCard(cardIndex) {
-  var card = allCards[cardIndex];
+  /* 【2026-10-12 作者报·结构修】取卡**优先用这次渲染网格时的那份候选表** ✓（pickerState.cards ✓，
+     与渲染同一份数组 ⇒ 下标不可能错位 ✗）；其它调用方若仍传全局下标 ⇒ 用 allCards 兜底 ✓ */
+  var card = (pickerState && pickerState.cards) ? pickerState.cards[cardIndex] : null;
+  if (!card) card = allCards[cardIndex];
   if (!card) return;
   var pl = pickerState.player, ty = pickerState.type, idx = pickerState.index, cfg = deckConfig[pl];
   function others(){ return cfg[ty].filter(function(c,k){ return c && k !== idx; }); }
