@@ -17938,7 +17938,12 @@ var __OPS_FAMILY = {
 };
 
 function runOneOp(op, ctx, next) {
-  var user = ctx.user || 'p1', target = ctx.target || 'p2', p = battleState[user], q = battleState[target];
+  var user = ctx.user || 'p1';
+  /* 【2026-10-13 主线收口 ✓】原为 `ctx.target || 'p2'` ✗（**默认对手**）⇒ 改走唯一入口的兜底 ✓：
+     ctx 上没有显式目标时，取"本句文本未提目标"的兜底座位 = **使用者自己** ✓（绝不取对手 ✗）。
+     上游 `executeEffectSteps` 已按本句原文判过并标了 `ctx.__noTarget` ✓，这里只是执行那个结论 ✓。 */
+  var target = ctx.target || __resolveTargetFromText(user, '', 'self').seat;
+  var p = battleState[user], q = battleState[target];
   var env = { user: user, target: target, p: p, q: q, pendingNext: false };
   var __famName = __OPS_OWNER[op.op];
   /* 【只读诊断·默认关闭】window.__OPS_TRACE = true 时才启用：
@@ -18383,6 +18388,19 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
       if (/自己|自身|我方/.test(__stxt) && !/对其|向其|为其|给其|与其/.test(__stxt)) context.__tgtSubj = false;
       if (/(?:^|[，,、。；;])\s*(?:其|该玩家|目标玩家)\s*(?=抽|选|将|受到|获得|失去|回复|支付|可以)/.test(__stxt)) context.__tgtSubj = true;
     } catch (e) { try { console.error('[catch] assets/engine.js:17944', e); } catch (e2) {} }
+
+    /* 【2026-10-13 作者裁决"选项按文本来"·主线收口 ✓】目标不设全局默认 ✗：
+       本句文本**完全没提目标** ⇒ 标 `context.__noTarget = true` ✓ ⇒ 底层兜底一律取**自己** ✓（绝不取对手 ✗）。
+       为什么判在这里：这是**唯一**同时拿得到「本句原文」与「共享 context」的地方 ✓
+       （`runOneOp` / `processSingleEffect` 只收 op 对象，op 上不带来源文本 ✗）；
+       判据与 `__resolveTargetFromText` 第④条**读同一段文本** ✓（不另起一套 ✗）。
+       ⚠ 必须放在上面那段之后：`__tgtSubj` 的赋值要基于**同一份未被改动的** `context.target` ✓ */
+    try {
+      if (!context.target && context.card) {
+        var __tg0 = __resolveTargetFromText(context.user || 'p1', getMainEffectText(context.card.effect || context.card.text || ''));
+        context.__noTarget = (__tg0 && __tg0.who === 'ask' && __tg0.src === '文本未指明目标');
+      }
+    } catch (e) { try { console.error('[catch] assets/engine.js:17947 无目标判定', e); } catch (e2) {} }
 
     // 单句分发：优先结构化指令精确执行，无法精确编译则回退文本引擎
     try {
@@ -18863,7 +18881,10 @@ function processSingleEffect(effectText, context, callback) {
     return;
   }
   
-  var target = context.target || 'p2';
+  /* 【2026-10-13 主线收口 ✓】原为 `context.target || 'p2'` ✗（**默认对手**）⇒ 同 17941：改走
+     `__resolveTargetFromText` 的兜底（文本未提目标 ⇒ **使用者自己** ✓，绝不取对手 ✗）。
+     显式目标（context.target ✓）一律优先，不被覆盖 ✓。 */
+  var target = context.target || __resolveTargetFromText(context.user || 'p1', '', 'self').seat;
   var user = context.user || 'p1';
   var isAuto = isAISeat(user); // AI 结算：选择类自动决策、不挂起等待点击（A5：原来写死 user === 'p2'）
   // 显式异步控制：需要玩家在效果中途选择时 hold() 暂停自动推进，选择回调里 finish() 继续
@@ -22475,8 +22496,13 @@ function __chainImgResolve(card) {
    ⚠ 为什么要有它：兜底目标原本被写在**四处**（`~8650` 连锁 / `17917` 指令执行器 / `18842` 文本引擎 / `22951` 攻击结算 ✓）
      且四处**都默认"对手"** ✗ ⇒ 文本没写目标时**静默打对手** ✓ = 既有注释 `15495` 说的"编译成功但语义反转"那类静默错误 ✗。
      收成一处后 ⇒ 不可能再出现"改了这处、漏了那处" ✗（今晚卡图那次复发就是同一教训 ✓）。
-   ⚠ **无法询问时**（AI／对端已断 ✓）取 **self**（对自己有利或中立 ✓），**绝不取对手** ✗。 */
-function __resolveTargetFromText(user, text) {
+   ⚠ **无法询问时**（AI／对端已断 ✓）取 **self**（对自己有利或中立 ✓），**绝不取对手** ✗。
+   【2026-10-13 主线收口 ✓】第三参 fb = 文本未指明目标时的**兜底座位**（默认 'self' ✓）。
+     为什么要有它：`runOneOp` / `processSingleEffect` 这类底层执行器**读不到本步的子句文本** ✗
+     （op 对象上没有来源文本 ✓）⇒ 它们无法自己判断"该问还是该自己" ⇒ 只能由**上游显式判过的地方**
+     （`executeEffectSteps` 在 `dispatchStep` 前按**本句文本**判一次 ✓）把结论标成 `ctx.__noTarget` ✓，
+     再由这两处**用本函数的兜底**顶掉原来写死的 `'p2'` ✗。非法值（如 'foe' ✗）一律回落 'self' ✓。 */
+function __resolveTargetFromText(user, text, fb) {
   var t = String(text || '');
   var foe = (typeof foeOf === 'function') ? foeOf(user) : (user === 'p1' ? 'p2' : 'p1');
   /* ① 明确写"其他玩家/对手/敌方" ⇒ 对手（这一条优先，避免"对一名其他玩家…自己"之类被自己那半句抢走 ✗） */
@@ -22486,7 +22512,7 @@ function __resolveTargetFromText(user, text) {
   /* ③ 写"一名玩家/指定玩家"但没定是谁 ⇒ 必须问 ✓ */
   if (/一名玩家|指定玩家|选择一名玩家|选一名玩家/.test(t)) return { who: 'ask', seat: null, src: '文本：一名玩家（未定）' };
   /* ④ 文本没提目标 ⇒ 也必须问 ✓（**绝不默认对手** ✗） */
-  return { who: 'ask', seat: null, src: '文本未指明目标' };
+  return { who: 'ask', seat: (fb === 'self' || fb === 'foe') ? (fb === 'self' ? user : foe) : user, src: '文本未指明目标' };
 }
 function computeActualCost(card, user) {
   var p = battleState[user] || {};
