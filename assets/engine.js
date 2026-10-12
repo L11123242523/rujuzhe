@@ -15733,7 +15733,10 @@ function __compileBody(t) {
   var jb = t.match(/(20|6|4|六|四)面骰判定[\s\S]*?([><≥≤]=?)\s*(\d+)\s*成功/);
   if (jb) ops.push({ op: 'judge_branch', sides: ({ 六: 6, 四: 4 })[jb[1]] || +jb[1], cmp: jb[2], rhs: +jb[3], thenOps: [] });
   // 移动量=本次判定骰点
-  if (/位移量为本次附加伤害值|位移量等于本次/.test(t)) ops.push({ op: 'move_by_roll' });
+  /* 【2026-10-12 作者报·编译不中】卡面是「那之后进行一次移动，位移量为本次附加**的**伤害值。」
+     旧正则 `/位移量为本次附加伤害值|位移量等于本次/` **漏了「的」** ⇒ 该句编不出 op ✗（实测：审计报告里这一句 = [] ✓）
+     ⇒ 补上「的」，并顺带容忍"本次附加的伤害值/本次附加伤害值"两种写法 ✓ */
+  if (/位移量为?本次附加的?伤害值|位移量等于本次/.test(t)) ops.push({ op: 'move_by_roll' });
   // 查看手牌并选1张延迟移出
   if (/查看[^。；]*手牌/.test(t) && /移出游戏/.test(t)) ops.push({ op: 'exile_pick', zone: 'hand', actions: __matchNum(/(\d+)\s*次行动内/, t) || 3 });
   // 下次造伤前先扣目标同步
@@ -16522,7 +16525,31 @@ function computeDamageValue(user, target, opt) {
   // 口径：判定伤害不吃（与既有"判定伤害只吃判定增伤"规则一致）
   if (!opt.judge && (tp._greedMark || 0) > 0) { final += (tp._greedMark || 0); logs.push('贪欲烙印·受创最终+' + tp._greedMark); }
   // 堆沙堡（小试身手！堆沙堡·7次以上）：全队造成的最终伤害+1（可累计）
+/* 【2026-10-12 作者点名 + 口径确认 A（常驻 ✓）】某女士爱用球棒 的 SP：
+   「队伍中每有一名[突破手]角色造成的最终伤害便+1。」
+   ⇒ 数值 = 该玩家**队伍里 [突破手] 角色的人数** ✓（标签判定沿用 `tagBonus` 的同款口径：`ch.tags` 字符串 或 `ch.roles` 数组 ✓）
+   ⇒ 作者口径 A = **常驻** ✓（不依赖这张卡在哪 ✓），但仍是**这张卡的 SP** ⇒ 必须**拥有这张卡**（手卡/牌组/墓地/移出/效果处理区任一 ✓）才算 ✓
+   ⚠ 唯一真相 ✓：**这一个函数**同时供两处消费 ——
+     ① 伤害出口（`final += …`，与既有的「羽奈SP·[侵略]道具最终+1」同族 ✓）
+     ② 本卡自身「位移量为本次附加的伤害值」的位移量（`move_by_roll` ✓）
+   ⇒ 两处不再各自猜数值 ✗ */
+function __batSpBonus(seat) {
+  try {
+    var p = battleState[seat];
+    if (!p) return 0;
+    var owns = ['hand', 'deck', 'grave', 'removed', 'removedFromGame', 'permanent'].some(function (z) {
+      return (p[z] || []).some(function (c) { return c && String(c.name || '').indexOf('某女士爱用球棒') >= 0; });
+    });
+    if (!owns) return 0;
+    return (p.chars || []).filter(function (ch) {
+      return ch && (((ch.tags || '').indexOf('突破手') >= 0) || ((ch.roles || []).indexOf('突破手') >= 0));
+    }).length;
+  } catch (e) { return 0; }
+}
   if (ap._teamFinalDmgUp > 0) { final += ap._teamFinalDmgUp; logs.push('堆沙堡·全队最终+' + ap._teamFinalDmgUp); }
+  /* 【2026-10-12】某女士爱用球棒 SP：队伍中每有一名[突破手]角色，造成的最终伤害 +1（常驻 ✓ 口径 A ✓） */
+  var __batSp = (typeof __batSpBonus === 'function') ? __batSpBonus(ap === battleState.p1 ? 'p1' : 'p2') : 0;
+  if (__batSp > 0) { final += __batSp; logs.push('球棒SP·[突破手]×' + __batSp + ' 最终+' + __batSp); }
   var pierce = false;
   /* 【结衣SP（2026-09-28 新卡面）】「使用**热忱属性**的卡造成最终伤害+1，并且可以**无视目标1点防御值**」
      —— 旧实现是"攻击卡或[侵略]技能卡 + 无视1护盾"，与新卡面不符：改成按**卡属性=热忱**判定；
@@ -17505,7 +17532,18 @@ function __opsMove(op, ctx, next, env) {
       else __peMove(1);
       return;
     }
-    case 'move_by_roll': applyMove(user, p._lastRoll || 0); break;
+    /* 【2026-10-12 作者报 + 口径确认 A】某女士爱用球棒：「进行一次移动，**位移量为本次附加的伤害值**」
+       其中"附加的伤害值" = 它的 SP「队伍中每有一名[突破手]角色造成的最终伤害便+1」所增加的伤害 ✓
+       ⇒ 位移量 = `__batSpBonus(seat)`（[突破手] 人数 ✓，唯一真相与伤害出口共用 ✓）
+       旧实现用 `p._lastRoll`（**骰子点数** ✗）⇒ 与卡面不符 ✓ */
+    case 'move_by_roll': {
+      var __seat = (user === 'p1' || user === 'p2') ? user : (user === battleState.p1 ? 'p1' : 'p2');
+      var __n = (typeof __batSpBonus === 'function') ? __batSpBonus(__seat) : 0;
+      if (__n <= 0) { __n = (battleState[__seat] && battleState[__seat]._lastRoll) || 0; }
+      addBattleLog(__seat, '【某女士爱用球棒】按"附加的伤害值"移动 ' + __n + ' 格（[突破手]×' + __n + '）');
+      applyMove(__seat, __n);
+      break;
+    }
     case 'move_to_player': { var before = p.position; p.position = q.position; addBattleLog(user, '移动到目标所在第' + p.position + '格（原第' + before + '格）'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user); break; }
     case 'interrupt_move': { var iw = op.who === 'self' ? user : target; if (iw !== user && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, iw)) break; battleState[iw]._moveInterrupted = true; addBattleLog(user, '打断' + (iw === user ? '自己' : '目标') + '移动'); break; }
     case 'knock_off': { var h = q.hand; if (h.length) { var ri = GameRNG.int(h.length), rc = h.splice(ri, 1)[0]; q.grave.push(rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
