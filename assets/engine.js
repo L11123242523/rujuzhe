@@ -21751,17 +21751,28 @@ var PERMANENT_ACTIVE_HANDLERS = {
   huginn: function (card, user) {
     var p = battleState[user];
     if (p.cost < 3) { if (user === 'p1') showToast('【福金与穆宁】音韵不足3点。', 'warn'); return false; }
+    /* 【2026-10-12 作者报："回收效果居然能回收非侵略标签的卡" ✗】卡面：「从墓地或移出游戏的卡中选一张
+       **[侵略]标签**的卡加入手卡」 ✓ ⇒ 判定必须**认标签/属性本身** ✓，不再用 matchCardQuery（实测它放行了
+       非侵略卡，例如混沌属性的【小恶魔的投喂】✗）。判据与 `engine.js:12058` 那一族的写法保持一致 ✓ */
+    var __isAggro = function (c) {
+      return !!(c && (c.attribute === '侵略' || (c.tags && c.tags.indexOf('侵略') >= 0) || (typeof c.type === 'string' && c.type.indexOf('侵略') >= 0) || (typeof c.subtype === 'string' && c.subtype.indexOf('侵略') >= 0)));
+    };
     var pool = [], zone = [];
-    p.grave.forEach(function (c) { if (typeof matchCardQuery === 'function' ? matchCardQuery(c, ['侵略']) : (c.attribute === '侵略' || (c.type && c.type.indexOf('侵略') >= 0) || (c.tags && c.tags.indexOf('侵略') >= 0))) { pool.push(c); zone.push('grave'); } });
-    (p.removed || []).forEach(function (c) { if (typeof matchCardQuery === 'function' ? matchCardQuery(c, ['侵略']) : (c.attribute === '侵略' || (c.type && c.type.indexOf('侵略') >= 0) || (c.tags && c.tags.indexOf('侵略') >= 0))) { pool.push(c); zone.push('removed'); } });
+    p.grave.forEach(function (c) { if (__isAggro(c)) { pool.push(c); zone.push('grave'); } });
+    (p.removed || []).forEach(function (c) { if (__isAggro(c)) { pool.push(c); zone.push('removed'); } });
     if (!pool.length) { if (user === 'p1') showToast('【福金与穆宁】墓地与移出区都没有[侵略]卡。', 'warn'); return false; }
     function __applyHuginn(idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
       var picked = pool[idx], z = zone[idx]; p.cost -= 3;
       if (z === 'grave') { var i = p.grave.indexOf(picked); if (i >= 0) p.grave.splice(i, 1); }
       else { var j = p.removed.indexOf(picked); if (j >= 0) p.removed.splice(j, 1); }
-      p.hand.push(picked); p.attackBuff = (p.attackBuff || 0) + 1;
-      addBattleLog(user, '【福金与穆宁】支付3音韵回收【' + picked.name + '】，最终伤害+1（攻击加成+' + p.attackBuff + '）');
+      p.hand.push(picked);
+      /* 【2026-10-12 作者报："造成的最终伤害+1 实际处理为+1攻击力" ✗】卡面是「那之后**造成的最终伤害+1**」✓
+         ⇒ 必须走**最终伤害**通道 ✓，不能再加攻击力 ✗（攻击力还要÷2折算 ⇒ 数值与卡面不符 ✓）。
+         复用引擎既有的 `_teamFinalDmgUp`：它在伤害出口（`engine.js` 的 `final += ap._teamFinalDmgUp` 那处）是
+         按**攻击者本人**读取的 ⇒ 对本卡持有者而言正好等价于"本人之后造成的最终伤害+1" ✓（无需新增输出口 ✗） */
+      p._teamFinalDmgUp = (p._teamFinalDmgUp || 0) + 1;
+      addBattleLog(user, '【福金与穆宁】支付3音韵回收【' + picked.name + '】，之后造成的最终伤害+1（累计+' + p._teamFinalDmgUp + '）');
       updateBattleUI();
     }
     if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
