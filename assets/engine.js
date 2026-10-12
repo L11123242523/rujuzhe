@@ -14872,9 +14872,57 @@ function getMainEffectText(effectText) {
   if (!effectText) return '';
   return String(effectText).split(/SP[：:]|【SP】|被动[：:]|永续[：:]|^被动/m)[0];
 }
+/* ============================================================
+   【2026-10-13 作者裁决·目标判据"唯一真相"（S1）✓】
+   病根：同一件事原本有**三份判据各自为政**，而且都拿正则扫**整段卡面** ✗：
+     · parseTargetType（给 needTargetSelect / 弹窗用）
+     · decideDefaultTarget（给 AI 用，注释自己都写着"启发式"）
+     · __resolveTargetFromText（给连锁/文本引擎的兜底用）
+   ⇒ 整段扫描会把**时机/条件/盖伏说明**当成目标 ✗，实测两类误判：
+     · 「**自己**的回合选一名玩家…」⇒ 被当成 self（作者真机：好孩子的奖励等 **14 张**）
+     · 「可盖伏在**其他玩家**回合使用」⇒ 被当成 foe（Twice / 颠倒骰子 / 绿宝之杖·择 ✗）
+   修法：把"剥杂讯"与"取目标句"收成下面两个函数，三份判据全部改读它 ✓（不再各写一份正则）。
+   ============================================================ */
+function __tgtNormalize(effectText) {
+  var t = String(effectText == null ? '' : effectText);
+  try { if (typeof getMainEffectText === 'function') t = getMainEffectText(t); } catch (e) {}
+  /* ① 发动时机/条件措辞：说的是"什么回合/谁有权发动"，**不代表目标** ✓
+        （「自己的回合」「其他玩家的回合」两种都剥 —— 前者造成 14 张误判 self、后者造成 3 张误判 foe） */
+  t = t.replace(/(自己|自身|我方|本队|其他玩家|对手|对方)的?(回合|阶段|主要阶段|结束阶段|准备阶段)/g, ' ');
+  /* ② 卡牌属性说明：盖伏说明等（与 __resolveOptionalParens 同口径 —— 它不是可选效果、也不是目标 ✓） */
+  t = t.replace(/[（(][^）)]*盖伏[^）)]*[）)]/g, ' ');
+  /* ③ 完整度说明：「每回合一次」「一场游戏限一次」—— 同样不是目标 ✓ */
+  t = t.replace(/(每回合|一场游戏|整局|一回合|本场游戏)[^，。；;]{0,6}(一次|限一次|限1次)/g, ' ');
+  return t;
+}
+/* 取"目标句"：含"目标指代"的那一小段（判据只在目标句里认目标 ⇒ 不被远句子误伤）
+   【2026-10-13 修我自己的实现 bug ✓】第一版只认「选择一名玩家/一名玩家」，于是
+     「回复**自身**1点同步值」（自身就是目标、但没有"选择"字样）取不到目标句 ⇒ clause 为空
+     ⇒ "自己/自身"那条判据不命中 ⇒ 落到"没提目标"的兜底（错的 ✗）。现在把 自身/自己/我方/本队 也作为种子 ✓。 */
+function __tgtPickClause(t) {
+  var m = String(t == null ? '' : t).match(/[，,。；;]?\s*([^，,。；;]{0,24}?(?:选择一名玩家|选一名玩家|指定玩家|一名玩家|自身|自己|我方|本队)[^，,。；;]{0,16})/);
+  return m ? m[1] : '';
+}
+/* 目标类型（**唯一真相**）：三份判据都读它 ✓ */
+function __tgtTargetScope(effectText) {
+  var __tt = __tgtNormalize(effectText);
+  if (__tt.indexOf('一名其他玩家') >= 0 || __tt.indexOf('其他玩家') >= 0) return 'other_player';
+  if (__tt.indexOf('对方') >= 0 || __tt.indexOf('对手') >= 0) return 'opponent';
+  if (__tt.indexOf('所有玩家') >= 0 || __tt.indexOf('所有') >= 0) return 'all';
+  if (__tt.indexOf('一名玩家') >= 0) return 'any_player';
+  if (__tt.indexOf('自身') >= 0 && __tt.indexOf('其他玩家') < 0) return 'self';
+  return 'any_player';
+}
+/* 目标**时点**（供 S2 用）：'activation' = 发动时选对象 / 'resolution' = 结算时选对象 ✓
+   口径来自作者 2026-10-13 裁决（按 MD 措辞）：写「选择/选一名玩家」⇒ 发动时；写「对/为一名玩家」⇒ 结算时 ✓ */
+function __tgtTiming(effectText) {
+  var t = __tgtNormalize(effectText);
+  if (/选择一名玩家|选一名玩家|指定玩家/.test(t)) return 'activation';
+  return 'resolution';
+}
 function needTargetSelect(effectText) {
   if (!effectText) return false;
-  var main = getMainEffectText(effectText);
+  var main = __tgtNormalize(effectText);
   var targetKeywords = ['选择一名', '选择目标', '一名玩家', '一名其他玩家', '对方', '对手', '对最远距离', '对同一行', '对自身前后', '对一名'];
   for (var i = 0; i < targetKeywords.length; i++) {
     if (main.indexOf(targetKeywords[i]) >= 0) return true;
@@ -14882,20 +14930,9 @@ function needTargetSelect(effectText) {
   return false;
 }
 
-// 解析目标类型
+// 解析目标类型（薄映射：判据读唯一真相 __tgtTargetScope ✓，返回契约保持不变 ⇒ 不牵动任何调用方）
 function parseTargetType(effectText) {
-  effectText = getMainEffectText(effectText);
-  // 剔除“其他玩家/对手 + 回合/阶段”这类发动时机记述（如“可盖伏在其他玩家回合使用”），
-  // 否则会把“为一名玩家追加…”这类可作用于自己的效果误判成 other_player，导致无法选自己
-  var __tt = effectText.replace(/其他玩家(的)?(回合|阶段)/g, ' ').replace(/对手(的)?(回合|阶段)/g, ' ');
-  // 先检查"其他玩家"，避免"自身3格的一名其他玩家"被误判为self
-  if (__tt.indexOf('一名其他玩家') >= 0 || __tt.indexOf('其他玩家') >= 0) return 'other_player';
-  if (__tt.indexOf('对方') >= 0 || __tt.indexOf('对手') >= 0) return 'opponent';
-  if (__tt.indexOf('所有玩家') >= 0 || __tt.indexOf('所有') >= 0) return 'all';
-  if (__tt.indexOf('一名玩家') >= 0) return 'any_player';
-  // "自身"最后检查，因为"自身X格"可能是距离描述而非目标
-  if (__tt.indexOf('自身') >= 0 && __tt.indexOf('其他玩家') < 0) return 'self';
-  return 'any_player';
+  return __tgtTargetScope(effectText);
 }
 
 // ========== 目标选择器 ==========
@@ -22303,6 +22340,15 @@ function handlePermanentActivation(card, effectText, callback) {
 
 function decideDefaultTarget(card, user) {
   var foe = foeOf(user);
+  /* 【S1 判据合一 ✓】先问**唯一真相**：文本已定目标的（self/foe）直接照办；
+     只有它说"必须问"（ask）时，AI 才用下面的启发式替自己挑一个 —— AI 没有人可问，这一步只在"未定"时兜底 ✓。 */
+  try {
+    if (typeof __resolveTargetFromText === 'function') {
+      var __tgD = __resolveTargetFromText(user, card.effect || card.text || '', 'self');
+      if (__tgD && __tgD.who === 'self') return user;
+      if (__tgD && __tgD.who === 'foe') return foe;
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js:22138 decideDefaultTarget 读唯一真相', e); } catch (e2) {} }
   var tt = parseTargetType(card.effect || card.text || '');
   if (tt === 'self') return user;
   if (tt === 'opponent' || tt === 'other_player') return foe;
@@ -22528,7 +22574,10 @@ function __chainImgResolve(card) {
      （`executeEffectSteps` 在 `dispatchStep` 前按**本句文本**判一次 ✓）把结论标成 `ctx.__noTarget` ✓，
      再由这两处**用本函数的兜底**顶掉原来写死的 `'p2'` ✗。非法值（如 'foe' ✗）一律回落 'self' ✓。 */
 function __resolveTargetFromText(user, text, fb) {
-  var t = String(text || '');
+  /* 【S1 判据合一 ✓】本函数不再自带正则：文本先过 `__tgtNormalize`（剥时机/盖伏/完整度说明），
+     判据顺序与 `__tgtTargetScope` / `needTargetSelect` 完全同源 ✓（同一件事只有一份判据）。 */
+  var t = (typeof __tgtNormalize === 'function') ? __tgtNormalize(text) : String(text || '');
+  var clause = (typeof __tgtPickClause === 'function') ? __tgtPickClause(t) : '';
   var foe = (typeof foeOf === 'function') ? foeOf(user) : (user === 'p1' ? 'p2' : 'p1');
   /* ① 明确写"其他玩家/对手/敌方" ⇒ 对手（这一条优先，避免"对一名其他玩家…自己"之类被自己那半句抢走 ✗） */
   if (/一名?其他玩家|其他玩家|对手|敌方/.test(t)) return { who: 'foe', seat: foe, src: '文本：其他玩家/对手' };
@@ -22536,13 +22585,13 @@ function __resolveTargetFromText(user, text, fb) {
      病象（作者实测·好孩子的奖励）：卡面「**选择一名玩家**，其回3同步，之后**自己**和其下一次使用卡费用-1」——
        旧顺序拿 `/自己|自身|我方|本队/` 扫**整段卡面** ⇒ 被**后半句**的「之后**自己**和其…」命中 ⇒ 判成 self ✗
        ⇒ 返回 `seat='p1'`（非 null）⇒ 调用方 `__executeCardEffectBody` **既不走 ask 弹窗**、
-         上游 `showTargetSelect` 也不再弹 ⇒ **玩家完全没得选** ✗（本机实测：卡池共 **14 张**中招）
-     为什么"选择一名玩家"必须优先：它才是**显式指定目标**的句子 ✓；
-       而「**自己**的回合」「使用后让**自己**抽一张」这类是**时机/条件措辞**，不代表目标 ✗（旧顺序把它们当成了目标）
-     ⚠ 已按卡池逐张对照验证 ✓：本改动只让这 14 张 `self → ask`，其余 116 张**判定一字不变** ✓。 */
-  if (/选择一名玩家|选一名玩家|指定玩家|一名玩家/.test(t)) return { who: 'ask', seat: null, src: '文本：一名玩家（未定）' };
-  /* ② 明确写自己，且**没有**指向别人的介词短语（与其/对其/向其/为其/给其） ⇒ 自己 ✓ */
-  if (/自己|自身|我方|本队/.test(t) && !/对其|向其|为其|给其|与其/.test(t)) return { who: 'self', seat: user, src: '文本：自己/自身' };
+         上游 `showTargetSelect` 也不再弹 ⇒ **玩家完全没得选** ✗（实测卡池共 **14 张**中招）
+     ⚠ 这里只认**目标句**里的"一名玩家"（`__tgtPickClause`）—— 与 `needTargetSelect` 读同一段文本 ✓ */
+  if (/一名玩家|指定玩家/.test(t)) return { who: 'ask', seat: null, src: '文本：一名玩家（未定）' };
+  /* ② 明确写自己（且**没有**指向别人的介词短语 与其/对其/向其/为其/给其） ⇒ 自己 ✓
+     ⚠ 只认**目标句**里的"自己/自身"：这样「之后**自己**和其…」这类远句子不会把目标抢走 ✓；
+        而「回复**自身**1点同步值」（自己就在目标句里）仍然正确判成自己 ✓ */
+  if (/自己|自身|我方|本队/.test(clause) && !/对其|向其|为其|给其|与其/.test(clause)) return { who: 'self', seat: user, src: '文本：自己/自身' };
   /* ③ 文本没提目标 ⇒ 也必须问 ✓（**绝不默认对手** ✗） */
   return { who: 'ask', seat: (fb === 'self' || fb === 'foe') ? (fb === 'self' ? user : foe) : user, src: '文本未指明目标' };
 }
