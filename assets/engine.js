@@ -8622,6 +8622,21 @@ function __chainC1WasTakenAway(owner, card) {
 function __executeCardEffectBody(player, card, done) {
   try {
     if (!card) { if (done) done(); return; }
+    /* 【2026-10-12 作者裁决·结构修 ✓】"这张卡是否需要手写/交互处理"的判断**收口到这一处** ✓
+       —— 原来出牌路径（`settleSpecialCard` `engine.js:23440`）会查 `getSpecialHandler` ✓，
+          而**连锁逆结算路径**（本函数）**根本不查** ✗ ⇒ 跟连锁发动时交互全丢 ✗：
+          · 【超频】"选一名玩家"不问 ⇒ 直接落到下面 `target: foeOf(player)` ⇒ **默认给对手** ✗（作者实测 ✓）
+          · 【特制手套】三选一不弹 ✗　·【小试身手！堆沙堡】配对流程不走 ✗
+       ⚠ 这里**不能**直接调 `settleSpecialCard` ✗ —— 它内部还会**再扣一次费、再从手牌移除** ✓（`23444-23447` ✓），
+          而连锁用卡在发动时**已经付过费、已从原区域移出** ✓（见 `8403` 注释 ✓）⇒ 只调**处理器本体** ✓，
+          付费/去处仍由连锁那条路自己负责 ✓（唯一真相不被两处碰 ✗）。
+       ⇒ 这样"出牌"与"连锁"两条路径**共用同一个判断** ✓，一处修好、所有特判卡一起受益 ✓。 */
+    var __h = (typeof getSpecialHandler === 'function') ? getSpecialHandler(card) : null;
+    if (__h && typeof __h.play === 'function') {
+      addBattleLog(player, '【连锁】' + (card.name || '') + '：走该卡的手写/交互处理（与出牌同一判断 ✓）');
+      __h.play(card, player, function () { if (done) done(); });
+      return;
+    }
     var __raw = card.effect || card.text || '';
     var text = (typeof getMainEffectText === 'function') ? getMainEffectText(__raw) : __raw;
     if (!text) { if (done) done(); return; }
