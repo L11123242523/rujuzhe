@@ -15117,6 +15117,14 @@ function compileStepOps(text, permanent) {
   // 含 Lv 追加的卡（如打起精神来）不走此特化，交给常规分段编译以保留等级抽牌
   if (/追加(?:一个)?掷?骰?阶段/.test(core) && !/Lv\d+追加/.test(core)) {
     if (/重新进行(?:一次)?判定|重新判定/.test(core)) {
+      /* 【2026-10-12 作者确认 ✓】Twice：**只门控"重新进行一次判定"那一半** ✓
+         "追加一个掷骰阶段"是**主动用法** ⇒ 永远保留 ✓
+         "重新判定"必须有**待定的掷骰结果**才有对象 ✓ ⇒ 无窗口时**不提供该选项** ✓
+         （唯一真相 = `battleState._openRollWindow` ✓，judgeSettleWindow 开窗置位/关窗清空 ✓）
+         ⚠ 编译发生在效果**结算时** ✓ ⇒ 此处能读到实时 `battleState` ✓ */
+      var __twRollOpen = false;
+      try { __twRollOpen = !!battleState._openRollWindow; } catch (e0) {}
+      if (!__twRollOpen) return [{ op: 'add_roll_phase', toTarget: true }];
       return [{ op: 'choice', labels: ['为所选玩家追加一个掷骰阶段', '让所选玩家重新进行一次判定'], branches: [
         [{ op: 'add_roll_phase', toTarget: true }],
         [{ op: 'reroll_judge', toTarget: true }]
