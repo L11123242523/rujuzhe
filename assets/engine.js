@@ -23211,8 +23211,16 @@ var SPECIAL_CARD_HANDLERS = {
         }
         if (user === 'p1' && typeof showCardPickerMulti === 'function') {
           showCardPickerMulti(cands, '【堆沙堡】选一张与牌组顶【' + top.name + '】属性或费用一致的手卡亮出（选0张＝结束配对）', function (sel) {
-            if (!sel || !sel.length) { __finish(); return; }
-            __take(cands[sel[0]] || cands[0]);
+            /* 【2026-10-12 作者报"选了属性或费用一致的卡，却告知配对失败"——读码定因 ✓】
+               本弹窗 need=1 ⇒ 按引擎**自己的**约定（`engine.js:13942`：「needCount 缺省/1 = 单选(回调 idx)；
+               needCount>=2 = 多选(回调 idx 数组)」✓）单选时回调收到的是 **idx 数字** ✓（不是数组 ✗）。
+               而原回调用 `!sel.length` 判断"有没有选" ✗ —— **数字没有 `.length`** ⇒ `!undefined` 恒为真
+               ⇒ 每次都当成"没选"⇒ 直接 `__finish()` ✗ ⇒ 只留「配对结束」、永远没有「配对成功」✓ = 作者现象 ✓
+               修法：与引擎里既有的 `pickFromList`（`13945` `Array.isArray(idxs) ? idxs : [idxs]` ✓）**同一套归一化** ✓
+               ⇒ 数字 / 数组 / null 三种形状都正确 ✓ */
+            var __selArr = Array.isArray(sel) ? sel : ((sel === null || sel === undefined || sel === '') ? [] : [sel]);
+            if (!__selArr.length) { __finish(); return; }
+            __take(cands[__selArr[0]] || cands[0]);
           }, 1, true);
           return;
         }
