@@ -13283,6 +13283,13 @@ function getActiveBuffs(user) {
   if ((p._teamFinalDmgUp || 0) > 0) {
     P('stat', '💥', '最终伤害', '+' + p._teamFinalDmgUp, '之后造成的最终伤害 +' + p._teamFinalDmgUp + '（来源：【福金与穆宁】回收 与/或 【堆沙堡】配对7次以上）', 'dmg');
   }
+  /* 【2026-10-12 作者要求】堆沙堡配对 **5 次以上**的「自身每回合自然回复的音韵值+1」也要在状态栏可见 ✓
+     字段唯一真相 = `p._sandRegenBonus`（累计于 `engine.js:23288` ✓；回合开始的自然回复结算里被加进 `__reg` ✓
+     —— 见 `engine.js:5991 if (__p._sandRegenBonus) __reg += __p._sandRegenBonus;` ✓）
+     ⚠ 它与【比翼恋理领域】的自然回复是**两个不同字段** ✗（领域读 `__domShown.regen` ✓ 见下面领域块 13292 ✓），互不覆盖 ✓ */
+  if ((p._sandRegenBonus || 0) > 0) {
+    P('stat', '♻️', '自然回复', '+' + p._sandRegenBonus, '每回合自然回复的音韵值 +' + p._sandRegenBonus + '（来源：【小试身手！堆沙堡】配对5次以上）', 'regen');
+  }
   /* ⚠ 这一行是**领域状态栏块的开头**，必须原样保留 ✓（我上一步插入新条目时误把它替换掉了，已补回 ✗） */
   if (__domShown && __domShown.has) {
     var __domParts = [];
