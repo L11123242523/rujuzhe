@@ -6681,23 +6681,10 @@ var CardAnim = {
       /* 【2026-10-12 作者报"连锁动画里很多卡只有名字没有卡图"】渲染层自己兜底按名字查图 ✓
          （原来只认 push 时回填过的 `_cards[i]` ✗；`settlePrebuilt` 等其它入链路径没经过回填 ⇒ 只能显示名字 ✗）
          兜底入口用引擎既有的 `__deckCardByName`（查 allCards / window.cardData 各分区 / 肉鸽 ✓）✓ */
-      if (!src && card && card.name && typeof __deckCardByName === 'function') {
-        try {
-          var __fb = __deckCardByName(card.name);
-          /* 【2026-10-12 作者报"连锁动画里有卡图的卡又不显示卡图"——真机实测根因 ✓】
-             链上的卡对象常带后缀名（「…·SP」「…SP」「…（水着）」✓），而 `__deckCardByName` 要求**完全相等** ✗
-             ⇒ 精确查名必然落空 ⇒ 回落成"只显示名字" ✓（实测：即兴演出 ✓有图；即兴演出·SP / 即兴演出SP / 即兴演出（水着）⇒ 全 none ✗）
-             修法：**先精确、后归一化**（去掉 `·SP`/`SP`/`（…）` 后缀再查一次 ✓）—— 精确优先 ⇒ 不会误配 ✓ */
-          if (!__fb) {
-            var __base = String(card.name)
-              .replace(/[·・]\s*SP\s*$/i, '')
-              .replace(/\s*SP\s*$/i, '')
-              .replace(/[（(][^）)]*[）)]\s*$/, '')
-              .trim();
-            if (__base && __base !== card.name) __fb = __deckCardByName(__base);
-          }
-          if (__fb) src = __fb.image_url || __fb.avatar_url || '';
-        } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
+      /* 【2026-10-12 作者裁决·结构修 ✓】改调**唯一取图函数** ✓（原来这里自己抄了一份归一化，
+         只去 `·SP`/`SP`/`（…）` 三种 ✗ ⇒ 链上 `【名字】` 形状的名字查不到 ⇒ 只剩文字 ✗ = 作者现象 ✓） */
+      if (!src && card && card.name && typeof __chainImgResolve === 'function') {
+        try { src = __chainImgResolve(card) || ''; } catch (e) { try { console.error('[catch] assets/engine.js 动画兜底查图', e); } catch (e2) {} }
       }
       var el = document.createElement('div');
       el.className = 'md-card-fly';
@@ -6881,23 +6868,10 @@ var ChainAnim = {
       /* 【2026-10-12 作者报"连锁动画里很多卡只有名字没有卡图"】渲染层自己兜底按名字查图 ✓
          （原来只认 push 时回填过的 `_cards[i]` ✗；`settlePrebuilt` 等其它入链路径没经过回填 ⇒ 只能显示名字 ✗）
          兜底入口用引擎既有的 `__deckCardByName`（查 allCards / window.cardData 各分区 / 肉鸽 ✓）✓ */
-      if (!src && card && card.name && typeof __deckCardByName === 'function') {
-        try {
-          var __fb = __deckCardByName(card.name);
-          /* 【2026-10-12 作者报"连锁动画里有卡图的卡又不显示卡图"——真机实测根因 ✓】
-             链上的卡对象常带后缀名（「…·SP」「…SP」「…（水着）」✓），而 `__deckCardByName` 要求**完全相等** ✗
-             ⇒ 精确查名必然落空 ⇒ 回落成"只显示名字" ✓（实测：即兴演出 ✓有图；即兴演出·SP / 即兴演出SP / 即兴演出（水着）⇒ 全 none ✗）
-             修法：**先精确、后归一化**（去掉 `·SP`/`SP`/`（…）` 后缀再查一次 ✓）—— 精确优先 ⇒ 不会误配 ✓ */
-          if (!__fb) {
-            var __base = String(card.name)
-              .replace(/[·・]\s*SP\s*$/i, '')
-              .replace(/\s*SP\s*$/i, '')
-              .replace(/[（(][^）)]*[）)]\s*$/, '')
-              .trim();
-            if (__base && __base !== card.name) __fb = __deckCardByName(__base);
-          }
-          if (__fb) src = __fb.image_url || __fb.avatar_url || '';
-        } catch (e) { try { console.error('[catch] assets/engine.js:6766 动画兜底查图', e); } catch (e2) {} }
+      /* 【2026-10-12 作者裁决·结构修 ✓】改调**唯一取图函数** ✓（原来这里自己抄了一份归一化，
+         只去 `·SP`/`SP`/`（…）` 三种 ✗ ⇒ 链上 `【名字】` 形状的名字查不到 ⇒ 只剩文字 ✗ = 作者现象 ✓） */
+      if (!src && card && card.name && typeof __chainImgResolve === 'function') {
+        try { src = __chainImgResolve(card) || ''; } catch (e) { try { console.error('[catch] assets/engine.js 动画兜底查图', e); } catch (e2) {} }
       }
       el.innerHTML = src ? ('<img src="' + src + '" alt="">')
         : ('<div class="md-chain-resolve-name">' + String(label || (card && card.name) || '') + '</div>');
@@ -22426,6 +22400,33 @@ function __ioriDrawTwoAsk(seat) {
     }
     __doIt();   // AI：纯收益 ⇒ 直接发动
   } catch (e) { try { console.error('[catch] assets/engine.js __ioriDrawTwoAsk', e); } catch (e2) {} }
+}
+/* 【2026-10-12 作者裁决·结构修 ✓】连锁动画**取图**的唯一入口（三处共用 ✓）
+   为什么要有它：这条"按名字兜底取图"的逻辑原本被**抄了三份** ✗（`CardAnim.play` ✓、`ChainAnim._cardResolve` ✓、
+   `ChainAnim.push` ✓），我前两轮只改了其中一份 ⇒ 另外两份继续旧行为 ⇒ 同一 bug 反复复发 ✓（作者第三次报 ✓）。
+   现在收成一处 ✓：**精确查名优先** ✓，落空才做**统一归一化**再查一次 ✓
+   —— 归一化覆盖：①去首尾包裹符号（`【】`/`「」`/`[]`/`（）` ✓，链上的 label 就是 `【名字】` 形状 ✓）
+                 ②去后缀（`·SP`/`SP`/`（形态）` ✓）
+   ⚠ 只返回"这张卡长什么样"这一个事实 ✓；调用方**只读返回值** ✓，不再各自实现 ✗。 */
+function __chainImgResolve(card) {
+  try {
+    if (!card) return '';
+    var have = card.image_url || card.avatar_url || '';
+    if (have) return have;
+    if (!card.name || typeof __deckCardByName !== 'function') return '';
+    var full = __deckCardByName(card.name);
+    if (!full) {
+      var base = String(card.name)
+        .replace(/^[【\[「『（(]+/, '')
+        .replace(/[】\]」』）)]+$/, '')
+        .replace(/[·・]\s*SP\s*$/i, '')
+        .replace(/\s*SP\s*$/i, '')
+        .replace(/[（(][^）)]*[）)]\s*$/, '')
+        .trim();
+      if (base && base !== card.name) full = __deckCardByName(base);
+    }
+    return (full && (full.image_url || full.avatar_url)) || '';
+  } catch (e) { return ''; }
 }
 function computeActualCost(card, user) {
   var p = battleState[user] || {};
