@@ -8434,7 +8434,19 @@ function resolveChainStack(effect, onDone) {
   /* S1d：逐环的**域内语义**（改点数/位移/方向/打断/无效/重判/事件卡/技能卡…）收成一个函数，
      由 TW.settle 逐节点调用 —— 逆序、丢失目标校验、逐环异常隔离、动画收尾都归状态机。
      旧的 __step/__ci 自写逆序循环已删除：逆结算现在也只有一条路径。 */
-  function __applyNode(i, e) {
+  /* 【2026-10-13 作者报·结构修 ✓】连锁逆结算**必须等这一环的交互做完**再推进下一环 ✗→✓
+     病象（作者真机）：连锁中发动"需要选对象"的卡时，它的提示框被**后面那一环**的效果挤掉；
+     单独使用同一张卡则正常 ✓。
+     根因（读原文实证，不是猜）：调用处写的是 `fire: function (next) { __applyNode(i, e); next(); }` ✗
+       —— `__applyNode` 里事件卡/技能卡走的是 `__executeCardEffectBody(e.by, card)`，
+          既**没传 done**、`next()` 又紧接着**同步**执行 ⇒ 交互是异步的、推进却是同步的 ✗
+       ⇒ 玩家还没回答，结算已经跑到下一环并弹了下一个框 ⇒ 把前一个框挤掉 ✓（非交互卡没有框，所以不受影响 ✓）。
+     结构修法：**推进只有一个出口 `next`** ✓ —— 把 `next` 作为 `finished` 传进 `__applyNode`：
+       · 不需要交互的环（set/add/reverse/negate/cancel…）⇒ 立刻 `finished()`（与旧行为等价 ✓）
+       · 事件卡/技能卡 ⇒ 传成 `__executeCardEffectBody` 的 `done` ⇒ 玩家答完、卡的效果真的结算完，才推进 ✓
+     为什么安全：`__executeCardEffectBody` 内部 `try/catch` + `finally` 保证 `done` **恰好回调一次** ✓
+       （正常路径 ✓、抛错路径 ✓、没有处理器走指令层 ✓），所以不会"少调"（停摆）也不会"多调"（跑两遍）✓。 */
+  function __applyNode(i, e, finished) {
     __paint({ resolving: i });
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('逆结算 C' + (i + 1) + ' · ' + e.name, 'flash-resolve');
     if (e.kind === 'set' || e.kind === 'add') {
@@ -8525,10 +8537,15 @@ function resolveChainStack(effect, onDone) {
            改为与**技能卡那一环完全同构**：直接执行这张卡的效果本体（费用与去向已处理完）。 */
         addBattleLog(e.by, '▸ 逆结算执行事件卡【' + (e.name || __evCard.name || '') + '】');
         try {
-          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard);
-          else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () {});
-        } catch (err) { console.error('事件卡连锁结算异常', err); }
+          /* 【2026-10-13】把 done 交出去 ⇒ 这一环的交互（选对象/弹窗）做完才推进下一环 ✓ */
+          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); });
+          else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () { finished(); });
+          else finished();
+        } catch (err) { console.error('事件卡连锁结算异常', err); finished(); }
+        /* ⚠ 必须 return：完成回调由上面那条异步路径负责，这里不能再往下走到"立即 finished" */
+        return;
       }
+      finished();
     } else if (e.kind === 'skill') {
       /* 作者口径：技能卡是全时点卡 —— 作为连锁响应发动后，**逆结算到这一环时执行它的效果本体**。
          与事件卡同构，但执行管线走"卡牌效果"（executeEffectSteps），并且"每回合一次"的标记
@@ -8536,7 +8553,10 @@ function resolveChainStack(effect, onDone) {
       __doneSet[i] = true;
       var __skCard = e.card;
       addBattleLog(e.by, '▸ 逆结算执行技能卡【' + (e.name || (__skCard && __skCard.name) || '') + '】');
-      try { __executeCardEffectBody(e.by, __skCard); } catch (err) { console.error('技能卡连锁结算异常', err); }
+      /* 【2026-10-13】同上：等这一环的效果本体（含交互）真正结算完，再推进下一环 ✓ */
+      try { __executeCardEffectBody(e.by, __skCard, function () { finished(); }); }
+      catch (err) { console.error('技能卡连锁结算异常', err); finished(); }
+      return;
     } else if (e.kind === 'selfdouble') {
       // 位移增益（能量饮料）：发动时已即时把位移 x2（最多+6）写入待结算值，这里只做链上确认
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，位移增益随之无效'); }
@@ -8544,6 +8564,9 @@ function resolveChainStack(effect, onDone) {
     }
     __flushGrave(); // 本链环已逆结算完成：其用卡此刻进墓并触发送墓时点
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('C' + (i + 1) + (__lostSet[i] ? ' 失去对象' : ' 结算完成'), __lostSet[i] ? 'flash-lost' : 'flash-ok');
+    /* 【2026-10-13】不需要交互的环到这里就算结算完 ⇒ 立刻推进（与旧行为等价 ✓，
+       事件卡/技能卡那两支已在上面 return，由它们自己的完成回调推进 ✓） */
+    finished();
   }
   /* S1d：逆结算交给唯一路径 TW.settle —— 节点顺序在发动时就已确定（effect._chain），
      不需要再组链，所以用 settlePrebuilt 直接结算这条已排好的链；逆序 / 逐环异常隔离 / 动画收尾由状态机负责
@@ -8551,7 +8574,9 @@ function resolveChainStack(effect, onDone) {
   TW.settlePrebuilt(stack.map(function (e, i) {
     return {
       owner: e.by, label: e.name || '', alive: function () { return true; },
-      fire: function (next) { __applyNode(i, e); next(); }
+      /* 【2026-10-13 修】原来这里是 `__applyNode(i, e); next();` ✗ —— next() 同步执行 ⇒ 不等交互。
+         现在把 next 作为"这一环结算完"的信号交给 __applyNode ✓：交互做完它才会被调用 ✓。 */
+      fire: function (next) { __applyNode(i, e, next); }
     };
   }), {
     type: 'cardActivationSettle', effect: effect, tp: effect.player || (battleState && battleState.currentPlayer) || 'p1',
@@ -23469,25 +23494,17 @@ var SPECIAL_CARD_HANDLERS = {
       else { apply(battleState[user].deck.length ? 0 : 1); } // AI：能检索就检索，否则改骰
     }
   },
-  // 搜查令：查看目标手牌选1张临时移出3行动，按移出总数+1造理智伤害
-  '搜查令': {
-    play: function (card, user, done) {
-      chooseTargetPlayer(user, card, function (tp) {
-        chooseZoneCard(user, tp, 'hand', '搜查令：查看目标手牌，选1张3次行动内移出游戏', function (sc, i) {
-          if (i < 0) { addBattleLog(user, '【搜查令】目标无手牌，效果不适用'); done(); return; }
-          if (!battleState[tp].removedFromGame) battleState[tp].removedFromGame = [];
-          if (!battleState[tp].temporaryRemoved) battleState[tp].temporaryRemoved = [];
-          battleState[tp].hand.splice(i, 1);
-          sc._removeTurns = 3; battleState[tp].temporaryRemoved.push(sc);
-      try { if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: tp, card: sc }); } catch (e) { console.error('搜查令移出时点发射出错', e); }
-          var n = (battleState[tp].removedFromGame.length || 0) + battleState[tp].temporaryRemoved.length;
-          var dmg = n + 1;
-          addBattleLog(user, '【搜查令】将【' + sc.name + '】临时移出，造成' + dmg + '点理智伤害');
-          dealDamageWithResponse(tp, dmg, '搜查令', done, '理智', user);
-        });
-      });
-    }
-  },
+  // 【2026-10-13 作者裁决 (B)：删掉「搜查令」表项 ✓】
+  // 为什么删（三条实测证据 ✓，不删会继续误导后来人）：
+  //   ① 它早已是**死代码** ✗ —— 架构闸（getSpecialHandler）：文本能完整编译就 return null ✓，
+  //      实测 getSpecialHandler(搜查令) ⇒ null、isSpecialInteractiveCard ⇒ false ✓。
+  //      指令层编出的是：[{op:'exile_pick',zone:'hand',actions:3} , {op:'damage_by_removed',plus:1,kind:'sanity'}] ✓
+  //   ② **即使解冻它也是错的** ✗ —— 它写的 `sc._removeTurns = 3` + `temporaryRemoved` 没有任何消费者：
+  //      实测 `_removeTurns` 在整个 engine.js 里**只被赋值、从不被读** ✓（全仓仅此一处），
+  //      `temporaryRemoved` 也只在它内部出现 ✓ ⇒ 被它移出的卡会**永久移出、再也不回来** ✗。
+  //      引擎真正认的延迟移出机制是 `_exilePending`（见 advanceActionLapse，15861-15867 ✓）。
+  //   ③ 两者语义一致 ✓ ⇒ 承认指令层已完全覆盖 ✓（目标由 __resolveTargetFromText / 上游选择决定 ✓）。
+  // ⚠ 肉鸽表 RL_FX 里另有一条同名条目（engine.js:4782）—— **与本表无关、按作者口径不碰** ✗。
   // 破坏：选目标区域内1张卡破坏（送入对方墓地）
   '破坏': {
     play: function (card, user, done) {
