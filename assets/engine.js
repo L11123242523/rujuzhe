@@ -8641,7 +8641,31 @@ function __executeCardEffectBody(player, card, done) {
     var text = (typeof getMainEffectText === 'function') ? getMainEffectText(__raw) : __raw;
     if (!text) { if (done) done(); return; }
     var steps = parseEffect(text);
-    executeEffectSteps(steps, { user: player, target: foeOf(player), card: card }, function () { if (done) done(); }, player === 'p1');
+    /* 【2026-10-13 作者裁决"选项按文本来" ✓】目标**不再默认对手** ✗ —— 交给唯一入口按卡面文本判定 ✓
+       · self ⇒ 落使用者自己 ✓　· foe ⇒ 落对手 ✓　· ask ⇒ **必须问**（本机弹窗；AI/对端已断时取"自己"✓，
+         绝不取对手 ✗ —— 规则见 `__resolveTargetFromText` 顶部注释 ✓） */
+    var __tg = (typeof __resolveTargetFromText === 'function') ? __resolveTargetFromText(player, text) : null;
+    var __tgtSeat = (__tg && __tg.seat) ? __tg.seat : ((__tg && __tg.who === 'self') ? player : null);
+    function __runBody(targetSeat) {
+      executeEffectSteps(steps, { user: player, target: targetSeat, card: card }, function () { if (done) done(); }, player === 'p1');
+    }
+    if (__tg && __tg.who === 'ask' && !__tgtSeat) {
+      /* ask ⇒ 弹窗问"给谁用"（本机 p1 ✓）；AI 座 / 对端无人 ⇒ 取自己（对自己有利 ✓，绝不对手 ✗） */
+      var __isAI = (typeof isAISeat === 'function') ? isAISeat(player) : (player === 'p2');
+      if (player === 'p1' && !__isAI && typeof showChoiceModal === 'function') {
+        var __myName = (typeof playerDisplayName === 'function') ? playerDisplayName('p1') : '自己';
+        var __foeName = (typeof playerDisplayName === 'function') ? playerDisplayName('p2') : '对手';
+        showChoiceModal('选择目标', (card.name || '') + '：' + (__tg.src || ''), '这张卡没写明目标，请选择给谁使用', ['给自己（' + __myName + '）', '给对手（' + __foeName + '）'], function (i) {
+          addBattleLog(player, '【' + (card.name || '') + '】按文本未定目标 ⇒ 使用者选择：' + (i === 0 ? '自己' : '对手'));
+          __runBody(i === 0 ? player : foeOf(player));
+        });
+        return;
+      }
+      addBattleLog(player, '【' + (card.name || '') + '】文本未指明目标且无法询问 ⇒ 默认给自己（绝不取对手 ✓）');
+      __runBody(player);
+      return;
+    }
+    __runBody(__tgtSeat || player);
   } catch (e) {
     try { addBattleLog(player, '【连锁】效果本体结算异常：' + ((e && e.message) || e)); } catch (e2) { try { console.error('[catch] assets/engine.js:8469', e2); } catch (e2) {} }
     if (done) done();
@@ -22442,6 +22466,27 @@ function __chainImgResolve(card) {
     }
     return (full && (full.image_url || full.avatar_url)) || '';
   } catch (e) { return ''; }
+}
+/* 【2026-10-13 作者裁决"选项按文本来" ✓】目标判定**唯一入口**（顶层 ✓）
+   规则（严格按卡面文本 ✓，**不设全局默认** ✗）：
+     · 「自己/自身/我方/本队」且无「对其/向其/为其/给其/与其」 ⇒ **self**（自己）✓
+     · 「一名其他玩家/对手/敌方」                                  ⇒ **foe**（对手）✓
+     · 「一名玩家/选一名玩家/指定玩家」或**完全没提目标**            ⇒ **ask**（必须弹窗问 ✓）
+   ⚠ 为什么要有它：兜底目标原本被写在**四处**（`~8650` 连锁 / `17917` 指令执行器 / `18842` 文本引擎 / `22951` 攻击结算 ✓）
+     且四处**都默认"对手"** ✗ ⇒ 文本没写目标时**静默打对手** ✓ = 既有注释 `15495` 说的"编译成功但语义反转"那类静默错误 ✗。
+     收成一处后 ⇒ 不可能再出现"改了这处、漏了那处" ✗（今晚卡图那次复发就是同一教训 ✓）。
+   ⚠ **无法询问时**（AI／对端已断 ✓）取 **self**（对自己有利或中立 ✓），**绝不取对手** ✗。 */
+function __resolveTargetFromText(user, text) {
+  var t = String(text || '');
+  var foe = (typeof foeOf === 'function') ? foeOf(user) : (user === 'p1' ? 'p2' : 'p1');
+  /* ① 明确写"其他玩家/对手/敌方" ⇒ 对手（这一条优先，避免"对一名其他玩家…自己"之类被自己那半句抢走 ✗） */
+  if (/一名?其他玩家|其他玩家|对手|敌方/.test(t)) return { who: 'foe', seat: foe, src: '文本：其他玩家/对手' };
+  /* ② 明确写自己，且**没有**指向别人的介词短语（与其/对其/向其/为其/给其） ⇒ 自己 ✓ */
+  if (/自己|自身|我方|本队/.test(t) && !/对其|向其|为其|给其|与其/.test(t)) return { who: 'self', seat: user, src: '文本：自己/自身' };
+  /* ③ 写"一名玩家/指定玩家"但没定是谁 ⇒ 必须问 ✓ */
+  if (/一名玩家|指定玩家|选择一名玩家|选一名玩家/.test(t)) return { who: 'ask', seat: null, src: '文本：一名玩家（未定）' };
+  /* ④ 文本没提目标 ⇒ 也必须问 ✓（**绝不默认对手** ✗） */
+  return { who: 'ask', seat: null, src: '文本未指明目标' };
 }
 function computeActualCost(card, user) {
   var p = battleState[user] || {};
