@@ -4873,7 +4873,15 @@ function rlProcessCardEffect(card, user, target, paidCost) {
     markJudged: function () { if (p._afterJudgeDraw) ctx.draw(1); },
     heal: function (n) { p.sync = Math.min(p.maxSync, p.sync + (parseInt(n, 10) || 0)); },
     healCost: function (n) { p.cost = Math.min(p.maxCost, p.cost + (parseInt(n, 10) || 0)); },
-    draw: function (n) { for (var i = 0; i < (n || 1); i++) rlDrawCard(user); },
+    /* 【2026-10-12 作者点名·小野伊织被动】「此外，**一次性抽取两张卡**的场合可以发动：抽一张并回复自身1点音韵值。」
+       唯一真相 = **同一次抽卡动作的张数** ✓ —— 这一处（卡效果 DSL 的 `draw(n)`）就是"一次抽 N 张"的唯一入口 ✓
+       ⇒ 在**这里**判断 N≥2 ✓，而不是按每张分别计数 ✗（那会把"分两次各抽1张"也误判成 N≥2 ✗） */
+    draw: function (n) {
+      var __n = n || 1;
+      for (var i = 0; i < __n; i++) rlDrawCard(user);
+      try { if (__n >= 2 && typeof __ioriDrawTwoAsk === 'function') __ioriDrawTwoAsk(user); }
+      catch (e) { try { console.error('[catch] assets/engine.js:4876 伊织抽两张询问', e); } catch (e2) {} }
+    },
     mill: function (n) { for (var i = 0; i < (n || 1) && p.deck.length; i++) p.grave.push(p.deck.pop()); },
     search: function () { ctx.draw(1); },
     recall: function () { if (t.grave && t.grave.length) t.deck.unshift(t.grave.pop()); },
@@ -22375,6 +22383,34 @@ function __batSpBonus(seat) {
       return ch && (((ch.tags || '').indexOf('突破手') >= 0) || ((ch.roles || []).indexOf('突破手') >= 0));
     }).length;
   } catch (e) { return 0; }
+}
+/* 【2026-10-12 作者点名·小野伊织被动·此外】「一次性抽取两张卡的场合可以发动：抽一张并回复自身1点音韵值。」
+   · 唯一真相 = **同一次抽卡动作的张数** ✓ —— 由卡效果 DSL 的 `draw(n)`（`engine.js:4876 ✓`）在抽完后调用本函数 ✓
+     （那里是"一次抽 N 张"的唯一入口 ✓；N≥2 才问 ✓，绝不按每张分别计数 ✗）
+   · 归属判定沿用引擎里既有口径 ✓：`p._ioriPassive`（= 编入了小野伊织 ✓，与 `9408`/`12479`/`19663` 的用法一致 ✓）
+   · 三个分支照项目既有模式 ✓：本机 `showChoiceModal` ✓ / 联机 p2 `onlineDecideModal` ✓ / AI 直接发动（纯收益 ✓） */
+function __ioriDrawTwoAsk(seat) {
+  try {
+    var p = battleState[seat];
+    if (!p || !p._ioriPassive) return;
+    function __doIt() {
+      try { if (typeof rlDrawCard === 'function') rlDrawCard(seat); } catch (e) { try { console.error('[catch] assets/engine.js 伊织·抽1张', e); } catch (e2) {} }
+      var __cap = (p.maxCost != null) ? p.maxCost : ((p.cost || 0) + 1);
+      p.cost = Math.min((p.cost || 0) + 1, __cap);
+      addBattleLog(seat, '【小野伊织·此外】一次性抽了两张 ⇒ 抽1张并回复自身1点音韵值（当前' + p.cost + '）');
+      try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+    }
+    var __opts = ['发动：抽1张并回复1音韵', '不发动'];
+    if (seat === 'p1') {
+      showChoiceModal('小野伊织·此外', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); });
+      return;
+    }
+    if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
+      onlineDecideModal('p2', '小野伊织·此外（对手）', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); });
+      return;
+    }
+    __doIt();   // AI：纯收益 ⇒ 直接发动
+  } catch (e) { try { console.error('[catch] assets/engine.js __ioriDrawTwoAsk', e); } catch (e2) {} }
 }
 function computeActualCost(card, user) {
   var p = battleState[user] || {};
