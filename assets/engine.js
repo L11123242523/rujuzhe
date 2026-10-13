@@ -18793,8 +18793,13 @@ function runOneOp(op, ctx, next) {
       return;
     }
     /* 【2026-10-12 作者点名·小恶魔的投喂】主动效果：选一名玩家 ⇒ 其回复 2 点同步值，且 3 次行动内最终伤害 +X%（可叠加 ✓）
-       卡面是"**选择一名玩家**使用"（可给自己 ✓）⇒ 必须真的问选谁 ✗（上一版默认打给对手 ✗，是隐患 ✓）
-       p2/对手侧同样要有路：联机走 onlineDecideModal ✓、AI 自动选自己 ✓ */
+       【2026-10-14 作者报「使用时问一次、结算时又问一次」⇒ 结构修 ✓】
+       卡面「选择一名玩家使用」⇒ `__tgtTiming==='activation'` ⇒ 引擎**发动前**已收好目标
+       （`__collectChainTarget`）✓ —— 这是 MD 口径的"取对象是发动前提"。
+       而结算时若**再问一次**，同一个决定就被问了两次 ✗（作者实测现象）。
+       ⇒ 改为**复用发动前选定的目标** `ctx.target`（引擎里"发动前目标"的唯一真相 ✓，
+          `runOneOp` 与 `heal_sync` 用的都是它 ⇒ 两处天然一致 ✓）；
+          只有在**拿不到**时（AI 座/无窗等）才回退"使用者自己"这个既有兜底 ✓（绝不取对手 ✗）。 */
     case 'devil_feed': {
       var __dfApply = function (__dfT) {
         var __dfP = battleState[__dfT];
@@ -18812,20 +18817,11 @@ function runOneOp(op, ctx, next) {
         }
         next();
       };
-      var __dfIds = playerIds();
-      var __dfAuto = (typeof isAISeat === 'function' && isAISeat(user)) || (typeof effectEngine !== 'undefined' && effectEngine.autoResolve);
-      if (__dfAuto || __dfIds.length < 2) { __dfApply(user); return; }                  // AI：给自己（回复+增伤都是收益 ✓）
-      if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
-        onlineDecideModal('p2', '小恶魔的投喂（对手）', '选择一名玩家', '其回复2点同步值，并在3次行动内造成的最终伤害+25%（可叠加）',
-          __dfIds.map(playerDisplayName), function (oi) { __dfApply(__dfIds[oi == null ? 0 : oi] || user); });
-        return;
-      }
-      if (typeof showChoiceModal === 'function') {
-        showChoiceModal('小恶魔的投喂', '选择一名玩家', '其回复2点同步值，并在3次行动内造成的最终伤害+25%（可叠加）',
-          __dfIds.map(playerDisplayName), function (oi) { __dfApply(__dfIds[oi == null ? 0 : oi] || user); });
-        return;
-      }
-      __dfApply(user);
+      /* 【2026-10-14 结构修 ✓】不再在这里问第二次；目标用**发动前已选定的**那个（`ctx.target` ✓）。
+         缺失时回退"使用者自己"——与 `runOneOp` 的兜底口径一致 ✓（绝不取对手 ✗）。 */
+      var __dfSeat = (ctx && ctx.target) ? ctx.target : user;
+      if (!battleState[__dfSeat]) __dfSeat = user;
+      __dfApply(__dfSeat);
       return;
     }
     case 'register_mechanic':
@@ -22455,10 +22451,15 @@ var PERMANENT_STRUCT = [
   /* { match: ['镌刻'], onPlay: ['从牌组把一张混沌属性的卡加入手卡'], active: null },  ← 已删除（见上） */
   /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面：「一回合一次，把牌组最上方的那张卡送入墓地来发动，
      对一名其他玩家造成1点神圣属性伤害。**这个效果在其他玩家回合也能发动**。」
-     与环境既有的「每回合一次主动能力」同构（蓝宝/直尺/钢笔…✓），只多一个 `anyTurn: true` ✓。 */
+     与环境既有的「每回合一次主动能力」同构（蓝宝/直尺/钢笔…✓）；
+     SP 的发动路径**只有全时点连锁候选**一条（见 `collectChainable` 的 `from:'permSP'` ✓）。 */
   { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'],
     onPlayHandler: 'leishan',
-    active: { once: 'turn', flag: '_leishanSPUsedThisTurn', handler: 'leishanSP', anyTurn: true, label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（其他玩家回合也能发动）' } },
+    active: { once: 'turn', flag: '_leishanSPUsedThisTurn', handler: 'leishanSP', label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（全时点连锁）' } },
+    /* 【2026-10-14 作者报「能先单独发一次、再连锁又发一次」⇒ 结构修 ✓】
+       去掉 `anyTurn`（那是「点场上的卡」这条旧路径的口子）—— SP **只保留全时点连锁候选**一条路径 ✓，
+       否则两条路径各自判次数 ⇒ 一回合能发动两次 ✗。
+       「其他玩家回合也能发动」由全时点候选保证（`from:'permSP'` ✓），不靠这个口子。 */
   { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
       /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
       active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
@@ -22549,11 +22550,6 @@ function permanentStruct(card) {
   return null;
 }
 
-/* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】"这张永续卡是否允许在**非自己回合**主动发动"的唯一判据。
-   UI（`ui.js` 的 permCanAct）与引擎（`executePermanentActiveFor`）**同读这一处** ⇒ 不会"能发却点不动" ✗ */
-function __permAnyTurnActive(card) {
-  try { var st = permanentStruct(card); return !!(st && st.active && st.active.handler && st.active.anyTurn); } catch (e) { return false; }
-}
 function permanentHasActiveEffect(card) {
   var st = permanentStruct(card);
   return !!(st && st.active && st.active.handler);
@@ -23046,12 +23042,11 @@ function executePermanentActiveFor(user, index, done) {
   }
   // 主要阶段才能主动发动（盖伏卡翻开当回合限制已在合法性层处理）
   var act = st.active;
-  /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面明写「这个效果在其他玩家回合也能发动」
-     ⇒ 该卡（`active.anyTurn`）**不受"必须是自己回合的主要阶段"这条限制** ✓；
-     其余永续主动能力行为一字不变 ✓（`anyTurn` 只由本卡登记）。 */
-  var __anyTurnOk = !!(act && act.anyTurn);
+  /* 【2026-10-14 作者报「能先单独发一次、再连锁又发一次」⇒ 结构修 ✓】
+     这里原来给雷閃开了 `anyTurn` 口子（点场上的卡、对手回合也能发）—— 它与**全时点连锁候选**并行，
+     两条各自判次数 ⇒ 一回合能发动两次 ✗。现在**只保留全时点那一条** ✓，本闸恢复原条件（主要阶段 ✓）。 */
   var __phaseOk = (battleState.phase === 'main1' || battleState.phase === 'main2');
-  if (!__anyTurnOk && !__phaseOk && card._faceDown !== true) {
+  if (!__phaseOk && card._faceDown !== true) {
     if (user === 'p1') showToast('当前阶段不能发动永续卡效果，请在主要阶段发动。', 'warn');
     if (done) done();
     return;
