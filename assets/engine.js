@@ -8193,6 +8193,15 @@ var TW = {
       var lb = (typeof __labelOf === 'function') ? __labelOf(c) : ((c && (c.label || (c.card && c.card.name))) || '?');
       var s = new String(lb);
       s.owner = (c && c.owner) || null;
+      /* 【2026-10-14 作者报"选项还是只有『连锁』二字，不知道要连锁的效果或卡是什么"⇒ 结构修 ✓】
+         `ui.js` 渲染按钮读的是 **`choice.label`**
+         （`btn.textContent = choice.label || (choice.card && choice.card.name) || '连锁'`），
+         而这里原来**只**给"需要收目标"的候选写 `s.label` ✗ ⇒ 其它候选的 `.label` **永远是 undefined**
+         ⇒ 玩家看到的每个选项都退化成兜底字 **『连锁』**（作者已两次报 ✗）。
+         ⇒ 修法：**每个选项都写 `.label`**（值 = 该选项显示文本，与 `String(s)` 同值 ✓）。
+         ⚠ 为什么以前"看着没事"：日志/下拉按 `String(s)` 比对 ✓，但**按钮文本只认 `.label`** ✗ ⇒ 必须显式写。
+         ⚠ 写 `.label` **不改** String 对象的值 ⇒ `String(s)` / `indexOf` 那套比对一律不受影响 ✓。 */
+      s.label = String(lb);
       /* 【2026-10-14 作者报"只写连锁、看不出是哪张卡"+ 日志里卡名被套两层 ⇒ 结构修 ✓】
          这里原来写的是 `s.pick = c` ✗ —— `c` 是**候选节点**（{card,from,index,label,onAdd,fire,owner}），
          而 `s` 是**给 UI 的显示字符串**（选项文本）。把节点塞进 pick 槽之后：
@@ -8203,7 +8212,7 @@ var TW = {
          修法：**只放真 pick**（与 `TW.scan` 里 `pick: pick` 同一口径 ✓）⇒ 显示槽与规则层口径一致 ✓。
          ⚠ 不能直接删掉这个字段：`ui.js` 要用它读 `owner`（"给自己/给对手"按钮 ✓）。
          ⚠ `c.pick` 可能为空（座位能力等没有 pick 的候选）⇒ UI 侧保留回落（见 ui.js 同一处注释 ✓）。 */
-      if (c && c.needTarget === true) { s.needTarget = true; s.pick = c.pick; s.label = String(lb); }
+      if (c && c.needTarget === true) { s.needTarget = true; s.pick = c.pick; }
       return s;
     });
     opts.push(__passLabel);
@@ -10539,11 +10548,16 @@ function aiMaybeUseEvent(done) {
        ⇒ 恢复自带的 `yu2`；本处骰子**不**走唯一投骰出口 ✗（否则队长是予时会与 `_yuPassive` 双重触发 ⇒ 每次回 2 点 ✗✗） */
     var yu2 = hasChar('予') && !hasChar('予(水着)');
     var sc = 0;
-    if (GameRNG.dice(12) >= 6) sc++;
+    /* 【2026-10-14 收口】躁动之心是**三次独立校准**（12/8/6 面各一次）⇒ 每次都是一次投掷 ✓
+       ⇒ 逐次补 `__rollForAfter`（原来 3 枚骰直连 `GameRNG.dice`、一次都不算 ⇒ 漏计投掷 ✗）。
+       ⚠ 卡自带的 `yu2`（队伍里有予 ⇒ 每次回 1 音韵）**保留不动** ✓ —— 那是**本卡卡面**的补偿，
+         与【予·被动·每 3 次投掷回 1】是两件事（后者按"3 次投掷"独立累计 ✓）。
+       ⚠ 本段上面"本处骰子**不**走唯一投骰出口"的旧注释**已作废**：现口径=投掷动作就该计入 ✓。 */
+    { var __r1 = GameRNG.dice(12); __rollForAfter(aiSeat(), '躁动之心[对手]·第1次校准(12面)'); if (__r1 >= 6) sc++; }
     if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    if (GameRNG.dice(8) >= 6) sc++;
+    { var __r2 = GameRNG.dice(8); __rollForAfter(aiSeat(), '躁动之心[对手]·第2次校准(8面)'); if (__r2 >= 6) sc++; }
     if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    if (GameRNG.dice(6) >= 6) sc++;
+    { var __r3 = GameRNG.dice(6); __rollForAfter(aiSeat(), '躁动之心[对手]·第3次校准(6面)'); if (__r3 >= 6) sc++; }
     if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
     if (sc > 0) p.fascination = Math.max(0, p.fascination - sc);
     L('躁动之心[对手]：校准成功' + sc + '次，降低' + sc + '点入迷（当前' + p.fascination + '）');
@@ -19659,6 +19673,11 @@ function __eventCasesB(card, player, p, done, env) {
       var successCount = 0;
       var __calStep = function (sides, idx, next) {
         var __raw = GameRNG.dice(sides);
+        /* 【2026-10-14 收口】每次校准都是一次**独立投掷**（本函数按 12/8/6 面逐次调用 ✓）
+           ⇒ 补一次「投掷后」被动（原来直连 `GameRNG.dice` ⇒ 漏计投掷 ✗）。
+           ⚠ 本处上面那段"不走唯一投骰出口"的旧注释**已作废**：现口径=投掷动作就该计入 ✓；
+             卡自带的 `__yu2` 补偿仍保留 ✓（与本卡卡面一致，见 AI 侧同款注释 ✓）。 */
+        __rollForAfter(player, '躁动之心·第' + idx + '次校准(' + sides + '面骰)');
         var __apply = function (v) {
           if (v >= 6) successCount++;
           if (__yu2) recoverCost(player, 1, '躁动之心[入间予]');
@@ -19743,6 +19762,32 @@ function useEventCardFor(player, index, name, done) {
     if (battleState[player].hand[index] && battleState[player].hand[index]._category === 'event_cards') {
       card = battleState[player].hand[index];
     }
+  }
+  /* 【2026-10-14 作者报「公共墓地已有那张事件卡，AI 区域里却还显示它在结算中」⇒ 结构修 ✓】
+     病根：**连锁路径**调本函数时传的是 `useEventCardFor(e.by, -1, __evCard.name, …)`（`engine.js` 的
+     `resolveChainStack` 事件卡分支 ✓），而上面两处都是**按索引取卡** ⇒ `eventCards[-1]` / `hand[-1]`
+     全是 undefined ⇒ `card` 为空 ⇒ **本函数在这里直接 return** ✗ ⇒ 后面那整段"撤 C1 占位
+     （`__chainC1Exit`）+ 进公共墓地"**全被跳过** ✗；而那张牌早在**发动那一刻**就已被推进公共墓地
+     （`applyChainCard.payAndRemove`：`publicGraveyard.event_cards.push(c); c._alreadyInPublicGrave = true;` ✓）
+     ⇒ 它在公共墓地里 ✓、却留在效果处理区 ✗（`_chainC1` 常真 ⇒ UI 画「C1 结算中」）。
+     修法：索引取不到卡时，用本函数**本来就有的 `name` 形参**去玩家各区域 + 公共墓地兜底取回 ✓ ——
+     两条路径共用同一份实现，不再"索引语义不同 ⇒ 静默跳过收尾"✗。 */
+  if (!card && name) {
+    var __pz = battleState[player] || {};
+    var __zones = ['eventCards', 'hand', 'permanent', 'faceDownCards', 'musicCards'];
+    for (var __zi = 0; __zi < __zones.length && !card; __zi++) {
+      var __arr = __pz[__zones[__zi]] || [];
+      for (var __ai = 0; __ai < __arr.length; __ai++) {
+        if (__arr[__ai] && __arr[__ai].name === name) { card = __arr[__ai]; break; }
+      }
+    }
+    if (!card) {
+      try {
+        var __pg = (typeof publicGraveyard !== 'undefined' && publicGraveyard && publicGraveyard.event_cards) || [];
+        for (var __pi = 0; __pi < __pg.length; __pi++) { if (__pg[__pi] && __pg[__pi].name === name) { card = __pg[__pi]; break; } }
+      } catch (e) { try { console.error('[catch] assets/engine.js 事件卡按名兜底', e); } catch (e2) {} }
+    }
+    if (card) { try { addBattleLog(player, '【' + name + '】按卡名取回（连锁路径传的索引取不到卡）'); } catch (e) {} }
   }
   if (!card) { if (done) done(); return; }
   
