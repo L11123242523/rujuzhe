@@ -7856,6 +7856,15 @@ var TW = {
         if (__humanCand.length) {
           try {
             if (typeof Decision !== 'undefined' && Decision && Decision.enter) Decision.enter('tw' + __wid, __humanCand[0].owner);
+            /* 【2026-10-14 作者报·**结构修**（第 9 项：对局永不结束 / 同步归零不判负）】
+               这里原来写 `battleState._awaitingDecision = __humanCand.length;` ✗ ——
+               而 `assets/decision.js` 的 `mirror()` 才是这本账的**唯一作者**（它把 Decision 表投影成
+               `count()>0 ? count() : null`）。**两个口径写同一个字段**的后果已实测：
+               残留一个非空值 ⇒ `__syncZeroBusy()` 永远为真 ⇒ `checkBattleEnd()` 永远走"延后"分支
+               ⇒ **同步归零也不判负、对局在玩家眼里永不结束** ✗
+               （三组对照实测：残留值在 ⇒ 不判负；清掉 ⇒ 立刻判负 ✓）
+               ⇒ 兜底也走权威（`__decideEnter` 内部会回落 Decision.enter，并负责投影 ✓）。 */
+            else if (typeof __decideEnter === 'function') __decideEnter('tw' + __wid);
             else battleState._awaitingDecision = __humanCand.length;
           } catch (e) { try { console.error('[catch] assets/engine.js:7700', e); } catch (e2) {} }
         }
@@ -8272,7 +8281,10 @@ var TW = {
        会把 `setTimeout(__aiGuard(step))` **永久延后** ⇒ 窗口停在 `settling`、结算深度卡 1、整链停摆。
        这就是作者报的"效果被卡掉"的机制：旧代码靠闸门"2.4 秒后放行"打破死锁，代价是谈窗被跳过、效果被吞。
        ⇒ 收口标记 = 既保住"闸门绝不主动抢跑"的约束，又让结算能正常推进。 */
-    try { if (battleState) battleState._awaitingDecision = null; } catch (e) { try { console.error('[catch] assets/engine.js:8092', e); } catch (e2) {} }
+    /* 【2026-10-14 结构修·第 9 项】原来这里直接 `battleState._awaitingDecision = null` ✗ ——
+       它与 `decision.js:41 mirror()` 是**两个写入口径**（残留即永久挡住判负，见下面 `__syncZeroBusy` 的注释）。
+       本函数紧接着就 `Decision.leave('tw'+win.id)`（下一行 ✓），投影由 `mirror()` 负责 ⇒ 这里不再自写。 */
+    try { if (typeof Decision === 'undefined' || !Decision || !Decision.leave) { if (battleState) battleState._awaitingDecision = null; } } catch (e) { try { console.error('[catch] assets/engine.js:8092', e); } catch (e2) {} }
     /* 【2026-10-07 结构修】只收**本窗口自己**的账（tag = 'tw'+id）。
        旧代码不分窗口地 leave('humanCandidates') ⇒ 结算会把别的窗口的账一起删掉。 */
     try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + win.id); } catch (e) { try { console.error('[catch] assets/engine.js:8095', e); } catch (e2) {} }
@@ -8355,7 +8367,9 @@ var TW = {
     win.state = 'done';
     /* P1（MD：同一连锁一次）：连锁结束 ⇒ 清空"本连锁已排过"的集合（下一条连锁重新计） */
     try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { console.error('清空"同链一次"集合失败（不影响收尾）', e); }
-    try { if (battleState) battleState._awaitingDecision = null; } catch (e) { /* 清标记失败不影响收尾 */ }
+    /* 【2026-10-14 结构修·第 9 项】同上：关窗时**不再自写**这本账（权威是 Decision + `mirror()`）。
+       本函数下面紧接着 `Decision.leave('tw'+win.id)` ✓ ⇒ 投影由权威负责 ✓。 */
+    try { if (typeof Decision === 'undefined' || !Decision || !Decision.leave) { if (battleState) battleState._awaitingDecision = null; } } catch (e) { /* 清标记失败不影响收尾 */ }
     /* 【S-a/S-c 修 2026-10-06·关键】**关窗必须撤销"人类正在决策"标记**。
        原来只有 TW.open 在"打开时就没有人类候选"的分支才 leave，**关窗时从不 leave**
        ⇒ Decision 的 humanCandidates 窗口**永久开着** ⇒ AI 闸门（"人类在决策就不放行"）永远等下去
@@ -11298,7 +11312,15 @@ function __syncZeroBusy() {
       if ((effectEngine._resolveDepth || 0) > 0) return true;
       if ((effectEngine._pendingTriggers || []).length > 0) return true;
     }
-    if (battleState && battleState._awaitingDecision) return true;
+    /* 【2026-10-14 作者报·**结构修**（第 9 项：对局永不结束 / 同步归零不判负）】
+       这里原来读 `battleState._awaitingDecision`（旧字段）✗ —— 它是 `decision.js` 的 `mirror()`
+       投影出来的**影子账**；而 engine 里另有 3 处直接赋值（TW.open 的兜底 / TW.settle / TW.close）
+       ⇒ **同一本账两个写入口径** ⇒ 只要残留一个非空值，本函数**永远为真** ⇒
+       `checkBattleEnd()` 永远走"延后"分支 ⇒ **同步归零也不判负、对局永不结束** ✗
+       （三组对照实测 `_probe-decide-leak.cjs`：残留值在 ⇒ 不判负；清掉 ⇒ 立刻判负 ✓）
+       ⇒ 改读**唯一权威** `__playerDeciding()`（它读 `Decision.isOpen()`，与本项目"三类判断各留一个
+       权威函数"的既定方向一致 ✓）；那 3 处直接赋值也已一并收口 ✓（字段仍由 mirror() 维护做兼容 ✓）。 */
+    if (typeof __playerDeciding === 'function' ? __playerDeciding() : (battleState && battleState._awaitingDecision)) return true;
   } catch (e) { console.error('同步归零豁免判定出错（按不豁免处理）', e); }
   return false;
 }
