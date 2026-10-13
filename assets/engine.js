@@ -6292,7 +6292,10 @@ function __chainAskRefresh() {
 /* 弹出连锁选择窗（带倒计时自动放弃）。choices 末项为 PASS；超时按 PASS 处理。 */
 
 // 发动一张连锁卡并修改待结算效果；需要二次选择（点数/增减）时走可视化弹窗，结束回调 done
-function applyChainCard(player,pick,effect,done){
+function applyChainCard(player,pick,effect,done,target){
+  /* 【2026-10-13 S2 ✓】第 5 参 target = **发动前**就已选定的目标（`__collectChainTarget` 收货 ✓）。
+     为什么必须带上：MD 口径下"选择/选一名玩家"这类取对象是**发动前提** ⇒ 目标在发动那一刻锁定 ✓。
+     不传（AI 座 / 阶段时点等旧调用方）⇒ 落到 undefined ⇒ 结算层走"取自己"的兜底 ✓（绝不对手 ✗）。 */
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
   /* 【座位级连锁效果（作者 2026-09-27 裁决）】非卡片的角色能力作为连锁响应时：不付费、不动卡区，
      只把一环压入连锁，具体效果在**逆结算**时执行（见 resolveChainStack 的 __applyNode → kind:'seatEffect'）。 */
@@ -6375,10 +6378,10 @@ function applyChainCard(player,pick,effect,done){
     payAndRemove(); effect._chain.push({kind:'stop_move',by:player,name:name}); afterUse();
   } else if(pick.from==='event'){
     // 事件卡最高时点：连锁任意卡/效果发动，逆结算时执行其效果本体（大风在非移动窗口也走这里）
-    payAndRemove(); effect._chain.push({kind:'event',by:player,name:name,card:c}); afterUse();
+    payAndRemove(); effect._chain.push({kind:'event',by:player,name:name,card:c,target:target}); afterUse();
   } else if(c._category === 'skill_cards'){
     // 作者口径：技能卡是全时点卡 —— 连锁发动后，**逆结算时执行它的效果本体**（与事件卡同构，kind:'skill'）
-    payAndRemove(); effect._chain.push({kind:'skill',by:player,name:name,card:c}); afterUse();
+    payAndRemove(); effect._chain.push({kind:'skill',by:player,name:name,card:c,target:target}); afterUse();
   } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
     payAndRemove();
     function applyAdd(add){ effect._chain.push({kind:'add',by:player,name:name,from:__orig(),delta:add}); afterUse(); }
@@ -8537,8 +8540,9 @@ function resolveChainStack(effect, onDone) {
            改为与**技能卡那一环完全同构**：直接执行这张卡的效果本体（费用与去向已处理完）。 */
         addBattleLog(e.by, '▸ 逆结算执行事件卡【' + (e.name || __evCard.name || '') + '】');
         try {
-          /* 【2026-10-13】把 done 交出去 ⇒ 这一环的交互（选对象/弹窗）做完才推进下一环 ✓ */
-          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); });
+          /* 【2026-10-13】把 done 交出去 ⇒ 这一环的交互做完才推进下一环 ✓
+             【2026-10-13 S2 ✓】第 4 参 = **发动前选定的目标**（节点上带着 ✓）⇒ 直接用、不再倒推文本 ✓ */
+          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); }, e.target || null);
           else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () { finished(); });
           else finished();
         } catch (err) { console.error('事件卡连锁结算异常', err); finished(); }
@@ -8553,8 +8557,9 @@ function resolveChainStack(effect, onDone) {
       __doneSet[i] = true;
       var __skCard = e.card;
       addBattleLog(e.by, '▸ 逆结算执行技能卡【' + (e.name || (__skCard && __skCard.name) || '') + '】');
-      /* 【2026-10-13】同上：等这一环的效果本体（含交互）真正结算完，再推进下一环 ✓ */
-      try { __executeCardEffectBody(e.by, __skCard, function () { finished(); }); }
+      /* 【2026-10-13】同上：等这一环的效果本体（含交互）真正结算完，再推进下一环 ✓
+         【2026-10-13 S2 ✓】第 4 参 = 发动前选定的目标（节点上带着 ✓） */
+      try { __executeCardEffectBody(e.by, __skCard, function () { finished(); }, e.target || null); }
       catch (err) { console.error('技能卡连锁结算异常', err); finished(); }
       return;
     } else if (e.kind === 'selfdouble') {
@@ -8643,8 +8648,11 @@ function __chainC1WasTakenAway(owner, card) {
   } catch (e) { return false; }
 }
 
-/** 执行一张"效果本体"（供连锁逆结算里的技能卡等使用；与正常出牌走同一套管线） */
-function __executeCardEffectBody(player, card, done) {
+/** 执行一张"效果本体"（供连锁逆结算里的技能卡等使用；与正常出牌走同一套管线）
+ *  【2026-10-13 作者裁决·S2 ✓】第 4 参 forceTarget = **发动前就已选定的目标**（`__collectChainTarget` 收货 ✓）。
+ *    · 给了 ⇒ **直接用**，不再从卡面文本倒推、也不弹窗 ✓（MD 口径：目标在发动那一刻锁定 ✓）
+ *    · 没给 ⇒ 退回"按文本判"（AI 座 / 阶段时点等旧调用方 ✓） */
+function __executeCardEffectBody(player, card, done, forceTarget) {
   try {
     if (!card) { if (done) done(); return; }
     /* 【2026-10-12 作者裁决·结构修 ✓】"这张卡是否需要手写/交互处理"的判断**收口到这一处** ✓
@@ -8666,14 +8674,18 @@ function __executeCardEffectBody(player, card, done) {
     var text = (typeof getMainEffectText === 'function') ? getMainEffectText(__raw) : __raw;
     if (!text) { if (done) done(); return; }
     var steps = parseEffect(text);
+    /* 统一执行体（唯一一份 ✓） */
+    function __runBody(targetSeat) {
+      executeEffectSteps(steps, { user: player, target: targetSeat, card: card }, function () { if (done) done(); }, player === 'p1');
+    }
+    /* 【2026-10-13 作者裁决·S2 ✓】**发动前已定好目标 ⇒ 直接用，不再判文本、不再弹窗** ✓
+       （MD 口径：取对象是发动前提、目标在发动那一刻锁定 ✓；链节点由 `__collectChainTarget` 收好带下来 ✓） */
+    if (forceTarget) { __runBody(forceTarget); return; }
     /* 【2026-10-13 作者裁决"选项按文本来" ✓】目标**不再默认对手** ✗ —— 交给唯一入口按卡面文本判定 ✓
        · self ⇒ 落使用者自己 ✓　· foe ⇒ 落对手 ✓　· ask ⇒ **必须问**（本机弹窗；AI/对端已断时取"自己"✓，
          绝不取对手 ✗ —— 规则见 `__resolveTargetFromText` 顶部注释 ✓） */
     var __tg = (typeof __resolveTargetFromText === 'function') ? __resolveTargetFromText(player, text) : null;
     var __tgtSeat = (__tg && __tg.seat) ? __tg.seat : ((__tg && __tg.who === 'self') ? player : null);
-    function __runBody(targetSeat) {
-      executeEffectSteps(steps, { user: player, target: targetSeat, card: card }, function () { if (done) done(); }, player === 'p1');
-    }
     if (__tg && __tg.who === 'ask' && !__tgtSeat) {
       /* ask ⇒ 弹窗问"给谁用"（本机 p1 ✓）；AI 座 / 对端无人 ⇒ 取自己（对自己有利 ✓，绝不对手 ✗） */
       var __isAI = (typeof isAISeat === 'function') ? isAISeat(player) : (player === 'p2');
@@ -8694,6 +8706,47 @@ function __executeCardEffectBody(player, card, done) {
   } catch (e) {
     try { addBattleLog(player, '【连锁】效果本体结算异常：' + ((e && e.message) || e)); } catch (e2) { try { console.error('[catch] assets/engine.js:8469', e2); } catch (e2) {} }
     if (done) done();
+  }
+}
+
+/* ============================================================
+   【2026-10-13 作者裁决·S2：**先选目标，再进连锁**（MD 口径）✓】
+   病根：目标判定原本只在"效果结算"那一层（`__executeCardEffectBody` 从卡面倒推）✗；
+        而按 MD 口径，「选择/选一名玩家」这类**取对象**是**发动前提** —— 目标不合法就不能发动、
+        目标在**发动那一刻锁定** ✓（作者原话：「选完目标了才是发动前提」✓）。
+   本函数 = "入链之前收目标"的**唯一入口** ✓：
+     · 只对 `__tgtTiming()` 判为 **activation**（卡面写「选择/选一名玩家」）的卡才问 ✓
+     · **resolution** 那类（写「对/为一名玩家」）在发动时**不问** ✓，仍留到结算时（S3 之后再收口）
+     · 无法询问（AI 座 / 对端 / 无弹窗环境）⇒ **取自己** ✓，**绝不取对手** ✗（作者口径）
+     · 玩家取消（回调给 null）⇒ 返回 null，调用方**放弃这次入链** ✓（目标不合法 ⇒ 不能发动，与 MD 一致 ✓）
+   为什么要在这一层收：`applyChainCard` 是**所有连锁发动的唯一入口** ✓，
+   而它原本的签名里**根本没有 target** ✗ ⇒ 链节点不带目标 ⇒ 结算时只能猜 ✓。
+   ============================================================ */
+function __collectChainTarget(user, card, cb) {
+  var fin = (typeof cb === 'function') ? cb : function () {};
+  var self = (typeof foeOf === 'function' && user === 'p2') ? 'p2' : (user || 'p1');
+  try {
+    var timing = (typeof __tgtTiming === 'function') ? __tgtTiming((card && (card.effect || card.text)) || '') : 'resolution';
+    if (timing !== 'activation') { fin(self); return; }                 /* 结算时选对象 ⇒ 发动时不问 ✓ */
+    var isAI = (typeof isAISeat === 'function') ? !!isAISeat(user) : (user === 'p2');
+    var online = (typeof Online !== 'undefined' && Online.active);
+    if (isAI || (online && user === 'p2')) { fin(self); return; }        /* 无法询问 ⇒ 取自己 ✓（绝不对手 ✗） */
+    if (typeof showChoiceModal !== 'function') { fin(self); return; }
+    var myName = (typeof playerDisplayName === 'function') ? playerDisplayName('p1') : '自己';
+    var foeName = (typeof playerDisplayName === 'function') ? playerDisplayName('p2') : '对手';
+    showChoiceModal('选择目标', (card && card.name) || '', '这张卡要选择**一名玩家**（发动前先定目标；选完才进连锁）',
+      ['给自己（' + myName + '）', '给对手（' + foeName + '）'], function (i) {
+        if (i === null || i === undefined || i < 0) {
+          try { addBattleLog(user, '【' + ((card && card.name) || '') + '】未选择目标 ⇒ 本次不发动（目标不合法不能发动）'); } catch (e) {}
+          fin(null); return;
+        }
+        var seat = (i === 0) ? self : ((typeof foeOf === 'function') ? foeOf(self) : (self === 'p1' ? 'p2' : 'p1'));
+        try { addBattleLog(user, '【' + ((card && card.name) || '') + '】发动前选定目标：' + (seat === self ? '自己' : '对手')); } catch (e) {}
+        fin(seat);
+      });
+  } catch (e) {
+    try { console.error('[catch] assets/engine.js:8700 __collectChainTarget', e); } catch (e2) {}
+    fin(self);                                                            /* 异常 ⇒ 取自己 ✓（绝不对手 ✗） */
   }
 }
 
@@ -9023,7 +9076,9 @@ function runResponseWindow(opts) {
      判定结果确定前用的是 applyJudgeChain（改点/重判，改的是 je.val/_reverseDir）。
      不注入则默认 applyChainCard —— 这样"循环只有一份，发动语义按窗口给"。 */
   var activateFn = (typeof opts.activate === 'function') ? opts.activate
-    : function (side, pick, eff, done) { applyChainCard(side, pick, eff, done); };
+    /* 【2026-10-13 S2 ✓】把"发动前选定的目标"（第 5 参）转给 applyChainCard ⇒ 写进链节点 ⇒ 结算层直接用 ✓
+       （第 4 参是回调、第 5 参才是 target；自定义 activate 的窗口不接收它也无副作用 ✓） */
+    : function (side, pick, eff, done, target) { applyChainCard(side, pick, eff, done, target); };
   var useChoiceModal = !!opts.p1Modal && opts.p1Modal === 'choice';   // 该窗口的 p1 弹窗沿用 showChoiceModal
   TW.open({
     type: opts.type || 'response',
@@ -9048,7 +9103,18 @@ function runResponseWindow(opts) {
             alive: function () { return true; },
             /* 入链那一刻就发动（付费+移出原区域+把修改节点 push 进 effect._chain / 改 je.val）——
                域内逆结算由 resolveChainStack 负责，所以 fire 什么都不做。 */
-            onAdd: function (done) { activateFn(side, pick, effect, function () { done(); }); },
+            /* 【2026-10-13 作者裁决·S2 ✓】**先选目标，再进连锁**（MD 口径）：
+               卡面写「选择/选一名玩家」的（`__tgtTiming === 'activation'`）在这里**收目标** ✓；
+               收不到（AI/对端）⇒ 取自己 ✓；玩家取消 ⇒ **放弃这次入链** ✓（目标不合法不能发动 ✓）。
+               自定义 `activate` 的窗口（判定结果窗口改的是 je.val，与目标无关）收到额外参数无副作用 ✓ */
+            onAdd: function (done) {
+              function __go(__tg) {
+                if (__tg === null) { try { addBattleLog(side, '【连锁】未选定目标 ⇒ 本次不发动'); } catch (e) {} done(); return; }
+                activateFn(side, pick, effect, function () { done(); }, __tg);
+              }
+              if (typeof __collectChainTarget === 'function') __collectChainTarget(side, pick.card, __go);
+              else __go('' + side);
+            },
             fire: function (next) { next(); }
           });
         });
@@ -15691,7 +15757,12 @@ function __compileBody(t) {
     // （实测【闲暇时光】"立即回复4点"变成了回6点，就是这里重复计了一次）
     var __isRegenClause = /每回合[^。；]{0,8}(?:回复|回)/.test(t) || /持续\s*\d+\s*回合/.test(t);
     if (/回\s*\/\s*扣/.test(t)) { var an = __matchNum(new RegExp('扣自身\\s*' + __NUM), t) || 2; ops.push({ op: 'self_alt_sync', amount: an }); }
-    else if (hm != null && !__isRegenClause) ops.push({ op: 'heal_sync', amount: hm });
+    /* 【2026-10-13 修·落点与 loss_sync 不对称 ✓】
+       `heal_sync` 原来**不带 targetWho**，而执行器又把它加在**使用者**头上 ✗ ⇒ 卡面写「选择一名玩家，**其**回3同步」
+       这类（好孩子的奖励 / 小恶魔的投喂）本该加在**选定的目标**身上 ✓（实测：选"给对手"时同步却加回自己 ✗）。
+       现在与下一行 `loss_sync` 用**同一口径**挂 targetWho ✓：子句里写"自身/自己" ⇒ self，否则 ⇒ target ✓
+       （注：`op.who==='target'` 的显式目标与 `ctx.__tgtSubj` 代词主语是更早的既有机制 ✓ 执行器会先认它们 ✓） */
+    else if (hm != null && !__isRegenClause) ops.push({ op: 'heal_sync', amount: hm, targetWho: (has('自身') || has('自己')) ? 'self' : 'target' });
     else if (lm != null && !__preDmgSync) ops.push({ op: 'loss_sync', amount: lm, targetWho: (has('自身') || has('自己')) ? 'self' : 'target' });
     else if (!__preDmgSync && !__isRegenClause && new RegExp('(?:回复|回|扣除|扣|失去)\\s*(?:自身|自己|其|目标|一名玩家)?\\s*' + __NUM + '?\\s*点?\\s*同步').test(t)) uncovered.push('sync');
   }
@@ -17563,7 +17634,20 @@ function __opsResource(op, ctx, next, env) {
     case 'gain_shield': p.shield = (p.shield || 0) + op.amount; break;
     case 'def_down': applyDefenseDown(target, op.amount, op.untilTurnEnd ? null : (op.actions || 2)); break;   /* 【2026-10-08】卡面写"直到本回合结束"的走回合清理 */
     case 'def_up': applyDefenseUp(user, op.amount); break;
-    case 'heal_sync': { var __hs = op.amount; if (ctx && ctx.card && typeof __lvHealSync === 'function') __hs = __lvHealSync(ctx.card, user, __hs); p.sync = Math.min(p.sync + __hs, p.maxSync || 999); break; }
+    /* 【2026-10-13 修】原来无条件加在 `p`（使用者）头上 ✗ ⇒ 卡面写「选择一名玩家，**其**回N同步」的
+       会把同步加回使用者（作者实测）✗。现在与 `loss_sync` 同口径：
+         · `op.who === 'target'`（显式目标）或 `ctx.__tgtSubj`（代词主语=所选目标）⇒ 落目标 ✓
+         · `op.targetWho === 'self'` ⇒ 落使用者 ✓
+         · 缺省（老数据 / 自身类）⇒ **落使用者** ✓（与旧行为一致，零回归 ✓） */
+    case 'heal_sync': {
+      var __hs = op.amount;
+      if (ctx && ctx.card && typeof __lvHealSync === 'function') __hs = __lvHealSync(ctx.card, user, __hs);
+      var __hsWho = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target
+        : (op.targetWho === 'self' ? user : (op.targetWho === 'target' ? target : user));
+      var __hsP = battleState[__hsWho] || p;
+      __hsP.sync = Math.min((__hsP.sync || 0) + __hs, __hsP.maxSync || 999);
+      break;
+    }
     case 'loss_sync': { var w = op.targetWho === 'self' ? user : target; battleState[w].sync = Math.max(0, battleState[w].sync - op.amount); break; }
     case 'self_alt_sync':
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
