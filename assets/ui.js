@@ -1047,7 +1047,11 @@ function renderZoneSlots(pl) {
         ' style="background:linear-gradient(135deg,#2c3e50,#34495e);' + (mine ? 'cursor:pointer;' : 'cursor:default;') + '">' +
         '<div class="slot-name" style="color:#feca57;">盖伏</div><div class="slot-type">' + fdType + '</div></div>';
     } else {
-      var permCanAct = mine && battleState.currentPlayer === pl && (battleState.phase === 'main1' || battleState.phase === 'main2');
+      /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面写「这个效果在其他玩家回合也能发动」的永续卡（雷閃），
+         在**不是自己回合**时同样可点 ✓；判据取引擎的 `__permAnyTurnActive`（唯一真相 ✓），
+         不再只认「当前回合方=自己」✗。其余永续卡行为一字不变 ✓。 */
+      var __anyTurnAct = (typeof __permAnyTurnActive === 'function') && __permAnyTurnActive(it.card);
+      var permCanAct = mine && (battleState.currentPlayer === pl || __anyTurnAct) && (battleState.phase === 'main1' || battleState.phase === 'main2');
       var permTitle = it.card.name + (mine ? (permCanAct ? ' - 点击发动效果' : ' - 仅自己主要阶段可发动主动效果') : '（对手场上·点击查看卡面）');
       var permStyle = mine ? (permCanAct ? 'cursor:pointer;' : 'cursor:not-allowed;opacity:0.45;filter:grayscale(0.5);') : 'cursor:help;';
       // 对手永续卡点击只做只读查看，避免误触发 p1 的发动入口

@@ -3773,6 +3773,27 @@ function computeAttrRequirement(chars) {
   var chaosN = (chars || []).filter(Boolean).filter(function (c) { return c.attribute === '混沌'; }).length;
   return { req: req, hardTotal: hardTotal, flexSlots: 8 - hardTotal, chaosN: chaosN };
 }
+/* 【2026-10-14 作者新机制·结构修 ✓】**神圣属性道具卡的携带位**（唯一裁决处 ✓）
+   规则（作者原话）：「队伍中三个角色都是相同属性则可以携带一张神圣属性的道具卡」
+   作者裁决：① 算在 **8 张**里、但**顶替一个正常配额位**（不改"恰好8张"这条硬规则 ✓）
+             ② 3 个角色属性**两两相同**即可，**3 混沌也算** ✓　③ **最多 1 张** ✓
+   实现口径：神圣位从**队伍主属性**的硬需求里扣 1（全混沌队没有属性配额 ⇒ 扣基础的「无序2」✓）。
+   本函数被 `validateDeck`(校验) 与 `autoFillItems`(自动补全) **共用** ⇒ 两处判定不可能漂移 ✓。
+   返回：{ allowed, attr } —— allowed=能否携带神圣卡；attr=被顶替的那个配额属性 ✓ */
+function __holySlotInfo(chars) {
+  try {
+    var cs = (chars || []).filter(Boolean);
+    if (cs.length < 3) return { allowed: false, attr: null };            /* 必须是"三个角色" ✓ */
+    var attrs = cs.map(function (c) { return c && c.attribute; });
+    for (var i = 1; i < attrs.length; i++) { if (attrs[i] !== attrs[0]) return { allowed: false, attr: null }; }  /* 两两相同 ✓ */
+    var main = attrs[0];
+    /* 顶替目标：主属性若不是混沌 ⇒ 扣它的属性配额；是混沌 ⇒ 混沌本就不占配额，扣基础的「无序」✓ */
+    var target = (main && main !== '混沌') ? main : '无序';
+    return { allowed: true, attr: target, main: main };
+  } catch (e) { return { allowed: false, attr: null }; }
+}
+function __isHolyItem(c) { try { return (typeof __ruleAttrOf === 'function' ? __ruleAttrOf(c) : (c && c.attribute)) === '神圣'; } catch (e) { return false; } }
+function __countHolyItems(items) { var n = 0; (items || []).forEach(function (c) { if (__isHolyItem(c)) n++; }); return n; }
 function __allItemCards() { return allCards.filter(function (c) { return c._category === 'item_permanent' || c._category === 'item_single'; }); }
 // 在保留已选(非null)的前提下，按硬需求补全到8张；全程不重复、永续≤2。scoreFn 决定同属性内优先级
 function autoFillItems(chars, current, scoreFn) {
@@ -3797,6 +3818,8 @@ function autoFillItems(chars, current, scoreFn) {
       if (c._category === 'item_permanent') permN++; needCount--;
     }
   }
+  /* 【2026-10-14 作者新机制 ✓】神圣位：三同属性的队伍，自动补全时**先占住那 1 张神圣卡**，
+     并把被顶替的那条配额减 1 ⇒ 否则"灵活位补满"会随手挑一张别的卡，神圣卡永远进不了智能构筑 ✗ */
   for (var attr in req) { var remain = req[attr] - (have[attr] || 0); if (remain > 0) fill(attr, remain); }
   fill(null, out.filter(function (c) { return !c; }).length); // 灵活位/补满
   return out;
@@ -3907,16 +3930,28 @@ function validateDeck(player) {
   Object.keys(inm).forEach(function(n){ if(inm[n]>1) errs.push('同名道具不能重复：'+n); });
   var permN=items.filter(function(c){return c._category==='item_permanent';}).length;
   if(permN>2) errs.push('永续道具最多2张（当前'+permN+'张）');
-  // 道具属性配额：默认2无序 + 每名非混沌角色对应属性2张；混沌角色可带任意属性(灵活位)
-  var attrNeed={'无序':2};
-  chars.forEach(function(c){ if(c.attribute && c.attribute!=='混沌') attrNeed[c.attribute]=(attrNeed[c.attribute]||0)+2; });
+  /* 【2026-10-14 作者新机制 ✓】道具属性配额改从**唯一来源** `computeAttrRequirement` 取（原来这里是内联的第二份 ✗），
+     再应用「神圣位」裁决（`__holySlotInfo`）：三同属性 ⇒ 可带 1 张神圣卡，并**顶替**主属性或基础无序的一个配额位 ✓。
+     属性统计仍走 `__ruleAttrOf`（卡面写"在规则上当作 X 属性使用"的卡在构建里也算那个属性 ✓）。 */
+  var __qinfo = (typeof computeAttrRequirement === 'function') ? computeAttrRequirement(chars) : null;
+  var attrNeed = __qinfo ? Object.assign({}, __qinfo.req) : {'无序':2};
+  var __holy = (typeof __holySlotInfo === 'function') ? __holySlotInfo(chars) : { allowed: false, attr: null };
   var attrHave={};
-  /* 【2026-10-07】道具的属性配额统计改走 __ruleAttrOf：
-     卡面写"在规则上还能当作 X 属性使用"的卡（镌刻的艺术 ⇒ 无序）在**卡组构建**里也算那个属性
-     （作者 2026-10-07 明确：构建与效果判定都管）。 */
   items.forEach(function(c){ var a=(typeof __ruleAttrOf==='function')?__ruleAttrOf(c):(c.attribute||''); if(a) attrHave[a]=(attrHave[a]||0)+1; });
+  var __holyN = (typeof __countHolyItems === 'function') ? __countHolyItems(items) : 0;
+  if (__holyN > 0) {
+    if (!__holy.allowed) {
+      errs.push('神圣属性道具【不可携带】：需要队伍中 3 个角色属性完全相同（混沌也同样算一致），当前队伍不满足');
+    } else if (__holyN > 1) {
+      errs.push('神圣属性道具最多携带 1 张（当前 ' + __holyN + ' 张）');
+    } else {
+      /* 允许 1 张 ⇒ 它顶替主属性（或其基础无序）的一个配额位 ✓ */
+      if (attrNeed[__holy.attr] != null && attrNeed[__holy.attr] > 0) attrNeed[__holy.attr] -= 1;
+    }
+  }
   Object.keys(attrNeed).forEach(function(a){
-    if((attrHave[a]||0)<attrNeed[a]) errs.push('【'+a+'】属性道具不足：需要'+attrNeed[a]+'张，当前'+(attrHave[a]||0)+'张（规则：2无序+每名非混沌角色对应属性2张，混沌角色为灵活位）');
+    if((attrHave[a]||0)<attrNeed[a]) errs.push('【'+a+'】属性道具不足：需要'+attrNeed[a]+'张，当前'+(attrHave[a]||0)+'张' +
+      '（规则：2无序+每名非混沌角色对应属性2张，混沌角色为灵活位' + (__holy.allowed ? '；三同属性可额外用 1 张神圣卡顶替一个配额位' : '') + '）');
   });
   var cnm={}; carries.forEach(function(c){cnm[c.name]=(cnm[c.name]||0)+1;});
   Object.keys(cnm).forEach(function(n){ if(cnm[n]>1) errs.push('同名携带卡不能重复：'+n); });
@@ -16128,7 +16163,12 @@ function __compileBody(t) {
   if (has('攻击')) {
     var av = __matchNum(new RegExp('(?:自身攻击|攻击力|攻击)\\s*\\+\\s*' + __NUM), t);
     if (av == null) av = __matchNum(new RegExp('\\+\\s*' + __NUM + '\\s*攻击'), t);
-    if (av == null) av = __matchNum(new RegExp('(?:上升|提升)\\s*(?:自身|其)?\\s*' + __NUM + '\\s*点?攻击力'), t);
+    /* 【2026-10-14 作者追问·新卡是否按卡面实现 ⇒ 结构修 ✓】
+       【金刚镯】卡面写的是「那之后**增加**自身1点攻击力」，而原来只认 `上升|提升` ✗
+       ⇒ 该子句编译返回 null ⇒ **攻击力+1 被静默丢掉**（实测跑一遍 attackBuff 0→0 ✗）。
+       扩成 `上升|提升|增加` 三种措辞（并容错"点"字位置 ✓）——同一件事只在这一处认，不另写分支 ✗。 */
+    if (av == null) av = __matchNum(new RegExp('(?:上升|提升|增加)\\s*(?:自身|其)?\\s*' + __NUM + '\\s*点?\\s*攻击力'), t);
+    if (av == null) av = __matchNum(new RegExp('(?:上升|提升|增加)\\s*(?:自身|其)?\\s*攻击力\\s*' + __NUM + '\\s*点?'), t);
     if (av == null) av = __matchNum(new RegExp('队伍攻击力\\+\\s*' + __NUM), t);
     /* 【百分比形态】（作者 2026-09-28 新卡面：最佳化「提升自身100%的攻击力」）
        引擎的 attackBuff 是 flat 数值 ⇒ N% 只能在**执行时**按"当时的攻击力"换算（见 op attack_buff_temp_pct）。 */
@@ -17938,6 +17978,21 @@ function __opsResource(op, ctx, next, env) {
     case 'heal_sync': {
       var __hs = op.amount;
       if (ctx && ctx.card && typeof __lvHealSync === 'function') __hs = __lvHealSync(ctx.card, user, __hs);
+      /* 【2026-10-14 补·闲暇时光 SP ⇒ 结构修 ✓】卡面 SP：「自身同步值低于3的场合使用回复量提升50%（向下）。」
+         实测该 SP 在引擎里**没有任何生效点**（只有一句无关注释 ✗）⇒ 这里补上。
+         位置=回复同步的**唯一出口**（`heal_sync` ✓）；判据按**卡名放行**（不用模糊文本匹配 ✗）；
+         "向下" = Math.floor ✓；只在**自身同步 < 3** 时加成 ✓（与卡面一致）。 */
+      try {
+        var __xxCardName = (ctx && ctx.card && ctx.card.name) || '';
+        if (__xxCardName === '闲暇时光' && (__hs > 0)) {
+          var __xxSelf = battleState[user];
+          if (__xxSelf && (__xxSelf.sync || 0) < 3) {
+            var __xxBefore = __hs;
+            __hs = Math.floor(__hs * 1.5);
+            addBattleLog(user, '【闲暇时光·SP】自身同步值低于3 ⇒ 回复量提升50%（' + __xxBefore + ' → ' + __hs + '）');
+          }
+        }
+      } catch (e) {}
       var __hsWho = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target
         : (op.targetWho === 'self' ? user : (op.targetWho === 'target' ? target : user));
       var __hsP = battleState[__hsWho] || p;
@@ -21718,12 +21773,42 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var cands = [];
     ab.hand.forEach(function (c) {
       var sp = c.sp || '';
+      /* 【2026-10-14 新卡·死灵令牌 SP ⇒ 结构修 ✓】卡面：「造成伤害时可以**舍弃一张手卡**来让最终伤害+1。」
+         原来这条通道只认「送墓/送入墓地」两种措辞 ✗ ⇒ 本卡 SP **完全不生效**（实测正则不匹配 ✓）。
+         现在扩成**两脉**，并在候选里标出属于哪一脉（`discard` 一脉要**再选一张手卡**丢弃 ✓）：
+           · 送墓一脉：卡面写"送墓/送入墓地" ⇒ 把**这张 SP 卡自己**从手牌送墓（原行为不变 ✓）
+           · 舍弃一脉：卡面写"舍弃…手卡" ⇒ 再问一次**丢哪张**（被丢的那张走正常送墓触发 ✓） */
       var m = sp.match(/造(?:成)?伤害时[^。；]*?(?:送墓|送入墓地)[^。；]*?最终伤害[+＋](\d+)/);
-      if (m && (ab.cost || 0) >= (c.cost || 0)) cands.push({ card: c, bonus: +m[1] });
+      if (m && (ab.cost || 0) >= (c.cost || 0)) { cands.push({ card: c, bonus: +m[1], discard: false }); return; }
+      var m2 = sp.match(/造(?:成)?伤害时[^。；]*?舍弃[^。；]*?(?:手卡|手牌|一张卡)[^。；]*?最终伤害[+＋](\d+)/);
+      if (m2) cands.push({ card: c, bonus: +m2[1], discard: true });
     });
     if (!cands.length) return __then(0);
     function __use(ci) {
       var pk = cands[ci], j = ab.hand.indexOf(pk.card); if (j < 0) return __then(0);
+      /* 舍弃一脉：**SP 卡本身留在手牌**，改为再选一张手卡丢弃 ✓（卡面「舍弃一张手卡」） */
+      if (pk.discard) {
+        var __others = (ab.hand || []).filter(function (c) { return c !== pk.card; });
+        function __applyDiscard(target2) {
+          var t2 = target2 || __others[0];
+          if (t2) {
+            var j2 = ab.hand.indexOf(t2); if (j2 >= 0) ab.hand.splice(j2, 1);
+            (ab.grave = ab.grave || []).push(t2);
+            addBattleLog(attacker, '【' + pk.card.name + '·SP】舍弃手卡【' + t2.name + '】');
+            if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, t2, 'effect');
+          } else { addBattleLog(attacker, '【' + pk.card.name + '·SP】没有其他手卡可舍弃 ⇒ 本次不增伤'); __then(0); return; }
+          damage += pk.bonus; addBattleLog(attacker, '【' + pk.card.name + '·SP】最终伤害+' + pk.bonus);
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+          __then(pk.bonus);
+        }
+        if (!__others.length) { addBattleLog(attacker, '【' + pk.card.name + '·SP】没有其他手卡可舍弃 ⇒ 本次不增伤'); __then(0); return; }
+        if (attacker === 'p1' && typeof showChoiceModal === 'function' && __others.length > 1) {
+          showChoiceModal(pk.card.name + '·SP', '舍弃一张手卡', '让本次最终伤害+' + pk.bonus, __others.map(function (c) { return '舍弃【' + (c.name || '?') + '】'; }), function (oi) { __applyDiscard(__others[oi] || __others[0]); });
+          return;
+        }
+        __applyDiscard(__others[0]);
+        return;
+      }
       ab.hand.splice(j, 1); (ab.grave = ab.grave || []).push(pk.card);
       damage += pk.bonus; addBattleLog(attacker, '【' + pk.card.name + '·SP】造成伤害时从手牌送墓，最终伤害+' + pk.bonus);
       if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, pk.card, 'hand_sp');
@@ -21791,10 +21876,20 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   var __hasTorrent = __torrentList.length > 0;
   
   // 墓地抵消卡：卡在墓地时，自己受到伤害后可把此卡移出游戏来抵消那次伤害（如 人格修正拳！SP）
+  /* 【2026-10-14 新卡·金刚镯 SP ⇒ 结构修 ✓】卡面：「自己受到来自**攻击力小于自身**的玩家的伤害时，
+     可以将墓地的此卡移出游戏来发动，抵消那次伤害。」
+     复用**既有**的"墓地移出抵消"通道（`__useGraveNeg`，与人格修正拳 SP 同一套 ✓），
+     只多一个前置条件：**伤害来源者的攻击力 < 自己**（不满足就不列入候选 ✓）。
+     攻击力读法用**唯一真相**：`battleState[attacker].attackBuff`（与 computeDamageValue 同一份 ✓）。 */
   var __graveNegIdx = -1, __graveNegCard = null;
+  var __myAtk = (p.attackBuff || 0);
+  var __srcAtk = (attacker && battleState[attacker]) ? (battleState[attacker].attackBuff || 0) : 0;
   for (var __gni = 0; __gni < (p.grave || []).length; __gni++) {
     var __gnc = p.grave[__gni], __gnsp = __gnc.sp || '';
-    if (__gnsp.indexOf('抵消') >= 0 && __gnsp.indexOf('移出') >= 0 && /受到(的)?伤害|那次伤害/.test(__gnsp)) { __graveNegIdx = __gni; __graveNegCard = __gnc; break; }
+    if (!(__gnsp.indexOf('抵消') >= 0 && __gnsp.indexOf('移出') >= 0 && /受到(的)?伤害|那次伤害/.test(__gnsp))) continue;
+    /* 条件型：卡面明写"攻击力小于自身"时，只有来源者攻击力更小才可发动 ✓ */
+    if (/攻击力小于自身/.test(__gnsp) && !(__srcAtk < __myAtk)) continue;
+    __graveNegIdx = __gni; __graveNegCard = __gnc; break;
   }
   function __useGraveNeg(idx) {
     var nc = p.grave.splice(idx, 1)[0]; (p.removed = p.removed || []).push(nc);
@@ -22282,7 +22377,7 @@ function aiActivateFaceDown(index, done, seat) {
 var PERMANENT_STRUCT = [
   /* 【2026-10-14 新卡·雷閃】永续：发动时 3 点神圣伤害 + 常驻「属性克制伤害+1」
      （handler 见 PERMANENT_ONPLAY_HANDLERS.leishan ✓；克制的"神圣克制非神圣"规则见 __attrBeats ✓） */
-  { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'], onPlayHandler: 'leishan', active: null },
+  /* （原"雷閃 主效果"条目已合并进下面带 active 的完整条目 —— 同一张卡不许在表里出现两条 ✗） */
   { match: ['臂章'], onPlay: ['给予一名玩家3理智伤害'], onPlayHandler: 'armband', active: null },
   { match: ['Huginn', '穆宁', '福金'], onPlay: ['自身攻击力+3'], onPlayHandler: 'huginnPlay',
     active: { once: 'game', flag: '_huginnUsedGame', handler: 'huginn' } },
@@ -22308,6 +22403,12 @@ var PERMANENT_STRUCT = [
      作者实测日志证据：留着这条登记时，效果**执行了两次**（"发动时效果"一次 + "主要效果"一次，
      两次都写了"加入手卡"）—— 一条效果两个来源，必然重复。 */
   /* { match: ['镌刻'], onPlay: ['从牌组把一张混沌属性的卡加入手卡'], active: null },  ← 已删除（见上） */
+  /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面：「一回合一次，把牌组最上方的那张卡送入墓地来发动，
+     对一名其他玩家造成1点神圣属性伤害。**这个效果在其他玩家回合也能发动**。」
+     与环境既有的「每回合一次主动能力」同构（蓝宝/直尺/钢笔…✓），只多一个 `anyTurn: true` ✓。 */
+  { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'],
+    onPlayHandler: 'leishan',
+    active: { once: 'turn', flag: '_leishanSPUsedTurn', handler: 'leishanSP', anyTurn: true, label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（其他玩家回合也能发动）' } },
   { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
       /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
       active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
@@ -22398,6 +22499,11 @@ function permanentStruct(card) {
   return null;
 }
 
+/* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】"这张永续卡是否允许在**非自己回合**主动发动"的唯一判据。
+   UI（`ui.js` 的 permCanAct）与引擎（`executePermanentActiveFor`）**同读这一处** ⇒ 不会"能发却点不动" ✗ */
+function __permAnyTurnActive(card) {
+  try { var st = permanentStruct(card); return !!(st && st.active && st.active.handler && st.active.anyTurn); } catch (e) { return false; }
+}
 function permanentHasActiveEffect(card) {
   var st = permanentStruct(card);
   return !!(st && st.active && st.active.handler);
@@ -22594,6 +22700,39 @@ var PERMANENT_ONPLAY_HANDLERS = {
 };
 
 var PERMANENT_ACTIVE_HANDLERS = {
+  /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面：「一回合一次，把牌组最上方的那张卡送入墓地来发动，
+     对一名其他玩家造成1点神圣属性伤害。这个效果在其他玩家回合也能发动。」
+     · 牌顶约定：本项目 `牌顶 = deck[0]`（`drawCard` 走 shift ✓，见 engine.js 注释）；牌组空 ⇒ **明确不处理**并写日志 ✓
+     · 伤害走**统一管线**（属性传"神圣" ⇒ 克制判定交给 `__attrBeats` 的"神圣克制非神圣"新规则 ✓，不在此硬算 ✗）
+     · 目标：p1 弹窗 / p2 联机 / AI 自动选对手 ✓（与环境既有三段式同款）
+     · 一回合一次：由 `active.flag` 闸门写/重置 ✓（被无效时的回滚由既有 A2 负责，标记后缀 `Turn` 可被识别 ✓） */
+  leishanSP: function (card, user) {
+    var p = battleState[user]; if (!p) return false;
+    if (!(p.deck || []).length) {
+      addBattleLog(user, '【雷閃·SP】牌组已空 ⇒ 无法把牌组最上方送墓，本次不发动');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      return false;   /* 返回 false ⇒ 不消耗"一回合一次"✓（没发动成功就不该记次数） */
+    }
+    var foes = (typeof othersOf === 'function') ? othersOf(user) : [foeOf(user)];
+    function __pickTarget(cb) {
+      if (foes.length <= 1) { cb(foes[0]); return; }
+      var opts = foes.map(function (k) { return playerDisplayName(k); });
+      if (user === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal(card.name + '·SP', '选一名其他玩家', '对其造成1点神圣属性伤害', opts, function (i) { cb(foes[i == null ? 0 : i]); }); return; }
+      if (typeof Online !== 'undefined' && Online.active && user === 'p2' && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', card.name + '·SP（对手）', '选一名其他玩家', '对其造成1点神圣属性伤害', opts, function (i) { cb(foes[i == null ? 0 : i]); }); return; }
+      cb(foes[0]);
+    }
+    var __top = p.deck.shift();
+    (p.grave = p.grave || []).push(__top);
+    addBattleLog(user, '【雷閃·SP】把牌组最上方【' + (__top.name || '?') + '】送入墓地');
+    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, __top, 'effect');
+    __pickTarget(function (foe) {
+      if (!foe || !battleState[foe]) { if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
+      addBattleLog(user, '【雷閃·SP】对' + playerDisplayName(foe) + '造成1点神圣属性伤害');
+      dealDamageWithResponse(foe, 1, card.name + '·SP', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, '神圣', user);
+    });
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    return true;
+  },
   /* 【2026-10-03 新版·蓝宝之杖·命】每个自己回合主要阶段主动发动：
      选一名玩家 → 硬币判定 → 正面造成 2 点判定伤害、反面不造成伤害（每回合一次由 active.flag 闸门管）。 */
   lanzhangCoin: function (card, user) {
@@ -22856,12 +22995,17 @@ function executePermanentActiveFor(user, index, done) {
     return;
   }
   // 主要阶段才能主动发动（盖伏卡翻开当回合限制已在合法性层处理）
-  if (battleState.phase !== 'main1' && battleState.phase !== 'main2' && card._faceDown !== true) {
+  var act = st.active;
+  /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面明写「这个效果在其他玩家回合也能发动」
+     ⇒ 该卡（`active.anyTurn`）**不受"必须是自己回合的主要阶段"这条限制** ✓；
+     其余永续主动能力行为一字不变 ✓（`anyTurn` 只由本卡登记）。 */
+  var __anyTurnOk = !!(act && act.anyTurn);
+  var __phaseOk = (battleState.phase === 'main1' || battleState.phase === 'main2');
+  if (!__anyTurnOk && !__phaseOk && card._faceDown !== true) {
     if (user === 'p1') showToast('当前阶段不能发动永续卡效果，请在主要阶段发动。', 'warn');
     if (done) done();
     return;
   }
-  var act = st.active;
   // 次数限制
   if (act.flag && card[act.flag]) {
     if (user === 'p1') showToast('【' + card.name + '】' + (act.once === 'game' ? '该效果一局游戏只能使用一次。' : '本回合已经发动过（每回合一次）。'), 'warn');
