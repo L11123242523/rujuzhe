@@ -6303,6 +6303,19 @@ function collectChainable(player, effect){
     consider(c,'hand',i);
   });
   (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
+  /* 【2026-10-14 作者报「雷閃不能在对手回合发（不像技能卡一样有全时点）」⇒ 结构修 ✓】
+     卡面：「…这个效果在**其他玩家回合也能发动**」——作者口径是**像技能卡那样的全时点** ✓：
+     任何时点、任何玩家的回合，它都作为**连锁响应候选**出现（与技能卡同权 ✓），
+     不走 `consider` 那套"连锁专用卡"闸（它没有对象/阶段限制 ✓）。
+     代价与时点无关：发动时把**牌组最上方**送墓（由处理器负责 ✓）；"一回合一次"标记在**逆结算执行时**消费 ✓。 */
+  try {
+    (me.permanent || []).forEach(function (c, i) {
+      if (!c || c.name !== '雷閃') return;
+      if (c._leishanSPUsedThisTurn === battleState.turn) return;                 /* 一回合一次 ✓ */
+      if (!(player === 'p1' || player === 'p2')) return;
+      out.push({ card: c, from: 'permSP', index: i, permSP: 'leishan' });
+    });
+  } catch (e) {}
   // 事件卡（全时点）：也可作为连锁响应发动（如大风在移动将执行前终止所有移动）
   (me.eventCards||[]).forEach(function(c,i){consider(c,'event',i);});
   /* 【座位级连锁候选（作者 2026-09-27 裁决）】主动型"每回合可以发动一次"的角色能力：
@@ -6388,6 +6401,21 @@ function applyChainCard(player,pick,effect,done,target){
     effect._chain = effect._chain || [];
     __chainWithC1().push({ kind: 'seatEffect', by: player, name: name, seatEffect: pick.seatEffect });
     addBattleLog(player, '连锁发动【' + name + '】（角色能力，已上链，待逆结算）');
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
+    if (typeof renderChainBar === 'function') renderChainBar(effect);
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    setTimeout(function () { if (typeof done === 'function') done(); }, 200);
+    return;
+  }
+  /* 【2026-10-14 重做·雷閃·SP 全时点 ⇒ 结构修 ✓】与上面 `seatEffect` **同一套**：
+     非"从手牌/盖伏/事件区打出"的效果 ⇒ **不付费、不动卡区**，只把一环压入连锁 ✓；
+     具体效果在**逆结算**时执行（见 `resolveChainStack` 的 `kind:'permSP'` 分支 ✓）。
+     ⚠ "一回合一次"的标记**不在这里**消费 —— 要等逆结算真的执行了才消费 ✓
+       （中途被无效 ⇒ 不该白扣次数；标记写在卡上、后缀 `Turn` 可被 A2 回滚识别 ✓）。 */
+  if (pick.from === 'permSP') {
+    effect._chain = effect._chain || [];
+    __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c });
+    addBattleLog(player, '连锁发动【' + name + '·SP】（全时点，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
     if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -8637,6 +8665,28 @@ function resolveChainStack(effect, onDone) {
       else if (e.seatEffect === 'lily' && typeof activateLilySP === 'function') { activateLilySP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】找不到对应能力实现，跳过'); }
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) { try { console.error('[catch] assets/engine.js:8312', e2); } catch (e2) {} } }
+  } else if (e.kind === 'permSP') {
+    /* 【2026-10-14 雷閃·SP 全时点】逆结算时执行；SP 的**实现只有一份**（复用已有处理器 ✓） */
+    try {
+      /* 【2026-10-14 修】这里原来只读模块内变量 `PERMANENT_ACTIVE_HANDLERS` ⇒ 取不到（实测日志："找不到对应实现，跳过"）
+         ⇒ 加 `window.PERMANENT_ACTIVE_HANDLERS` 回退（该表在文件末尾已挂到 window ✓）。 */
+      /* 查表顺序：模块内变量 → window → **globalThis**（引擎末尾用 `window.<name>=…` 挂了一套访问器，
+         globalThis 在无头/浏览器两种环境都能取到 ⇒ 实测这是唯一稳的那条 ✓） */
+      var __psTable = null;
+      try { if (typeof PERMANENT_ACTIVE_HANDLERS !== 'undefined' && PERMANENT_ACTIVE_HANDLERS) __psTable = PERMANENT_ACTIVE_HANDLERS; } catch (e1) {}
+      if (!__psTable) { try { __psTable = (typeof window !== 'undefined' && window && window.PERMANENT_ACTIVE_HANDLERS) || null; } catch (e2) {} }
+      if (!__psTable) { try { __psTable = (typeof globalThis !== 'undefined' && globalThis && globalThis.PERMANENT_ACTIVE_HANDLERS) || null; } catch (e3) {} }
+      /* 【2026-10-14 定稿】不再用动态索引 `__psTable[e.permSP]`（实测取不到值 ✗），
+   改成**显式映射**：新增 permSP 能力时在这里登记一行即可（清晰、可审计 ✓）。 */
+      var __psKey = (e.permSP === 'leishan') ? 'leishanSP' : null;
+      var __psFn = (__psTable && __psKey) ? __psTable[__psKey] : null;
+      if (typeof __psFn === 'function') {
+        var __psOk = __psFn(e.card || { name: e.name }, e.by);
+        __doneSet[i] = true;
+        /* 只有**真的发动成功**才消费"一回合一次" ✓（牌组空等未发动 ⇒ 返回 false ⇒ 不扣次数 ✓） */
+        if (__psOk !== false && e.card) { e.card._leishanSPUsedThisTurn = battleState.turn; }
+      } else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '·SP】找不到对应实现，跳过'); }
+    } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '·SP】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) {} }
   } else if (e.kind === 'reverse') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else { effect._reverseDir = !effect._reverseDir; __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动方向反转生效'); }
@@ -22408,7 +22458,7 @@ var PERMANENT_STRUCT = [
      与环境既有的「每回合一次主动能力」同构（蓝宝/直尺/钢笔…✓），只多一个 `anyTurn: true` ✓。 */
   { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'],
     onPlayHandler: 'leishan',
-    active: { once: 'turn', flag: '_leishanSPUsedTurn', handler: 'leishanSP', anyTurn: true, label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（其他玩家回合也能发动）' } },
+    active: { once: 'turn', flag: '_leishanSPUsedThisTurn', handler: 'leishanSP', anyTurn: true, label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（其他玩家回合也能发动）' } },
   { match: ['蓝宝', '蓝杖'], onPlay: ['对一名其他玩家造成一次6面骰判定伤害'],
       /* 【2026-10-03 新版】每个自己回合的主要阶段可以发动：硬币判定伤害（正面2点、反面0） */
       active: { once: 'turn', flag: '_lanzhangActiveUsed', handler: 'lanzhangCoin', label: '硬币判定伤害（正面2点）' } },
