@@ -5845,7 +5845,7 @@ function startTurn() {
      （不用计时器、不靠计数猜；回合号是唯一真相）。放在回合最前面，保证一定跑到。 */
   try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:5751', e); } catch (e2) {} }
   /* 【2026-10-14 新卡·永眠之棺】同一处、同一口径：'直到本回合结束'的效果无效也按回合号统一清理 ✓ */
-  try { if (typeof clearTurnScopedEffectDisables === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedEffectDisables(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:永眠之棺', e); } catch (e2) {} }
+  try { if (typeof clearTurnScopedCardStates === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedCardStates(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:回合到期卡状态', e); } catch (e2) {} }
   /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
      实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
      它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
@@ -7103,6 +7103,22 @@ registerTrigger({
 registerTrigger({
   id: 'liuli-hw-sp-leave',
   timing: 'leave-field',
+  /* 【2026-10-14 作者报「同时两张卡送墓 ⇒ 弹出两个询问」⇒ 结构修 ✓】
+     卡面：「**一回合一次**，当有玩家的卡不因使用而离开其原本所在的区域时可以发动，自己抽一张卡」。
+     病根：原来的"一回合一次"判据 `_liuliHWSPTurn !== turn` 在 `ownerOf`/`cond` 里只是**读**，
+           真正写它却在 `fire` —— 而**同一批候选收集时两个候选都会被判过**（那时还没写）
+           ⇒ 两张卡同时送墓就**两条都入列** ⇒ 弹两次询问 ✗（正是作者看到的现象）。
+     修法：把"一回合一次"**消费在候选生成时** —— 谁被收进这一批，就在 `ownerOf` 里立刻记上本回合已用 ✓
+           ⇒ 同一批的第二张卡再也收不进来 ✓（一次离场事件只产生一条候选）。
+     ⚠ 消费了会不会"被无效后少一次"？不会：引擎**既有**的 A2 机制会在该环被无效时自动回滚 ——
+       `__snapshotOncePerTurn` / `__restoreOncePerTurn` 的键名判据是后缀 `Turn$`（已读码确认 ✓），
+       `_liuliHWSPTurn` 正好匹配 ⇒ 无需我再写回滚代码 ✓。
+     ⚠ `_liuliHWQueuedFor`（按"哪张卡触发过"去重）**保留**：它仍负责"同一张卡的同一次离场"不重复排队 ✓。 */
+  /* ⚠【2026-10-14 我自己的回归修正 ✓】本函数**必须是纯判据、绝不能有副作用** ✗：
+     `__leaveEventHasTrigger`（约 21096）会先调一次 `__scanTriggers` **只当"这事件会不会触发什么"用** ——
+     我上一版在这里消费"一回合一次" ⇒ 那次纯判据调用把标记烧掉 ⇒ 真正入队时琉璃SP 不再产出
+     ⇒ 进行曲与琉璃SP **不再同窗**（门禁 chain_completeness 实测 5 项红 ✗）。
+     ⇒ 消费回到 `fire`；"同一离场事件内只留一条"由入批处的 `__dedupeLeaveCands` 负责 ✓。 */
   ownerOf: function (ctx) {
     var list = [];
     playerIds().forEach(function (w) {
@@ -7117,6 +7133,7 @@ registerTrigger({
   fire: function (ctx, owner) {
     var q = battleState[owner]; if (!q) return;
     q._liuliHWQueuedFor = ctx.card;
+    /* 【2026-10-14】"一回合一次"在**真正发动时**消费 ✓（标记后缀 `Turn` ⇒ 该环被无效时 A2 会自动回滚 ✓） */
     q._liuliHWSPTurn = battleState.turn;
     addBattleLog(owner, '【琉璃(万圣祭)SP】有玩家的卡不因使用' + ctx.how + '（【' + ((ctx.card && ctx.card.name) || '') + '】），自己抽1张');
     if (typeof drawCard === 'function') drawCard(owner);
@@ -16766,7 +16783,9 @@ function clearTurnScopedDefDowns(who) {
 /* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】"直到本回合结束前效果无效"的**到期清理**。
    与 `clearTurnScopedDefDowns` 同一族同一处调用（`startTurn` 最前面）⇒ 与"回合号"这个唯一真相同生同灭 ✓，
    不用计时器、不靠计数猜 ✗。清理时把卡上的标记**删掉**（不是置假）⇒ 卡对象不会跨局带标记 ✓。 */
-function clearTurnScopedEffectDisables(who) {
+/* 【2026-10-14】「直到本回合结束」这类**按回合号**生效的卡状态，统一在这一处到期清理
+   （效果无效：`永眠之棺` ✓；每次受伤回音韵：`荷鲁斯之眼` ✓）—— 一次遍历清两种，不写第二份 ✗ */
+function clearTurnScopedCardStates(who) {
   var q = battleState[who]; if (!q) return;
   var __zones = ['permanent', 'faceDownCards', 'eventCards', 'musicCards'];
   var __restored = 0;
@@ -16778,7 +16797,14 @@ function clearTurnScopedEffectDisables(who) {
     });
   });
   if (__restored) addBattleLog(who, '「直到本回合结束」的效果无效已到期，' + __restored + ' 张卡恢复生效');
+  /* 【荷鲁斯之眼】「直到本回合结束前自己每次受到伤害后回复1点音韵值」 */
+  if (q._horusEyeUntilTurn != null && q._horusEyeUntilTurn !== battleState.turn) {
+    delete q._horusEyeUntilTurn;
+    addBattleLog(who, '【荷鲁斯之眼】「直到本回合结束」的每次受伤回音韵已到期');
+  }
 }
+/* 旧名保留（调用点/探针可能仍在用） */
+function clearTurnScopedEffectDisables(who) { return clearTurnScopedCardStates(who); }
 
 function applyDefenseUp(who, amount) {
   var q = battleState[who]; if (!q || !amount) return;
@@ -20948,10 +20974,49 @@ function __graveSelfApplies(player, card, reason) {
     if (/进(入)?墓地后/.test(t2) && t2.indexOf('回收') >= 0) return true;
     if (nm === '共鸣' && sp && sp.indexOf('回收') >= 0) return true;
     if (nm.indexOf('认真起来了') >= 0) return true;
+    /* 【2026-10-14 作者报「新卡典籍之残页的SP被送入墓地无法触发」⇒ 结构修 ✓】
+       卡面 SP：「这张卡**因为卡的效果而被送入墓地**的场合可以从以下效果中选择一项发动：
+                 ①选墓地一张角色携带卡加入手卡，然后自己失去2点同步值。
+                 ②选手卡一张角色携带卡送入墓地，然后自己回复3点音韵值。」
+       病根：本函数是**按卡名白名单**（盒子/破损/共鸣/认真起来了…）⇒ 这张新卡不在名单里
+             ⇒ 送墓时**永不产出候选** ⇒ SP 整段不触发 ✗（与作者实测一致）。
+       条件口径与盒子同类：**因卡的效果送墓**才算（`reason` 为 effect/destroy；献祭经光太郎被动亦视为效果送墓 ✓）。 */
+    if (nm === '典籍之残页' && (reason === 'effect' || reason === 'destroy') && sp && /因为?卡的效果而被送入墓地|因卡效果送墓|因卡的效果[^，。]*送入墓地/.test(sp)) return true;
     return false;
   } catch (e) { console.error('判断送墓触发条件出错', e); return true; }
 }
 
+/* 【2026-10-14 作者报「同时两张卡送墓 ⇒ 弹两个询问」⇒ 结构修 ✓】
+   "一回合一次"触发的**同事件去重**：同一次"卡离场事件"里，同一个 (触发 id + 座位) 只留**一条**候选 ✓。
+   为什么必须在**入批处**、不能放 `ownerOf`：`ownerOf` 会被 `__leaveEventHasTrigger` 当**纯判据**再调一次
+   （只问"会不会触发"、不真入队）⇒ 在那里消费标记会被误烧 ✗（我上一版就是这么错的）。
+   为什么**不能**按 `id` 全局去重：双方都编组琉璃(万圣祭) 时本就该各出一条 ✗（误杀）。
+   "同一次离场事件"的唯一真相 = `effectEngine._resolveDepth` + 回合号 ✓（同一次结算里连送 N 张卡 ⇒ 同一个键 ✓）。
+   被去重掉的**只是同一座位在同一事件里的第二条**，不影响"同一座位在下一个事件里再触发"✓。 */
+function __leaveEventKey() {
+  try {
+    var d = (typeof effectEngine !== 'undefined' && effectEngine && typeof effectEngine._resolveDepth === 'number') ? effectEngine._resolveDepth : 0;
+    return (battleState && battleState.turn) + '#' + d;
+  } catch (e) { return '0#0'; }
+}
+function __dedupeLeaveCands(cands) {
+  try {
+    var key = __leaveEventKey();
+    if (!battleState._leaveSeenKey || battleState._leaveSeenKey !== key) {
+      battleState._leaveSeenKey = key;
+      battleState._leaveSeenByOwner = {};
+    }
+    var seen = battleState._leaveSeenByOwner || (battleState._leaveSeenByOwner = {});
+    return (cands || []).filter(function (c) {
+      if (!c) return true;
+      if (c.id !== 'liuli-hw-sp-leave' && c.id !== 'toma-sp-leave') return true;   /* 只对"一回合一次"的两条去重 ✓ */
+      var k = c.id + '@' + (c.owner || '');
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  } catch (e) { return cands || []; }
+}
 function __leaveEventHasTrigger(player, card, reason) {
   /* 【结构性：改成"问扫描器"】（2026-09-28）
      原来是手写的条件表（卡自身/进行曲/琉璃SP/冬马SP/羽奈…）—— 每加一条触发都得回来改这里，
@@ -20978,6 +21043,7 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
        由注册表统一产出，且已按 MD 口径排序（回合玩家先、同组玩家自排）。 */
     var __ctxB = { player: player, card: card, reason: reason, how: how };
     var __scannedB = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxB) : [];
+    __scannedB = (typeof __dedupeLeaveCands === 'function') ? __dedupeLeaveCands(__scannedB) : __scannedB;
     __scannedB.forEach(function (c) {
       out.push({
         owner: c.owner, card: card, mandatory: c.mandatory, label: c.label,
@@ -21070,6 +21136,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       var __ctxQ = { player: player, card: card, reason: reason,
                      how: (reason === 'destroy' ? '被破坏' : (reason === 'sacrifice' ? '被献祭' : '送入墓地')) };
       var __scannedQ = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxQ) : [];
+      __scannedQ = (typeof __dedupeLeaveCands === 'function') ? __dedupeLeaveCands(__scannedQ) : __scannedQ;
       __scannedQ.forEach(function (c) {
         queueOrRunTrigger({ owner: c.owner, card: card, label: c.label, mandatory: c.mandatory,
                             fire: function () { try { c.fire(); } catch (e) { console.error('扫描出的触发执行出错 ' + c.id, e); } } });
@@ -21127,6 +21194,59 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
   // 【2026-10-01 迁移】"通用送墓回复音韵"（如【鸣奏之"圣音"】）已改为**不进链、就地执行**，
   // 由 checkGraveTrigger 开头的 __graveDirectPassive 负责（原来在这里跑 ⇒ 逆结算时才回费、界面滞后）。
 
+  /* 【2026-10-14 新卡·典籍之残页 SP ⇒ 结构修 ✓】卡面：
+       「这张卡因为卡的效果而被送入墓地的场合可以从以下效果中选择一项发动：
+         ①选墓地一张角色携带卡加入手卡，然后自己失去2点同步值。
+         ②选手卡一张角色携带卡送入墓地，然后自己回复3点音韵值。」
+     实现（与「盒子SP」同一套三段式分流：p1 弹窗 / p2 联机 / AI 自动选 ✓）：
+       · 选卡复用引擎**既有**的 `collectZoneCards`（按 `_category` 判"角色携带卡=攻击/技能卡" ✓）
+         与 `pickFromList`（选卡交互的唯一入口 ✓）——不新造搜索机制 ✗。
+       · 两个分支的收益都落在**已有出口**上：入手 = 区域搬运；失同步/回音韵 = 既有 `recoverCost` ✓。 */
+  if (cardName === '典籍之残页' && (reason === 'effect' || reason === 'destroy')
+      && sp && /因为?卡的效果而被送入墓地|因卡效果送墓|因卡的效果[^，。]*送入墓地/.test(sp)) {
+    var __djPickOption = function (ci) {
+      if (ci === 0) {
+        /* ① 选墓地一张角色携带卡加入手卡，然后自己失去2点同步值 */
+        var __gc = collectZoneCards(player, ['grave'], null, ['attack_cards', 'skill_cards']);
+        if (!__gc.length) { addBattleLog(player, '【典籍之残页·SP】墓地里没有角色携带卡 ⇒ 改选②或放弃'); return; }
+        pickFromList(player, __gc, '典籍之残页·SP：选墓地一张角色携带卡加入手卡（然后失去2点同步值）', 1, function (picks) {
+          if (!picks.length) { addBattleLog(player, '【典籍之残页·SP】未选择卡 ⇒ 本项不处理'); return; }
+          var pk = picks[0], arr = battleState[player][pk.zone], ix = arr.indexOf(pk.card);
+          if (ix >= 0) arr.splice(ix, 1);
+          pk.card._addedByEffect = true;
+          battleState[player].hand.push(pk.card);
+          var __b4 = p.sync || 0;
+          p.sync = Math.max(0, __b4 - 2);
+          addBattleLog(player, '【典籍之残页·SP①】从墓地回收【' + pk.card.name + '】加入手卡，自己失去2点同步值（' + __b4 + ' → ' + p.sync + '）');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        });
+      } else if (ci === 1) {
+        /* ② 选手卡一张角色携带卡送入墓地，然后自己回复3点音韵值 */
+        var __hc = collectZoneCards(player, ['hand'], null, ['attack_cards', 'skill_cards']);
+        if (!__hc.length) { addBattleLog(player, '【典籍之残页·SP】手卡里没有角色携带卡 ⇒ 本项不处理'); return; }
+        pickFromList(player, __hc, '典籍之残页·SP：选手卡一张角色携带卡送入墓地（然后回复3点音韵值）', 1, function (picks) {
+          if (!picks.length) { addBattleLog(player, '【典籍之残页·SP】未选择卡 ⇒ 本项不处理'); return; }
+          var pk = picks[0], arr2 = battleState[player][pk.zone], ix2 = arr2.indexOf(pk.card);
+          if (ix2 >= 0) arr2.splice(ix2, 1);
+          (p.grave = p.grave || []).push(pk.card);
+          recoverCost(player, 3, '典籍之残页·SP②');
+          addBattleLog(player, '【典籍之残页·SP②】把手卡【' + pk.card.name + '】送入墓地，自己回复3点音韵值（当前' + p.cost + '）');
+          if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, pk.card, 'effect');
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        });
+      }
+    };
+    var __djOpts = ['① 选墓地一张角色携带卡加入手卡（自己失去2点同步值）', '② 选手卡一张角色携带卡送入墓地（自己回复3点音韵值）'];
+    if (player === 'p1' && typeof showChoiceModal === 'function') {
+      showChoiceModal('典籍之残页·SP', '因为卡的效果而被送入墓地', '选择一项发动', __djOpts, __djPickOption);
+    } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2') {
+      onlineDecideModal('p2', '典籍之残页·SP（对手）', '因为卡的效果而被送入墓地', '选择一项发动', __djOpts, __djPickOption);
+    } else {
+      /* AI：优先①（从墓地回收资源）；墓地没有携带卡则走② */
+      var __djAI = collectZoneCards(player, ['grave'], null, ['attack_cards', 'skill_cards']).length ? 0 : 1;
+      __djPickOption(__djAI);
+    }
+  }
   // 来自地狱的盒子SP：因卡效果送墓时可选 ①4面骰判定，按点数回复同数值音韵 ②对一名玩家造一次4面骰判定伤害
   // （献祭经光太郎被动视为效果送墓；破坏同样属于“因卡效果送墓”）
   if (cardName.indexOf('来自地狱的盒子') >= 0 && !__missTiming('hell-box-sp', { reason: reason, player: player, card: card })   /* 2026-10-01：盒子已不在名单内 ⇒ 该判定恒为 false（保留调用以便日后复原） */ && (reason === 'effect' || reason === 'destroy') && sp && /送墓时可选|送墓时|因(为)?卡的效果而被送入墓地|因卡效果送墓/.test(sp)) {
@@ -21714,6 +21834,16 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       return;
     }
     __torrentAfterDamage();   // 【无首刺虫】"那之后自己失去3点同步值"（唯一收尾处 ✓）
+    /* 【2026-10-14 新卡·荷鲁斯之眼 ⇒ 结构修 ✓】卡面：「自己或其他玩家的回合把这张卡送入墓地才能发动，
+       **直到本回合结束前自己每次受到伤害后回复1点音韵值**。」
+       触发点：受击方真正掉血之后（本函数就是统一的"伤害结算收尾"✓）——
+       与 `__torrentAfterDamage` **同一处**，不另开钩子 ✗；到期由 `clearTurnScopedCardStates` 按回合号清 ✓。 */
+    try {
+      if (p._horusEyeUntilTurn === battleState.turn) {
+        recoverCost(target, 1, '荷鲁斯之眼（每次受伤后）');
+        addBattleLog(target, '【荷鲁斯之眼】受到伤害后回复1点音韵值（当前' + (p.cost || 0) + '）');
+      }
+    } catch (e) {}
     __finish(actualDamage);
   }
   /* 【2026-10-14 新卡·无首刺虫 ⇒ 结构修 ✓】"那次最终伤害-75%"的**唯一实现**。
@@ -23128,15 +23258,47 @@ function __ioriDrawTwoAsk(seat) {
    —— 归一化覆盖：①去首尾包裹符号（`【】`/`「」`/`[]`/`（）` ✓，链上的 label 就是 `【名字】` 形状 ✓）
                  ②去后缀（`·SP`/`SP`/`（形态）` ✓）
    ⚠ 只返回"这张卡长什么样"这一个事实 ✓；调用方**只读返回值** ✓，不再各自实现 ✗。 */
+/* 池里的卡名索引（只建一次）——供"从名字里切出卡名"用 ✓ */
+function __cardNameIndex() {
+  try {
+    if (window.__cardNameIdxCache && window.__cardNameIdxCache.length) return window.__cardNameIdxCache;
+    var pools = [];
+    try { if (typeof allCards !== 'undefined' && allCards && allCards.length) pools.push(allCards); } catch (e) {}
+    try { if (window.cardData) { ['characters', 'attack_cards', 'skill_cards', 'item_permanent', 'item_single', 'gift_cards', 'music_cards', 'event_cards', 'omikuji'].forEach(function (k) { if (Array.isArray(window.cardData[k])) pools.push(window.cardData[k]); }); } } catch (e) {}
+    var out = [];
+    pools.forEach(function (arr) { (arr || []).forEach(function (c) { if (c && c.name) out.push(c.name); }); });
+    out = out.filter(function (v, i) { return out.indexOf(v) === i; });
+    window.__cardNameIdxCache = out;
+    return out;
+  } catch (e) { return []; }
+}
+/* 【2026-10-14 作者报「连锁动画的卡图有些卡有、有些没有」⇒ 结构修 ✓】
+   真机实测：卡池 176 张**全都有**图 ✓，但连锁动画的节点名**不一定等于卡名** ——
+   触发类节点叫「【典籍之残页】送入墓地触发」「【永奏进行曲】有卡送入墓地·造无序伤害」
+   「【琉璃(万圣祭)·SP】有卡不因使用…」⇒ 精确查名必然落空 ⇒ 只剩文字 ✗（= 作者现象）。
+   修法：入口里多一层"**从名字里切出真正存在的卡名**"——
+     ① 先试 `【…】` 里那段（触发标签正是这个形状 ✓）；② 再试名字本身；
+     ③ 再试"某个池里的卡名是这个名字的**子串**"（取**最长**命中，避免短名误配 ✓；名字短于 2 字不参与 ✓）。
+   本函数是**唯一取图入口**（三个调用点共用 ✓）⇒ 改这一处就够了 ✓。 */
 function __chainImgResolve(card) {
   try {
     if (!card) return '';
     var have = card.image_url || card.avatar_url || '';
     if (have) return have;
     if (!card.name || typeof __deckCardByName !== 'function') return '';
-    var full = __deckCardByName(card.name);
+    var __nm = String(card.name);
+    function __imgOf(nm) {
+      if (!nm) return '';
+      var f = __deckCardByName(nm);
+      return (f && (f.image_url || f.avatar_url)) || '';
+    }
+    var full = __deckCardByName(__nm);
     if (!full) {
-      var base = String(card.name)
+      /* ① 名字里 `【…】` 的那一段（触发标签形状 ✓） */
+      var __br = __nm.match(/【([^】]+)】/);
+      if (__br && __br[1]) { var __r1 = __imgOf(__br[1].trim()); if (__r1) return __r1; }
+      /* ② 归一化：去包裹符号 / 去 ·SP / 去尾部括号 */
+      var base = __nm
         .replace(/^[【\[「『（(]+/, '')
         .replace(/[】\]」』）)]+$/, '')
         .replace(/[·・]\s*SP\s*$/i, '')
@@ -23144,8 +23306,22 @@ function __chainImgResolve(card) {
         .replace(/[（(][^）)]*[）)]\s*$/, '')
         .trim();
       if (base && base !== card.name) full = __deckCardByName(base);
+      if (!full) { var __r2 = __imgOf(base); if (__r2) return __r2; }
     }
-    return (full && (full.image_url || full.avatar_url)) || '';
+    var __hit = (full && (full.image_url || full.avatar_url)) || '';
+    if (__hit) return __hit;
+    /* ③ 子串命中：池里的卡名是这个名字的一部分 ⇒ 取**最长**的那个（短名误配风险最低 ✓） */
+    try {
+      var __names = __cardNameIndex(), __best = '';
+      for (var __i = 0; __i < __names.length; __i++) {
+        var __n = __names[__i];
+        if (!__n || __n.length < 2) continue;
+        if (__nm.indexOf(__n) < 0) continue;
+        if (__n.length > __best.length) __best = __n;
+      }
+      if (__best) { var __r3 = __imgOf(__best); if (__r3) return __r3; }
+    } catch (e) {}
+    return '';
   } catch (e) { return ''; }
 }
 /* 【2026-10-13 作者裁决"选项按文本来" ✓】目标判定**唯一入口**（顶层 ✓）
@@ -24001,6 +24177,27 @@ var SPECIAL_CARD_HANDLERS = {
     }
   },
 
+  /* ============================================================
+  【荷鲁斯之眼】（无序·反制·单次，费2）—— 2026-10-14 新增卡
+  卡面：凝视深渊，或者被深渊所凝视。
+    •自己或其他玩家的回合把这张卡送入墓地才能发动，直到本回合结束前自己每次受到伤害后回复1点音韵值。
+  为什么必须走特判：实测指令层把它编译成 `gain_cost` = **结算时回一次音韵** ✗，
+    与卡面「**每次**受到伤害后回复1点」完全不符（少了持续触发）⇒ 按名接管 ✓。
+  实现：登记 `p._horusEyeUntilTurn = battleState.turn`（回合号=唯一真相 ✓）；
+    受击触发在 `__afterHitSettle`；到期在 `clearTurnScopedCardStates`（都与永眠之棺同一处 ✓）。
+  ============================================================ */
+'荷鲁斯之眼': {
+    play: function (card, user, done) {
+      var p = battleState[user];
+      if (p) {
+        p._horusEyeUntilTurn = battleState.turn;
+        addBattleLog(user, '【荷鲁斯之眼】把此卡送入墓地 ⇒ 直到本回合结束前，自己每次受到伤害后回复1点音韵值');
+      }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      if (done) done();
+    }
+  },
+
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
@@ -24293,6 +24490,8 @@ function getSpecialHandler(card) {
   if (n === '永眠之棺') return h;
   /* 【2026-10-14 新卡·死灵令牌】整卡被编译成一个假的 `draw`（打出就抽1张 ✗）⇒ 与卡面不符，必须走特判 ✓ */
   if (n === '死灵令牌') return h;
+  /* 【2026-10-14 新卡·荷鲁斯之眼】编译成假的 `gain_cost`（回一次）⇒ 与"每次受伤后回"不符，必须走特判 ✓ */
+  if (n === '荷鲁斯之眼') return h;
   // 架构闸：结构化指令层能精确编译的卡，优先走指令层；旧特判仅对指令层无法编译(null)的卡兜底，杜绝旧硬编码覆盖新卡面
   if (h && typeof compileStepOps === 'function') {
     var __main = (typeof getMainEffectText === 'function') ? getMainEffectText(t) : t;
