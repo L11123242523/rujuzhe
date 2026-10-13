@@ -8184,7 +8184,17 @@ var TW = {
       var lb = (typeof __labelOf === 'function') ? __labelOf(c) : ((c && (c.label || (c.card && c.card.name))) || '?');
       var s = new String(lb);
       s.owner = (c && c.owner) || null;
-      if (c && c.needTarget === true) { s.needTarget = true; s.pick = c; s.label = String(lb); }
+      /* 【2026-10-14 作者报"只写连锁、看不出是哪张卡"+ 日志里卡名被套两层 ⇒ 结构修 ✓】
+         这里原来写的是 `s.pick = c` ✗ —— `c` 是**候选节点**（{card,from,index,label,onAdd,fire,owner}），
+         而 `s` 是**给 UI 的显示字符串**（选项文本）。把节点塞进 pick 槽之后：
+           · `ui.js` 的 `__pickTargetThenFinish` 把节点当 pick 用 ⇒ 选中后写到了 `节点.target`
+           · `_addChain` 回传的 `pick` 也就成了节点 ⇒ `applyChainCard` 里 `pick.card` = **undefined**
+           ⇒ 卡名退化成"选项文本" ⇒ 日志出现 `发动【好孩子的奖励】（2费）` 这种**套两层** ✗
+           （同一条链上 C1/C2/C3 三张都需要"发动前选目标" ⇒ 三条日志全中 ✓ 作者已附日志）
+         修法：**只放真 pick**（与 `TW.scan` 里 `pick: pick` 同一口径 ✓）⇒ 显示槽与规则层口径一致 ✓。
+         ⚠ 不能直接删掉这个字段：`ui.js` 要用它读 `owner`（"给自己/给对手"按钮 ✓）。
+         ⚠ `c.pick` 可能为空（座位能力等没有 pick 的候选）⇒ UI 侧保留回落（见 ui.js 同一处注释 ✓）。 */
+      if (c && c.needTarget === true) { s.needTarget = true; s.pick = c.pick; s.label = String(lb); }
       return s;
     });
     opts.push(__passLabel);
@@ -13551,6 +13561,10 @@ function getActiveBuffs(user) {
   if (p._nextMoveReverse) P('pending','🔁','下次反向','','下一次移动方向反转','pend');
   if (p._nextDiceSides) P('pending','🎲','下次投掷',(p._nextDiceCount||1)+'枚'+p._nextDiceSides+'面','下一次投掷改用 '+(p._nextDiceCount||1)+' 枚'+p._nextDiceSides+'面骰','pend');
   if (p._preNextDamageLoss) P('pending','⚠️','造伤先扣同步',''+(p._preNextDamageLoss.amount||''),'下次造成伤害前先扣除目标同步','pend');
+  /* 【2026-10-14 作者裁决"加上"】琉璃(水着)被动②：用攻击/技能卡后「下次造成的最终伤害+1」⇒ 状态栏标识 ✓
+     字段：`_nextFervorFinalUp`（写入 `23368` 同一处被动 ✓；消耗在伤害出口 `16886`，按**攻击者本人**读并清零 ✓）。
+     口径与其它 pending 条目一致：只在**有值**时显示，消耗后自动消失 ✓。 */
+  if (p._nextFervorFinalUp > 0) P('pending','💥','下次最终伤害+',''+p._nextFervorFinalUp,'下一次造成的最终伤害 +'+p._nextFervorFinalUp+'（来源：【琉璃(水着)被动】使用攻击/技能卡后，限**热忱**属性的卡）','pend');
   // —— 进度记录：累计移动 X/阈值，还差几格触发 ——
   function PROG(field, thr, icon, name, cond) {
     if (!cond) return; var v = p[field] || 0;

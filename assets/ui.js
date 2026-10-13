@@ -462,7 +462,10 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
      —— 另开框会被"下一个连锁窗"顶掉（单槽冲突），实测回调永不回 ⇒ 卡不上链 ✗。 */
   function __pickTargetThenFinish(idx) {
     var c = choices[idx];
-    var pick = (c && typeof c === 'object') ? (c.pick || c) : null;
+    /* 【2026-10-14 随 engine 8187 的结构修一起改 ✓】`c.pick` 现在放的是**真 pick**（原来错放了候选节点 ✗）。
+       `c.pick.pick` 是引擎候选（collectChainable 的 pick，带 owner ✓）——优先用它来判"给自己/给对手"；
+       读不到就逐级回落（兼容旧形状 / 座位能力等没有 pick 的候选 ✓），**绝不猜座位** ✗。 */
+    var pick = (c && typeof c === 'object') ? ((c.pick && c.pick.pick) || c.pick || c) : null;
     var mine = (c && c.owner) || (pick && pick.owner) || 'p1';
     var other = (typeof foeOf === 'function') ? foeOf(mine) : ((mine === 'p1') ? 'p2' : 'p1');
     var __nm = (typeof playerDisplayName === 'function') ? playerDisplayName(mine) : '自己';
