@@ -6313,6 +6313,24 @@ function collectChainable(player, effect){
       if (!c || c.name !== '雷閃') return;
       if (c._leishanSPUsedThisTurn === battleState.turn) return;                 /* 一回合一次 ✓ */
       if (!(player === 'p1' || player === 'p2')) return;
+      /* 【2026-10-14 作者截图报「CHAIN 3 已是雷閃，却又问要不要连锁雷閃」⇒ 结构修 ✓】
+         该标记要到**逆结算执行时**才写 ⇒ 同一轮连锁里每次都还能再产出候选 ✗。
+         判据改成**链的既有事实**：这张实体卡已在本条连锁上（或已在待选里）⇒ 不再产出 ✓
+         （不靠计时/重试/兜底阈值 ✗）。 */
+      var __alreadyOnChain = false;
+      try {
+        var __ch = (effect && effect._chain) || [];
+        for (var __k = 0; __k < __ch.length; __k++) {
+          var __n = __ch[__k];
+          if (__n && (__n.card === c || (__n.kind === 'permSP' && __n.permSP === 'leishan' && __n.by === player))) { __alreadyOnChain = true; break; }
+        }
+        if (!__alreadyOnChain) {
+          for (var __k2 = 0; __k2 < out.length; __k2++) {
+            if (out[__k2] && out[__k2].card === c) { __alreadyOnChain = true; break; }
+          }
+        }
+      } catch (e) {}
+      if (__alreadyOnChain) return;
       out.push({ card: c, from: 'permSP', index: i, permSP: 'leishan' });
     });
   } catch (e) {}
@@ -12904,6 +12922,25 @@ function __drawPickPage(kind, player, cb) {
     pick((typeof GameRNG !== 'undefined' && GameRNG.int) ? GameRNG.int(n) : 0);   // AI：随机一格
   } catch (e) { try { console.error('抽取页面出错（回退自动抽）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:12282', e2); } catch (e2) {} } cb(null); }
 }
+/* 【2026-10-14 第三次平衡性改动·再来一次招待券 SP ⇒ 结构修】
+   卡面 SP：「队伍中的 [增益者][增幅者] 角色合计为三名时改为抽取2张馈赠卡。」
+   角色标签口径**复用引擎既有判据**（[突破手] 计数那套）：`ch.tags`（斜杠串）或 `ch.roles`（数组）✓。
+   为什么单独一个函数：判据只有一份，读的地方只此一处 ✓（不散落在各处 ✗）。 */
+function __teamHasThreeBenefactors(player) {
+  try {
+    var p = battleState[player];
+    var chars = (p && p.characters) || [];
+    var n = 0;
+    chars.forEach(function (ch) {
+      if (!ch) return;
+      var tags = String(ch.tags || '');
+      var roles = (ch.roles || []).join('/');
+      var all = tags + '/' + roles;
+      if (all.indexOf('增益者') >= 0 || all.indexOf('增幅者') >= 0) n++;
+    });
+    return n >= 3;
+  } catch (e) { return false; }
+}
 function drawGiftCard(player, pickName) {
   if (!battleState) return;
   var p = battleState[player];
@@ -14596,6 +14633,19 @@ function initRules() {
    items 改动条目（card 卡名 + chg 改动）。
    数值一律以母本 data/cards.json 与玩家可见的 cards.js / 内联表为准（不许凭记忆写）。 */
 var ANNOUNCEMENTS = [
+  {
+    date: '2026-10-14',
+    title: '平衡性调整 · 第三次（5 张卡）',
+    pub: '见本次提交',
+    note: '本次调整了以下 5 张卡的费用与效果，卡面与游戏内数值已同步更新：',
+    items: [
+      { card: '得分！', chg: '防御值 +1 → +2（持续 2 次行动）；伤害范围 前后 4 格 → 3 格；首段混沌伤害 2 → 1（「否则再次受到」仍为 2）' },
+      { card: '典籍之残页', chg: 'SP 选项① 可选范围由「墓地」扩为「墓地或移出游戏」' },
+      { card: '死灵令牌', chg: '费用 6 → 5；发动时效果改为「抽一张卡然后选一张手卡公开」（原来只有公开、不抽卡）' },
+      { card: '设计师的直尺', chg: '费用 4 → 6' },
+      { card: '再来一次招待券', chg: '费用 4 → 2；SP「队伍中[增益者][增幅者]合计三名时改为抽取2张馈赠卡」现已生效（原来恒定抽 1）' }
+    ]
+  },
   {
     date: '2026-10-11',
     title: '平衡性调整 · 第二次（角色卡效果）',
@@ -18443,7 +18493,20 @@ function __opsCards(op, ctx, next, env) {
       __doDraw(__dw); // 抽卡动画结束（=抽卡后的“那之后”隔断）再继续
       return;
     }
-    case 'draw_gift': if (typeof drawGiftCard === 'function') drawGiftCard((ctx && ctx.__tgtSubj) ? target : user); break; // C19 共鸣“其抽1张馈赠卡”=目标
+    case 'draw_gift': {
+      /* 【2026-10-14 招待券 SP ⇒ 结构修】卡面：「队伍中的 [增益者][增幅者] 角色合计为三名时改为抽取2张馈赠卡。」
+         原来**无条件抽 1** ⇒ SP 不生效 ✗。这里按**来源卡名**放行（只影响这张卡 ✓，别的 draw_gift 调用者一字不变 ✓）。
+         ⚠ 判据函数只有一份 `__teamHasThreeBenefactors` ✓。 */
+      var __dgCard = (ctx && ctx.card && ctx.card.name) || '';
+      var __dgWho = (ctx && ctx.__tgtSubj) ? target : user;
+      var __dgN = 1;
+      if (__dgCard === '再来一次招待券' && typeof __teamHasThreeBenefactors === 'function' && __teamHasThreeBenefactors(__dgWho)) {
+        __dgN = 2;
+        try { addBattleLog(__dgWho, '【再来一次招待券·SP】队伍中[增益者][增幅者]合计三名 ⇒ 抽取2张馈赠卡'); } catch (e) {}
+      }
+      if (typeof drawGiftCard === 'function') { for (var __dgi = 0; __dgi < __dgN; __dgi++) drawGiftCard(__dgWho); }
+      break;
+    } // C19 共鸣“其抽1张馈赠卡”=目标
     case 'draw_omikuji': if (typeof drawOmikuji === 'function') drawOmikuji(user); break;
     case 'search': {
       var sw = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target : user; if (typeof __refillDeckIfEmpty==='function' && (op.sources||[]).indexOf('deck')>=0) __refillDeckIfEmpty(sw); var list = collectZoneCards(sw, op.sources, op.tags, op.cats, op.excludeAttr); // C19 代词主语归目标
@@ -22490,7 +22553,10 @@ var PERMANENT_STRUCT = [
        而编译层/执行层本来就支持 d4 判定伤害（13839 / 16232-16233，含控骰与琉璃SP钩子）。 */
     onPlay: ['对一名玩家造成一次四面骰判定伤害'],
     active: null },
-  { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } }
+  { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } },
+  /* 2026-10-14 第三次平衡性改动·死灵令牌（5费）：发动时效果改走具名处理器 siling（抽一张再公开一张手卡）。
+     为什么必须具名：指令层把那句拆成两个 draw ⇒「选一张手卡公开」整段丢失。 */
+  { match: ['死灵令牌'], onPlay: ['发动时作为效果处理：抽一张卡然后选一张手卡公开'], onPlayHandler: 'siling', active: null }
 ];
 
 /* 【结构修复 2026-10-05】永久卡"发动时"从句：**从卡自己的 cardData 文本**提取（不再依赖注册表副本）。
@@ -22613,6 +22679,38 @@ function resolvePermanentOnPlay(card, user, cb) {
 }
 
 var PERMANENT_ONPLAY_HANDLERS = {
+  /* 2026-10-14 第三次平衡性改动·死灵令牌 ⇒ 结构修。新卡面：「发动时作为效果处理：抽一张卡然后选一张手卡公开。」
+     实测指令层把它拆成两个 draw ⇒「选一张手卡公开」整段丢失（作者要的公开机制没了）。
+     改走具名处理器（与臂章、福金、善意面具同款架构）：① 抽 1 张（唯一抽卡入口 drawCard）
+     ② 再选一张手卡公开（复用同一份公开交互：打 _public 与 _faceUp 标记）。
+     公开计数的唯一真相是 __isPublicCard（在场永续算公开）。 */
+  siling: function (card, user, cb) {
+    var p = battleState[user];
+    var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (cb) cb(); };
+    var __drawn = null;
+    try { if (typeof drawCard === 'function') __drawn = drawCard(user); } catch (e) {}
+    if (__drawn) addBattleLog(user, '【死灵令牌】抽到【' + (__drawn.name || '?') + '】');
+    var __cands = (p && p.hand ? p.hand : []).filter(function (c) { return c; });
+    if (!__cands.length) { addBattleLog(user, '【死灵令牌】手卡为空 ⇒ 没有可公开的卡'); __fin(); return; }
+    function __apply(i) {
+      var pick = __cands[i];
+      if (!pick) { addBattleLog(user, '【死灵令牌】未选择要公开的手卡'); __fin(); return; }
+      pick._public = true; pick._faceUp = true;
+      addBattleLog(user, '【死灵令牌】公开手卡【' + (pick.name || '?') + '】（当前公开 ' +
+        ((typeof __publicCardCount === 'function') ? __publicCardCount(p) : '?') + ' 张）');
+      __fin();
+    }
+    var __opts = __cands.map(function (c) { return '公开【' + (c.name || '?') + '】'; });
+    if (user === 'p1') {
+      if (typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p1', '死灵令牌', '选一张手卡公开', '公开后计入公开的卡', __opts, function (o) { __apply(o); }); return; }
+      if (typeof showChoiceModal === 'function') { showChoiceModal('死灵令牌', '选一张手卡公开', '公开后计入公开的卡（回合开始按其数量额外抽卡，上限3）', __opts, function (o) { __apply(o); }); return; }
+      __apply(0); return;
+    }
+    if (typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '死灵令牌（对手）', '选一张手卡公开', '公开后计入公开的卡', __opts, function (o) { __apply(o); }); return; }
+    var __aiIdx = 0, __aiCost = -1;
+    __cands.forEach(function (c, i) { var cc = parseInt(c.cost, 10) || 0; if (cc > __aiCost) { __aiCost = cc; __aiIdx = i; } });
+    __apply(__aiIdx);
+  },
   // 风纪委员臂章：3 理智伤害
   armband: function (card, user, cb) {
     dealDamageWithResponse(permOther(user), 3, card.name, function () { cb && cb(); });
