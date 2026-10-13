@@ -8714,6 +8714,25 @@ function __chainC1Exit(owner, card) {
   } catch (e) { return false; }
 }
 /** 判断"这张正在结算的卡是否已被其他效果搬离效果处理区"（用于送墓出口跳过重复落点） */
+/* 【2026-10-14 作者报「公共墓地已有那张事件卡，却还显示它在结算中」⇒ 结构修 ✓】
+   本函数 = **"这张卡已经离开效果处理区、它的 C1 收尾做了吗"的唯一出口** ✓。
+   为什么需要它：卡的去向在别处（送去哪）已经决定，可 `_chainC1` 标记是**写在卡对象上的状态** ——
+   任何一条"离开效果处理区"的路径漏了收尾，标记就漂在卡上 ⇒ UI 一直把它画成「C1 结算中」✗
+   （作者截图：AI 的效果处理区里那张已进公共墓地的事件卡仍标着"结算中"）。
+   口径：**不猜、只按事实收尾** —— 卡若已不在 `permanent` 里，却还带 `_chainC1` ⇒ 那就是漏了；
+   此时把标记清掉（`__chainC1Exit` 会顺带清 ✓）。已经收尾过的卡（标记为假）**什么都不做** ✓（幂等）。
+   返回：是否真的补了一次收尾（用于调用方写日志 ✓）。 */
+function __chainC1EnsureExited(owner, card) {
+  try {
+    if (!card || !card._chainC1) return false;
+    if (typeof battleState === 'undefined' || !battleState) return false;
+    var p = battleState[owner]; if (!p || !p.permanent) return false;
+    if (p.permanent.indexOf(card) >= 0) return false;   /* 还在处理区（正常永续留场）⇒ 不动它 ✓ */
+    __chainC1Exit(owner, card);
+    try { addBattleLog(owner, '【连锁】' + (card.name || '?') + ' 已离开效果处理区，补撤它的 C1 占位（原来是漏了收尾）'); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
 function __chainC1WasTakenAway(owner, card) {
   try {
     if (!card || !card._chainC1) return false;
@@ -19870,6 +19889,9 @@ function useEventCardFor(player, index, name, done) {
       updateBattleUI(); checkBattleEnd(); if (done) done(); return;
     }
     __chainC1Exit(player, card);   // 作者口径：结算完毕先撤掉 C1 占位，再按种类送墓（事件卡→公共墓地）
+    /* 【2026-10-14 收口】本函数是事件卡的**第二条**"离开效果处理区"出口（它自己写公共墓地）——
+       与 `placeAfterUse` 共用**同一个**收尾函数 ⇒ "卡离场 ⇒ C1 必被撤"成为结构性事实 ✓ */
+    __chainC1EnsureExited(player, card);
     if (!card._alreadyInPublicGrave) {
       publicGraveyard.event_cards.push(card);
       addBattleLog(player, '【' + card.name + '】已放入公共墓地（公共墓地现有' + publicGraveyard.event_cards.length + '张事件卡）');
@@ -23080,6 +23102,11 @@ function placeAfterUse(user, card, isPerm) {
   }
   // 技能卡用后必离场（进墓/回牌组）：清除实例级“本回合已用”标记，使其被回收回手后可再次发动（未回收则卡在墓地，自然无法一回合连发）
   if (card && card._category === 'skill_cards') delete card._skillUsedThisTurn;
+  /* 【2026-10-14 收口·唯一出口】上面各条分支已经把这张卡的**去向**定完了（回收/蓝图跳过/销毁/
+     事件卡→公共墓地/乐谱卡→公共墓地/按种类送墓…）⇒ 这里在**公共尾巴**上补一次 C1 收尾：
+     任何一条去向分支漏了"撤 C1 占位"都不会再把标记漂在卡上 ⇒ UI 不会一直画「C1 结算中」✗。
+     幂等：已经收尾过的（`__chainC1Exit` 已把 `_chainC1` 置假）⇒ 本调用什么都不做 ✓。 */
+  __chainC1EnsureExited(user, card);
   if (isPerm) {
     // 效果处理区共3格：正面永续 + 盖伏卡合计不超过3（盖伏卡占一个空位）；满则进墓
     var __procSlots = p.permanent.length + ((p.faceDownCards || []).length);
