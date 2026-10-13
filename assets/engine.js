@@ -7472,7 +7472,15 @@ function __runTimingTriggers(timing, ctx, next) {
             if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
             cands.push({
               owner: side, mandatory: false, id: 'phasecard|' + side + '|' + (c.name || ''),
-              label: '发动【' + (c.name || '') + '】（' + (c.cost || 0) + '费）',
+              /* 【2026-10-14 作者真机截图报「按钮显示成 发动【发动【X】】」⇒ 结构修 ✓】
+                 `label` 的语义是**名字** —— 显示层会自己套前缀：
+                   · 窗口选项：`__labelOf` ⇒ `'↧ 连锁发动：' + c.label`
+                   · 入选日志：`fire(node.label)` ⇒ `'发动【' + label + '】'`
+                   · 连锁组成：`_chainText` ⇒ `'C1 你·' + c.label`
+                 原来这里写成 `'发动【' + 名字 + '】（N费）'` ⇒ 每层各再套一次 ⇒ 玩家看到
+                 「发动 发动【X】（3费）」、日志出现「发动【发动【X】（3费）】」✗
+                 ⇒ 改回**纯卡名**（与其它候选同一口径 ✓）：前缀由各显示层自己加，三层同时干净 ✓ */
+              label: (c.name || ''),
               fire: function (nx) {
                 var fin = (typeof nx === 'function') ? nx : function () {};
                 try {
