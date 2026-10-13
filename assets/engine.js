@@ -6297,11 +6297,21 @@ function applyChainCard(player,pick,effect,done,target){
      为什么必须带上：MD 口径下"选择/选一名玩家"这类取对象是**发动前提** ⇒ 目标在发动那一刻锁定 ✓。
      不传（AI 座 / 阶段时点等旧调用方）⇒ 落到 undefined ⇒ 结算层走"取自己"的兜底 ✓（绝不对手 ✗）。 */
   var me=battleState[player], c=pick.card, name=c.name||'', eff=c.effect||'';
+  /* 【2026-10-14 作者裁决·结构修 ✓】C1（= 被响应的那个效果）**只在真有响应环要入链时**才写进 `effect._chain`。
+     为什么：无条件写它会让"无人可响应的单人发动"也走非空栈的**异步收尾** ⇒ 白开一个响应窗（真人犹豫时
+     最长 7 秒自动放弃）⇒ 卡自己的效果体被推到窗关之后，它弹的框只能入队等窗关 ✗（实测 6/6 滞留 7.13s）。
+     口径：**链里有环才叫连锁**；无环 ⇒ `effect._chain` 保持空 ⇒ 回到"不开关窗、直接结算" ✓（与基线一致）。
+     幂等：只会补一次（已有 C1 就不重复放）✓。 */
+  function __chainWithC1(){
+    effect._chain = effect._chain || [];
+    if (effect._c1Node && effect._chain.indexOf(effect._c1Node) < 0) effect._chain.unshift(effect._c1Node);
+    return effect._chain;
+  }
   /* 【座位级连锁效果（作者 2026-09-27 裁决）】非卡片的角色能力作为连锁响应时：不付费、不动卡区，
      只把一环压入连锁，具体效果在**逆结算**时执行（见 resolveChainStack 的 __applyNode → kind:'seatEffect'）。 */
   if (pick.from === 'seatEffect') {
     effect._chain = effect._chain || [];
-    effect._chain.push({ kind: 'seatEffect', by: player, name: name, seatEffect: pick.seatEffect });
+    __chainWithC1().push({ kind: 'seatEffect', by: player, name: name, seatEffect: pick.seatEffect });
     addBattleLog(player, '连锁发动【' + name + '】（角色能力，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
@@ -6353,7 +6363,7 @@ function applyChainCard(player,pick,effect,done,target){
     if (__sbOrig !== null) {
       var __sbBonus = Math.min(Math.abs(__sbOrig), 6);
       effect.moveAmount = __sbOrig + __sbBonus;
-      effect._chain.push({kind:'selfdouble', by:player, name:name, from:__sbOrig, to:effect.moveAmount, delta:__sbBonus});
+      __chainWithC1().push({kind:'selfdouble', by:player, name:name, from:__sbOrig, to:effect.moveAmount, delta:__sbBonus});
       if (!me.moveBuff) me.moveBuff = {};
       if ((c.sp||'').indexOf('位移量大于7') >= 0) me.moveBuff.energyDrinkSP = true; // SP：位移>7造3热忱、>14造5
       addBattleLog(player, '发动【' + name + '】：本次位移x2（' + __sbOrig + '格→' + effect.moveAmount + '格，最多+6）');
@@ -6364,7 +6374,7 @@ function applyChainCard(player,pick,effect,done,target){
   // 遥控骰子/特制手套：把原始点数指定为某值（set，丢失目标需重新校验）
   if(name.indexOf('遥控骰子')>=0||name.indexOf('特制手套')>=0 || eff.indexOf('修改一次掷骰结果')>=0 || eff.indexOf('修改骰子点数')>=0){
     payAndRemove();
-    function setV(v){ effect._chain.push({kind:'set',by:player,name:name,from:__orig(),to:v}); afterUse(); }
+    function setV(v){ __chainWithC1().push({kind:'set',by:player,name:name,from:__orig(),to:v}); afterUse(); }
     // 修改范围=实际使用的“单枚骰子”面数；多枚骰投掷也只把最终点数设为所选值（不逐枚相加，如2枚6面改成6即最终=6而非12）
     var __setSides = effect._diceSides || 6, __setCnt = effect._diceCount || 1, __setOpts = [];
     for (var __si = 1; __si <= __setSides; __si++) __setOpts.push(String(__si));
@@ -6372,25 +6382,25 @@ function applyChainCard(player,pick,effect,done,target){
     if(player==='p1') showChoiceModal(name,'将本次最终点数改为几点（锁定原始值'+__orig()+'）'+__setHint,effect.description||'',__setOpts,function(i){ setV(i+1); });
     else setV(__setSides);
   } else if(name.indexOf('颠倒骰子')>=0 || (eff.indexOf('改变')>=0&&eff.indexOf('方向')>=0)){
-    payAndRemove(); effect._chain.push({kind:'reverse',by:player,name:name}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'reverse',by:player,name:name}); afterUse();
   } else if((name.indexOf('大风')>=0 || /终止.*移动/.test(eff)) && effect && (effect._stage==='move' || effect.type==='move')){
     // 大风（事件卡）：移动将执行前连锁——终止所有移动动作；触发后所有玩家下次执行的位移效果-2
-    payAndRemove(); effect._chain.push({kind:'stop_move',by:player,name:name}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'stop_move',by:player,name:name}); afterUse();
   } else if(pick.from==='event'){
     // 事件卡最高时点：连锁任意卡/效果发动，逆结算时执行其效果本体（大风在非移动窗口也走这里）
-    payAndRemove(); effect._chain.push({kind:'event',by:player,name:name,card:c,target:target}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'event',by:player,name:name,card:c,target:target}); afterUse();
   } else if(c._category === 'skill_cards'){
     // 作者口径：技能卡是全时点卡 —— 连锁发动后，**逆结算时执行它的效果本体**（与事件卡同构，kind:'skill'）
-    payAndRemove(); effect._chain.push({kind:'skill',by:player,name:name,card:c,target:target}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'skill',by:player,name:name,card:c,target:target}); afterUse();
   } else if(eff.indexOf('位移量')>=0||eff.indexOf('增减')>=0||name.indexOf('侦探放大镜')>=0){
     payAndRemove();
-    function applyAdd(add){ effect._chain.push({kind:'add',by:player,name:name,from:__orig(),delta:add}); afterUse(); }
+    function applyAdd(add){ __chainWithC1().push({kind:'add',by:player,name:name,from:__orig(),delta:add}); afterUse(); }
     if(player==='p1') showChoiceModal('侦探放大镜','调整本次位移量（锁定原始值'+__orig()+'）',effect.description||'',['位移量 +2','位移量 -2'],function(i){ applyAdd(i===0?2:-2); });
     else applyAdd(-2);
   } else if(eff.indexOf('打断')>=0||name.indexOf('猎手爪链')>=0){
     payAndRemove();
     var mover=effect.player, actor=player;
-    effect._chain.push({kind:'cancel',by:player,name:name,extra:function(){
+    __chainWithC1().push({kind:'cancel',by:player,name:name,extra:function(){
       // 猎手爪链：打断成立时，发动者向移动者方向前进3格并触发所到格子
       if(mover && mover!==actor && battleState[actor] && battleState[mover]){
         var ap=battleState[actor], aOld=ap.position, ad=battleState[mover].position>=ap.position?1:-1;
@@ -6400,16 +6410,16 @@ function applyChainCard(player,pick,effect,done,target){
     }});
     afterUse();
   } else if(eff.indexOf('抵消')>=0&&eff.indexOf('伤害')>=0){
-    payAndRemove(); effect._chain.push({kind:'cancelDamage',by:player,name:name}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'cancelDamage',by:player,name:name}); afterUse();
   } else if(eff.indexOf('效果无效')>=0||name.indexOf('崩塌之乌托邦')>=0){
     /* 【MD 口径 A3】（2026-09-30）这一支的卡面写的就是「**效果无效**」⇒ 按 MD 口径属于**效果无效**：
        仍占连锁环、只是效果不生效；而**发动代价不返还**（代价在发动时已付）。
        原来统一用 kind:'negate'（= 发动无效：整条动作消失 + A2 次数返还）⇒ 与卡面语义不符。
        「发动无效」的 kind:'negate' 分支保留（供卡面写明"发动无效/破坏并无效"的卡使用）。 */
-    payAndRemove(); effect._chain.push({kind:'negate_effect',by:player,name:name}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'negate_effect',by:player,name:name}); afterUse();
   } else if(name==='Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff)){
     // Twice 重判：在骰子/判定结果确定前连锁，重掷一次（修复原兜底分支吞卡白费）
-    payAndRemove(); effect._chain.push({kind:'reroll',by:player,name:name}); afterUse();
+    payAndRemove(); __chainWithC1().push({kind:'reroll',by:player,name:name}); afterUse();
   } else {
     payAndRemove(); afterUse();
   }
@@ -9228,7 +9238,14 @@ function beforeEffectExecution(effect, callback) {
        · 逆结算 `stack` 只含响应卡 ⇒ 被响应的效果**不在同一条链里结算** ✗（症状③/④）
      口径：C1 = 被响应的效果本身 ⇒ 它**最后**结算（响应卡排在它前面，符合逆序 ✓）。
      注意：卡已由 `__chainC1Enter` 放进效果处理区 ✓ ⇒ 这里只做"链上记账"，**不重复放置** ✗。 */
+  /* 【2026-10-13 作者裁决 1B ✓】C1 = 被响应的那个效果本身 ⇒ 它**最后**结算（响应卡排在它前面，逆序 ✓）。
+     ⚠ 本函数会被**重入**（实测：同一张卡出现两次「送入墓地」+ 两轮结算）⇒ 这里只**重建**这个节点对象 ✓，
+       入链动作交给 `applyChainCard` 的 `__chainWithC1()`（它按对象身份去重 ⇒ 重入也不会累积出两个 C1 ✓；
+       旧版用 `effect._chain = [effect._c1Node]` 无条件赋值，虽幂等却会让"无人可响应"的单人发动也走异步收尾 ✗）。 */
   effect._c1Node = { kind: 'c1', by: __c1who, name: (__c1card ? (__c1card.name || '') : (effect.description || '效果')), card: __c1card || null, label: (__c1card ? (__c1card.name || '') : (effect.description || '效果')) };
+  /* 【2026-10-14 作者裁决·结构修 ✓】C1 **不在这里**入 `effect._chain` ✗（上一版无条件写它 ⇒ 无人可响应的
+     单人发动也走异步收尾 ⇒ 白开响应窗 ⇒ 最长 7 秒滞留，实测 6/6）。改由 `applyChainCard` 的
+     `__chainWithC1()` 在"真有响应环入链"那一刻补进第 1 环 ✓（详见那里的注释）。 */
   // 记录当前响应窗口类型，供 AI 盖伏响应（aiPickFaceDownForWindow）判定
   if (battleState) { battleState._curWindowStage = effect._stage || effect.type || ''; battleState._curWindowDamage = effect.pendingDamage || effect.damage || 0; }
   // 快速路径：双方都没有任何可连锁卡时静默放行，不刷日志/不弹连锁条，避免普通用卡被打扰
