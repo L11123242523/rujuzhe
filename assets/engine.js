@@ -2882,6 +2882,20 @@ function evaluatePlayable(card,player,opts){
   if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) cost = 0; // 区间费用卡：支付在效果内完成
   var __loanCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
   if (!__costAffordable(player, card)) return {ok:false,reason:'费用不足！需要'+cost+'音韵值，当前只有'+me.cost + (__loanCap>0 ? '（[超频]可透支'+__loanCap+'点）' : '')};
+  /* 【2026-10-14 作者裁决·结构修 ✓】"不满足发动条件的卡应该变灰无法使用" ——
+     有些卡的**发动前置条件写在卡面**（例：【堵徒游戏】「触发者**支付500金币**」），
+     旧实现只在结算里扣（而且那行还是笔误 ⇒ 余额不足也照样发动 ✗）。
+     ⇒ 在这里（**唯一的"能不能出"判定处**、正挨着音韵费用那条 ✓）补一条**金币门槛**：
+        卡面写了「支付 N 金币」而余额不足 ⇒ 不可出 + 写明原因 ✓（UI 据此变灰 ✓，无需另写一套 ✗）。
+     ⚠ 只拦"**固定**支付 N 金币"（数字明文）；「每500金币增伤」那种**可选**花费不在此列 ✓（在效果里询问）。 */
+  try {
+    var __goldNeed = 0;
+    var __gm = String(eff || '').match(/支付\s*(\d+)\s*金币/);
+    if (__gm) __goldNeed = parseInt(__gm[1], 10) || 0;
+    if (__goldNeed > 0 && (me.gold || 0) < __goldNeed) {
+      return { ok: false, reason: '金币不足' + __goldNeed + '，无法使用【' + name + '】（当前' + (me.gold || 0) + ' 金币）' };
+    }
+  } catch (e) {}
   /* 【2026-10-01 作者裁决】"扣除自身 N 点同步值"**不再前置拦截**：允许发动，
      代价按 0 下限扣（不足不补）；若因此归零则由"同步值归零 ⇒ 败北"规则处理（无回复手段时才判负）。
      ⚠ 音韵值（费用）不足仍然拦（上面的 __loanCap 那段不受影响）。 */
@@ -18680,7 +18694,11 @@ function runOneOp(op, ctx, next) {
       var __dfApply = function (__dfT) {
         var __dfP = battleState[__dfT];
         if (__dfP) {
-          __dfP.sync = Math.min((__dfP.sync || 0) + 2, __dfP.maxSync || 999);          // 回给**被选中的那名玩家** ✓
+          /* 【2026-10-14 作者报「回复同步值效果会回复2次，卡面2点实际4点」⇒ 结构修 ✓】
+             实测本卡文本被编译成**两个** op：`heal_sync(2)` **与** `devil_feed`。
+             而这里原来**又**回一次 2 点 ⇒ 同一件事两处实现 ⇒ 合计 4 ✗。
+             ⇒ 回同步**只留 `heal_sync` 那一份**（它是卡面文本编译出来的权威 ✓）；
+                本分支只负责"3 次行动内最终伤害 +N%"这一件事 ✓。 */
           __dfP._devilFeed = (__dfP._devilFeed || 0) + (op.pct || 0);                  // 累加，不覆盖 ✓（作者口径 ✓）
           __dfP._devilFeedActions = Math.max(__dfP._devilFeedActions || 0, op.actions || 0);  // 重复发动不缩短 ✓
           addBattleLog(user, '【小恶魔的投喂】' + (__dfT === user ? '自己' : playerDisplayName(__dfT)) + '回复2点同步值（现' + __dfP.sync + '），'
@@ -19761,7 +19779,13 @@ function __eventCasesB(card, player, p, done, env) {
     case '赌徒游戏': {
       // 支付500金币（黑色卡片可折价），木原家族投4枚6面骰
       if (!p.gold) p.gold = 0;
-      var __pay = (p, 500);
+      /* 【2026-10-14 作者报「没有500金币却能发动」⇒ 结构修 ✓】
+         原写法 `var __pay = (p, 500);` 是**笔误**：逗号表达式返回 500（金额本身对），
+         但紧跟的 `p.gold -= __pay` **完全不看余额** ⇒ 100 金币也能玩、玩完变 **-400** ✗。
+         余额门槛已加到 `evaluatePlayable`（卡在那里就出不来、并写明原因 ✓）；
+         这里把笔误写正，并在扣费前兜底一次（防绕过 UI 的调用路径 ✓）。 */
+      var __pay = 500;
+      if ((p.gold || 0) < __pay) { addBattleLog(player, '【赌徒游戏】金币不足（当前' + (p.gold || 0) + '，需要' + __pay + '）⇒ 本次不发动'); if (done) done(); return; }
       p.gold -= __pay;
       var __muyuan = false;
       try { __muyuan = ((deckConfig[player].chars || [])).some(function (c) { return c && c.name && c.name.indexOf('木原') >= 0; }); } catch (e) { try { console.error('[catch] assets/engine.js:18734', e); } catch (e2) {} }
