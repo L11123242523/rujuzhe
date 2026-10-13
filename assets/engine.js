@@ -7857,7 +7857,11 @@ var TW = {
       tp: tp,
       foe: (typeof foeOf === 'function') ? foeOf(tp) : 'p2',
       state: 'collect',
-      chain: [],
+      /* 【2026-10-13 作者裁决 1B ✓】窗口的链数组**也要把"被响应的那个效果"记为 C1** ✓ ——
+         与 engine 的 `effect._chain` 同一口径（C1 也进链数组）⇒ 响应卡上链后 `win.chain.length`=2
+         ⇒ **编号显示 C2** ✓、【连锁组成】两条都在 ✓（此前窗口里是空的 ✗ ⇒ 响应卡被显示成 C1 ✗）。
+         注：C1 是"占位记账" ⇒ `fire` 时会被当作已完成（`__chainC1WasTakenAway` 之外不再执行 ✗）。 */
+      chain: (opts._c1node ? [opts._c1node] : []),
       priority: tp,
       passStreak: 0,
       parent: opts.parent || null,
@@ -8163,7 +8167,16 @@ var TW = {
       else pass();
       return;
     }
-    var opts = pool.map(__labelOf);
+    /* 【2026-10-13 S4 ✓】选项**必须仍是字符串**（按钮文字与各处 String(x) 比对都按字符串 ✓）；
+       仅在**需要收目标**的项上，给这个字符串对象挂 needTarget/pick/owner ✓
+       ⚠ 不能用 {label:…} 对象 ✗（会让 indexOf/比对全失效 ⇒ 实测"连锁项选不中 ⇒ 直接 PASS"✗） */
+    var opts = pool.map(function (c) {
+      var lb = (typeof __labelOf === 'function') ? __labelOf(c) : ((c && (c.label || (c.card && c.card.name))) || '?');
+      var s = new String(lb);
+      s.owner = (c && c.owner) || null;
+      if (c && c.needTarget === true) { s.needTarget = true; s.pick = c; s.label = String(lb); }
+      return s;
+    });
     opts.push(__passLabel);
     var pickP1 = function (idx) {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
@@ -8461,6 +8474,15 @@ function resolveChainStack(effect, onDone) {
   function __applyNode(i, e, finished) {
     __paint({ resolving: i });
     if (typeof ChainAnim !== 'undefined') ChainAnim.flash('逆结算 C' + (i + 1) + ' · ' + e.name, 'flash-resolve');
+    /* 【2026-10-13 作者裁决 1B ✓】**链上的 C1 = 被响应的那个效果本身** ⇒ 标记完成即可，**不重复执行** ✗：
+       它的效果由**本函数的外层回调**（`beforeEffectExecution` 的 `callback(effect)`／调用方）负责跑 ✓；
+       逆结算只负责"把它作为链的第 1 环排到最后" ✓（响应卡排在它前面 ⇒ 逆序正确 ✓）。 */
+    if (e.kind === 'c1') {
+      __doneSet[i] = true;
+      try { addBattleLog(e.by, '【连锁】C1【' + (e.name || '效果') + '】生效（本环即被响应的效果）'); } catch (err) {}
+      finished();
+      return;
+    }
     if (e.kind === 'set' || e.kind === 'add') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else if (hasNum && cur !== e.from) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】锁定的原始值' + e.from + '已被先结算的连锁变为' + cur + '，丢失对象，不处理'); }
@@ -8662,8 +8684,17 @@ function __chainC1WasTakenAway(owner, card) {
  *    · 给了 ⇒ **直接用**，不再从卡面文本倒推、也不弹窗 ✓（MD 口径：目标在发动那一刻锁定 ✓）
  *    · 没给 ⇒ 退回"按文本判"（AI 座 / 阶段时点等旧调用方 ✓） */
 function __executeCardEffectBody(player, card, done, forceTarget) {
+  /* 【2026-10-13 S4 ✓】标记"正在执行效果本体" ⇒ beforeEffectExecution 期间**不开新窗** ✓
+     （否则响应卡的效果体会给自己再开一个响应窗 + 再逆结算一次 ✗ —— 实测"共1张 → 共1个效果" ✗）
+     收尾时**必须**减回去（否则标记永久挂着 ⇒ 后续连锁再也开不了窗 ✗）
+     ⇒ 统一包一次 `done`：**所有出口**（各处提前 return / 异常）都走同一个递减 ✓ */
+  __runningEffectBody = (__runningEffectBody || 0) + 1;
+  var __bodyDone = function () {
+    if (__runningEffectBody > 0) __runningEffectBody--;
+    if (typeof done === 'function') done();
+  };
   try {
-    if (!card) { if (done) done(); return; }
+    if (!card) { __bodyDone(); return; }
     /* 【2026-10-12 作者裁决·结构修 ✓】"这张卡是否需要手写/交互处理"的判断**收口到这一处** ✓
        —— 原来出牌路径（`settleSpecialCard` `engine.js:23440`）会查 `getSpecialHandler` ✓，
           而**连锁逆结算路径**（本函数）**根本不查** ✗ ⇒ 跟连锁发动时交互全丢 ✗：
@@ -8676,16 +8707,16 @@ function __executeCardEffectBody(player, card, done, forceTarget) {
     var __h = (typeof getSpecialHandler === 'function') ? getSpecialHandler(card) : null;
     if (__h && typeof __h.play === 'function') {
       addBattleLog(player, '【连锁】' + (card.name || '') + '：走该卡的手写/交互处理（与出牌同一判断 ✓）');
-      __h.play(card, player, function () { if (done) done(); });
+      __h.play(card, player, function () { __bodyDone(); });
       return;
     }
     var __raw = card.effect || card.text || '';
     var text = (typeof getMainEffectText === 'function') ? getMainEffectText(__raw) : __raw;
-    if (!text) { if (done) done(); return; }
+    if (!text) { __bodyDone(); return; }
     var steps = parseEffect(text);
     /* 统一执行体（唯一一份 ✓） */
     function __runBody(targetSeat) {
-      executeEffectSteps(steps, { user: player, target: targetSeat, card: card }, function () { if (done) done(); }, player === 'p1');
+      executeEffectSteps(steps, { user: player, target: targetSeat, card: card }, function () { __bodyDone(); }, player === 'p1');
     }
     /* 【2026-10-13 作者裁决·S2 ✓】**发动前已定好目标 ⇒ 直接用，不再判文本、不再弹窗** ✓
        （MD 口径：取对象是发动前提、目标在发动那一刻锁定 ✓；链节点由 `__collectChainTarget` 收好带下来 ✓） */
@@ -8705,9 +8736,12 @@ function __executeCardEffectBody(player, card, done, forceTarget) {
     __runBody(__tgtSeat || player);
   } catch (e) {
     try { addBattleLog(player, '【连锁】效果本体结算异常：' + ((e && e.message) || e)); } catch (e2) { try { console.error('[catch] assets/engine.js:8469', e2); } catch (e2) {} }
-    if (done) done();
+    __bodyDone();
   }
 }
+
+/* 【2026-10-13 S4 ✓】"正在执行某张卡的效果本体"的计数（逆结算期间禁止再开新窗口，见 beforeEffectExecution） */
+var __runningEffectBody = 0;
 
 /* ============================================================
    【2026-10-13 作者裁决·S2：**先选目标，再进连锁**（MD 口径）✓】
@@ -9085,6 +9119,10 @@ function runResponseWindow(opts) {
     tp: firstSide,
     candidates: [],
     effect: effect,
+    /* 【2026-10-13 作者裁决 1B ✓】把"被响应的效果"作为窗口的 **C1 记账**交给窗口 ✓
+       ⇒ 响应卡上链后 `win.chain.length` = 2 ⇒ 编号显示 **C2** ✓、`【连锁组成】` 也带上 C1 ✓
+       （与 `effect._chain` 里那个 C1 节点是**同一个对象** ⇒ 两边口径一致 ✓） */
+    _c1node: (effect && effect._c1Node) || null,
     useChoiceModal: useChoiceModal,
     scan: function () {
       var out = [];
@@ -9101,6 +9139,13 @@ function runResponseWindow(opts) {
             mandatory: false,
             pick: pick,
             alive: function () { return true; },
+            /* 【2026-10-13 S4 ✓】本候选是否需要**在发动前收目标** ⇒ 交给**连锁窗自己**问第二步 ✓ */
+            needTarget: (function () {
+              try {
+                if (typeof __collectChainTarget !== 'function' || typeof __tgtTiming !== 'function') return false;
+                return __tgtTiming((pick.card && (pick.card.effect || pick.card.text)) || '') === 'activation';
+              } catch (e) { return false; }
+            })(),
             /* 入链那一刻就发动（付费+移出原区域+把修改节点 push 进 effect._chain / 改 je.val）——
                域内逆结算由 resolveChainStack 负责，所以 fire 什么都不做。 */
             /* 【2026-10-13 作者裁决·S2 ✓】**先选目标，再进连锁**（MD 口径）：
@@ -9108,12 +9153,20 @@ function runResponseWindow(opts) {
                收不到（AI/对端）⇒ 取自己 ✓；玩家取消 ⇒ **放弃这次入链** ✓（目标不合法不能发动 ✓）。
                自定义 `activate` 的窗口（判定结果窗口改的是 je.val，与目标无关）收到额外参数无副作用 ✓ */
             onAdd: function (done) {
-              function __go(__tg) {
-                if (__tg === null) { try { addBattleLog(side, '【连锁】未选定目标 ⇒ 本次不发动'); } catch (e) {} done(); return; }
-                activateFn(side, pick, effect, function () { done(); }, __tg);
+              /* 目标已在**连锁窗自己的槽**里收好（ui.showChainChoice 的第二步）；这里只兜底：
+                 AI 座 / 无窗 / 阶段时点等场合才现场取，且**绝不取对手** ✓ */
+              var __tg = pick.target;
+              if (__tg === undefined || __tg === null) {
+                if (typeof __collectChainTarget === 'function') {
+                  __collectChainTarget(side, pick.card, function (t) {
+                    if (t === null) { try { addBattleLog(side, '【连锁】未选定目标 ⇒ 本次不发动'); } catch (e) {} done(); return; }
+                    activateFn(side, pick, effect, function () { done(); }, t);
+                  });
+                  return;
+                }
+                __tg = '' + side;
               }
-              if (typeof __collectChainTarget === 'function') __collectChainTarget(side, pick.card, __go);
-              else __go('' + side);
+              activateFn(side, pick, effect, function () { done(); }, __tg);
             },
             fire: function (next) { next(); }
           });
@@ -9156,7 +9209,26 @@ function beforeEffectExecution(effect, callback) {
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
   if (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._chainLock) { if (typeof popEffect === 'function') popEffect(effect); __releaseB(); callback(effect); return; }
+  /* 【2026-10-13 S4 ✓·**嵌套结算根因**】逆结算里正在执行某张卡的**效果本体**时 ⇒ **不再开新窗** ✗
+     为什么原来漏了：_chainLock 在 __endChain（8433）里、**回调之前**就置回 false ✗ ⇒
+     回调里 __executeCardEffectBody 执行响应卡效果本体时，上面那道闸**看不到锁** ⇒ 又开一个响应窗 +
+     再来一次逆结算（实测日志：共1张 → 共1个效果，同一张卡被单独结算一次 ✗）。
+     ⇒ 用**专用标记**把"正在执行效果本体"这个事实管到效果本体结束（与它同生同灭 ✓，不是计时器 ✓）。 */
+  if (__runningEffectBody > 0) {
+    try { addBattleLog('system', '【连锁】逆结算中执行效果本体 ⇒ 不再开新窗口，直接结算'); } catch (e) {}
+    if (typeof popEffect === 'function') popEffect(effect);
+    __releaseB(); callback(effect); return;
+  }
   effect._chain = [];
+  /* 【2026-10-13 作者裁决 1B ✓·**C1 也进链数组**】把"**正在被响应的那个效果**"（`__chainC1Enter` 已把它
+     放进效果处理区占 C1 位 ✓）作为一个**真实链节点**放进 `effect._chain` ⇒ 它就是链的第 1 环 ✓。
+     为什么必须这样（此前三个症状同源）：
+       · `win.chain` 开窗时是空的 ✗ ⇒ 响应卡上链后 `win.chain.length`=1 ⇒ **被显示成 C1** ✗（症状①）
+       · `【连锁组成】` 只列 `win.chain` ⇒ 组成里只剩响应卡 ✗（症状②）
+       · 逆结算 `stack` 只含响应卡 ⇒ 被响应的效果**不在同一条链里结算** ✗（症状③/④）
+     口径：C1 = 被响应的效果本身 ⇒ 它**最后**结算（响应卡排在它前面，符合逆序 ✓）。
+     注意：卡已由 `__chainC1Enter` 放进效果处理区 ✓ ⇒ 这里只做"链上记账"，**不重复放置** ✗。 */
+  effect._c1Node = { kind: 'c1', by: __c1who, name: (__c1card ? (__c1card.name || '') : (effect.description || '效果')), card: __c1card || null, label: (__c1card ? (__c1card.name || '') : (effect.description || '效果')) };
   // 记录当前响应窗口类型，供 AI 盖伏响应（aiPickFaceDownForWindow）判定
   if (battleState) { battleState._curWindowStage = effect._stage || effect.type || ''; battleState._curWindowDamage = effect.pendingDamage || effect.damage || 0; }
   // 快速路径：双方都没有任何可连锁卡时静默放行，不刷日志/不弹连锁条，避免普通用卡被打扰
@@ -9178,12 +9250,20 @@ function beforeEffectExecution(effect, callback) {
     (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')) + '（等待双方连锁）', __c1actor);
   if (typeof renderChainBar === 'function') renderChainBar(effect);
   function finish(finishWindow){
-    resolveChainStack(effect, function(){
-      __releaseB();
-      if (typeof finishWindow === 'function') finishWindow();
-      if(effect.cancelled){ addBattleLog('system','本次效果被连锁打断，不执行'); callback(null); return; }
-      callback(effect);
-    });
+    /* 【2026-10-13 S4 症状③ 结构修 ✓】原来**先逆结算、后关窗** ✗ —— resolveChainStack 会开
+       settlePrebuilt（换掉 TW.active）⇒ 与"响应窗还开着"冲突 ⇒ 必然打
+       「上一个窗口（#N）还没关就被新窗口取代」✗（作者真机 + 探针均实测 ✓）。
+       ⇒ **先关窗、再逆结算** ✓；关窗走**异步**（同步关会重入本链收尾 ✗）。
+       __releaseB() 仍在逆结算完成后调 ✓（释放结算锁与排空触发队列的时机不变 ✓）。 */
+    var __settle = function(){
+      resolveChainStack(effect, function(){
+        __releaseB();
+        if(effect.cancelled){ addBattleLog('system','本次效果被连锁打断，不执行'); callback(null); return; }
+        callback(effect);
+      });
+    };
+    if (typeof finishWindow === 'function') setTimeout(function () { try { finishWindow(); } catch (e) { console.error('关窗失败（不影响逆结算）', e); } __settle(); }, 0);
+    else __settle();
   }
   /* 连锁重构 S1b：优先权轮转 / PASS 判定 / 候选收集**不再在这里自写一份**，
      统一交给唯一的响应窗口驱动器（TW 派生；候选每轮重扫 collectChainable，新出现的合法连锁卡会被看到）。
