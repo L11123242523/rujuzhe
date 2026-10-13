@@ -15265,7 +15265,20 @@ function compileStepOps(text, permanent) {
     return [{ op: 'move', n: 3 }, { op: 'fengji_destroy' }];
   }
   __CTX_FORCE_REMOVED = /破坏[\s\S]{0,24}移出(?:本局)?游戏/.test(core) && !/[①②③④⑤⑥][\s\S]{0,16}移出(?:本局)?游戏/.test(core); // 编号分支内的移出属条件路由，不做无条件去向
+  /* 【2026-10-13 bug2 结构修 ✓】**先于一切"玩家选择"**试条件路由：文本是"若结果/根据结果/根据点数…：①…/1.…"
+     时，这些是**由投掷结果决定的条件分支** ✗，不该弹"选择一项发动"让玩家挑 ✓
+     （放在这里是为了同时覆盖**圈号**(赌徒游戏)与**阿拉伯数字**(即兴演出/独奏)两种编号形态 ✓；
+       `__routeChoice` 只在 `__isRouteText` 为真 **且每个分支都能解析出条件** 时才认 ⇒
+       【拿手好戏】"还可以适用效果：①…"、【结晶碎弧】"选择一项发动：①…" **不受影响** ✓） */
+  if (/[①②③④⑤⑥]/.test(core) || /\d\s*[.、]\s*\S/.test(core)) {
+    var __rc0 = __routeChoice(core, permanent); if (__rc0) return __rc0;
+  }
   if (/[①②③④⑤⑥]/.test(core)) {
+    /* 【2026-10-13 bug2 结构修 ✓】先试"**条件路由**"：文本是"若结果/根据结果/根据点数…：①②③"时，
+       这三条是**由投掷结果决定的条件分支** ✗，不该弹"选择一项发动"让玩家挑 ✓
+       （`__routeChoice` 只在 `__isRouteText` 为真 **且每个分支都能解析出条件** 时才认 ⇒
+         【拿手好戏】"还可以适用效果：①…"、【结晶碎弧】"选择一项发动：①…" **不受影响** ✓） */
+    var __rc = __routeChoice(core, permanent); if (__rc) return __withRoll(core, __rc);
     // 默认圈号=玩家单选（历史行为，零回归）；仅当首个圈号前引导语明确“获得：/行动内：”等并列全享、且无选择词/非条件路由时，才顺序执行全部
     var __fi = core.search(/[①②③④⑤⑥]/), __head = core.slice(0, __fi);
     var __ordered = !__isChoiceText(core) && !__isRouteText(core) && /(?:获得|得到|享有|拥有)\s*[：:]|行动内\s*[：:]/.test(__head);
@@ -15393,6 +15406,83 @@ function compileNumChoice(core, permanent) {
   });
   if (branches.some(function (b) { return b === null; })) return null;
   return [{ op: 'choice', title: '选择一项发动', subtitle: __choiceHead(headTxt), labels: parts.map(__branchLabel), branches: branches }];
+}
+
+/* ============================================================
+   【2026-10-13 作者报·bug2 结构修 ✓】"条件被当成选项"
+   病象（作者截图·【赌徒游戏】）：卡面「投掷3枚6面骰，**若结果**：①有两个数字相同…②有三个数字相同…
+     ③没有数字相同…」——三条是**由投掷结果决定**的**条件分支** ✗，却弹成「选择一项发动」让玩家自己挑 ✗
+   根因（读原文实证）：
+     · 圈号 ①②③ 那条路（`compileStepOps` 里 `if (/[①②③④⑤⑥]/.test(core))`）**只有"玩家单选"** ✗
+     · 真正的路由编译只写在**阿拉伯数字**那条（`1./2.`）里 ⇒ 圈号形态**连路由分支都没有** ✗
+   修法：判据用引擎既有的 `__isRouteText`（它本来就认得"若结果："✓），**在"玩家单选"之前**先试条件路由 ✓；
+        条件本身从**每个分支文本**里解析（"两个数字相同"/"<8"/"=8"/">8"/"偶数"/"3的倍数"）✓
+   ============================================================ */
+function __routeCondOf(t) {
+  /* 【2026-10-13 修我自己的 bug ✓】必须用**不带编号**的分支原文来判 ——
+     上一版吃的是 `__branchLabel` 生成的 label（形如「①<8，…」），于是 `<` 被当成 `≤`、`>` 被当成 `≥` ✗
+     （`②=8`/`③>8` 同理）⇒ 现在由调用方传 `parts[i]`（原文）✓，本函数也先把可能的编号前缀抹掉兜底。 */
+  var s = String(t || '').trim().replace(/^[①②③④⑤⑥]/, '').trim();
+  var m;
+  /* ① 多枚骰的"有几个相同"（赌徒游戏：两个数字相同 / 三个数字相同 / 没有数字相同） */
+  if (/没有[^，。；;]{0,6}相同/.test(s)) return { mode: 'same', n: 0 };
+  if (/个位\s*(?:数字)?\s*为\s*(\d+)\s*的(?:正整数)?倍数/.test(s)) {
+    var __d = +s.match(/个位\s*(?:数字)?\s*为\s*(\d+)\s*的(?:正整数)?倍数/)[1];
+    return { mode: 'onesdigitmult', n: __d };      /* 独奏②：个位数字为4的倍数（⇒ 4 或 8）✓ */
+  }
+  m = s.match(/([一二两三四五六]|[\d])\s*(?:个|枚)?\s*(?:数字|点数|点|骰子)?\s*相同/);
+  if (m) {
+    var zh = { '一': 1, '两': 2, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
+    var n = zh[m[1]] || parseInt(m[1], 10);
+    if (n >= 2) return { mode: 'same', n: n };
+  }
+  /* ② 数值比较（即兴演出：<8 / =8 / >8；兼收 ≥≤ 与"大于/小于/等于"）
+     ⚠ 运算符必须**紧邻数字**（允许中间只有空白）⇒ 这样「①<8」这种带编号的文本也不会把 < 读成 ≤ ✓ */
+  m = s.match(/(?:不小于|大于等于|≥)\s*(\d+)/); if (m) return { mode: 'cmp', cmp: '>=', rhs: +m[1] };
+  m = s.match(/(?:不大于|小于等于|≤)\s*(\d+)/); if (m) return { mode: 'cmp', cmp: '<=', rhs: +m[1] };
+  m = s.match(/(?:大于|>)\s*(\d+)/); if (m) return { mode: 'cmp', cmp: '>', rhs: +m[1] };
+  m = s.match(/(?:小于|<)\s*(\d+)/); if (m) return { mode: 'cmp', cmp: '<', rhs: +m[1] };
+  m = s.match(/(?:等于|=)\s*(\d+)/); if (m) return { mode: 'cmp', cmp: '==', rhs: +m[1] };
+  /* ③ 奇偶（独奏：偶数） */
+  if (/偶数/.test(s)) return { mode: 'parity', parity: 'even' };
+  if (/奇数/.test(s)) return { mode: 'parity', parity: 'odd' };
+  /* ④ N 的倍数（独奏③：为4的正整数倍数；**不含**"个位数字为…"那种，已被上面拦掉 ✓） */
+  m = s.match(/(?:^|[，,。；;：:])\s*为\s*(\d+)\s*的(?:正整数)?倍数/);
+  if (m) return { mode: 'mult', n: +m[1] };
+  return null;
+}
+function __routeChoice(core, permanent) {
+  if (!__isRouteText(core)) return null;                 // 只认"结果路由"类文本 ✓（"选择一项发动"不会被误伤 ✓）
+  /* 编号形态二选一：圈号（①②③）或阿拉伯（1. 2. 3.）—— 两种卡面都存在 ✓ */
+  var re = /[①②③④⑤⑥]/;
+  var useCjk = re.test(core);
+  var first = useCjk ? core.search(re) : core.search(/\d\s*[.、]\s*\S/);
+  if (first < 0) return null;
+  var headTxt = core.slice(0, first);
+  var body = core.slice(first);
+  var parts = useCjk
+    ? body.split(re).map(function (x) { return x.trim(); }).filter(Boolean)
+    : body.split(/\d+\s*[.、]/).map(function (x) { return x.trim(); }).filter(Boolean);
+  if (parts.length < 2) return null;
+  /* 条件**从分支原文解析**（不带编号 ✓）—— label 之外单独留一份，供执行器判定 ✓
+     （上一版误用 label 解析 ⇒ 编号被当成运算符，`①<8` 读成 ≤ ✗，已修 ✓） */
+  var conds = parts.map(__routeCondOf);
+  if (conds.some(function (c) { return !c; })) return null;   // 有一个分支解析不出条件 ⇒ 不认（退回既有行为 ✓）
+  var branches = parts.map(function (p) {
+    var ss = p.split(/[。；;]/).map(function (x) { return x.trim(); }).filter(Boolean);
+    return ss.length ? compileClauses(ss, permanent) : [];
+  });
+  if (branches.some(function (b) { return b === null; })) return null;
+  /* 投几枚骰：优先用"投掷N枚M面骰"，否则用"（使用一枚）M面骰"那一句 */
+  var cnt = 1, sides = 0, mm;
+  mm = headTxt.match(/投掷\s*(\d+)\s*枚\s*(\d+)\s*面骰/);
+  if (mm) { cnt = +mm[1]; sides = +mm[2]; }
+  else { cnt = 1; mm = headTxt.match(/(\d+)\s*面骰/); sides = mm ? +mm[1] : 0; }
+  var rn = { 六: 6, 四: 4 }[headTxt.match(/([六四])面骰/) ? headTxt.match(/([六四])面骰/)[1] : ''] || 0;
+  if (!sides && rn) sides = rn;
+  if (!sides) { var rm2 = core.match(/(\d+)\s*面骰/); sides = rm2 ? +rm2[1] : 6; }
+  if (!cnt) cnt = 1;
+  return [{ op: 'route_choice', sides: sides, count: cnt, title: '按投掷结果执行', subtitle: __choiceHead(headTxt), labels: parts.map(__branchLabel), conds: conds, branches: branches }];
 }
 
 function __looksActionable(t) {
@@ -17653,7 +17743,56 @@ function __opsDice(op, ctx, next, env) {
   var user = env.user, target = env.target, p = env.p, q = env.q;
   switch (op.op) {
     case 'modify_dice': p._modifyDiceNext = true; break;
-    case 'roll_dice': { var __sd = op.sides || 6; var __rv = __rollFor(user, __sd, '掷骰判定·' + __sd + '面骰'); p._lastRoll = __rv; addBattleLog(user, '【判定】投掷' + __sd + '面骰，结果 ' + __rv); if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __rv, label: '掷骰判定' }, function () { }); } catch (e) { try { console.error('[catch] assets/engine.js:17252', e); } catch (e2) {} } } break; }   // 【2026-10-11】走唯一投骰出口 ✓
+    case 'roll_dice': {
+      /* 【2026-10-13 bug2】多枚骰必须**逐枚记账** ✓ —— 与移动投掷那套同口径（`p._lastRolls` / `_lastDiceSides` / `_lastDiceCount`，
+         见 rollPlayerDice ✓）。理由：条件路由里「有几个数字相同」**只据最终点数判不出来** ✗（赌徒游戏：3枚6面骰）
+         数值仍是"每枚相加"（与移动投掷一致 ✓），不改任何既有语义 —— 只是把"每一枚"也记下来 ✓。 */
+      var __sd = op.sides || 6;
+      var __cnt = op.count || 1;
+      var __rolls = [], __sum = 0;
+      for (var __k = 0; __k < __cnt; __k++) { var __one = __rollFor(user, __sd, '掷骰判定·' + __sd + '面骰'); __rolls.push(__one); __sum += __one; }
+      p._lastRolls = __rolls; p._lastDiceSides = __sd; p._lastDiceCount = __cnt;
+      p._lastRoll = __sum;
+      addBattleLog(user, '【判定】投掷' + __cnt + '枚' + __sd + '面骰，结果 ' + (__cnt > 1 ? __rolls.join('+') + '=' : '') + __sum);
+      if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __sum, label: '掷骰判定' }, function () { }); } catch (e) { try { console.error('[catch] assets/engine.js:17252', e); } catch (e2) {} } }
+      break;
+    }   // 【2026-10-11】走唯一投骰出口 ✓
+    /* 【2026-10-13 作者报·bug2 结构修 ✓】条件路由：投掷后**按结果**选分支，不问玩家 ✗
+       病象：卡面「投掷N枚M面骰，**若结果**：①…②…③…」被编成"选择一项发动"让玩家自己挑 ✗
+       修法：`compileStepOps` 现在把这类编成 `route_choice`（带每条分支的**条件** ✓），由**这里**判定。
+       条件形态（`__routeCondOf` 解析 ✓）：`{mode:'same',n}`（有两个/三个数字相同 / 没有相同）、
+       `{mode:'cmp',cmp,rhs}`（<8 / =8 / >8）、`{mode:'parity'}`（偶数/奇数）、`{mode:'mult',n}`（4的倍数）。
+       投掷者 = 效果使用者（卡面统一写"触发者/弹奏者"⇒ 即结算该效果的人 ✓）。 */
+    case 'route_choice': {
+      var __rs = op.sides || 6, __rc2 = op.count || 1;
+      var __rr = [], __rsum = 0;
+      for (var __rk = 0; __rk < __rc2; __rk++) { var __rv2 = __rollFor(user, __rs, '掷骰判定·' + __rs + '面骰'); __rr.push(__rv2); __rsum += __rv2; }
+      p._lastRolls = __rr; p._lastDiceSides = __rs; p._lastDiceCount = __rc2; p._lastRoll = __rsum;
+      addBattleLog(user, '【判定】' + (ctx.card ? ('【' + (ctx.card.name || '') + '】') : '') + '投掷' + __rc2 + '枚' + __rs + '面骰，结果 ' +
+        (__rc2 > 1 ? __rr.join('+') + '=' : '') + __rsum);
+      if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __rs, fixed: __rsum, label: '掷骰判定' }, function () { }); } catch (e) { try { console.error('[catch] assets/engine.js:17260', e); } catch (e2) {} } }
+      /* 逐条判条件，取**第一条成立**的（卡面就是"若结果：①…②…③…"的顺序 ✓） */
+      var __maxSame = 1;
+      var __counts = {};
+      __rr.forEach(function (v) { __counts[v] = (__counts[v] || 0) + 1; if (__counts[v] > __maxSame) __maxSame = __counts[v]; });
+      var __pick = -1;
+      for (var __ci = 0; __ci < (op.conds || []).length; __ci++) {
+        var __cd = op.conds[__ci];
+        var __ok = false;
+        if (__cd.mode === 'same') __ok = (__cd.n === 0) ? (__maxSame === 1) : (__maxSame === __cd.n);
+        else if (__cd.mode === 'cmp') __ok = (__cd.cmp === '>=') ? (__rsum >= __cd.rhs) : (__cd.cmp === '>') ? (__rsum > __cd.rhs)
+          : (__cd.cmp === '<=') ? (__rsum <= __cd.rhs) : (__cd.cmp === '<') ? (__rsum < __cd.rhs) : (__rsum === __cd.rhs);
+        else if (__cd.mode === 'parity') __ok = (__cd.parity === 'even') ? (__rsum % 2 === 0) : (__rsum % 2 !== 0);
+        else if (__cd.mode === 'mult') __ok = (__cd.n > 0) && (__rsum % __cd.n === 0) && (__rsum > 0);
+        /* 个位数字为 N 的倍数（独奏②：个位为4的倍数 ⇒ 点数个位是 4 或 8 ✓） */
+        else if (__cd.mode === 'onesdigitmult') __ok = (__cd.n > 0) && (__rsum > 0) && (((__rsum % 10) % __cd.n) === 0) && ((__rsum % 10) > 0);
+        if (__ok) { __pick = __ci; break; }
+      }
+      if (__pick < 0) { addBattleLog(user, '【条件路由】投掷结果 ' + __rsum + '（每枚 ' + __rr.join('、') + '）不满足任何一条 ⇒ 本效果不适用'); next(); return true; }
+      addBattleLog(user, '【条件路由】按投掷结果 ' + __rsum + ' ⇒ 执行「' + String((op.labels || [])[__pick] || ('第' + (__pick + 1) + '条')).slice(0, 24) + '」');
+      runOps((op.branches || [])[__pick] || [], ctx, next);
+      return true;
+    }
     case 'buff_next_judge': p._nextAttackJudge = { dice: op.dice, front: op.front }; addBattleLog(user, '获得增益：下一次造伤害附带' + (op.dice==='coin'?'硬币':(op.dice==='d4'?'四面骰':'六面骰')) + '判定（正面/' + (op.front||2) + '点）'); break;
   }
   env.pendingNext = true;
@@ -17959,6 +18098,9 @@ var __OPS_OWNER = {
   'knock_off': '__opsMove',
   'modify_dice': '__opsDice',
   'roll_dice': '__opsDice',
+  /* 【2026-10-13 bug2】条件路由也归"投骰族" ✓（它自带投掷 ⇒ 必须与 roll_dice 同族，
+     否则 `__OPS_OWNER[op.op]` 取不到 ⇒ 族标签/诊断会落到 '(switch)' 兜底 ✗） */
+  'route_choice': '__opsDice',
   'buff_next_judge': '__opsDice',
   'attack_buff': '__opsBuff',
   'attack_buff_temp': '__opsBuff',
