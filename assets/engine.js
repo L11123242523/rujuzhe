@@ -5989,6 +5989,30 @@ function startTurn() {
       /* 血之佑戒·红泪拉克莎（卡面 2026-09-25 版）：只要它在效果处理区，每回合自然回复+2。
          （上限+2 在"自己回合开始的永续被动"里一次性应用，避免每回合叠加。） */
       if ((__p.permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) __reg += 2;
+      /* 【2026-10-14 新卡·死灵令牌 ⇒ 结构修 ✓】卡面：「每有一张公开的卡都会让自己在回合开始时额外抽取1张卡
+         （最多额外抽取3张）。」
+         归属：这是**在场的永续卡**在"自己回合开始"派发的效果 ⇒ 与上面「血之佑戒」放在**同一处**（`startTurn`）✓，
+         不新开"回合开始钩子"那套机制 ✗（引擎里根本没有 TURN_START ✓ 实测）。
+         计数用**唯一真相** `__publicCardCount`（含在场正面永续 ✓）；上限 3 ✓；
+         用"本回合已结算"标记防重入（回合号=唯一真相，不用计时器 ✗）✓。 */
+      if ((__p.permanent || []).some(function (c) { return c && c.name === '死灵令牌'; })) {
+        if (__p._silingDrawnTurn !== battleState.turn) {
+          __p._silingDrawnTurn = battleState.turn;
+          var __pubN = (typeof __publicCardCount === 'function') ? __publicCardCount(__p) : 0;
+          var __extraN = Math.min(3, __pubN);
+          if (__extraN > 0) {
+            addBattleLog(player, '【死灵令牌】公开的卡 ' + __pubN + ' 张 ⇒ 回合开始额外抽' + __extraN + '张（上限3）');
+            for (var __si = 0; __si < __extraN; __si++) {
+              var __sc = (typeof drawCard === 'function') ? drawCard(player) : null;
+              if (!__sc) break;
+              addBattleLog(player, '【死灵令牌】额外抽到【' + (__sc.name || '?') + '】');
+            }
+            if (typeof updateBattleUI === 'function') updateBattleUI();
+          } else {
+            addBattleLog(player, '【死灵令牌】公开的卡 0 张 ⇒ 回合开始不额外抽卡');
+          }
+        }
+      }
       // 堆沙堡（小试身手！堆沙堡·5次以上）：自身每回合自然回复的音韵值+1（可累计，按每次结算的各档位效果叠加）
       if (__p._sandRegenBonus) __reg += __p._sandRegenBonus;
       // 里尔亚斯被动：自然回复+2/4/5/6（Lv1/Lv4/Lv7/Lv10）；音韵上限同步+2/4/5/6
@@ -16807,10 +16831,24 @@ function recoverCost(player, amount, source) {
 function __publicCardCount(p) {
   if (!p) return 0;
   var n = 0;
-  ['deck', 'grave', 'permanent'].forEach(function (z) {
-    (p[z] || []).forEach(function (c) { if (c && c._faceUp) n++; });
+  /* 【2026-10-14 补】手牌区也要算：**被公开的手卡**同样是「公开的卡」✓
+     判据走唯一的 `__isPublicCard` ⇒ 手牌默认未标记 ⇒ 不计入 ✓（语义正确） */
+  ['deck', 'grave', 'permanent', 'hand'].forEach(function (z) {
+    (p[z] || []).forEach(function (c) { if (__isPublicCard(c, z)) n++; });
   });
   return n;
+}
+/* 【2026-10-14 作者口径·结构修 ✓】「公开的卡」的判据收成**这一处**，免得各区域各写一遍、日后又漂。
+   作者口径：**在场的正面永续卡就是公开的卡** —— 它明摆着给对手看得见，
+   **不该依赖有没有被写过 `_faceUp`** ✗
+   （实测旧写法：正面永续卡若不写 `_faceUp` ⇒ 计 0 张 ⇒ 与作者口径不符 ✗；
+    只有**明确标记为盖伏**（`_faceUp === false`）的卡才不算公开 ✓）。 */
+function __isPublicCard(c, zone) {
+  if (!c) return false;
+  if (c._faceUp === false) return false;
+  if (c._faceUp === true) return true;
+  /* 未标记：效果处理区里的卡按「在场=明牌」算公开 ✓；牌组/墓地未标记则不算 ✓ */
+  return zone === 'permanent';
 }
 
 function __waterGunExtraSegments(card, user) {
@@ -23922,6 +23960,47 @@ var SPECIAL_CARD_HANDLERS = {
     }
   },
 
+  /* ============================================================
+  【死灵令牌】（混沌·增益·永续，费6）—— 2026-10-14 新增卡
+卡面：来自地狱邪神的令牌，可以作为通行证使用。
+  •发动时作为效果处理：选一张手卡公开。
+  •每有一张公开的卡都会让自己在回合开始时额外抽取1张卡（最多额外抽取3张）。
+  SP：造成伤害时可以舍弃一张手卡来让最终伤害+1。
+为什么必须走特判：实测**整张卡被编译成一个 `draw n:1`**（风味句+两段效果挤在同一从句 ⇒
+  编译器只捞到"额外抽取1张"⇒ 打出就抽1张 ✗），而"有实现"的闸门因此通过 ⇒ 与 Huginn&Muninn 事故同型。
+实现分工（各有唯一归属 ✓）：
+  · 入场"选一张手卡公开" = 本 handler（打 `_public`/`_faceUp` 标记，供"公开的卡"计数 ✓）
+  · "回合开始按公开卡数额外抽卡" = `startTurn` 里按在场永续扫描（与「血之佑戒」同一处 ✓）
+  · SP「造成伤害时舍弃一张手卡让最终伤害+1」= 由既有"造成伤害时手牌送墓"通道承接 ✓
+============================================================ */
+'死灵令牌': {
+    play: function (card, user, done) {
+      var p = battleState[user];
+      var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
+      var __cands = (p.hand || []).filter(function (c) { return c; });
+      if (!__cands.length) { addBattleLog(user, '【死灵令牌】手卡为空 ⇒ 没有可公开的卡'); __fin(); return; }
+      function __apply(i) {
+        var pick = __cands[i];
+        if (!pick) { addBattleLog(user, '【死灵令牌】未选择要公开的手卡'); __fin(); return; }
+        pick._public = true; pick._faceUp = true;
+        addBattleLog(user, '【死灵令牌】公开手卡【' + (pick.name || '?') + '】（当前公开 ' +
+          ((typeof __publicCardCount === 'function') ? __publicCardCount(p) : '?') + ' 张）');
+        __fin();
+      }
+      var __opts = __cands.map(function (c) { return '公开【' + (c.name || '?') + '】'; });
+      if (user === 'p1') {
+        if (typeof Online !== 'undefined' && Online.active) { onlineDecideModal('p1', '死灵令牌', '选一张手卡公开', '公开后计入"公开的卡"', __opts, function (o) { __apply(o); }); return; }
+        showChoiceModal('死灵令牌', '选一张手卡公开', '公开后计入「公开的卡」（回合开始按其数量额外抽卡，上限3）', __opts, function (o) { __apply(o); });
+        return;
+      }
+      if (typeof Online !== 'undefined' && Online.active) { onlineDecideModal('p2', '死灵令牌（对手）', '选一张手卡公开', '公开后计入"公开的卡"', __opts, function (o) { __apply(o); }); return; }
+      /* AI：优先公开费用最高的手卡（信息暴露最小、且它最可能有价值） */
+      var __aiIdx = 0, __aiCost = -1;
+      __cands.forEach(function (c, i) { var cc = parseInt(c.cost, 10) || 0; if (cc > __aiCost) { __aiCost = cc; __aiIdx = i; } });
+      __apply(__aiIdx);
+    }
+  },
+
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
@@ -24212,6 +24291,8 @@ function getSpecialHandler(card) {
   if (n === '邪恶南瓜攻击！') return h;
   /* 【2026-10-14 新卡·永眠之棺】卡面要"选场上一张卡"且是到回合结束的持续无效 ⇒ 必须走特判 ✓ */
   if (n === '永眠之棺') return h;
+  /* 【2026-10-14 新卡·死灵令牌】整卡被编译成一个假的 `draw`（打出就抽1张 ✗）⇒ 与卡面不符，必须走特判 ✓ */
+  if (n === '死灵令牌') return h;
   // 架构闸：结构化指令层能精确编译的卡，优先走指令层；旧特判仅对指令层无法编译(null)的卡兜底，杜绝旧硬编码覆盖新卡面
   if (h && typeof compileStepOps === 'function') {
     var __main = (typeof getMainEffectText === 'function') ? getMainEffectText(t) : t;
