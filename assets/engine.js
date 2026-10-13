@@ -243,6 +243,15 @@ function attackNeedsEnemy(card){
   var t=(card.effect||card.text||'').replace(/^\s*[\[【][^\]】]*[\]】]\s*/,'').trim();
   var first=(t.split(/[，。；,;、]/)[0]||'');
   var firstIsMove = /前进|后退|向前|向后|移动|跃|飞掷/.test(first) && !/造成|伤害|给予|击退/.test(first);
+  /* 【2026-10-14 作者报「人格修正拳和邪恶南瓜一样，是先移动然后再造伤（当前是先造伤再移动）」⇒ 结构修 ✓】
+     上面那条把"移动与造伤**同段**"的卡排除了（第二项 `!/造成|伤害|…/`）⇒ 人格修正拳（第一段是
+     「（可以向前移动3格）对自身前后4格范围内的…造成…」）落进"普通点位射程 ⇒ 发动时即要求范围内有目标"，
+     于是**用移动前的位置**要求射程 ⇒ "靠移动把目标纳入射程"的操作整段作废 ✗。
+     按第 240 行既有口径（"前端=移动的攻击卡允许在射程外发动，结算时再校验移动后仍无目标则不造伤"）：
+     把"移动+造伤同段"也判为"前端有移动" ✓ —— 结算仍按**移动后**的位置校验 ✓。 */
+  var firstHasMove = /前进|后退|向前|向后|移动|跃|飞掷/.test(first);
+  var firstHasDmg = /造成|伤害|给予|击退/.test(first);
+  if (firstHasMove && firstHasDmg) return false;            /* 移动+造伤同段 ⇒ 允许射程外发动，结算时再校验 ✓ */
   if (firstIsMove) return false;
   var isPlainRange = spec.kind === 'around' || spec.kind === 'forward' || spec.kind === 'samecell' || spec.kind === 'forwardBack' || spec.kind === 'samerow';
   if (!isPlainRange) return false; // 特殊范围：不做射程要求
@@ -14636,7 +14645,7 @@ var ANNOUNCEMENTS = [
   {
     date: '2026-10-14',
     title: '平衡性调整 · 第三次（5 张卡）',
-    pub: '见本次提交',
+    pub: 'v=326',
     note: '本次调整了以下 5 张卡的费用与效果，卡面与游戏内数值已同步更新：',
     items: [
       { card: '得分！', chg: '防御值 +1 → +2（持续 2 次行动）；伤害范围 前后 4 格 → 3 格；首段混沌伤害 2 → 1（「否则再次受到」仍为 2）' },

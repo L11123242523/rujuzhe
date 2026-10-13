@@ -1094,7 +1094,7 @@ window.__CARD_DATA__ = {
          "name": "得分！",
          "character": "枫",
          "cost": 3,
-         "attribute": "侵略",
+         "attribute": "混沌",
          "type": "侵略",
          "effect": "是妹妹的专属特权哦！\n提升自身2点防御值(持续2次行动)，然后对自身前后3格内的一名其他玩家造成1点混沌属性伤害。那之后对手除非将一张混沌属性的卡送入墓地（视为一次献祭），否则将再次受到2点混沌属性伤害。",
          "score": 7,
@@ -1115,7 +1115,7 @@ window.__CARD_DATA__ = {
             "宫樱子"
          ],
          "combo_notes": "先打鼓舞（混沌[增益]，用后费用-1）触发枫的队长被动敏锐洞察：抽1馈赠卡再抽1，异色送墓正好当一次献祭并回2音韵，再打得分！对手要么交一张混沌卡进墓，要么连吃两段2点混沌。队员木原光太郎给献祭次数+1、首次献祭后还能选队伍攻击+1，宫樱子编组SP队伍攻击+2让两段各+1。",
-         "image_url": "assets/images/ui2/img_lYL7RgQUOC.webp?v=9",
+         "image_url": "assets/images/ui2/img_lYL7RgQUOC.webp?v=10",
          "character_full": "入间枫",
          "attack_range": "前后4格内一名玩家",
          "range_adjustment": 0,
@@ -3118,7 +3118,7 @@ window.__CARD_DATA__ = {
             "椎名小春"
          ],
          "combo_notes": "直尺把移动格数换成伤害：落场前进4格，此后每付1音韵走1格，单回合每凑满6格就对一名对手打2点理智伤害，队伍里有两个[位移手]时这段伤害升到3点。现实间里绪既是位移手，又有同款每8格一次的判定伤害，两人共用同一份位移；能量饮料把一次移动翻倍（最多+6格），是踩过8格线的主力。",
-         "image_url": "assets/images/ui2/img_R5ZTbMb8Vi.webp?v=6",
+         "image_url": "assets/images/ui2/img_R5ZTbMb8Vi.webp?v=7",
          "sp": "单回合内每移动6格后适用效果：对一名其他玩家造成2点理智属性伤害。（队伍中有两名以上[位移手]角色时造成的基础理智属性伤害提升至3点）",
          "_category": "item_permanent",
          "card_type": "道具/永续",
@@ -3323,7 +3323,7 @@ window.__CARD_DATA__ = {
             "永奏进行曲"
          ],
          "combo_notes": "6费永续，进场先公开一张手卡，之后**每有一张公开的卡**就在自己回合开始时额外抽1张（最多额外抽3张）——是长线资源引擎：公开得越多，后续每回合的抽卡就越厚。代价是费用高、且公开手卡意味着信息暴露，属于\"用信息换手牌量\"的取舍。适合能一次性堆多张公开卡的队伍（公开区=牌组顶/墓地/效果处理区里正面朝上的卡都算），与需要持续过牌的运转队契合。SP 是任意伤害时舍弃一张手卡让最终伤害+1，可当斩杀补刀。",
-         "image_url": "assets/images/ui2/card_siling_lingpai.webp?v=1",
+         "image_url": "assets/images/ui2/card_siling_lingpai.webp?v=2",
          "_category": "item_permanent",
          "card_type": "道具/永续",
          "tags": [
@@ -4204,7 +4204,7 @@ window.__CARD_DATA__ = {
             "宫樱子"
          ],
          "combo_notes": "4费只换1张馈赠卡，效率差，得先改造奖池：共鸣者在场时卡池不出200$、抽到[Noise][和声]的概率上升，里绪(水着)首次抽馈赠卡必出[和声]还能先剔除奖池2张，小野伊织则不会抽到500$。翻倍靠SP：队伍里[增益者][增幅者]凑满3名就改抽2张，构筑前要先数标签。",
-         "image_url": "assets/images/ui2/img_1CBBfStonz.webp?v=5",
+         "image_url": "assets/images/ui2/img_1CBBfStonz.webp?v=6",
          "_category": "item_single",
          "dims": {
             "cost": 6,
@@ -4534,7 +4534,7 @@ window.__CARD_DATA__ = {
             "音叉"
          ],
          "combo_notes": "1费从牌组精确取一张角色携带卡（攻击卡或技能卡），是\"把牌组当工具箱\"的检索位：越早开越容易摸到队伍的关键携带卡，且只花1费，节奏极轻。SP 走墓地路线——被效果送墓时可以再选一张携带卡入手（自己失去2点同步值），或把手卡一张携带卡送墓换回3点音韵值；前者是二次检索、后者是把手里的多余携带卡换成音韵。和宁雨清、入间予这类\"抽卡/投掷后回音韵\"的角色同队时，检索带来的额外抽卡还能再转成资源。",
-         "image_url": "assets/images/ui2/card_dianji_canye.webp?v=1",
+         "image_url": "assets/images/ui2/card_dianji_canye.webp?v=2",
          "_category": "item_single",
          "card_type": "道具/单次",
          "tags": [
