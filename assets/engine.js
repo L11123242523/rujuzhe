@@ -5844,6 +5844,8 @@ function startTurn() {
   /* 【2026-10-08 修·"减防御会一直存在"】卡面写「直到本回合结束」的降防，在这里按**回合号**统一清理
      （不用计时器、不靠计数猜；回合号是唯一真相）。放在回合最前面，保证一定跑到。 */
   try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:5751', e); } catch (e2) {} }
+  /* 【2026-10-14 新卡·永眠之棺】同一处、同一口径：'直到本回合结束'的效果无效也按回合号统一清理 ✓ */
+  try { if (typeof clearTurnScopedEffectDisables === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedEffectDisables(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:永眠之棺', e); } catch (e2) {} }
   /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
      实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
      它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
@@ -9288,6 +9290,14 @@ function beforeEffectExecution(effect, callback) {
     try { addBattleLog('system', '【连锁】逆结算中执行效果本体 ⇒ 不再开新窗口，直接结算'); } catch (e) {}
     if (typeof popEffect === 'function') popEffect(effect);
     __releaseB(); callback(effect); return;
+  }
+  /* 【2026-10-14 新卡·永眠之棺】"那张卡直到本回合结束前效果无效" ⇒ 在**效果生效前**这一层判：
+     该卡被永眠之棺指定且仍在有效期内 ⇒ 直接走引擎既有的"效果无效"通道（`effect.cancelled`）✓
+     —— 与连锁里的 `negate_effect` 同一个下游（`effect.cancelled` 是唯一真相 ✓），不新造一套 ✗。 */
+  if (__c1card && __c1card._effectDisabledUntilTurn != null && typeof battleState !== 'undefined' && battleState
+      && __c1card._effectDisabledUntilTurn === battleState.turn) {
+    effect.cancelled = true; effect.negateKind = 'effect';
+    try { addBattleLog('system', '【永眠之棺】' + (__c1card.name || '?') + ' 本回合内效果无效 ⇒ 本次效果不处理'); } catch (e) {}
   }
   effect._chain = [];
   /* 【2026-10-13 作者裁决 1B ✓·**C1 也进链数组**】把"**正在被响应的那个效果**"（`__chainC1Enter` 已把它
@@ -16459,12 +16469,25 @@ function blueprintCopy(user, selfCard, done) {
   });
 }
 
+/* 【2026-10-14 作者裁决·新增属性「神圣」✓】
+   口径（作者原话，逐条落到代码）：
+     ① 神圣攻击非神圣 ⇒ **克制成立** ✓
+     ② 神圣攻击神圣   ⇒ **不克制** ✓
+     ③ 非神圣攻击神圣 ⇒ **不克制** ✓
+     ④ 神圣**不加入**属性循环（`ATTR_COUNTER` 里不出现 ⇒ 不影响 无序→理智→热忱→无序 与混沌那套 ✓）
+   实现：这三条都收在 `__attrBeats` 一处（唯一的克制判定 ✓）——
+     神圣作为攻击方 ⇒ 除神圣外一律克制；作为防守方 ⇒ 谁都不克制它 ✓。
+   ⚠ 顺序要紧：必须在"混沌"那两条**之前**返回，否则神圣打混沌会被"混沌打混沌才加成"那条规则吞掉 ✗。 */
 var ATTR_COUNTER = { '无序': '理智', '理智': '热忱', '热忱': '无序' };
 
-function __normAttr(x) { x = x || ''; if (x.indexOf('混沌') >= 0) return '混沌'; if (x.indexOf('热忱') >= 0) return '热忱'; if (x.indexOf('理智') >= 0) return '理智'; if (x.indexOf('无序') >= 0) return '无序'; return x; }
+function __normAttr(x) { x = x || ''; if (x.indexOf('神圣') >= 0) return '神圣'; if (x.indexOf('混沌') >= 0) return '混沌'; if (x.indexOf('热忱') >= 0) return '热忱'; if (x.indexOf('理智') >= 0) return '理智'; if (x.indexOf('无序') >= 0) return '无序'; return x; }
 
 function __attrBeats(att, def) {
   att = __normAttr(att); def = __normAttr(def);
+  /* 【2026-10-14 神圣】攻击方是神圣 ⇒ 除神圣外一律克制（①）；神圣打神圣不克制（②） */
+  if (att === '神圣') return def !== '神圣';
+  /* 【2026-10-14 神圣】防守方是神圣、攻击方不是 ⇒ 不克制（③） */
+  if (def === '神圣') return false;
   // C25 混沌规则（卡面 rules.chaos_weakness + 代码注释“混沌只克混沌”）：混沌受所有属性攻击多1伤害；混沌攻击对非混沌无克制加成，“打混沌除外”→混沌打混沌也有加成
   if (att === def) return att === '混沌';
   if (def === '混沌') return true; // 非混沌属性打混沌：多1伤害
@@ -16716,6 +16739,23 @@ function clearTurnScopedDefDowns(who) {
   }
 }
 
+/* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】"直到本回合结束前效果无效"的**到期清理**。
+   与 `clearTurnScopedDefDowns` 同一族同一处调用（`startTurn` 最前面）⇒ 与"回合号"这个唯一真相同生同灭 ✓，
+   不用计时器、不靠计数猜 ✗。清理时把卡上的标记**删掉**（不是置假）⇒ 卡对象不会跨局带标记 ✓。 */
+function clearTurnScopedEffectDisables(who) {
+  var q = battleState[who]; if (!q) return;
+  var __zones = ['permanent', 'faceDownCards', 'eventCards', 'musicCards'];
+  var __restored = 0;
+  __zones.forEach(function (z) {
+    (q[z] || []).forEach(function (c) {
+      if (c && c._effectDisabledUntilTurn != null && c._effectDisabledUntilTurn !== battleState.turn) {
+        delete c._effectDisabledUntilTurn; __restored++;
+      }
+    });
+  });
+  if (__restored) addBattleLog(who, '「直到本回合结束」的效果无效已到期，' + __restored + ' 张卡恢复生效');
+}
+
 function applyDefenseUp(who, amount) {
   var q = battleState[who]; if (!q || !amount) return;
   if (q.defenseBase === undefined || q.defenseBase === null) q.defenseBase = (q.defense || 0);
@@ -16936,6 +16976,10 @@ function computeDamageValue(user, target, opt) {
   else if (!opt.judge && !opt.selfInflicted && __bAttr && defAttr && typeof __attrBeats === 'function' && __attrBeats(__bAttr, defAttr)) {
     var __cadd = 1;
     if (__dom.counterAdd && (!__dom.counterAttr || __normAttr(__bAttr) === __normAttr(__dom.counterAttr))) { __cadd += __dom.counterAdd; logs.push('领域克制强化（' + __normAttr(__dom.counterAttr) + '）克制部分+' + __dom.counterAdd); }
+    /* 【2026-10-14 新卡·雷閃 ⇒ 结构修 ✓】卡面「属性克制伤害+1」：写在这张卡持有者身上的**常驻标记**
+       （`_attrCounterDmgUp`，由 `leishan` 的发动时处理器登记 ✓）——就加在**已有的克制段**里，
+       不另开新的伤害出口 ✗ ⇒ 与"属性克制"同生同灭、只在这一段生效 ✓。 */
+    if (ap && ap._attrCounterDmgUp) { __cadd += ap._attrCounterDmgUp; logs.push('雷閃·属性克制伤害+' + ap._attrCounterDmgUp); }
     final += __cadd; logs.push('属性克制（' + __normAttr(__bAttr) + '克' + __normAttr(defAttr) + '）最终+' + __cadd);
     if (ap._attrBonus) { final += ap._attrBonus; logs.push('克制伤害+' + ap._attrBonus); }
     if (__lhwOk) { final += 1; logs.push('琉璃(万圣祭)被动·该卡费用≤3且产生克制→克制伤害+1'); }
@@ -21552,7 +21596,17 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       if (__isCharmCard(__fc) && p.cost >= (parseInt(__fc.cost, 10) || 0)) __fdCharmList.push({ card: __fc, idx: i2 });
     }
   }
+  /* 【2026-10-14 新卡·无首刺虫 ⇒ 结构修 ✓】卡面：「自己或其他玩家的回合有玩家造成伤害时可以**舍弃此卡**来发动，
+     那次最终伤害-75%。那后面自己失去3点同步值。」
+     探测口径：**任意玩家回合**都能用（比手牌护符更宽 ✓，与卡面一致）；只匹配这张卡的卡名（显式写死 ⇒ 不用模糊匹配 ✗）。
+     发动/收尾见 `__useTorrent` 与 `__torrentAfterDamage`（下面 ✓）。 */
+  var __torrentList = [];
+  for (var __ti = 0; __ti < (p.hand || []).length; __ti++) {
+    var __tc = p.hand[__ti];
+    if (__tc && __tc.name === '无首刺虫') __torrentList.push({ card: __tc, idx: __ti });
+  }
   var hasCharm = __charmList.length + __fdCharmList.length > 0;
+  var __hasTorrent = __torrentList.length > 0;
   
   // 墓地抵消卡：卡在墓地时，自己受到伤害后可把此卡移出游戏来抵消那次伤害（如 人格修正拳！SP）
   var __graveNegIdx = -1, __graveNegCard = null;
@@ -21565,6 +21619,28 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     addBattleLog(target, '发动墓地【' + nc.name + '】并将其移出游戏，抵消本次' + damage + '点伤害');
     rwClose('damage'); updateBattleUI();
     __finish(0);
+  }
+  /* 【无首刺虫】发动：舍弃此卡 ⇒ 登记"本次最终伤害-75%"（减伤在 `__torrentReduce` 唯一实现里生效 ✓），
+     并把"那之后自己失去3点同步值"排到**本次伤害结算收尾**（`__torrentAfterDamage` ✓）⇒ 与卡面顺序一致 ✓ */
+  function __useTorrent(idx) {
+    var tc = p.hand.splice(idx, 1)[0];
+    if (!tc) { rwClose('damage'); __normalHit(); return; }
+    if (typeof moveCardToGrave === 'function') moveCardToGrave(target, tc, 'use'); else (p.grave = p.grave || []).push(tc);
+    p._torrentReduce75 = true;
+    p._torrentLoseSync3 = true;
+    addBattleLog(target, '【无首刺虫】舍弃此卡发动 ⇒ 本次最终伤害-75%（结算后自己失去3点同步值）');
+    rwClose('damage'); updateBattleUI();
+    __normalHit();
+  }
+  /* 【无首刺虫】收尾：本次伤害结算完毕后执行"自己失去3点同步值"（一次性 ✓ 幂等 ✓） */
+  function __torrentAfterDamage() {
+    try {
+      if (!p._torrentLoseSync3) return;
+      p._torrentLoseSync3 = false;
+      var __b4 = p.sync || 0;
+      p.sync = Math.max(0, __b4 - 3);
+      addBattleLog(target, '【无首刺虫】结算后自己失去3点同步值（' + __b4 + ' → ' + p.sync + '）');
+    } catch (e) {}
   }
   // 攻击者“下一次造伤害附带判定”增益（如 夏日畅饮时间！②）：只有真正造成伤害（实际扣除护盾/同步）时才消耗并结算；
   // 未成功造成伤害（被护盾完全抵消等）时不消耗，增益保留到下一次真正造伤。
@@ -21599,7 +21675,24 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       }
       return;
     }
+    __torrentAfterDamage();   // 【无首刺虫】"那之后自己失去3点同步值"（唯一收尾处 ✓）
     __finish(actualDamage);
+  }
+  /* 【2026-10-14 新卡·无首刺虫 ⇒ 结构修 ✓】"那次最终伤害-75%"的**唯一实现**。
+     卡面：「自己或其他玩家的回合有玩家造成伤害时可以**舍弃此卡**来发动，那次最终伤害-75%。那之后自己失去3点同步值。」
+     归属：这是**受击者**在**最终伤害**上的减免 ⇒ 出口在受击方（护盾结算之后、写进 `p.sync` 之前 ✓），
+           不是"再砍一次护盾"、也不进攻击方的 `computeDamageValue` ✗。
+     本函数被**两条**伤害出口共用（主伤害 `__normalHit` / 追加段 `__applyBonusLocal`）⇒ 不会漏 ✓。
+     一次性：标记 `p._torrentReduce75` 由卡的舍弃动作登记，用完即清 ⇒ 只作用于**那一次**伤害 ✓。
+     数值：-75% ⇒ `Math.ceil(原伤害 × 25%)`（向上取整，**不做成 0** —— 卡面是"减少"不是"免除" ✓）。 */
+  function __torrentReduce(dmg) {
+    try {
+      if (!(dmg > 0) || !p._torrentReduce75) return dmg;
+      p._torrentReduce75 = false;
+      var __red = Math.ceil(dmg * 0.25);
+      addBattleLog(target, '【无首刺虫】舍弃此卡 ⇒ 本次最终伤害-' + (dmg - __red) + '（' + dmg + ' → ' + __red + '，-75%）');
+      return __red;
+    } catch (e) { return dmg; }
   }
   // 段内追加伤害：本地数值结算（不递归、不再开响应窗）
   function __applyBonusLocal(bd, label) {
@@ -21607,6 +21700,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var __sh = p.shield || 0;
     if (__sh >= bd) { __sh -= bd; bd = 0; } else { bd -= __sh; __sh = 0; }
     p.shield = __sh;
+    bd = __torrentReduce(bd);
     if (bd > 0) {
       var __jc = { attacker: attacker, target: target, amount: bd, source: label, attr: null };
       runTiming(TIMING.DAMAGE_STEP_START, __jc);   // 【D 组】伤害步骤开始
@@ -21681,6 +21775,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     if (attacker && battleState[attacker] && battleState[attacker]._nextAttackPierce) { battleState[attacker]._nextAttackPierce = 0; addBattleLog(attacker, '【一次性增益】无视护盾点数已消耗'); }
     var __dmgCtx = { attacker: attacker, target: target, amount: actualDamage, source: source, attr: (__dmgCalc && __dmgCalc.attr) || attackerAttr || null,
       judge: !!(__dmgCalc && __dmgCalc.judge), value: (__dmgCalc && __dmgCalc.value) || actualDamage };
+    /* 【无首刺虫】-75% 走唯一实现 `__torrentReduce`（与追加段出口共用同一份 ✓） */
+    var __redMain = __torrentReduce(actualDamage);
+    if (__redMain !== actualDamage) { actualDamage = __redMain; __dmgCtx.amount = actualDamage; __dmgCtx.value = actualDamage; }
     if (actualDamage > 0) {
       runTiming(TIMING.DAMAGE_STEP_START, __dmgCtx);  // 【D 组】伤害步骤开始（MD：傷害ステップ開始時）
       runTiming(TIMING.BEFORE_DAMAGE, __dmgCtx); // 造成伤害前（攻击者视角）
@@ -21718,12 +21815,13 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   // 受伤响应（护符/墓地抵消/承受）整体包为 __goResponse，由“造成伤害前手牌诱发”结束后进入
   function __goResponse() {
   // 玩家受伤：可视化询问抵消方式（手牌/盖伏护符每张分别列出、墓地移出抵消）或承受
-  if (target === 'p1' && (hasCharm || __graveNegIdx >= 0)) {
+  if (target === 'p1' && (hasCharm || __graveNegIdx >= 0 || __hasTorrent)) {
     rwOpen('damage', { amount: damage, target: target, source: source });
     var __negOpts = [], __negActs = [];
     __charmList.forEach(function (o) { __negOpts.push('🛡️ 发动手牌【' + o.card.name + '】抵消（消耗并前进2格）'); __negActs.push(function () { __useCharm(false, o.idx); }); });
     __fdCharmList.forEach(function (o) { __negOpts.push('🛡️ 发动盖伏【' + o.card.name + '】抵消（消耗并前进2格）'); __negActs.push(function () { __useCharm(true, o.idx); }); });
     if (__graveNegIdx >= 0) { __negOpts.push('⚡ 发动墓地【' + __graveNegCard.name + '】并移出游戏来抵消'); __negActs.push(function () { __useGraveNeg(__graveNegIdx); }); }
+    __torrentList.forEach(function (o) { __negOpts.push('🐛 舍弃手牌【' + o.card.name + '】⇒ 本次最终伤害-75%（之后失去3点同步值）'); __negActs.push(function () { __useTorrent(o.idx); }); });
     __negOpts.push('承受本次伤害'); __negActs.push(function () { addBattleLog('p1', '选择承受' + damage + '点伤害'); rwClose('damage'); __normalHit(); });
     // 联机：本机玩家受伤响应显式按 p1 归属弹窗并广播（对手回合的远端流程内同样如此）
     if (typeof Online !== 'undefined' && Online.active) {
@@ -21736,13 +21834,14 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       if (o >= 0 && o < __negActs.length) __negActs[o](); else { rwClose('damage'); __normalHit(); }
     });
     return;
-  } else if (target === 'p2' && (hasCharm || __graveNegIdx >= 0)) {
+  } else if (target === 'p2' && (hasCharm || __graveNegIdx >= 0 || __hasTorrent)) {
     // 联机：远端位受伤响应等待对方答案（选项与对方 p1 弹窗同序：手牌护符/盖伏护符/墓地移出/承受）
     if (typeof Online !== 'undefined' && Online.active) {
       var __p2Opts = [], __p2Acts = [];
       __charmList.forEach(function (o) { __p2Opts.push('🛡️ 发动手牌【' + o.card.name + '】抵消（消耗并前进2格）'); __p2Acts.push(function () { __useCharm(false, o.idx); }); });
       __fdCharmList.forEach(function (o) { __p2Opts.push('🛡️ 发动盖伏【' + o.card.name + '】抵消（消耗并前进2格）'); __p2Acts.push(function () { __useCharm(true, o.idx); }); });
       if (__graveNegIdx >= 0) { __p2Opts.push('⚡ 发动墓地【' + __graveNegCard.name + '】并移出游戏来抵消'); __p2Acts.push(function () { __useGraveNeg(__graveNegIdx); }); }
+      __torrentList.forEach(function (o) { __p2Opts.push('🐛 舍弃手牌【' + o.card.name + '】⇒ 本次最终伤害-75%（之后失去3点同步值）'); __p2Acts.push(function () { __useTorrent(o.idx); }); });
       __p2Opts.push('承受本次伤害'); __p2Acts.push(function () { addBattleLog(target, '选择承受' + damage + '点伤害'); rwClose('damage'); __normalHit(); });
       onlineDecideModal('p2', '受伤响应（对手）', '即将受到' + damage + '点伤害' + (source ? ('（来自【' + source + '】）') : ''), '可选择抵消方式，或承受本次伤害', __p2Opts, function(o) {
         if (o >= 0 && o < __p2Acts.length) __p2Acts[o](); else { rwClose('damage'); __normalHit(); }
@@ -21756,6 +21855,8 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var __effAi = damage - Math.max(0, (p.shield || 0) - Math.min(__pierceN, p.shield || 0));
     var afterSync = p.sync - __effAi;
     if (__graveNegIdx >= 0 && __effAi >= p.sync) { __useGraveNeg(__graveNegIdx); return; }
+    /* 【无首刺虫】AI 判据与护符同款：这一下会打死 / 或打完压到危险线（<=8）时才舍弃 ✓ */
+    if (__hasTorrent && (__effAi >= p.sync || afterSync <= 8)) { __useTorrent(__torrentList[0].idx); return; }
     if (aiCharm && (__effAi >= p.sync || afterSync <= 8)) {
       p.cost -= (parseInt(aiCharm.cost,10)||0); if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else p.hand.splice(aiCharmIdx,1);
       moveCardToGrave('p2', aiCharm, 'use');
@@ -21987,6 +22088,9 @@ function aiActivateFaceDown(index, done, seat) {
 }
 
 var PERMANENT_STRUCT = [
+  /* 【2026-10-14 新卡·雷閃】永续：发动时 3 点神圣伤害 + 常驻「属性克制伤害+1」
+     （handler 见 PERMANENT_ONPLAY_HANDLERS.leishan ✓；克制的"神圣克制非神圣"规则见 __attrBeats ✓） */
+  { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'], onPlayHandler: 'leishan', active: null },
   { match: ['臂章'], onPlay: ['给予一名玩家3理智伤害'], onPlayHandler: 'armband', active: null },
   { match: ['Huginn', '穆宁', '福金'], onPlay: ['自身攻击力+3'], onPlayHandler: 'huginnPlay',
     active: { once: 'game', flag: '_huginnUsedGame', handler: 'huginn' } },
@@ -22168,6 +22272,19 @@ var PERMANENT_ONPLAY_HANDLERS = {
   // 风纪委员臂章：3 理智伤害
   armband: function (card, user, cb) {
     dealDamageWithResponse(permOther(user), 3, card.name, function () { cb && cb(); });
+  },
+  /* 【2026-10-14 新卡·雷閃 ⇒ 结构修 ✓】卡面：
+       「·发动时作为效果处理：对一名玩家造成3点神圣属性伤害。·属性克制伤害+1。
+        SP：一回合一次，把牌组最上方的那张卡送入墓地来发动，对一名其他玩家造成1点神圣属性伤害。这个效果在其他玩家回合也能发动。」
+     ① 发动时：对一名玩家（这里取对手，与臂章同款 ✓）造成 3 点**神圣属性**伤害 —— 走统一伤害管线
+        （属性克制交给 `__attrBeats` 的"神圣克制非神圣"新规则 ✓，不在此处硬算 ✗）。
+     ② 「属性克制伤害+1」是**这张卡在场期间**对持有者生效的常驻加成 ⇒ 写 `p._attrCounterDmgUp`，
+        由伤害出口的克制段读取（见 `computeDamageValue` 里的雷閃那一段 ✓）。 */
+  leishan: function (card, user, cb) {
+    var p = battleState[user];
+    if (p) { p._attrCounterDmgUp = (p._attrCounterDmgUp || 0) + 1; }
+    addBattleLog(user, '【雷閃】属性克制伤害+1（常驻；当前+' + ((p && p._attrCounterDmgUp) || 1) + '）');
+    dealDamageWithResponse(permOther(user), 3, card.name, function () { if (typeof updateBattleUI === 'function') updateBattleUI(); cb && cb(); }, '神圣', user);
   },
   /* 【2026-10-09 平衡性改动·新卡面】发动时作为效果处理 ⇒ **只有「自身攻击力+3」**；
      旧卡面那句「对一名其他玩家造成3点混沌属性伤害」已被作者删除 ⇒ 这里同步删掉那次伤害调用。 */
@@ -23743,6 +23860,68 @@ var SPECIAL_CARD_HANDLERS = {
   //   （实测该子句 compileStepOps 返回 null），通用兜底会把文本里的 **33** 当固定伤害
   //   ⇒ 实测打出 36（33 + baseDamage 2 + 琉璃(万圣祭)被动 +1）。架构闸（getSpecialHandler）在存在 null 步时自动让本特判生效。
   // ============================================================
+  /* ============================================================
+  【永眠之棺】（混沌·反制·单次，费2）—— 2026-10-14 新增卡
+  卡面：据说在棺材内住着一只粘人的恶魔。
+    •自己或其他玩家的回合内，选场上一张卡为对象发动，那张卡直到本回合结束前效果无效。
+  为什么走特判：卡面是"选场上一张卡为对象"+"到回合结束的持续无效" ⇒ 指令层没有对应 op
+    （`compileStepOps` 返回 null），而它又需要"场上选卡"的交互 ⇒ 与「邪恶南瓜攻击！」同款。
+  实现：给目标卡写 `_effectDisabledUntilTurn = battleState.turn`（回合号=唯一真相 ✓），
+    到期由 `clearTurnScopedEffectDisables` 在 `startTurn` 统一清 ✓，生效判定在 `beforeEffectExecution` ✓。
+  ============================================================ */
+/* ============================================================
+ 【无首刺虫】（无序·反制·单次，费1）—— 2026-10-14 新增卡
+  卡面：来自遥远古国的奇妙生物。
+    •自己或其他玩家的回合有玩家造成伤害时可以舍弃此卡来发动，那次最终伤害-75%。那之后自己失去3点同步值。
+  为什么按名登记：它的生效**不在"打出"路径上**，而是挂在**受伤响应**这条链上（任何玩家回合、任何玩家造伤害时）
+    ⇒ 指令层没有对应 op（`compileStepOps` 返回 null ✓ 实测）。
+  实际生效位置（都已实现 ✓，此处只是登记+说明）：
+    · 探测/询问：`dealDamageWithResponse` 里的 `__torrentList` / 受伤响应弹窗（与护符同一套 ✓）
+    · 减伤唯一实现：`__torrentReduce`（主伤害与追加段两条出口共用 ✓）
+    · 收尾"自己失去3点同步值"：`__torrentAfterDamage`（挂在 `__afterHitSettle` ✓）
+ ============================================================ */
+'无首刺虫': {
+    play: function (card, user, done) {
+      /* 从手牌主动打出时：卡面没写"主动发动"的效果 ⇒ 只做登记提示，效果留给受伤响应链 ✓ */
+      addBattleLog(user, '【无首刺虫】已打出；它的效果在"有玩家造成伤害时"的受伤响应里舍弃发动（-75%）');
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      if (done) done();
+    }
+  },
+
+  '永眠之棺': {
+    play: function (card, user, done) {
+      var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
+      var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
+      /* 候选：场上（双方效果处理区正面 + 盖伏）的卡 —— 按引擎对"场上一张卡"的既有口径收集 ✓ */
+      var __cands = [];
+      [user, foe].forEach(function (w) {
+        var q = battleState[w]; if (!q) return;
+        (q.permanent || []).forEach(function (c) { if (c && c !== card) __cands.push({ who: w, card: c }); });
+        (q.faceDownCards || []).forEach(function (c) { if (c && c !== card) __cands.push({ who: w, card: c, faceDown: true }); });
+      });
+      if (!__cands.length) { addBattleLog(user, '【' + N + '】场上没有可作为对象的卡 ⇒ 本次不处理'); __fin(); return; }
+      function __apply(i) {
+        var pick = __cands[i];
+        if (!pick) { addBattleLog(user, '【' + N + '】未选择对象 ⇒ 本次不处理'); __fin(); return; }
+        pick.card._effectDisabledUntilTurn = battleState.turn;
+        addBattleLog(user, '【' + N + '】指定' + (pick.who === user ? '自己' : '对手') + '场上的【' + (pick.card.name || '?') + '】⇒ 直到本回合结束前效果无效');
+        __fin();
+      }
+      var __opts = __cands.map(function (o) { return '（' + (o.who === user ? '自己' : '对手') + '）' + (o.faceDown ? '盖伏·' : '') + (o.card.name || '?'); });
+      /* 三段式分流（与「邪恶南瓜」同一套）：真人 p1 弹窗 / 联机远端 / 单机 AI 自动选 */
+      if (user === 'p1') {
+        if (typeof Online !== 'undefined' && Online.active) { onlineDecideModal('p1', N, '选场上一张卡', '那张卡直到本回合结束前效果无效', __opts, function (o) { __apply(o); }); return; }
+        showChoiceModal(N, '选场上一张卡', '那张卡直到本回合结束前效果无效', __opts, function (o) { __apply(o); });
+        return;
+      }
+      if (typeof Online !== 'undefined' && Online.active) { onlineDecideModal('p2', N + '（对手）', '选场上一张卡', '那张卡直到本回合结束前效果无效', __opts, function (o) { __apply(o); }); return; }
+      /* AI：优先无效"对手（p1）的永续卡"，没有则选第一张 */
+      var __aiIdx = __cands.findIndex(function (o) { return o.who === 'p1' && !o.faceDown; });
+      __apply(__aiIdx >= 0 ? __aiIdx : 0);
+    }
+  },
+
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
@@ -24031,6 +24210,8 @@ function getSpecialHandler(card) {
      通用兜底又把文本里的 33 当成固定伤害（实测打出 36 = 33 + baseDamage 2 + 被动 1）。
      ⇒ 与上面三张同款：显式声明"这张卡必须走 SPECIAL 特判"。 */
   if (n === '邪恶南瓜攻击！') return h;
+  /* 【2026-10-14 新卡·永眠之棺】卡面要"选场上一张卡"且是到回合结束的持续无效 ⇒ 必须走特判 ✓ */
+  if (n === '永眠之棺') return h;
   // 架构闸：结构化指令层能精确编译的卡，优先走指令层；旧特判仅对指令层无法编译(null)的卡兜底，杜绝旧硬编码覆盖新卡面
   if (h && typeof compileStepOps === 'function') {
     var __main = (typeof getMainEffectText === 'function') ? getMainEffectText(t) : t;
