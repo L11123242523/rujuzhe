@@ -7467,12 +7467,21 @@ function __runTimingTriggers(timing, ctx, next) {
                 var fin = (typeof nx === 'function') ? nx : function () {};
                 try {
                   var stub = { _chain: [], _stage: timing, player: side, description: '阶段时点发动：' + (c.name || ''), card: c };
-                  applyChainCard(side, pk, stub, function () {
+                  /* 【2026-10-13 S3 ✓】与连锁窗同款：**入链之前先收目标** ✓
+                     （原来这里不传目标 ✗ ⇒ 结算层还得兜底、甚至可能弹窗 ✗；现在目标在"发动那一刻"定好 ✓） */
+                  function __pcGo(__tg) {
+                    if (__tg === null) { try { addBattleLog(side, '【连锁】未选定目标 ⇒ 本次不发动'); } catch (e) {} fin(); return; }
                     try {
-                      if (stub._chain && stub._chain.length && typeof resolveChainStack === 'function') resolveChainStack(stub, function () { fin(); });
-                      else fin();
-                    } catch (e) { console.error('阶段时点卡结算出错（忽略）', e); fin(); }
-                  });
+                      applyChainCard(side, pk, stub, function () {
+                        try {
+                          if (stub._chain && stub._chain.length && typeof resolveChainStack === 'function') resolveChainStack(stub, function () { fin(); });
+                          else fin();
+                        } catch (e) { console.error('阶段时点卡结算出错（忽略）', e); fin(); }
+                      }, __tg);
+                    } catch (e) { console.error('阶段时点发动卡出错（忽略）', e); fin(); }
+                  }
+                  if (typeof __collectChainTarget === 'function') __collectChainTarget(side, c, __pcGo);
+                  else __pcGo('' + side);
                 } catch (e) { console.error('阶段时点发动卡出错（忽略）', e); fin(); }
               }
             });
@@ -8681,26 +8690,17 @@ function __executeCardEffectBody(player, card, done, forceTarget) {
     /* 【2026-10-13 作者裁决·S2 ✓】**发动前已定好目标 ⇒ 直接用，不再判文本、不再弹窗** ✓
        （MD 口径：取对象是发动前提、目标在发动那一刻锁定 ✓；链节点由 `__collectChainTarget` 收好带下来 ✓） */
     if (forceTarget) { __runBody(forceTarget); return; }
-    /* 【2026-10-13 作者裁决"选项按文本来" ✓】目标**不再默认对手** ✗ —— 交给唯一入口按卡面文本判定 ✓
-       · self ⇒ 落使用者自己 ✓　· foe ⇒ 落对手 ✓　· ask ⇒ **必须问**（本机弹窗；AI/对端已断时取"自己"✓，
-         绝不取对手 ✗ —— 规则见 `__resolveTargetFromText` 顶部注释 ✓） */
+    /* 【2026-10-13 S3 ✓】**结算层不再向玩家提问**（"先选目标再进连锁"的收口 ✓）
+       为什么现在不可达：能进本函数的只有**响应窗上链**的事件卡/技能卡 ✓，而它们的目标已在
+       `__collectChainTarget`（入链前）收好 ⇒ 上面 `forceTarget` 就返回了 ✓。
+       真的走到这里（目标缺失：阶段时点等旧调用方 / 解析不出目标），一律**按事实取座位、不打字问** ✓：
+         · self ⇒ 使用者 ✓　· foe ⇒ 对手 ✓　· ask/无法判定 ⇒ **使用者自己** ✓（绝不取对手 ✗，作者口径 ✓）
+       这样"给自己/给对手"这类弹窗**只可能出现在发动那一刻** ✓（MD 口径：取对象是发动前提 ✓）。 */
     var __tg = (typeof __resolveTargetFromText === 'function') ? __resolveTargetFromText(player, text) : null;
-    var __tgtSeat = (__tg && __tg.seat) ? __tg.seat : ((__tg && __tg.who === 'self') ? player : null);
-    if (__tg && __tg.who === 'ask' && !__tgtSeat) {
-      /* ask ⇒ 弹窗问"给谁用"（本机 p1 ✓）；AI 座 / 对端无人 ⇒ 取自己（对自己有利 ✓，绝不对手 ✗） */
-      var __isAI = (typeof isAISeat === 'function') ? isAISeat(player) : (player === 'p2');
-      if (player === 'p1' && !__isAI && typeof showChoiceModal === 'function') {
-        var __myName = (typeof playerDisplayName === 'function') ? playerDisplayName('p1') : '自己';
-        var __foeName = (typeof playerDisplayName === 'function') ? playerDisplayName('p2') : '对手';
-        showChoiceModal('选择目标', (card.name || '') + '：' + (__tg.src || ''), '这张卡没写明目标，请选择给谁使用', ['给自己（' + __myName + '）', '给对手（' + __foeName + '）'], function (i) {
-          addBattleLog(player, '【' + (card.name || '') + '】按文本未定目标 ⇒ 使用者选择：' + (i === 0 ? '自己' : '对手'));
-          __runBody(i === 0 ? player : foeOf(player));
-        });
-        return;
-      }
-      addBattleLog(player, '【' + (card.name || '') + '】文本未指明目标且无法询问 ⇒ 默认给自己（绝不取对手 ✓）');
-      __runBody(player);
-      return;
+    var __tgtSeat = (__tg && __tg.who === 'foe') ? ((typeof foeOf === 'function') ? foeOf(player) : null)
+      : (__tg && __tg.seat) ? __tg.seat : player;
+    if (__tg && __tg.who === 'ask') {
+      try { addBattleLog(player, '【' + ((card && card.name) || '') + '】结算时目标未指定 ⇒ 取使用者自己（绝不取对手 ✓）'); } catch (e) {}
     }
     __runBody(__tgtSeat || player);
   } catch (e) {
