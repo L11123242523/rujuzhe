@@ -16660,7 +16660,19 @@ function __compileBody(t) {
   if (has('破坏') && /一张|1张|场上|区域|功能卡|手卡|手牌/.test(t) && !(/加入手[卡牌]/.test(t) && /移出游戏的?卡/.test(t))) {
     ops.push({ op: 'destroy_pick', zone: /手卡|手牌/.test(t) ? 'hand' : 'permanent', to: (/移出/.test(t) || __CTX_FORCE_REMOVED) ? 'removed' : 'grave', who: /自己|自身/.test(t) ? 'self' : 'target' });
   }
-  if (/打落/.test(t)) ops.push({ op: 'knock_off', loseCost: 3 });
+  /* 【2026-10-15 作者报「没造伤但是触发打落」⇒ 结构修 ✓】
+     条件式打落（"命中且造成N点以上伤害后可以打落"）**已经**由本函数开头的条件分支编成
+     `optional{cond:{lastDmgGe:N}}`；这里若**再**加一条无条件 knock_off，去重（__opsMove 只保留一条）
+     会留下排在前面的无条件的那个 ⇒ 条件被丢掉 ⇒ 没造伤也打落 ✗（实测 ops 证据见探针）。
+     ⇒ 兜底跳过条件式文本（与上面同一判据）；非条件式的普通"打落"卡面行为不变 ✓ */
+  var __knockCondGuard = /命中且造成\s*([0-9]+|[一二两三四五六七八九十])\s*点以上伤害后可以(?:随机)?打落其[^。；;]*/.test(t);
+  /* 【2026-10-15 第二次修·真正的根因】卡面第 2 句是**机制定义**（解释"打落"是什么）：
+     打落：受击者将被打落的卡送入墓地并且失去3点音韵值
+     它也被通用兜底产出一条**无条件 knock_off**；与第 1 句拼接后去重只留第一个
+     ⇒ 带 lastDmgGe 条件的那条被丢掉 ⇒ 没造伤也打落 ✗（逐句实测：定义句 ⇒ [lose_cost, knock_off]）
+     ⇒ 定义句一律跳过通用兜底 ✓ */
+  var __knockDefOnly = /^\s*打落\s*[：:]/.test(t);
+  if (/打落/.test(t) && !__knockCondGuard && !__knockDefOnly) ops.push({ op: 'knock_off', loseCost: 3 });
 
   // 引导核心 / 激励
   var corem = t.match(/(\d+)\s*点引导核心/); if (corem) ops.push({ op: 'gain_core', n: +corem[1] });
