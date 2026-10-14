@@ -2676,7 +2676,15 @@ function isDualUseChainCard(card){
 // 特例卡的额外发动条件：返回 {ok:false,reason} 或 true
 var CARD_PLAY_CONDITIONS={
   '来自地狱的盒子':function(card,me,bs){ if((me.grave||[]).length<2) return {ok:false,reason:'来自地狱的盒子需要墓地中有至少2张卡才能发动'}; return true; },
-  '底牌':function(card,me,bs){ var others=(me.hand||[]).filter(function(c){return c!==card;}); var only=others.length===0; var mono=others.length>0&&others.every(function(c){return c.attribute===card.attribute;}); if(!only&&!mono) return {ok:false,reason:'底牌需手卡只有这张、或全部为同一属性才能发动'}; me._dipaiOnly=only; return true; }
+  '底牌':function(card,me,bs){ var others=(me.hand||[]).filter(function(c){return c!==card;}); var only=others.length===0; var mono=others.length>0&&others.every(function(c){return c.attribute===card.attribute;}); if(!only&&!mono) return {ok:false,reason:'底牌需手卡只有这张、或全部为同一属性才能发动'}; me._dipaiOnly=only; return true; },
+  /* 【2026-10-14 新卡·无首刺虫 ⇒ 结构修 ✓】作者报：「主阶段能把它打出去，打出去什么也不发生」✓（真机实测复现）。
+     卡面：「自己或其他玩家的回合**有玩家造成伤害时**可以**舍弃此卡**来发动，那次最终伤害-75%。那之后自己失去3点同步值。」
+     ⇒ 它的**唯一发动方式**是"受伤响应里舍弃手牌"（`dealDamageWithResponse` 的 `__torrentList` ⇒ `__useTorrent`），
+       **没有**"从手牌主动打出"这一面（真打出去只会写一句登记日志、白丢一张卡 ✗）。
+     归属："它能不能被主动打出"这件事**只有一个判定处**：`evaluatePlayable` 末尾读的这张特例条件表
+       （`CARD_PLAY_CONDITIONS`，既有惯例：来自地狱的盒子 / 底牌 同表）⇒ 判在这里，UI 自动变灰 ✓，
+       不另在 handler 里补 if、也不改 cardData ✗（唯一入口 ✓）。 */
+  '无首刺虫':function(card,me,bs){ return {ok:false,reason:'【无首刺虫】只能在"有玩家造成伤害时"从手牌**舍弃**发动（受伤响应里选它）——不能主动打出'}; }
 };
 // ===== [超频]状态：可透支音韵值（基础最多5点，Lv7起最多7点；透支发生时扣除持有者3点同步）=====
 function __overclockLoanCap(who) {
