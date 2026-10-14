@@ -6318,6 +6318,18 @@ function collectChainable(player, effect){
     consider(c,'hand',i);
   });
   (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
+  /* 【2026-10-14 作者报「荷鲁斯之眼在对手回合根本没法用，它应该和技能卡一样是全时点卡」⇒ 结构修 ✓】
+     卡面：「**自己或其他玩家的回合**把这张卡送入墓地才能发动，直到本回合结束前自己每次受到伤害后回复1点音韵值。」
+     实测：`classifyChainCard=null`、`isChainOnlyCard=false`、`hasChainTarget=false`
+     ⇒ 在下面的通用闸 `!isChainOnlyCard(c) || !hasChainTarget(c) || !__matchStage(c)` 被挡住 ⇒ 两个回合都出不来 ✗。
+     修法：照【雷閃】同一套 —— 直接为它产出候选（**绕过 consider 那套「连锁专用卡」闸** ✓），
+     与技能卡同权：任何时点、任何玩家的回合都出现 ✓；标 `horus:true` 供上层执行它自己的处理器 ✓。 */
+  try {
+    (me.hand || []).forEach(function (c, i) {
+      if (!c || c.name !== '荷鲁斯之眼') return;
+      out.push({ card: c, from: 'hand', index: i, horus: true });
+    });
+  } catch (e) {}
   /* 【2026-10-14 作者报「雷閃不能在对手回合发（不像技能卡一样有全时点）」⇒ 结构修 ✓】
      卡面：「…这个效果在**其他玩家回合也能发动**」——作者口径是**像技能卡那样的全时点** ✓：
      任何时点、任何玩家的回合，它都作为**连锁响应候选**出现（与技能卡同权 ✓），
@@ -6448,6 +6460,21 @@ function applyChainCard(player,pick,effect,done,target){
      具体效果在**逆结算**时执行（见 `resolveChainStack` 的 `kind:'permSP'` 分支 ✓）。
      ⚠ "一回合一次"的标记**不在这里**消费 —— 要等逆结算真的执行了才消费 ✓
        （中途被无效 ⇒ 不该白扣次数；标记写在卡上、后缀 `Turn` 可被 A2 回滚识别 ✓）。 */
+  /* 【2026-10-14 荷鲁斯之眼·全时点 ⇒ 结构修 ✓】与 permSP 同款：不动卡区，只压一环；
+     结算时执行**卡面效果本体**（`kind:'skill'` 那一支 ⇒ `__executeCardEffectBody` ⇒ 该卡特判处理器 ✓）
+     ⇒ 送墓 + 置 `_horusEyeUntilTurn`（受伤回复与到期清理都挂在既有位置 ✓）。 */
+  if (pick.horus) {
+    effect._chain = effect._chain || [];
+    __chainWithC1().push({ kind: 'skill', by: player, name: name, card: c });
+    try { if (c) c._inUseBy = player; } catch (e) {}
+    if (typeof me.hand !== 'undefined' && pick.index >= 0 && me.hand[pick.index] === c) me.hand.splice(pick.index, 1);
+    addBattleLog(player, '连锁发动【' + name + '】（全时点，已上链，待逆结算）');
+    if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
+    if (typeof renderChainBar === 'function') renderChainBar(effect);
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    setTimeout(function () { if (typeof done === 'function') done(); }, 200);
+    return;
+  }
   if (pick.from === 'permSP') {
     effect._chain = effect._chain || [];
     __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c });
