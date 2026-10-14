@@ -5646,6 +5646,19 @@ function __refillDeckIfEmpty(player) {
   return false;
 }
 // 统一从牌顶抽一张：牌组空则立即用墓地重置后再抽；牌组与墓地皆空返回 null。约定牌顶=deck[0]
+/* 【2026-10-14 作者报「牌组没牌了不立即洗牌」⇒ 结构修·收口 ✓】
+   规则：**牌组一空就立即把墓地整体翻面为新牌组**（不洗切）。
+   原来只有 `takeTopCard` 在抽完最后一张后补 ⇒ **从牌组直接摘卡**的路径（堆沙堡配对 / 特制手套选卡）
+   把牌组取空后**不翻面** ✗。这里做成**唯一函数**，摘卡点都走它 ⇒ 规则只写一次、不可能忘 ✓。
+   返回：被摘走的那张卡（下标非法 ⇒ null）。 */
+function __takeFromDeckAt(player, index) {
+  var __p = battleState[player]; if (!__p || !__p.deck) return null;
+  var __i = (typeof index === 'number' && index >= 0 && index < __p.deck.length) ? index : -1;
+  if (__i < 0) return null;
+  var __c = __p.deck.splice(__i, 1)[0];
+  if (__p.deck.length === 0) __refillDeckIfEmpty(player);   // 摘走最后一张 ⇒ 立刻翻面 ✓
+  return __c;
+}
 function takeTopCard(player) {
   var __p = battleState[player]; if (!__p) return null;
   if (!__p.deck || __p.deck.length === 0) { if (!__refillDeckIfEmpty(player)) return null; }
@@ -24749,7 +24762,7 @@ var SPECIAL_CARD_HANDLERS = {
         addBattleLog(user, '【堆沙堡】亮出牌组最上方【' + top.name + '】（' + (top.attribute || '?') + '／费用' + (top.cost != null ? top.cost : '?') + '），可选配对' + cands.length + '张');
         function __take(handCard) {
           if (!handCard) { __finish(); return; }
-          var ti = p.deck.indexOf(top); if (ti >= 0) p.deck.splice(ti, 1);
+          var ti = p.deck.indexOf(top); if (ti >= 0) __takeFromDeckAt(user, ti);   /* 【2026-10-14】统一摘卡出口 ⇒ 空了立刻翻面 ✓ */
           var hi = p.hand.indexOf(handCard); if (hi >= 0) p.hand.splice(hi, 1);
           paired.push(top); paired.push(handCard);
           addBattleLog(user, '【堆沙堡】配对成功：牌组顶【' + top.name + '】＋手卡【' + handCard.name + '】暂时放在一旁（累计' + (paired.length / 2) + '次）');
@@ -24856,7 +24869,7 @@ var SPECIAL_CARD_HANDLERS = {
         var __pick = String(opts[ci] || '');
         if (__pick.indexOf('从牌组') >= 0) {
           chooseZoneCard(user, user, 'deck', '特制手套：从牌组选1张卡加入手卡', function (c, i) {
-            if (i >= 0) { p.deck.splice(i, 1); p.hand.push(c); __emitAddHand(user, c, 'deck'); addBattleLog(user, '【特制手套】将【' + c.name + '】加入手卡'); }
+            if (i >= 0) { __takeFromDeckAt(user, i); p.hand.push(c); __emitAddHand(user, c, 'deck'); addBattleLog(user, '【特制手套】将【' + c.name + '】加入手卡'); }
             done();
           });
         } else if (__pick.indexOf('修改一次掷骰') >= 0) {
