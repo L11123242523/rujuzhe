@@ -23923,7 +23923,14 @@ function computeRequiredCost(card, user) {
     actual = cost + (card._escalateCount || 0);
   }
   // 小野葵：整副牌组（8道具 + 4角色携带卡 = 12张）每张的"首次使用"费用-1 ⇒ 属「所需要的音韵值-1」✓
-  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) actual = Math.max(0, actual - 1);
+  /* 【2026-10-15 作者报「葵的SP:所有携带卡（道具卡、技能卡或攻击卡）首次使用是所需要的费用-1没有生效」⇒ 结构修 ✓】
+     卡面（实测抄录）：「sp: 初始手牌+1，暴击伤害+1；游戏开始时队伍携带的所有卡在首次使用时所需要的音韵值-1。
+                       这个效果即使作为**队员**编组也会生效。」
+     病根：这里判的是 `p._aoiPassive`，而它**只在 `__captainPassives`（队长被动）里置位** ✗
+       ⇒ 小野葵**当队员**时该标记为 undefined ⇒ 首用 -1 永不生效（作者看到的正是这个）；
+       而"编入队伍（含队员）"的唯一标识是 `p._aoiSP`（`processCharacterPassives` 会遍历三名队员置位 ✓，见 21110 行）。
+     修法：判据改用 `_aoiSP`（与卡面"作为队员也生效"同口径 ✓）；两个出口（判定用/扣费用）一起改，避免只改一处 ✗。 */
+  if (p._aoiSP && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) actual = Math.max(0, actual - 1);
   // 宁雨清SP：因效果加入手卡的卡费用-1
   if (p._ningSP && card._addedByEffect && actual > 0) actual -= 1;
   // 钢笔：攻击卡、技能卡所需音韵-1
@@ -24101,9 +24108,11 @@ function computeActualCost(card, user) {
   } catch (e) { try { console.error('[catch] assets/engine.js:21905', e); } catch (e2) {} }
   // —— 以下属「所消耗的音韵值 -1」：只改实际扣多少，不改"能否发动" ✗ ——
   // 小野葵「首次使用」的消费点：只有真正扣费时才算用过 ✓（资格检查走上面的无副作用版本 ✓）
-  if (p._aoiPassive && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) {
+  /* 【2026-10-15 与上面同一处结构修】判据 `_aoiPassive`（队长专用）⇒ `_aoiSP`（编入队伍含队员 ✓），
+     否则当队员时这里也不消费标记 —— 上下两个出口必须同口径 ✓ */
+  if (p._aoiSP && (card._isCarry || card._fromDeck) && !card._aoiDiscountUsed) {
     card._aoiDiscountUsed = true;
-    addBattleLog(user, '【小野葵被动】携带卡首次使用费用-1（现' + actual + '费）');
+    addBattleLog(user, '【小野葵SP】携带卡首次使用费用-1（现' + actual + '费）');
   }
   if (p._nextCostReduction && p._nextCostReduction > 0) {
     var reduced = Math.min(actual, p._nextCostReduction);
