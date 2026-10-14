@@ -22720,7 +22720,13 @@ function resolvePermanentOnPlay(card, user, cb) {
     var __ss = parseEffect(text); __opsOk = __ss.length > 0;
     for (var __i = 0; __i < __ss.length; __i++) { if (compileStepOps(__ss[__i].text, true) === null) { __opsOk = false; break; } }
   }
-  if (st.onPlayHandler && PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler] && !__opsOk) {
+  /* 【2026-10-14 作者报「死灵令牌的『选一张手卡公开』没执行」⇒ 结构修 ✓】
+     上面那道闸是「指令层能编译就不调具名 handler」；而死灵令牌那句里的**「公开」在指令层没有 op**
+     ⇒ 被编译器落成**第二个 `draw`**（假动作）⇒ 整句判为「能编译」⇒ **handler 被跳过** ✗。
+     修法：**从句里含指令层执行不了的「（手卡）公开」⇒ 走具名 handler**（这张卡的专用实现更权威 ✓）。
+     影响面：全池**只有死灵令牌**含此句式 ⇒ 其余带具名 handler 的卡（臂章/福金/善意面具/妖刀/永奏/巧匠/雷閃）一字不动 ✓。 */
+  var __needsNamedHandler = !!st.onPlayHandler && /选[^。；]{0,10}(?:一张)?手卡公开|手卡公开/.test(String(text || ''));
+  if (st.onPlayHandler && PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler] && (!__opsOk || __needsNamedHandler)) {
     PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler](card, user, function () {
       if (cb) cb();
     });
@@ -24863,6 +24869,12 @@ function getSpecialHandler(card) {
   if (n === '邪恶南瓜攻击！') return h;
   /* 【2026-10-14 新卡·永眠之棺】卡面要"选场上一张卡"且是到回合结束的持续无效 ⇒ 必须走特判 ✓ */
   if (n === '永眠之棺') return h;
+  /* 【2026-10-14 作者报「死灵令牌的『选一张手卡公开』没执行」⇒ 结构修 ✓】
+     它原来走**特殊交互路径**，而那条路**只跑卡名特判的 h.play、不执行「发动时效果」**
+     ⇒ 登记在 `PERMANENT_ONPLAY_HANDLERS.siling`（抽一张卡 + 选一张手卡公开）的整段没跑 ✗。
+     让它**不走特殊路径** ⇒ 回标准永续卡路径：`resolvePermanentOnPlay` 会用卡面从句派发到 `siling` ✓
+     （该从句编译不出指令层 op ⇒ 走具名兜底 ✓），一次跑完，且去向由标准路径决定（永续留处理区 ✓）。 */
+  if (n === '死灵令牌') return null;
   /* 【2026-10-14 新卡·死灵令牌】整卡被编译成一个假的 `draw`（打出就抽1张 ✗）⇒ 与卡面不符，必须走特判 ✓ */
   if (n === '死灵令牌') return h;
   /* 【2026-10-14 新卡·荷鲁斯之眼】编译成假的 `gain_cost`（回一次）⇒ 与"每次受伤后回"不符，必须走特判 ✓ */
