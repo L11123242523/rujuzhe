@@ -11606,6 +11606,27 @@ function aiEndTurn(seat) {
   // 临时攻击力（直到本回合结束类）回合结束清零
   if (aiMe()._tempAttack) { aiMe()._tempAttack = 0; addBattleLog(aiSeat(), '临时攻击力（本回合）已结束'); }
   
+  /* 【2026-10-14 作者报「客机回合结束手牌超出，没让客机选丢弃多的牌，而是系统强行帮弃一张」⇒ 结构修 ✓】
+     病根：下面这段**无条件**弃尾张。而本函数在**房主侧**负责"非 p1 座位的回合收尾"，
+     联机时 p2 是**活人**（客人）⇒ 房主直接替他把牌弃了（而且弃的不是他想弃的那张 ✗）。
+     ⚠ 留档一个我查到的反直觉事实：**客人自己那台机器走的是 `endTurn`、不走这里**
+       （客人视角里"我"永远是 p1）；所以这个 bug **只在房主侧**发生 —— 与作者看到的一致 ✓。
+     口径与仓库既有写法一致（`endTurn` L10772 早就写着"联机时 p2 也是活人，同样要问他"）：
+       · 该座位是**远端活人**（联机中、本机不是客人、且座位不是 p1）⇒ 交给 `promptDiscardToLimit(seat, 收尾)`
+         去**问他本人**选哪张；选完再重入本函数继续收尾 ✓
+       · 该座位是 AI（单机 p2）⇒ 保持原来的"自动弃尾张"一字不动 ✓
+     ⚠ 这里**不能**用 `isAISeat(aiSeat())` 判"是不是 AI"：联机时客人座也被标成 AI 座，
+       那样会把活人当成 AI ⇒ 又回到"替客人弃牌" ✗（这就是原来那段的病根）。 */
+  try {
+    var __seatNow2 = aiSeat();
+    var __isRemoteHumanSeat = (typeof Online !== 'undefined' && Online && Online.active === true && Online.isGuest !== true
+      && typeof promptDiscardToLimit === 'function' && __seatNow2 && __seatNow2 !== 'p1');
+    if (__isRemoteHumanSeat && aiMe() && (aiMe().hand || []).length > 5) {
+      var __seatKeep2 = __seatNow2;
+      promptDiscardToLimit(__seatKeep2, function () { __setAiSeat(__seatKeep2); aiEndTurn(__seatKeep2); });
+      return;
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js aiEndTurn 弃牌分流', e); } catch (e2) {} }
   while (aiMe().hand.length > 5) {
     var discarded2 = aiMe().hand.pop();
     moveCardToGrave(aiSeat(), discarded2, 'discard');
