@@ -17732,7 +17732,9 @@ var __sfx = (function () {
     draw: 'assets/audio/draw.wav?v=2', click: 'assets/audio/click.wav?v=2',
     damage: 'assets/audio/damage.wav?v=1', judge: 'assets/audio/judge.wav?v=2',
     chain: 'assets/audio/chain.wav?v=2', turn: 'assets/audio/turn.wav?v=2',
-    win: 'assets/audio/win.wav?v=2', lose: 'assets/audio/lose.wav?v=2'
+    win: 'assets/audio/win.wav?v=2', lose: 'assets/audio/lose.wav?v=2',
+    /* 【2026-10-15 作者要求】【雷閃】专属音效：电流声（素材由 port-old/gen_audio_leishan.py 生成 ✓） */
+    leishan: 'assets/audio/leishan.wav?v=1'
   };
   var BGM_URL = 'assets/audio/bgm.wav?v=1';           /* 旧：合成琶音（作兜底保留） */
   /* 【2026-10-03】真实 BGM 两轨：常驻 / 残血（ncm2audio.py 从 .ncm 解密） */
@@ -17810,7 +17812,23 @@ var __sfx = (function () {
     chain:  function () { tone(420, 0.16, 'triangle', 0.15, 0, 980); noise(0.12, 'bandpass', 2000, 1.4, 0.07, 0.02); },
     turn:   function () { tone(523, 0.18, 'sine', 0.13, 0); tone(784, 0.22, 'sine', 0.11, 0.09); },
     win:    function () { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.20, 'triangle', 0.15, i * 0.10); }); },
-    lose:   function () { [440, 370, 294].forEach(function (f, i) { tone(f, 0.28, 'sine', 0.15, i * 0.14); }); }
+    lose:   function () { [440, 370, 294].forEach(function (f, i) { tone(f, 0.28, 'sine', 0.15, i * 0.14); }); },
+    /* 【2026-10-15】【雷閃】电流声的**合成回退**（素材 leishan.wav 加载失败时用，口径与其它音效一致）：
+       高通噪声放电爆发 + 一串随机噼啪（电弧感）+ 高频下滑哨音（电流退去）+ 低频体量。 */
+    leishan: function () {
+      /* ① 放电爆发（亮、快） */
+      noise(0.16, 'highpass', 2400, 0.9, 0.34, 0, 1800);
+      /* ② 噼啪电弧：频率与间隔都抖动 */
+      for (var i = 0; i < 9; i++) {
+        noise(0.02 + Math.random() * 0.02, 'bandpass', 3200 + Math.random() * 3200, 2.4,
+              0.16 * (1 - i / 11), 0.03 + i * (0.028 + Math.random() * 0.022));
+      }
+      /* ③ 余韵：滋滋衰减 + 高频下滑 */
+      noise(0.30, 'bandpass', 4200, 0.8, 0.10, 0.06, 900);
+      tone(5200, 0.20, 'sine', 0.05, 0.05, 900);
+      /* ④ 低频体量：不至于只有高频显得单薄 */
+      tone(150, 0.26, 'sine', 0.14, 0, 55);
+    }
   };
   /* —— 对局 BGM：本地合成的 8 小节循环（柔和琶音 + 低音），可单独开关 —— */
   var bgm = { on: true, timer: null, step: 0, gain: null };
@@ -22229,6 +22247,15 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     if (callback) callback(damage);
     return;
   }
+  /* 【2026-10-15 作者要求】【雷閃】造成伤害时播放**专属电流声**（`__sfx.play('leishan')`）
+     · 收口在这一处：雷閃的两条伤害路径（onPlay 主效果 3 点神圣 / SP 1 点神圣）**都**经由本函数，
+       且都把卡名传进了 `source`（`card.name` 与 `card.name + '·SP'`）⇒ 判 source 即可，不必在两张表里各挂一次 ✓
+     · 放在"真的会结算伤害"的检查之后（目标不存在就直接 return 的那些分支不该响）✓ */
+  try {
+    if (typeof source === 'string' && source.indexOf('雷閃') >= 0 && typeof __sfx !== 'undefined' && __sfx && __sfx.play) {
+      __sfx.play('leishan');
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js 雷閃音效', e); } catch (e2) {} }
   // 结算锁：伤害响应窗/结算期间禁止手动插入发动
   var __eeD=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
