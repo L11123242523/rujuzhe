@@ -20107,7 +20107,15 @@ function __eventCasesA(card, player, p, done, env) {
         arr.splice(ri, 1);
         (battleState[sd].removed = battleState[sd].removed || []).push(c); // 移出本局游戏
         runTiming(TIMING.ON_REMOVE, { player: sd, card: c });
-        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + (__zn === 'faceDownCards' ? '盖放卡' : '永续卡') + '【' + c.name + '】并移出本局游戏');
+        /* 【2026-10-14 修·日志按卡的真实类别写】原来只分"盖放卡/永续卡"两种措辞 ⇒
+           效果处理区里的**单次卡**也被写成"永续卡"（实测：破坏【20面骰】写成"破坏对方永续卡【20面骰】" ✗）。
+           现在：盖放区一律"盖放卡"；效果处理区内按卡本身的类别（`_category`）写"永续卡/单次卡/道具卡" ✓。
+           ⚠ 只改**日志措辞**，不动任何判定与候选（作者口径：三类都该能被破坏 ✓）。 */
+        var __kind = (__zn === 'faceDownCards') ? '盖放卡'
+          : (c._category === 'item_permanent') ? '永续卡'
+          : (c._category === 'item_single') ? '单次卡'
+          : (c._category === 'item_cards') ? '道具卡' : '卡';
+        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + __kind + '【' + c.name + '】并移出本局游戏');
         var __ed = false;
         try { __ed = ((deckConfig[player].chars || [])).some(function (ch) { return ch && ch.name && ch.name.indexOf('露璐缇雅') >= 0; }); } catch (e) { try { console.error('[catch] assets/engine.js:18566', e); } catch (e2) {} }
         if (__ed) {
