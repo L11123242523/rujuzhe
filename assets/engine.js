@@ -6553,6 +6553,15 @@ function applyChainCard(player,pick,effect,done,target){
     afterUse();
   } else if(eff.indexOf('抵消')>=0&&eff.indexOf('伤害')>=0){
     payAndRemove(); __chainWithC1().push({kind:'cancelDamage',by:player,name:name}); afterUse();
+  } else if(name.indexOf('永眠之棺')>=0){
+    /* 【2026-10-14 作者报「永眠之棺连锁时不让玩家选卡」⇒ 结构修 ✓】
+       它卡面写「选场上一张卡…**效果无效**」⇒ 原来**命中下面那条**（`eff.indexOf('效果无效')>=0`）
+       ⇒ 被压成 `negate_effect`（= 整条效果无效）⇒ 逆结算时**从不执行卡面逻辑、也不弹窗选卡** ✗。
+       修法：压成**通用卡片环** `{kind:'skill'}` —— 它的结算分支会执行**卡面效果本体**
+       （`__executeCardEffectBody` ⇒ 查 `getSpecialHandler` ⇒ 走永眠之棺的 play）
+       ⇒ 弹窗选卡 ✓、选中的那张被标记「直到本回合结束前效果无效」✓，且**等交互做完才推进下一环** ✓。
+       只对**卡名=永眠之棺**放行；别的卡一字不动 ✓。 */
+    payAndRemove(); __chainWithC1().push({kind:'skill',by:player,name:name,card:c,target:target}); afterUse();
   } else if(eff.indexOf('效果无效')>=0||name.indexOf('崩塌之乌托邦')>=0){
     /* 【MD 口径 A3】（2026-09-30）这一支的卡面写的就是「**效果无效**」⇒ 按 MD 口径属于**效果无效**：
        仍占连锁环、只是效果不生效；而**发动代价不返还**（代价在发动时已付）。
