@@ -6276,19 +6276,23 @@ function collectChainable(player, effect){
           try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { try { console.error('[catch] assets/engine.js:6089', e); } catch (e2) {} }
           return;
         }
-      } else if (!isChainOnlyCard(c) || !hasChainTarget(c)) return;
+      } else if (!isChainOnlyCard(c) || !hasChainTarget(c, stage)) return;
     } else if(__kd==='negate_effect'){
       // 反制整效（崩塌之乌托邦类）：仅在“效果将执行前”窗口，且被反制的源效果含 加手/送墓/抽卡/检索
       if(stage!=='effect_activate') return;
       var __src=((effect&&effect.card&&(effect.card.effect||effect.card.text))||(effect&&effect.description)||'');
-      if(!/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__src)) return;
+      /* 【2026-10-14】这条来源限制是**崩塌之乌托邦专用**口径（只反 加手/送墓/抽卡/检索）；
+         而【永眠之棺】卡面是「选**场上一张卡**…效果无效」⇒ 对**任何效果**都能用 ⇒ 必须豁免 ✓。
+         只按卡名豁免这一张；其它 negate_effect 卡行为一字不变 ✓。 */
+      var __ymCard = (((c && c.name) || '').indexOf('永眠之棺') >= 0);
+      if (!__ymCard && !/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__src)) return;
       /* __UTOPIA_TIMING：灰流丽类 ⇒ 触发步不是该次结算的最后一步时**时点被卡**、不能发动 */
       if (typeof __negateTimingMissed === 'function' && __negateTimingMissed(__src)) {
         try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { try { console.error('[catch] assets/engine.js:6100', e); } catch (e2) {} }
         return;
       }
     } else {
-      if(!isChainOnlyCard(c) || !hasChainTarget(c) || !__matchStage(c)) return;
+      if(!isChainOnlyCard(c) || !hasChainTarget(c, stage) || !__matchStage(c)) return;
     }
     var __clCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
     if((parseInt(c.cost,10)||0)>(me.cost||0)+__clCap) return;
@@ -22352,7 +22356,7 @@ function isChainOnlyCard(card) {
   return false;
 }
 
-function hasChainTarget(card) {
+function hasChainTarget(card, stage) {
   if (!card) return false;
   var name = card.name || '';
   var effect = card.effect || card.text || '';
@@ -22372,6 +22376,19 @@ function hasChainTarget(card) {
   if (effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) {
     return rwHas('damage');
   }
+  /* 【2026-10-14 作者报「永眠之棺无法跟连锁」⇒ 结构修 ✓】
+     效果无效类（`classifyChainCard === 'negate_effect'`：永眠之棺 / 崩塌之乌托邦）原来**没有分支**
+     ⇒ 一律 return false ⇒ 连锁窗里根本出不来 ✗（实测 hasChainTarget 恒 false）。
+     判据用**唯一真相** `classifyChainCard` ✓；有 stage 时要求「效果将要执行前」窗口
+     （与引擎里 negate 分支 `if (stage !== 'effect_activate') return;` **同源** ✓）；
+     没传 stage（无窗口上下文的调用点）⇒ 退回旧行为，不据窗口拦（避免误杀）✓。 */
+  try {
+    if (typeof RJEngine !== 'undefined' && RJEngine.classifyChainCard
+        && RJEngine.classifyChainCard(card) === 'negate_effect') {
+      if (stage == null || stage === '') return true;
+      return stage === 'effect_activate';
+    }
+  } catch (e) {}
   return false;
 }
 
