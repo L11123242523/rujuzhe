@@ -721,7 +721,16 @@ function __updateBattleUI_impl() {
       var __p2deck = (battleState.p2.deck || []).length;
       var __p2lv = battleState.p2.level || 1;
       var __p2need = (__p2lv >= 6) ? 7 : Math.max(1, __p2lv - 1);
+      /* 【2026-10-14 作者要求「单机和联机都无法知道对手有几张事件卡（这个应该可以互相知道数量）」】
+         事件卡不占手牌上限、平时只在自己那一行显示（见本文件 845 行），对手张数玩家完全看不到。
+         这里把**张数**补进对手信息行。为什么读 `.length` 就够了（实测 `port-old/_tmp-hidden-shape.cjs`）：
+           · 单机：`battleState.p2.eventCards` 是真实数组 ⇒ 取到真张数 ✓
+           · 联机：对手的 eventCards 在 `online.js:27 HIDDEN_ZONES` 里 ⇒ 随快照遮蔽成 `{__hidden:true,n:张数}`，
+             客人侧 decode 后是**长度 = 张数的数组**（元素全是"？？？"占位）⇒ `.length` 同样正确 ✓
+             —— 只露数量、不露卡面，符合联机信息口径 ✓ */
+      var __p2ev = (battleState.p2.eventCards || []).length;
       __p2zc.textContent = '对手 手牌×' + __p2h + ' · 区域×' + (__p2perm + __p2fd) + (__p2fd ? '（含盖伏×' + __p2fd + '）' : '') +
+        ' · 事件×' + __p2ev +
         ' · 牌组×' + __p2deck + ' · 激励' + (battleState.p2.motivation || 0) + '/' + __p2need;
     }
     var __p2g = document.getElementById('p2GraveN');

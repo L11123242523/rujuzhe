@@ -11007,10 +11007,16 @@ function aiMaybeUseEvent(done) {
   }
   // --- 命运之回声：对手场上功能卡破坏并移出本局（露璐缇雅可回收1张移出卡） ---
   if (nm === '命运之回声') {
-    var poolP = (foe.permanent || []).slice();
+    /* 【2026-10-14 结构修·与人类/联机侧同口径】候选池原来只取 `permanent` ⇒ 盖放区那张不在候选里 ✗。
+       "场上"的唯一口径 = `permanent + faceDownCards + eventCards + musicCards`（见 `__cardIsOnFieldNow`）⇒
+       这里补齐**盖放区**，并从**原来那个区**移出（原来写死 permanent ✗）。AI 侧沿用既有"取第一个候选"的选择策略，不变。 */
+    var poolP = [];
+    (foe.permanent || []).forEach(function (c) { poolP.push({ c: c, z: 'permanent' }); });
+    (foe.faceDownCards || []).forEach(function (c) { poolP.push({ c: c, z: 'faceDownCards' }); });
     if (!poolP.length) { __finished(); return; }
-    var dcard = poolP[0]; var di2 = foe.permanent.indexOf(dcard);
-    if (di2 >= 0) foe.permanent.splice(di2, 1);
+    var dcard = poolP[0].c, __dzone = poolP[0].z;
+    var di2 = (foe[__dzone] || []).indexOf(dcard);
+    if (di2 >= 0) foe[__dzone].splice(di2, 1);
     if (!foe.removedFromGame) foe.removedFromGame = [];
     foe.removedFromGame.push(dcard);
     /* 【同类补齐（作者要求举一反三）】移出游戏必须发 ON_REMOVE 时点（那里挂着"不因使用离开区域"的统一钩子）——
@@ -20081,17 +20087,27 @@ function __eventCasesA(card, player, p, done, env) {
       
     case '命运之回声': {
       // 选场上一张功能卡破坏并移出本局游戏；露璐缇雅在场可回收一张移出卡
-      var __pool = [], __sides = [];
-      (battleState[__ecFoe].permanent || []).forEach(function (c) { __pool.push(c); __sides.push(__ecFoe); });
-      (p.permanent || []).forEach(function (c) { __pool.push(c); __sides.push(player); });
+      /* 【2026-10-14 作者报「命运之回声只能破坏盖放的道具卡，不能破坏效果处理区的卡」⇒ 结构修 ✓】
+         卡面：「触发者选**场上**一张功能卡破坏…」。而本仓库对"场上"的既有唯一口径是
+         `permanent + faceDownCards + eventCards + musicCards`（见 `__cardIsOnFieldNow`）。
+         实测（port-old 观察探针）：候选池原来只取 `permanent` ⇒ **盖放区那张根本不在候选里** ✗
+         （作者记的方向相反，但症状同一处：**"场上"被写窄成了"效果处理区"**）。
+         修法：候选池按"场上"口径补齐**盖放区**（`faceDownCards`）✓ —— 与 `__cardIsOnFieldNow` 同口径，
+         不新造机制 ✗。命中后按 `zone` 从**原来那个区**移出（原来写死 `permanent` ✗，盖放的卡会移错区）。 */
+      var __pool = [], __sides = [], __zones = [];
+      (battleState[__ecFoe].permanent || []).forEach(function (c) { __pool.push(c); __sides.push(__ecFoe); __zones.push('permanent'); });
+      (battleState[__ecFoe].faceDownCards || []).forEach(function (c) { __pool.push(c); __sides.push(__ecFoe); __zones.push('faceDownCards'); });
+      (p.permanent || []).forEach(function (c) { __pool.push(c); __sides.push(player); __zones.push('permanent'); });
+      (p.faceDownCards || []).forEach(function (c) { __pool.push(c); __sides.push(player); __zones.push('faceDownCards'); });
       function __destroy(idx) {
         if (idx == null || idx < 0) return;
-        var sd = __sides[idx], c = __pool[idx], arr = battleState[sd].permanent, ri = arr.indexOf(c);
+        var sd = __sides[idx], c = __pool[idx], __zn = __zones[idx] || 'permanent';
+        var arr = battleState[sd][__zn] || [], ri = arr.indexOf(c);
         if (ri < 0) return;
         arr.splice(ri, 1);
         (battleState[sd].removed = battleState[sd].removed || []).push(c); // 移出本局游戏
         runTiming(TIMING.ON_REMOVE, { player: sd, card: c });
-        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + '永续卡【' + c.name + '】并移出本局游戏');
+        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + (__zn === 'faceDownCards' ? '盖放卡' : '永续卡') + '【' + c.name + '】并移出本局游戏');
         var __ed = false;
         try { __ed = ((deckConfig[player].chars || [])).some(function (ch) { return ch && ch.name && ch.name.indexOf('露璐缇雅') >= 0; }); } catch (e) { try { console.error('[catch] assets/engine.js:18566', e); } catch (e2) {} }
         if (__ed) {
