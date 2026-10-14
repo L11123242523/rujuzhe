@@ -5904,6 +5904,8 @@ function startTurn() {
   try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:5751', e); } catch (e2) {} }
   /* 【2026-10-14 新卡·永眠之棺】同一处、同一口径：'直到本回合结束'的效果无效也按回合号统一清理 ✓ */
   try { if (typeof clearTurnScopedCardStates === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedCardStates(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:回合到期卡状态', e); } catch (e2) {} }
+  /* 【2026-10-14 雷閃·SP】座位级「一回合一次」标记也在这里按回合号清（与上面同一处、同一口径 ✓） */
+  try { if (battleState) playerIds().forEach(function (w) { if (battleState[w]) delete battleState[w]._leishanSPTurn; }); } catch (e) { try { console.error('[catch] 雷閃座位标记清理', e); } catch (e2) {} }
   /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
      实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
      它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
@@ -6320,7 +6322,10 @@ function collectChainable(player, effect){
   try {
     (me.permanent || []).forEach(function (c, i) {
       if (!c || c.name !== '雷閃') return;
-      if (c._leishanSPUsedThisTurn === battleState.turn) return;                 /* 一回合一次 ✓ */
+      /* 【2026-10-14 作者报「一回合一次拦不住」⇒ 结构修 ✓】标记记在**座位**上（`me._leishanSPTurn`）——
+         原来记在**卡对象**上，而场上的卡对象会被快照/联机克隆替换 ⇒ 标记一丢就又能发 ✗。
+         座位写法与 `p._edwardSPTurn` / `p._lilySPTurn` **同一套** ✓（对局状态的一部分，不会丢）。 */
+      if (me._leishanSPTurn === battleState.turn) return;                        /* 一回合一次 ✓（座位级） */
       if (!(player === 'p1' || player === 'p2')) return;
       /* 【2026-10-14 作者截图报「CHAIN 3 已是雷閃，却又问要不要连锁雷閃」⇒ 结构修 ✓】
          该标记要到**逆结算执行时**才写 ⇒ 同一轮连锁里每次都还能再产出候选 ✗。
@@ -6442,6 +6447,9 @@ function applyChainCard(player,pick,effect,done,target){
   if (pick.from === 'permSP') {
     effect._chain = effect._chain || [];
     __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c });
+    /* 【2026-10-14 作者报「主要阶段发一次、跟连锁又发一次」⇒ 结构修 ✓】
+       次数**在入链这一刻就消费**（发动即算用掉），且记在**座位**上 ✓ */
+    try { battleState[player]._leishanSPTurn = battleState.turn; } catch (e) {}
     addBattleLog(player, '连锁发动【' + name + '·SP】（全时点，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
@@ -8711,7 +8719,7 @@ function resolveChainStack(effect, onDone) {
         var __psOk = __psFn(e.card || { name: e.name }, e.by);
         __doneSet[i] = true;
         /* 只有**真的发动成功**才消费"一回合一次" ✓（牌组空等未发动 ⇒ 返回 false ⇒ 不扣次数 ✓） */
-        if (__psOk !== false && e.card) { e.card._leishanSPUsedThisTurn = battleState.turn; }
+        if (__psOk !== false) { try { battleState[e.by]._leishanSPTurn = battleState.turn; } catch (e) {} }   /* 与入链处同一标记 ✓ */
       } else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '·SP】找不到对应实现，跳过'); }
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '·SP】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) {} }
   } else if (e.kind === 'reverse') {
@@ -22527,7 +22535,8 @@ var PERMANENT_STRUCT = [
      SP 的发动路径**只有全时点连锁候选**一条（见 `collectChainable` 的 `from:'permSP'` ✓）。 */
   { match: ['雷閃', '雷闪'], onPlay: ['发动时作为效果处理：对一名玩家造成3点神圣属性伤害', '属性克制伤害+1'],
     onPlayHandler: 'leishan',
-    active: { once: 'turn', flag: '_leishanSPUsedThisTurn', handler: 'leishanSP', label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（全时点连锁）' } },
+    /* 【2026-10-14】次数改记在**座位**上（`battleState[座位]._leishanSPTurn`）⇒ 这里的 flag 已无用、清掉 ✓ */
+    active: { once: 'turn', handler: 'leishanSP', label: '牌组顶送墓 ⇒ 对其他玩家1点神圣伤害（全时点连锁）' } },
     /* 【2026-10-14 作者报「能先单独发一次、再连锁又发一次」⇒ 结构修 ✓】
        去掉 `anyTurn`（那是「点场上的卡」这条旧路径的口子）—— SP **只保留全时点连锁候选**一条路径 ✓，
        否则两条路径各自判次数 ⇒ 一回合能发动两次 ✗。
