@@ -16188,7 +16188,16 @@ function __compileBody(t) {
   if (has('防御')) {
     var dd = __matchNum(new RegExp('降低(?:其|目标)?\\s*' + __NUM + '\\s*点防御'), t);
     var du = __matchNum(new RegExp('提升(?:自身)?\\s*' + __NUM + '\\s*点防御'), t);
-    if (dd != null) ops.push({ op: 'def_down', amount: dd, untilTurnEnd: /直到本回合结束|本回合结束/.test(t) });   /* 【2026-10-08】时长按卡面区分 */ else if (du != null) ops.push({ op: 'def_up', amount: du }); else uncovered.push('defense');
+    if (dd != null) ops.push({ op: 'def_down', amount: dd, untilTurnEnd: /直到本回合结束|本回合结束/.test(t) });   /* 【2026-10-08】时长按卡面区分 */
+    else if (du != null) {
+      /* 【2026-10-14 作者报「得分的加防御是永久的（卡面是持续2次行动）」⇒ 结构修 ✓】
+         原来**不带时长** ⇒ 执行层只能永久加 ✗。照 def_down 同款带上时长：
+           · 「持续N次行动 / N次行动内」⇒ actions=N（按一次行动流逝一次 ✓）
+           · 没写时长（如【你呀你呀】）⇒ **不传** ⇒ 保持原语义（基础防御值增益）✓ */
+      var __duDur = t.match(/持续\s*(\d+)\s*次行动|(\d+)\s*次行动内/);
+      ops.push({ op: 'def_up', amount: du, actions: __duDur ? +(__duDur[1] || __duDur[2]) : null });
+    }
+    else uncovered.push('defense');
   }
   // 下一次攻击无视N点护盾（如“你呀你呀”）
   var __pierceM = __matchNum(new RegExp('下一次(?:的)?攻击[^。；;]{0,8}?无视\\s*' + __NUM + '\\s*点?护盾'), t);
@@ -16476,6 +16485,7 @@ function advanceActionLapse(player) {
   var p = battleState[player]; if (!p) return;
   if (typeof StatusSys !== 'undefined') StatusSys.tickAction(player);
   lapseDefenseDown(player); // 临时降防按“一次行动”流逝，到期恢复
+  lapseDefenseUp(player);   // 【2026-10-14】「持续N次行动」的加防御同样流逝 ✓
   // 延迟 N 次行动后移出游戏（搜查令等）
   if (p._exilePending && p._exilePending.length) {
     p._exilePending.forEach(function (e) { e.in -= 1; });
@@ -16923,7 +16933,8 @@ function recalcDefense(who) {
   var q = battleState[who]; if (!q) return;
   if (q.defenseBase === undefined || q.defenseBase === null) q.defenseBase = (q.defense || 0) - (q._defDowns || []).reduce(function (a, d) { return a + d.amount; }, 0);
   var down = (q._defDowns || []).reduce(function (a, d) { return a + d.amount; }, 0);
-  q.defense = (q.defenseBase || 0) - down;
+  var up = (q._defUps || []).reduce(function (a, d) { return a + d.amount; }, 0);   /* 【2026-10-14】「持续N次行动」的加防御 ✓ */
+  q.defense = (q.defenseBase || 0) - down + up;
 }
 
 function applyDefenseDown(who, amount, actions) {
@@ -16977,12 +16988,24 @@ function clearTurnScopedCardStates(who) {
 /* 旧名保留（调用点/探针可能仍在用） */
 function clearTurnScopedEffectDisables(who) { return clearTurnScopedCardStates(who); }
 
-function applyDefenseUp(who, amount) {
+function applyDefenseUp(who, amount, actions) {
   var q = battleState[who]; if (!q || !amount) return;
   if (q.defenseBase === undefined || q.defenseBase === null) q.defenseBase = (q.defense || 0);
-  q.defenseBase += amount; recalcDefense(who);
+  /* 【2026-10-14】给了时长 ⇒ 记进 `_defUps`（到期自动恢复 ✓）；没给 ⇒ 仍是基础防御值增益（不误伤别的卡 ✓） */
+  if (actions != null) { q._defUps = q._defUps || []; q._defUps.push({ amount: amount, actions: actions }); }
+  else { q.defenseBase += amount; }
+  recalcDefense(who);
 }
 
+/* 【2026-10-14】「持续N次行动」的**加**防御流逝（与 lapseDefenseDown 同一族、同一处调用 ✓） */
+function lapseDefenseUp(who) {
+  var q = battleState[who]; if (!q || !q._defUps || !q._defUps.length) return;
+  var before = q._defUps.length;
+  q._defUps.forEach(function (d) { d.actions -= 1; });
+  q._defUps = q._defUps.filter(function (d) { return d.actions > 0; });
+  if (q._defUps.length !== before) addBattleLog(who, '提升防御的效果持续时间到期，防御值恢复');
+  recalcDefense(who);
+}
 function lapseDefenseDown(who) {
   var q = battleState[who]; if (!q || !q._defDowns || !q._defDowns.length) return;
   var before = q._defDowns.length;
@@ -18086,7 +18109,7 @@ function __opsResource(op, ctx, next, env) {
     case 'lose_cost': p.cost = Math.max(0, p.cost - op.amount); break;
     case 'gain_shield': p.shield = (p.shield || 0) + op.amount; break;
     case 'def_down': applyDefenseDown(target, op.amount, op.untilTurnEnd ? null : (op.actions || 2)); break;   /* 【2026-10-08】卡面写"直到本回合结束"的走回合清理 */
-    case 'def_up': applyDefenseUp(user, op.amount); break;
+    case 'def_up': applyDefenseUp(user, op.amount, op.actions); break;   /* 【2026-10-14】时长照卡面 ✓ */
     /* 【2026-10-13 修】原来无条件加在 `p`（使用者）头上 ✗ ⇒ 卡面写「选择一名玩家，**其**回N同步」的
        会把同步加回使用者（作者实测）✗。现在与 `loss_sync` 同口径：
          · `op.who === 'target'`（显式目标）或 `ctx.__tgtSubj`（代词主语=所选目标）⇒ 落目标 ✓
@@ -19292,7 +19315,19 @@ function __psResourceClauses(user, target, effectText) {
 
   // 提升自身防御值
   // 只匹配明确的"提升X点防御值"格式
-  var defUpMatch = effectText.match(/提升(?:自身)?(\d+)点防御/);
+  /* 【2026-10-14 防双加 ⇒ 结构修 ✓】这句「提升X点防御」**指令层也会产出 def_up** ⇒ 若这里再动手就是加两次（实测 +4）✗。
+     判据用编译器本身：指令层会产出 def_up ⇒ 本兜底**不碰**（单一真理 ✓，不写卡名名单 ✗）。 */
+  var __defUpHandledByOps = false;
+  try {
+    if (typeof compileStepOps === 'function' && typeof parseEffect === 'function') {
+      var __dus = parseEffect(String(effectText || '')) || [];
+      for (var __di = 0; __di < __dus.length && !__defUpHandledByOps; __di++) {
+        var __dops = compileStepOps(__dus[__di].text, false);
+        if (__dops) for (var __dj = 0; __dj < __dops.length; __dj++) { if (__dops[__dj] && __dops[__dj].op === 'def_up') { __defUpHandledByOps = true; break; } }
+      }
+    }
+  } catch (e) {}
+  var defUpMatch = __defUpHandledByOps ? null : effectText.match(/提升(?:自身)?(\d+)点防御/);
   if (defUpMatch) {
     var defUp = parseInt(defUpMatch[1]);
     applyDefenseUp(user, defUp);
@@ -23168,7 +23203,12 @@ function executePermanentActiveFor(user, index, done) {
     return;
   }
   // 次数限制
-  if (act.flag && card[act.flag]) {
+  /* 【2026-10-14 作者报「雷閃主阶段又能反复发动」⇒ 修我 v329 的回归 ✓】
+     这道闸原来只看卡上标记（`act.flag`）；而【雷閃】的次数已改记在**座位**上
+     ⇒ 卡上没有 flag ⇒ 闸永久失效 ✗。现在**同时认座位标记**（`p._leishanSPTurn`）✓；
+     `act.flag` 分支一字不动 ⇒ 别的永续卡行为不变 ✓。 */
+  var __seatOnceUsed = (battleState[user] && battleState[user]._leishanSPTurn === battleState.turn);
+  if ((act.flag && card[act.flag]) || __seatOnceUsed) {
     if (user === 'p1') showToast('【' + card.name + '】' + (act.once === 'game' ? '该效果一局游戏只能使用一次。' : '本回合已经发动过（每回合一次）。'), 'warn');
     if (done) done();
     return;
@@ -23180,6 +23220,8 @@ function executePermanentActiveFor(user, index, done) {
   addBattleLog(user, '发动永续卡【' + card.name + '】主动效果');
   var ok = fn(card, user);
   if (ok && act.flag && !act.noAutoFlag) card[act.flag] = true;
+  /* 【2026-10-14】雷閃（handler 为 leishanSP）的次数记在**座位**上 ⇒ 这里一并写上 ✓（主阶段发过 ⇒ 连锁那边也不再给候选） */
+  try { if (ok && act.handler === 'leishanSP') battleState[user]._leishanSPTurn = battleState.turn; } catch (e) {}
   updateBattleUI();
   if (done) done();
 }
