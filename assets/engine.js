@@ -801,7 +801,15 @@ var Online = {
     // 联机反馈③：开始盯着"结算锁"（房主解锁补推 / 客人卡在旧快照时自愈 / 等待对手回答可见化）
     try{ this._startLockWatch(); }catch (e) { try { console.error('[catch] assets/engine.js:793', e); } catch (e2) {} }
     // 卡组交换：客人也要把自己的卡组发给房主（房主需要它来建立 p2）
-    this._relay({k:'deck', cfg:this._myDeckCfg(), name:this.myName});
+    /* 【2026-10-14 诊断·作者报"联机的很多效果都是旧版"⇒ 把双方**实际加载的前端版本**搭在这条已有的
+       握手消息上（纯诊断：只读 `?v=` 并写日志，**不参与任何规则判定** ✓）。
+       为什么要它：从服务端查不出"谁旧"（线上 6 个 assets + game.html + 母本 + cards.js 全部逐字节一致），
+       只能是**某一侧浏览器手里那份页面/脚本是旧的**（assets 缓存头是 24 小时，靠 `?v=` 换键失效）。
+       有了这行，联机时两边日志都会写明"你=?, 对手=?"，一眼就能定位是哪一侧旧。 */
+    var __verMe = (typeof _uiVer === 'function') ? _uiVer() : '?';
+    this._relay({k:'deck', cfg:this._myDeckCfg(), name:this.myName, ver:__verMe});
+    /* ⚠ 这里**不能**写 addBattleLog：此刻 battleState 还没建立（双方都是）⇒ 会被静默丢掉。
+       版本日志统一放在"对局已建立"之后写（见下面 _sendSnapshotNow 之前 / 快照到达之后）✓ */
     this._deckSent=true;
     this._waitOppDeck(function(){
       if(self.isGuest){ self.status('已收到对手卡组，等待房主开始对局…'); return; }  // 客人等快照，不建局
@@ -812,6 +820,9 @@ var Online = {
       self._startingOnlineBattle = false;
       self._enteredBattle=true;
       self._savedAt=0; self._savedOnce=false;
+      /* 【2026-10-14 诊断·版本对照】到这一步 battleState 已建立 ⇒ 写进去才不会被丢 ✓
+         （原来放在 _onGameStart 里是错的：那一刻 battleState 还没建，日志会被静默丢掉） */
+      try { __logOnlineVersion(self, '房主'); } catch (e) {}
       self._sendSnapshotNow({ full:true });   // 立刻把权威状态给客人（完整卡定义）
       self._ensureSurrenderBtn();
     });
@@ -865,6 +876,8 @@ var Online = {
           }
         }catch(e){ console.error('对手卡组解析失败',e); }
         this.oppName=m.name||'对手';
+        /* 【2026-10-14 诊断】记下"对手实际加载的前端版本"（到"对局已建立"之后统一写日志，见下） */
+        try { this._oppVer = (m && m.ver) ? String(m.ver) : '（未上报）'; } catch (e) {}
         this._oppDeck=m.cfg||{};
         this._oppDeckWaiters.forEach(function(f){ try{f();}catch (e) { try { console.error('[catch] assets/engine.js:860', e); } catch (e2) {} } });
         this._oppDeckWaiters=[];
@@ -1215,6 +1228,8 @@ var Online = {
     if(!this._enteredBattle && battleState){
       this._enteredBattle=true;
       try{ showScreen('battleScreen'); }catch (e) { try { console.error('[catch] assets/engine.js:1208', e); } catch (e2) {} }
+      /* 【2026-10-14 诊断·版本对照】客人侧同样是"快照到达、battleState 已建立"之后才写 ✓ */
+      try { __logOnlineVersion(Online, '客人'); } catch (e) { try { console.error('[catch] assets/engine.js 版本日志', e); } catch (e2) {} }
     }
     /* 【2026-10-10 联机开局硬币】权威方把硬币结果随快照带过来（`battleState._olCoin`）
        ⇒ 客人**也播同一个面**的动画（同一份数据、同一面 ⇒ 两边看到的硬币一致 ✓）。 */
@@ -13346,6 +13361,40 @@ __defEngineState('_choiceQueue', function () { return []; }); // 弹窗队列：
 /* 【2026-10-05 AI 抢跑·第 7 次·统一口径】"玩家正在决策"的唯一权威计数。
    所有玩家决策入口成对调用 enter/leave；闸门 __decideWaitGate / __phaseWaitBusy 只看它。
    原来只有连锁窗会设置它 ⇒ 选项弹窗/选卡时 AI 以为玩家空闲 ⇒ 抢跑。 */
+/* 【2026-10-14 诊断·唯一读法】"本机实际加载的前端版本"。
+   为什么从 DOM 的 script[src] 里取、而不写一个常量：**只有页面真实引用的 `?v=` 才是事实** ——
+   常量会与发布链漂移（本项目已被"同一件事多份实现"坑过多次）。
+   取 engine.js 的 `?v=` 即可代表整批 assets（发布链把它们一起升位 ✓）。读不到就返回 '?'（不抛错）。 */
+/* 【2026-10-14 诊断·版本对照】把"本机 / 对手"实际加载的前端版本写进战斗日志（**纯诊断**：
+   只读 DOM 里的 `?v=` 与握手带来的对手版本，不参与任何规则判定 ✓）。
+   用途：作者报"联机很多效果是旧版"，而服务端已核到全部逐字节一致 ⇒ 只能是某一侧浏览器手里那份页面旧；
+   有了这一行，联机时两边日志都能直接看出是谁旧（不一致时还会弹一条提示）。 */
+function __logOnlineVersion(O, whoTag) {
+  try {
+    var me = (typeof _uiVer === 'function') ? _uiVer() : '?';
+    var opp = (O && O._oppVer) ? String(O._oppVer) : '（未上报）';
+    var extra = (opp === '（未上报）') ? ' ← 对手没上报版本，说明他那份页面很旧 ✗' : (String(opp) !== String(me) ? ' ← ⚠ 两边版本不一致，请落后的一方 Ctrl+F5 强刷' : '（一致 ✓）');
+    addBattleLog('system', '【联机·版本】' + (whoTag || '') + ' 你 = ' + me + ' ｜ 对手 = ' + opp + extra);
+    if (opp !== '（未上报）' && String(opp) !== String(me) && typeof showToast === 'function') {
+      try { showToast('联机版本不一致：你 ' + me + ' / 对手 ' + opp + ' —— 请落后的一方 Ctrl+F5 强刷', 'warn'); } catch (e2) {}
+    }
+  } catch (e) {}
+}
+function _uiVer() {
+  try {
+    var sc = (typeof document !== 'undefined' && document.querySelectorAll) ? document.querySelectorAll('script[src]') : null;
+    if (sc) {
+      for (var i = 0; i < sc.length; i++) {
+        var u = String((sc[i] && sc[i].src) || '');
+        var m = u.match(/assets\/engine\.js\?v=(\d+)/);
+        if (m) return 'v' + m[1];
+      }
+    }
+    /* 兜底：从当前地址栏的 ?v= 取（某些容器里 script 可能被内联替换） */
+    try { var m2 = String((typeof location !== 'undefined' && location.href) || '').match(/[?&]v=(\d+)/); if (m2) return 'v' + m2[1]; } catch (e2) {}
+  } catch (e) {}
+  return '?';
+}
 function __decideEnter(why) {
   try { if (typeof Decision !== 'undefined' && Decision && Decision.enter) { Decision.enter(why); return; } } catch (e) { try { console.error('[catch] assets/engine.js:12510', e); } catch (e2) {} }
   try {
