@@ -3692,22 +3692,36 @@ function openCardPicker(player, type, index) {
 }
 
 function selectCard(cardIndex) {
+  /* 【2026-10-14 诊断·零干扰打点】作者报偶发「编组界面删卡后加不进卡」（点卡没反应/槽位不变）。
+     这里**只在"点了卡但没加进去"这一刻**记现场（即下面每一个 `return` 之前都打一条日志），
+     正常加入**不记**（不刷屏 ✓）；**不改任何判据** ✗ —— 纯观测，下次偶发时日志里就是证据 ✓。
+     为什么要它：这条在真机与本机都复现不出来（三种入口 + 打完一把 + 真实 DOM 点击全绿），
+     只能在真发生时把"到底卡在哪一步"带回来。 */
+  var __dg = function (why) {
+    try { addBattleLog('system', '🐞【编组·加卡未生效】' + why + '（诊断打点）'); } catch (e) {}
+  };
   /* 【2026-10-12 作者报·结构修】取卡**优先用这次渲染网格时的那份候选表** ✓（pickerState.cards ✓，
      与渲染同一份数组 ⇒ 下标不可能错位 ✗）；其它调用方若仍传全局下标 ⇒ 用 allCards 兜底 ✓ */
   var card = (pickerState && pickerState.cards) ? pickerState.cards[cardIndex] : null;
   if (!card) card = allCards[cardIndex];
-  if (!card) return;
+  if (!card) {
+    __dg('取不到卡：cardIndex=' + cardIndex + '，pickerState.cards=' + ((pickerState && pickerState.cards) ? pickerState.cards.length : '(无)') +
+      '，allCards=' + ((typeof allCards !== 'undefined' && allCards) ? allCards.length : '(无)'));
+    return;
+  }
   var pl = pickerState.player, ty = pickerState.type, idx = pickerState.index, cfg = deckConfig[pl];
+  if (!cfg) { __dg('deckConfig[' + pl + '] 不存在（player=' + pl + '）'); return; }
+  if (!cfg[ty]) { __dg('deckConfig[' + pl + '].' + ty + ' 不存在'); return; }
   function others(){ return cfg[ty].filter(function(c,k){ return c && k !== idx; }); }
   if (ty === 'chars') {
-    if (others().some(function(c){ return c.name === card.name; })) { showToast('该角色已在队伍中，不能重复选择', 'warn'); return; }
+    if (others().some(function(c){ return c.name === card.name; })) { __dg('角色已在队伍中：' + card.name); showToast('该角色已在队伍中，不能重复选择', 'warn'); return; }
   } else if (ty === 'items') {
-    if (others().some(function(c){ return c.name === card.name; })) { showToast('同名道具不能重复加入', 'warn'); return; }
-    if (card._category === 'item_permanent' && others().filter(function(c){return c._category==='item_permanent';}).length >= 2) { showToast('永续道具最多只能携带2张', 'warn'); return; }
+    if (others().some(function(c){ return c.name === card.name; })) { __dg('同名道具已在卡组：' + card.name); showToast('同名道具不能重复加入', 'warn'); return; }
+    if (card._category === 'item_permanent' && others().filter(function(c){return c._category==='item_permanent';}).length >= 2) { __dg('永续已满 2 张，拒收：' + card.name); showToast('永续道具最多只能携带2张', 'warn'); return; }
   } else if (ty === 'carries') {
-    if (others().some(function(c){ return c.name === card.name; })) { showToast('同名携带卡不能重复加入', 'warn'); return; }
+    if (others().some(function(c){ return c.name === card.name; })) { __dg('同名携带卡已在卡组：' + card.name); showToast('同名携带卡不能重复加入', 'warn'); return; }
     var __nm = cfg.chars.filter(Boolean).map(function(c){return c.name;});
-    if (!cardBelongsToTeam(card, __nm)) { showToast('携带卡【'+card.name+'】不属于所选3名角色（同名不同形态不通用）', 'warn'); return; }
+    if (!cardBelongsToTeam(card, __nm)) { __dg('携带卡不属于所选角色：' + card.name + '（队伍=' + JSON.stringify(__nm) + '）'); showToast('携带卡【'+card.name+'】不属于所选3名角色（同名不同形态不通用）', 'warn'); return; }
   }
   cfg[ty][idx] = card;
   closeCardPicker();
@@ -6335,6 +6349,27 @@ function collectChainable(player, effect){
     if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
     out.push({card:c,from:from,index:index});
   }
+  /* 【2026-10-14 诊断·零干扰打点】作者报"一张卡会作为两个连锁候选"（偶发）。
+     机制：`_addChain` 的同链去重键是 `owner|id|label|卡名` ⇒ **同一张卡若带着两种不同的 id/来源**
+     （手牌 + 盖伏 / 座位触发 / 两条触发声明各产一条…）就会去重失败、界面上出现两个候选。
+     这里**只在真出现时**把现场记进战斗日志（谁、哪张卡、两条各自的 from/index 与去重键），
+     **不改任何判据、不改候选、不加过滤** ✗ —— 纯观测，下次偶发时日志里就是证据 ✓。
+     ⚠ 注意：`collectChainable` 会被**反复调用**（每次重新组链/扫描都会调）⇒ 只在"同一个 playerIndex
+       上、同一张卡出现≥2条"时才记，且**每次调用至多记一条**，避免刷屏。 */
+  try {
+    var __seenCard = {}, __dupMsg = [];
+    out.forEach(function (o) {
+      if (!o || !o.card) return;
+      var __k = (o.from || '?') + '#' + String(o.index);
+      var __nmKey = String(o.card.name || '?');
+      if (__seenCard[__nmKey] && __seenCard[__nmKey] !== __k) {
+        __dupMsg.push('【' + __nmKey + '】' + __seenCard[__nmKey] + ' 与 ' + __k);
+      } else { __seenCard[__nmKey] = __k; }
+    });
+    if (__dupMsg.length) {
+      addBattleLog(player, '🐞【连锁候选·重复】同一张卡出现多条候选（诊断打点，未做任何过滤）：' + __dupMsg.join('；'));
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js 连锁候选重复打点', e); } catch (e2) {} }
   (me.hand||[]).forEach(function(c,i){
     // 对手回合：手牌连锁必须卡面写明“其他玩家回合也能从手卡发动”（如怪怪幽灵吊坠/遥控骰子）；
     // 其余连锁卡（侦探放大镜/猎手爪链/颠倒骰子/Twice/幸运护符等）在对手回合必须盖伏后才能响应。
@@ -21131,30 +21166,51 @@ function processCharacterPassives(player) {
   updateBattleUI();
 }
 
+/* ============================================================
+   【入间枫SP】三项效果 —— **唯一一份定义**（2026-10-14 结构修）
+   ------------------------------------------------------------
+   病根（作者实测：客机的枫SP还是"①回6音韵 / ②抽2张"）：本函数里**同一个效果写了两份** ——
+     · 联机远端位（player==='p2'，也就是**客机**那一侧走的路）那份**没有跟着 2026-10-11 的平衡性调整改**
+       ⇒ 客机看到的选项与结算都是**旧数值** ✗；
+     · 本机 p1（主机）与 AI 那份改了 ⇒ 主机看到的才是新数值。
+   ⇒ 这正是本仓库反复出现的"同一规则多个入口"（见 `交接清单.md` §25.1）。
+   结构修法：数值与文案收进下面这一张表，**三条路（联机远端 / 本机 / AI）都读它**，
+   以后调平衡只改这一处 ⇒ 不可能再出现"一端新一端旧" ✓。
+   ⚠ 表里只放**基础数值**；p.maxCost 上限夹取仍在各自结算处（那是运行时状态，不属于卡面数值）。
+   ============================================================ */
+var KAEDE_SP_ALL = [
+  { id: 1, cost: 4, draws: 0, label: '①回复4点音韵值' },   /* 【2026-10-11 第二次平衡性调整】新卡面：4（旧 6 ✗） */
+  { id: 2, cost: 0, draws: 1, label: '②抽1张卡' },          /* 【2026-10-11 第二次平衡性调整】新卡面：1（旧 2 ✗） */
+  { id: 3, cost: 0, draws: 0, label: '③每回合献祭次数+1' }
+];
+/* 结算一项（唯一出口：三条路共用，数值只从表里取 ✓） */
+function __kaedeSPApply(p, player, id) {
+  try {
+    var o = null;
+    for (var i = 0; i < KAEDE_SP_ALL.length; i++) if (KAEDE_SP_ALL[i].id === id) o = KAEDE_SP_ALL[i];
+    if (!o) return;
+    if (o.cost > 0) p.cost = Math.min(p.cost + o.cost, p.maxCost);
+    for (var d = 0; d < o.draws; d++) { var c = takeTopCard(player); if (c) p.hand.push(c); }
+    if (o.id === 3) p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
+  } catch (e) { try { console.error('[catch] assets/engine.js __kaedeSPApply', e); } catch (e2) {} }
+}
+
 function kaedeSPSelect(player) {
   if (!battleState) return;
   var p = battleState[player];
   if (!p._kaedeSPPending) return;
   // 联机远端位：等待对方 p1 弹窗广播的选择（选项顺序双机一致，用索引映射）
   if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-    var __kAll = [
-      {id: 1, label: '①回复6点音韵值'},
-      {id: 2, label: '②抽2张卡'},
-      {id: 3, label: '③每回合献祭次数+1'}
-    ];
+    var __kAll = KAEDE_SP_ALL;      /* ★ 与主机/AI 读同一张表（原来这里硬编码旧数值 ✗） */
     var __kPick = function (idx) {
       if (idx == null || idx === undefined || idx < 0) idx = 0;
       var selected = __kAll[idx] || __kAll[0];
-      if (selected.id === 1) p.cost = Math.min(p.cost + 6, p.maxCost);
-      else if (selected.id === 2) { for (var j = 0; j < 2; j++) { var c = takeTopCard(player); if (c) p.hand.push(c); } }
-      else if (selected.id === 3) p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
+      __kaedeSPApply(p, player, selected.id);
       addBattleLog(player, '【入间枫SP】选择' + selected.label);
       Online.awaitAnswer({ label: '入间枫SP选择（第2项）', choices: __kAll.filter(function(o){ return o.id!==selected.id; }).map(function(o){ return o.label; }) }, function (idx2) {
         if (idx2 == null || idx2 === undefined || idx2 < 0) idx2 = 1; // 默认第二项
         var s2 = __kAll.filter(function (o) { return o.id !== selected.id; })[idx2 % 2] || __kAll[1];
-        if (s2.id === 1) p.cost = Math.min(p.cost + 6, p.maxCost);
-        else if (s2.id === 2) { for (var j2 = 0; j2 < 2; j2++) { var c2 = takeTopCard(player); if (c2) p.hand.push(c2); } }
-        else if (s2.id === 3) p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
+        __kaedeSPApply(p, player, s2.id);
         p._kaedeSPPending = false;
         addBattleLog(player, '【入间枫SP】选择完成：' + selected.label + '、' + s2.label);
         if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -21163,23 +21219,19 @@ function kaedeSPSelect(player) {
     Online.awaitAnswer({ label: '入间枫SP选择（第1项）', choices: __kAll.map(function(o){ return o.label; }) }, __kPick);
     return;
   }
-  // AI 自动选择最通用的①回6音韵 + ②抽2张，不弹窗
+  // AI 自动选择最通用的①回音韵 + ②抽卡，不弹窗
   // A5 批次第 1 处（探针实测发现）：原来写死 `player === 'p2'`，1v1v1 时 p3 会掉进下面"给人类弹窗"那条路，
   // 等于让本机玩家替 AI 座位选 SP；改成「不是本机人类座位（p1）的座位一律走 AI 自动选择」。
   // 1v1 等价：那时能走到这里的非 p1 座位只有 p2，行为逐字不变。
   if (player !== 'p1') {
-    p.cost = Math.min(p.cost + 4, p.maxCost);   // 【2026-10-11 第二次平衡性调整】新卡面：①回 4 音韵（旧 6 ✗）
-    for (var ai = 0; ai < 1; ai++) { var __tcAI = takeTopCard(player); if (__tcAI) p.hand.push(__tcAI); }   // ②抽 1 张（旧 2 ✗）
+    __kaedeSPApply(p, player, 1);   /* ★ 与上表同源（原来是写死的 6/2 ✗） */
+    __kaedeSPApply(p, player, 2);
     p._kaedeSPPending = false;
-    addBattleLog(player, '【入间枫SP·AI】自动选择①回复4音韵、②抽1张卡');
+    addBattleLog(player, '【入间枫SP·AI】自动选择' + KAEDE_SP_ALL[0].label + '、' + KAEDE_SP_ALL[1].label);
     return;
   }
   
-  var allOptions = [
-    {id: 1, label: '①回复4点音韵值', applied: false},   // 【2026-10-11】新卡面：4（旧 6 ✗）
-    {id: 2, label: '②抽1张卡', applied: false},          // 【2026-10-11】新卡面：1（旧 2 ✗）
-    {id: 3, label: '③每回合献祭次数+1', applied: false}
-  ];
+  var allOptions = KAEDE_SP_ALL.map(function (o) { return { id: o.id, label: o.label, applied: false }; });   /* ★ 同源 ✓ */
   p._kaedeSPOptions = allOptions;
   p._kaedeSPSelected = [];
   
@@ -21196,11 +21248,16 @@ function kaedeSPSelect(player) {
       var selected = available[choiceIdx];
       selected.applied = true;
       p._kaedeSPSelected.push(selected);
+      /* 【2026-10-14 结构修】结算改成读**唯一那张表**（`KAEDE_SP_ALL`），不再手写数值 ——
+         原来这里又抄了一份"回4/抽1/献祭+1"，联机那条也抄一份 ⇒ 正是"一端新一端旧"的来源 ✗。
+         ⚠ 本机 p1 的回音韵历来走 `recoverCost`（要发回音韵时点），故**保留 recoverCost**、数值取自同表 ✓。 */
+      var __kOpt = null;
+      for (var __ki = 0; __ki < KAEDE_SP_ALL.length; __ki++) { if (KAEDE_SP_ALL[__ki].id === selected.id) __kOpt = KAEDE_SP_ALL[__ki]; }
       if (selected.id === 1) {
-        recoverCost(player, 4, '入间枫SP');   // 【2026-10-01 修·队列②】先发时点再打日志；【2026-10-11】回 4（旧 6 ✗）
-        addBattleLog(player, '【入间枫SP】回复4点音韵值，当前' + p.cost + '音韵');
+        recoverCost(player, (__kOpt ? __kOpt.cost : 4), '入间枫SP');
+        addBattleLog(player, '【入间枫SP】回复' + (__kOpt ? __kOpt.cost : 4) + '点音韵值，当前' + p.cost + '音韵');
       } else if (selected.id === 2) {
-        for (var j = 0; j < 1; j++) {   // 【2026-10-11】抽 1 张（旧 2 ✗）
+        for (var j = 0; j < (__kOpt ? __kOpt.draws : 1); j++) {
           var c = takeTopCard(player);
           if (c) {
             p.hand.push(c);
@@ -21682,10 +21739,17 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       && sp && /因为?卡的效果而被送入墓地|因卡效果送墓|因卡的效果[^，。]*送入墓地/.test(sp)) {
     var __djPickOption = function (ci) {
       if (ci === 0) {
-        /* ① 选墓地一张角色携带卡加入手卡，然后自己失去2点同步值 */
-        var __gc = collectZoneCards(player, ['grave'], null, ['attack_cards', 'skill_cards']);
-        if (!__gc.length) { addBattleLog(player, '【典籍之残页·SP】墓地里没有角色携带卡 ⇒ 改选②或放弃'); return; }
-        pickFromList(player, __gc, '典籍之残页·SP：选墓地一张角色携带卡加入手卡（然后失去2点同步值）', 1, function (picks) {
+        /* ① 从**墓地或移出游戏**选一张角色携带卡加入手卡，然后自己失去2点同步值。
+           【2026-10-14 作者报「平衡性调整第三次」漏点 ⇒ 结构修 ✓】
+           卡面（实测抄录）：「①选**墓地或移出游戏**一张角色携带卡加入手卡，然后自己失去2点同步值。」
+           而这里原来只取 **grave** ✗ ⇒ "移出游戏"那一半从未可选。
+           口径与本仓库既有写法**同源**（见 evaluatePlayable 的 `__alsoRemoved`：移出区 = removed + removedFromGame ✓），
+           不新造机制 ✗。候选按 zone 各自带 `zone/index`（pickFromList 就是按这对字段回取并 splice ✓）。 */
+        var __gc = collectZoneCards(player, ['grave'], null, ['attack_cards', 'skill_cards'])
+          .concat(collectZoneCards(player, ['removed'], null, ['attack_cards', 'skill_cards']))
+          .concat(collectZoneCards(player, ['removedFromGame'], null, ['attack_cards', 'skill_cards']));
+        if (!__gc.length) { addBattleLog(player, '【典籍之残页·SP】墓地和移出游戏里都没有角色携带卡 ⇒ 改选②或放弃'); return; }
+        pickFromList(player, __gc, '典籍之残页·SP：选墓地或移出游戏一张角色携带卡加入手卡（然后失去2点同步值）', 1, function (picks) {
           if (!picks.length) { addBattleLog(player, '【典籍之残页·SP】未选择卡 ⇒ 本项不处理'); return; }
           var pk = picks[0], arr = battleState[player][pk.zone], ix = arr.indexOf(pk.card);
           if (ix >= 0) arr.splice(ix, 1);
@@ -21693,7 +21757,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
           battleState[player].hand.push(pk.card);
           var __b4 = p.sync || 0;
           p.sync = Math.max(0, __b4 - 2);
-          addBattleLog(player, '【典籍之残页·SP①】从墓地回收【' + pk.card.name + '】加入手卡，自己失去2点同步值（' + __b4 + ' → ' + p.sync + '）');
+          addBattleLog(player, '【典籍之残页·SP①】从' + (pk.zone === 'grave' ? '墓地' : '移出游戏') + '回收【' + pk.card.name + '】加入手卡，自己失去2点同步值（' + __b4 + ' → ' + p.sync + '）');
           if (typeof updateBattleUI === 'function') updateBattleUI();
         });
       } else if (ci === 1) {
