@@ -3548,7 +3548,7 @@ function __deckLibRenderBar() {
 }
 
 
-const DECK_ATTR_COLOR = { '无序': '#94a3b8', '热忱': '#e94560', '理智': '#4a9eff', '混沌': '#a855f7' };
+const DECK_ATTR_COLOR = { '无序': '#94a3b8', '热忱': '#e94560', '理智': '#4a9eff', '混沌': '#a855f7', '神圣': '#f5c518' };   /* 【2026-10-14 作者报「献祭页雷閃是灰色」⇒ 补神圣=金黄 ✓】 */
 const ATTR_COLOR = DECK_ATTR_COLOR; // 全局唯一四属性配色（红热忱/蓝理智/灰无序/紫混沌，对齐查询站）
 
 function deckAutoFill(player) {
@@ -22921,6 +22921,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var __top = p.deck.shift();
     (p.grave = p.grave || []).push(__top);
     addBattleLog(user, '【雷閃·SP】把牌组最上方【' + (__top.name || '?') + '】送入墓地');
+    /* 【2026-10-14 作者报「把牌组最后一张送墓后不立刻洗牌」⇒ 修 ✓】
+       走引擎既有的唯一补充规则 `__refillDeckIfEmpty`（牌组一空就立刻把墓地整体翻面为新牌组、**不洗切** ✓），
+       与所有抽卡/检索路径同一套 ✔（原来这里送墓后不补 ⇒ 牌组停在 0 张）。 */
+    try { if (typeof __refillDeckIfEmpty === 'function') __refillDeckIfEmpty(user); } catch (e) {}
     if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, __top, 'effect');
     __pickTarget(function (foe) {
       if (!foe || !battleState[foe]) { if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
