@@ -7240,6 +7240,17 @@ function __scanTriggers(timing, ctx) {
       for (var oi = 0; oi < owners.length; oi++) {
         var owner = owners[oi];
         if (!owner) continue;
+        /* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】触发注册表是"卡效果"的**第 6 条执行路径**
+           （触发声明写在别处、由本扫描器统一产出并 fire）⇒ 也必须过同一道闸 ✓。
+           判据：**触发来源卡**（`ctx.card` / `ctx.srcCard`）本轮被永眠之棺指定 ⇒ 这条触发不产出
+           （与"这张卡的效果无效"同口径 ✓）。来源不是卡（纯座位能力、无 ctx.card）⇒ 不拦 ✓（不误伤 ✗）。 */
+        try {
+          var __srcCard = (ctx && (ctx.card || ctx.srcCard)) || null;
+          if (__srcCard && __cardEffectDisabledNow(__srcCard)) {
+            __logCardDisabledByYongmian(__srcCard, '触发类效果不发动');
+            continue;
+          }
+        } catch (e0) {}
         var ok = true;
         try { ok = (typeof d.cond === 'function') ? !!d.cond(ctx, owner) : true; } catch (e) { console.error('触发条件出错 ' + d.id, e); ok = false; }
         if (!ok) continue;
@@ -9502,6 +9513,73 @@ function runResponseWindow(opts) {
   });
 }
 
+/* ============================================================
+   【永眠之棺】"那张卡直到本回合结束前效果无效" —— **唯一判据**。
+   ------------------------------------------------------------
+   为什么要有这个函数（2026-10-14 作者报「永眠之棺不能真的无效卡」）：
+     v337 之前，这条判据**只内联写在 `beforeEffectExecution` 一处**，而"一张卡的效果"在本引擎里
+     有多条并行执行路径（`交接清单.md` 第 25.1 节列过：指令层 / 特殊交互卡表 / 攻击卡文本兜底 /
+     旧文本引擎 / 触发器注册表）⇒ 只堵住"打出与连锁"那一条，别的路照样跑：
+       · 永续卡的**主动能力**（`executePermanentActiveFor` 直接调处理体）✗
+       · 送墓类**不进链被动**（`__graveDirectPassive` 就地执行）✗
+       · 技能卡（作者点名）✗  · 触发注册表产出的触发 ✗
+     ⇒ 作者看到的就是"标了无效，卡照样生效"。
+   结构修法：判据收成这**一个**函数（唯一真相），凡是"某张卡要自己发动/执行效果"的收口处都调它，
+     不在各条路上各写一份判据 ✗。新增任何执行入口时，只需在这里问一次即可覆盖。
+   两个事实（都在这一个函数里判，别处不再重复 ✗）：
+     ① 回合号：`_effectDisabledUntilTurn === battleState.turn`（到期由 `clearTurnScopedCardStates`
+        按同一个回合号统一清 ✓，不用计时器 ✗）；
+     ② **只无效"场上"的卡**（作者 2026-10-14 裁决：手牌/牌堆/墓地里的**同名卡不受影响** ✓）
+        ⇒ 必须判"这张卡**此刻**是否在场上（效果处理区）"。同一张卡从场上离开（进墓/回手）后，
+        它就不再是"场上的那张卡" ⇒ 不再被这条限制 ✓（与「选场上一张卡为对象」的卡面一致 ✓）。
+   ============================================================ */
+function __cardEffectDisabledNow(card) {
+  try {
+    if (!card) return false;
+    if (card._effectDisabledUntilTurn == null) return false;
+    if (typeof battleState === 'undefined' || !battleState) return false;
+    if (card._effectDisabledUntilTurn !== battleState.turn) return false;
+    return __cardIsOnFieldNow(card);      /* ② 只在场上才算被无效 ✓ */
+  } catch (e) { return false; }
+}
+/* 这张卡**此刻**是否在"场上"（= 效果处理区：正面永续 / 盖伏 / 事件区 / 乐谱区 / **正在结算的 C1 占位**）。
+   为什么按"它在不在那些区域里"判、而不按它身上有没有某个在场标记：区域归属是**事实**，
+   而"标记"会在搬运（送墓/回手/回收）时被漏删 ⇒ 判事实更稳 ✓（本仓库既有口径：区域即事实）。
+   ⚠ **C1 占位也算**（作者 2026-10-14 口径，参考 MD 的「擦」）：
+     永眠之棺无效的是"**效果处理区的卡**"，分两类 ——
+       ① 单次卡：它在**结算完成前**一直待在效果处理区（`__chainC1Enter` 放进去、`placeAfterUse` 才撤）
+          ⇒ 那一发效果被无效，之后照常送墓 ✓；
+       ② 永续卡：按卡面到本回合结束都被无效 ✓。
+     ⇒ 所以**不能**把带 `_chainC1` 的卡排除在外 ✗（我一度那样写过，会把"单次卡那一发"整段漏掉）。
+     不在效果处理区里的卡（手牌/牌堆/墓地里的同名卡）自然不受影响 ✓。 */
+function __cardIsOnFieldNow(card) {
+  try {
+    if (!card) return false;
+    var __zones = ['permanent', 'faceDownCards', 'eventCards', 'musicCards'];
+    var ids = (typeof playerIds === 'function') ? playerIds() : ['p1', 'p2'];
+    for (var i = 0; i < ids.length; i++) {
+      var q = battleState[ids[i]]; if (!q) continue;
+      for (var z = 0; z < __zones.length; z++) {
+        var arr = q[__zones[z]] || [];
+        for (var k = 0; k < arr.length; k++) { if (arr[k] === card) return true; }
+      }
+    }
+    return false;
+  } catch (e) { return false; }
+}
+/* 统一记一条"被永眠之棺无效"的日志（各调用点共用同一措辞，便于作者在战斗日志里一眼看到 ✓）
+   ⚠ 同一张卡**同一回合内只记一次**：判据分散在多条执行路径上（发动前的连锁窗 / 逐步骤执行口 /
+     永续主动 / 送墓被动），一次用卡可能同时经过两道 ⇒ 不靠"把标记在 context 之间传来传去" ✗
+     （context 是各自新建的对象，传不住 —— 实测技能卡会记两遍），而是把标记打在**卡对象**上 ✓。 */
+function __logCardDisabledByYongmian(card, what) {
+  try {
+    var __turn = (typeof battleState !== 'undefined' && battleState) ? battleState.turn : null;
+    if (card && __turn != null && card.__ymNegatedTurn === __turn) return;
+    if (card && __turn != null) { try { card.__ymNegatedTurn = __turn; } catch (e1) {} }
+    addBattleLog('system', '【永眠之棺】' + ((card && card.name) || '?') + ' 本回合内效果无效 ⇒ ' + (what || '本次效果不处理'));
+  } catch (e) {}
+}
+
 function beforeEffectExecution(effect, callback) {
   // 结算锁：连锁询问窗口期间禁止手动插入发动（事件卡/乐谱卡/盖伏翻开等入口都会检查 _resolveDepth）
   var __eeB=(typeof effectEngine!=='undefined')?effectEngine:null;
@@ -9529,11 +9607,14 @@ function beforeEffectExecution(effect, callback) {
   }
   /* 【2026-10-14 新卡·永眠之棺】"那张卡直到本回合结束前效果无效" ⇒ 在**效果生效前**这一层判：
      该卡被永眠之棺指定且仍在有效期内 ⇒ 直接走引擎既有的"效果无效"通道（`effect.cancelled`）✓
-     —— 与连锁里的 `negate_effect` 同一个下游（`effect.cancelled` 是唯一真相 ✓），不新造一套 ✗。 */
-  if (__c1card && __c1card._effectDisabledUntilTurn != null && typeof battleState !== 'undefined' && battleState
-      && __c1card._effectDisabledUntilTurn === battleState.turn) {
+     —— 与连锁里的 `negate_effect` 同一个下游（`effect.cancelled` 是唯一真相 ✓），不新造一套 ✗。
+     ⚠ 判据走唯一函数 `__cardEffectDisabledNow`（原来这里内联写了一份 ⇒ 别的执行路径各自漏掉 ✗）。 */
+  if (__c1card && __cardEffectDisabledNow(__c1card)) {
     effect.cancelled = true; effect.negateKind = 'effect';
-    try { addBattleLog('system', '【永眠之棺】' + (__c1card.name || '?') + ' 本回合内效果无效 ⇒ 本次效果不处理'); } catch (e) {}
+    /* 打上"这张卡这一轮已经被判过无效"的标记 ⇒ 下游 `executeEffectSteps` 的同一道闸不再重复记一遍 ✗
+       （`effect` 就是该卡本轮的 context，标记会随它传下去 ✓） */
+    try { effect.__ymNegated = true; } catch (e) {}
+    __logCardDisabledByYongmian(__c1card, '本次效果不处理');
   }
   effect._chain = [];
   /* 【2026-10-13 作者裁决 1B ✓·**C1 也进链数组**】把"**正在被响应的那个效果**"（`__chainC1Enter` 已把它
@@ -19161,6 +19242,23 @@ function dispatchStep(text, ctx, next) {
 }
 
 function executeEffectSteps(steps, context, finalCallback, showLog) {
+  /* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】这里 = **所有卡效果唯一的逐步骤执行口**（技能卡 / 道具 /
+     攻击卡 / 事件卡 / 连锁里的效果本体…全都过这里）⇒ "这张卡本回合效果无效"的闸**必须也设在这里** ✓。
+     为什么原来漏了：判据只写在 `beforeEffectExecution` 一处，而那是**"发动前的连锁窗"**；
+     各条执行路径（技能卡 / 永眠卡的主动能力 / 送墓被动 / 触发注册表…）并不都会经过它 ⇒
+     作者实测："永眠之棺不能真的无效卡"，技能卡尤其明显 ✗。
+     ⚠ 只判 `context.card`（**这张卡自己**的效果）——与 `beforeEffectExecution` 判 C1 卡同口径 ✓；
+       若上面那道闸已经判过（同一张卡），这里不重复记日志 ✗。 */
+  try {
+    var __ctxCard = context && context.card;
+    if (__ctxCard && __cardEffectDisabledNow(__ctxCard) && context.__ymNegated !== true) {
+      context.__ymNegated = true;
+      __logCardDisabledByYongmian(__ctxCard, '本次效果不处理');
+      if (typeof updateBattleUI === 'function') { try { updateBattleUI(); } catch (e0) {} }
+      if (finalCallback) finalCallback();
+      return;
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js executeEffectSteps 无效闸', e); } catch (e2) {} }
   var __ee2=(typeof effectEngine!=='undefined')?effectEngine:null;
   /* 【2026-10-07】标签带卡名，便于线上从日志认出"是哪张卡的嵌套链没跑完"（纯诊断，不参与判定）。
      ⚠ 标记必须**紧邻**在上锁那一行之前（effect_lock_test 有这条静态断言，我第一版插了两行就被抓到）。 */
@@ -21365,6 +21463,13 @@ function __graveDirectPassive(player, card, reason) {
     var key = String((card && (card.name || '?')) || '') + '|' + String(reason || '') + '|' + String(battleState.turn);
     if (battleState._graveDirectKey === key) return false;   // 同一次事件的重入调用：不重复执行
     battleState._graveDirectKey = key;
+    /* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】这条"不进链、就地执行"的送墓被动**也不经过**
+       `beforeEffectExecution` ✗ ⇒ 作者实测：被永眠之棺指定的卡，送墓被动照样生效 ✗。
+       这里补同一道判据（唯一函数 ✓）；放在最前面 ⇒ 连"重入键"都不会被它占用 ✓。 */
+    if (__cardEffectDisabledNow(card)) {
+      __logCardDisabledByYongmian(card, '送墓类被动不处理');
+      return false;
+    }
     /* 【2026-10-03 作者口径】神乐铃也属"类似 SP"⇒ 满足条件（进入墓地）就**直接执行、不进连锁**：
        原来是走送墓批次 → 时点窗口 → C1 逆结算（作者日志里就是这个）。 */
     if (String(card.name || '').indexOf('神乐铃') >= 0) {
@@ -23301,6 +23406,16 @@ function executePermanentActiveFor(user, index, done) {
      所以重置也必须**遍历永续区的卡**来清 —— 这同时修好 直尺/智能手机/蓝宝之杖 等所有同类永续卡。 */
   var fn = PERMANENT_ACTIVE_HANDLERS[act.handler];
   if (!fn) { if (done) done(); return; }
+  /* 【2026-10-14 新卡·永眠之棺 ⇒ 结构修 ✓】"这张卡本回合效果无效"的闸**也必须在这条路上**：
+     本函数原来**直接调处理体**（`fn(card, user)`），整段不经过 `beforeEffectExecution` ✗
+     ⇒ 作者实测：被永眠之棺指定的永续卡，主动能力照样发动 ✗。
+     只加这一道判据（唯一函数 `__cardEffectDisabledNow` ✓），处理体一字不动 ✓。 */
+  if (__cardEffectDisabledNow(card)) {
+    __logCardDisabledByYongmian(card, '主动能力不发动');
+    if (user === 'p1') { try { showToast('【' + card.name + '】本回合内效果无效，无法发动', 'warn'); } catch (e0) {} }
+    if (done) done();
+    return;
+  }
   addBattleLog(user, '发动永续卡【' + card.name + '】主动效果');
   var ok = fn(card, user);
   if (ok && act.flag && !act.noAutoFlag) card[act.flag] = true;
