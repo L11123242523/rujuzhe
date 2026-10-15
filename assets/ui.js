@@ -1566,6 +1566,42 @@ try { window.showAttackCardSelect = showAttackCardSelect; } catch (e) {}
    鼠标**悬停**在自己的盖伏卡上 ⇒ 显示卡面浮层；移开即隐藏。
    数据取自 battleState.p1.faceDownCards[index]（与点击发动 uiActivateFaceDown(index) 同一索引口径）。
    只对**自己的**盖卡挂 onmouseenter/onmouseleave（见盖卡渲染处）⇒ 对手的盖卡不泄露。 */
+/* 【2026-10-15 作者报「悬停查看的卡牌底部会被挡住 / 图片要等一下才刷新」⇒ 结构修 ✓】
+   根因（实测复现 port-old/probe-peek-geom.cjs）：
+     · 定位那一刻图片常**还没加载完** ⇒ `box.offsetHeight` 只量到兜底值 300，
+       而卡图实际渲染高约 529（1326×1948 比例）⇒ top 算小约 229px ⇒ 图加载完把浮层撑高、**底部溢出屏幕** ✗
+     · 换卡时 `img.src=新地址`，新图下载+解码完之前**旧图仍显示** ⇒ 像「要等一下」✗
+   修法：① 图片加 max-height（按视口算）⇒ 高度上限可预期
+         ② 定位改为按「图片实际高 + 卡名行高」并把浮层夹进视口
+         ③ 换图走 `__peekSetImg`（先解码、再上屏）
+   ⚠ 两个预览实现（本函数用于**场上盖伏卡**；`__cardPeekShow` 用于**手牌/选卡弹窗/编组/墓地**）
+     共用同一个浮层元素 ⇒ **两处都改**，否则谁先跑谁创建浮层、行为不一致 ✗ */
+function __peekSetImg(img, url) {
+  try {
+    if (!img) return;
+    if (!url) { try { img.removeAttribute('src'); } catch (e) {} img.style.display = 'none'; return; }
+    img.style.display = 'block';
+    if (img.getAttribute('src') === url) return;      /* 同一张：不动，避免闪一下 ✓ */
+    var __box = document.getElementById('__fdPeekBox');
+    function __place() {
+      try {
+        if (!__box) return;
+        var __nm = document.getElementById('__fdPeekName');
+        var __h = (img.naturalWidth > 0 ? Math.round(360 * (img.naturalHeight / img.naturalWidth)) : 0)
+          + (__nm ? (__nm.getBoundingClientRect().height || 0) : 0) + 10;
+        if (__h <= 0) return;
+        var __t = parseFloat(__box.style.top) || 0;
+        if (__t + __h > window.innerHeight - 8) __box.style.top = Math.max(8, window.innerHeight - __h - 8) + 'px';
+      } catch (e) {}
+    }
+    var pre = new Image();
+    try { pre.decoding = 'async'; } catch (e) {}
+    pre.onload = function () { try { img.src = url; } catch (e) {} __place(); };
+    pre.onerror = function () { try { img.src = url; } catch (e) {} };
+    pre.src = url;
+    if (pre.complete && pre.naturalWidth > 0) { try { img.src = url; } catch (e) {} __place(); }
+  } catch (e) { try { if (img) img.src = url; } catch (e2) {} }
+}
 function __fdPeekShow(el, index) {
   try {
     var p = battleState && battleState.p1;
@@ -1578,17 +1614,29 @@ function __fdPeekShow(el, index) {
       box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
         'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
         'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
-      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;">' +
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;max-height:min(60vh,calc(100vh - 90px));object-fit:contain;">' +
         '<div id="__fdPeekName" style="color:#feca57;font-size:13px;text-align:center;padding:5px 6px;"></div>';
       document.body.appendChild(box);
     }
     var img = document.getElementById('__fdPeekImg');
     var nm = document.getElementById('__fdPeekName');
-    if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; }
+    __peekSetImg(img, card.image_url || '');   /* 【2026-10-15】先解码再上屏，避免"旧图停一下" ✓ */
     if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null ? '（' + card.cost + '费）' : '');
     box.style.display = 'block';
     var r = el.getBoundingClientRect();
-    var bw = box.offsetWidth || 214, bh = box.offsetHeight || 300;
+    /* 【2026-10-15 结构修】高度**不再依赖 box.offsetHeight**（图片没加载完时它是兜底值 300 ⇒ 算小 ⇒ 底部溢出）✗
+       改为：图片实际渲染高（或按 360 宽 × 图比例推算）+ 卡名行高；再把浮层高度**夹进视口**（双保险）✓ */
+    var bw = box.offsetWidth || 214;
+    var __nmRow = 0; try { __nmRow = nm ? (nm.getBoundingClientRect().height || 0) : 0; } catch (e) { __nmRow = 0; }
+    var __imgH = 0;
+    try {
+      if (img) {
+        __imgH = Math.round(img.getBoundingClientRect().height || 0);
+        if (!__imgH && img.naturalWidth > 0) __imgH = Math.round(360 * (img.naturalHeight / img.naturalWidth));
+      }
+    } catch (e) { __imgH = 0; }
+    var bh = (__imgH + __nmRow + 10) || (box.offsetHeight || 300);
+    if (bh > window.innerHeight - 16) bh = window.innerHeight - 16;   /* 夹进视口 ✓ */
     var left = r.left - bw - 10;
     if (left < 8) left = Math.min(r.right + 10, Math.max(8, window.innerWidth - bw - 8));
     var top = r.top;
@@ -1632,17 +1680,29 @@ function __cardPeekShow(el, nameEnc) {
       box.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;display:none;' +
         'border:2px solid #feca57;border-radius:8px;overflow:hidden;' +
         'box-shadow:0 6px 24px rgba(0,0,0,.6);background:#111;';
-      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;">' +
+      box.innerHTML = '<img id="__fdPeekImg" style="display:block;width:360px;height:auto;max-height:min(60vh,calc(100vh - 90px));object-fit:contain;">' +
         '<div id="__fdPeekName" style="color:#feca57;font-size:13px;text-align:center;padding:5px 6px;"></div>';
       document.body.appendChild(box);
     }
     var img = document.getElementById('__fdPeekImg');
     var nm = document.getElementById('__fdPeekName');
-    if (img) { img.src = card.image_url || ''; img.style.display = card.image_url ? 'block' : 'none'; }
+    __peekSetImg(img, card.image_url || '');   /* 【2026-10-15】先解码再上屏，避免"旧图停一下" ✓ */
     if (nm) nm.textContent = String(card.name || '') + (card.cost !== undefined && card.cost !== null && card.cost !== '' ? '（' + card.cost + '费）' : '');
     box.style.display = 'block';
     var r = el.getBoundingClientRect();
-    var bw = box.offsetWidth || 214, bh = box.offsetHeight || 300;
+    /* 【2026-10-15 结构修】高度**不再依赖 box.offsetHeight**（图片没加载完时它是兜底值 300 ⇒ 算小 ⇒ 底部溢出）✗
+       改为：图片实际渲染高（或按 360 宽 × 图比例推算）+ 卡名行高；再把浮层高度**夹进视口**（双保险）✓ */
+    var bw = box.offsetWidth || 214;
+    var __nmRow = 0; try { __nmRow = nm ? (nm.getBoundingClientRect().height || 0) : 0; } catch (e) { __nmRow = 0; }
+    var __imgH = 0;
+    try {
+      if (img) {
+        __imgH = Math.round(img.getBoundingClientRect().height || 0);
+        if (!__imgH && img.naturalWidth > 0) __imgH = Math.round(360 * (img.naturalHeight / img.naturalWidth));
+      }
+    } catch (e) { __imgH = 0; }
+    var bh = (__imgH + __nmRow + 10) || (box.offsetHeight || 300);
+    if (bh > window.innerHeight - 16) bh = window.innerHeight - 16;   /* 夹进视口 ✓ */
     var left = r.left - bw - 10;
     if (left < 8) left = Math.min(r.right + 10, Math.max(8, window.innerWidth - bw - 8));
     var top = r.top;
