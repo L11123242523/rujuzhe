@@ -24678,6 +24678,20 @@ function postUsePassiveHooks(user, card, done) {
     __add(user, true, '过载·抽1张', function (next) {
       var __ovDraw = (typeof drawCard === 'function') ? drawCard(user) : null;
       if (__ovDraw) addBattleLog(user, '【过载】自己回合内因使用【' + (card && card.name) + '】进入墓地，立即抽1张【' + __ovDraw.name + '】');
+      /* 【2026-10-15 作者平衡性改动】「每以此法抽一张牌时过载剩余时间减少一次行动，这样抽3张牌过载就没了」
+         口径：**因为过载而抽出牌**时，过载剩余行动数 -1；减到 0 ⇒ 立即结束（与 17007 到期同一收尾）✓
+         ⚠ 永久过载（until === -1 = 直到本场游戏结束，如乐谱第三张【谢幕】）**不流逝**，保持原意 ✓ */
+      try {
+        if (__ovDraw && p && p._overload && p._overload.until > 0) {
+          p._overload.until -= 1;
+          if (p._overload.until <= 0) {
+            p._overload = null;
+            addBattleLog(user, '【过载】因本次抽牌缩短而结束（抽满，剩余行动数归零）');
+          } else {
+            addBattleLog(user, '【过载】因本次抽牌缩短，剩余 ' + p._overload.until + ' 次行动');
+          }
+        }
+      } catch (e) {}
       next();
     });
   }
