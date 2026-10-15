@@ -1622,6 +1622,25 @@ var Online = {
      两边的问题形状本来就同源（都是 ENV.ask 的 spec），只是通道不同（relay/ans 与 engine/ans）。 */
   _onAsk:function(m){
     var self=this;
+    /* 【2026-10-15 作者报「客机端关时点但是还是会因为非必发效果而弹是否连锁」⇒ 结构修 ✓】
+       根因：本入口原来**直接**画窗，从不看本机的「关闭连锁询问」开关
+       —— 而带该判定的 `_onEngineAsk`（L1259）服务的是**另一条**消息（k:'engine'），管不到这条 k:'ask' 路径 ✗
+       口径（与 L1259 完全一致）：开关**只管本机**；房主把连锁窗询问标了 `chainAsk` ⇒
+       本机开关关着时**不弹窗**、直接回 PASS（连锁窗约定：**最后一项 = PASS** ✓ 与 ui.js 同源）。
+       必发同批与所有非连锁询问（改点/选卡/造伤响应…）**不带标记** ⇒ 照常弹窗，行为不变 ✓ */
+    var __sp = (m && m.spec) || {};
+    var __chainFlag = false;
+    try {
+      if (__sp.chainAsk) __chainFlag = true;
+      /* 外层包壳（{kind:'prompt', spec:{…}}）时标记可能在内层 ⇒ 一并查（只读，不影响渲染 ✓） */
+      else if (__sp.spec && typeof __sp.spec === 'object' && __sp.spec.chainAsk) __chainFlag = true;
+    } catch (e) { __chainFlag = false; }
+    if (__chainFlag && (typeof __chainNeverAsk !== 'undefined') && __chainNeverAsk) {
+      var __apIdx = (__sp.choices && __sp.choices.length) ? (__sp.choices.length - 1) : null;
+      try { addBattleLog('system', '【连锁】本机已关闭连锁询问 ⇒ 自动放弃（房主询问）：「' + (__sp.label || '') + '」'); } catch (e) {}
+      try { self.sendAnswer(m.id, __apIdx); } catch (e) { try { console.error('[catch] assets/engine.js:1553', e); } catch (e2) {} }
+      return;
+    }
     this._renderAsk(m.spec||{}, function(v){ self.sendAnswer(m.id, v); }, true);   /* true = 来自房主 ⇒ 座位要按视角换算 */
   },
   /* 用现成弹窗把一个问题画出来，把选择交给 done(v)。
