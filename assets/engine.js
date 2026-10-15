@@ -14951,7 +14951,7 @@ function __askPickCardsLocal(spec, callback) {
     var name = card.name || '未知';
     var cost = card.cost !== undefined ? card.cost : '?';
     var type = card.type || card.card_type || '';
-    div.innerHTML = '<div style="text-align:center;"><div style="display:inline-block;background:' + costColor + ';color:#fff;border-radius:50%;width:24px;height:24px;line-height:24px;font-size:12px;font-weight:bold;margin-bottom:4px;">' + cost + '</div><div style="color:#fff;font-size:12px;font-weight:bold;margin-bottom:2px;">' + name + '</div><div style="color:#aaa;font-size:10px;">' + type + '</div></div>';
+    div.innerHTML = '<div style="text-align:center;"><div style="display:inline-block;background:' + costColor + ';color:#fff;border-radius:50%;width:24px;height:24px;line-height:24px;font-size:12px;font-weight:bold;margin-bottom:4px;">' + cost + '</div><div class="card-picker-item-name" style="color:#fff;font-size:12px;font-weight:bold;margin-bottom:2px;">' + name + '</div><div style="color:#aaa;font-size:10px;">' + type + '</div></div>';
     if (multi) {
       div.onclick = function() {
         var p = chosen.indexOf(idx);
@@ -14963,6 +14963,19 @@ function __askPickCardsLocal(spec, callback) {
     } else {
       div.onclick = function() { fire(idx); };
     }
+    /* 【2026-10-15 作者第 5 项】悬停**卡名** ⇒ 预览这张卡（复用既有 __cardPeekShow ✓）
+       用 addEventListener 而非 onmouseenter 赋值：格子上原有的 hover 反馈（14948 行）不能被覆盖 ✓ */
+    try {
+      var __nmEl = div.querySelector('.card-picker-item-name');
+      if (__nmEl) {
+        __nmEl.addEventListener('mouseenter', function () {
+          try { if (typeof __cardPeekShow === 'function') __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) {}
+        });
+        __nmEl.addEventListener('mouseleave', function () {
+          try { if (typeof __cardPeekHide === 'function') __cardPeekHide(); } catch (e) {}
+        });
+      }
+    } catch (e) {}
     grid.appendChild(div);
   });
   if (multi) {
