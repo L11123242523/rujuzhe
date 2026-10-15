@@ -861,14 +861,37 @@ function __updateBattleUI_impl() {
       var isSkillPhase = isPlayerTurn && battleState.phase !== 'roll'; // 技能卡在非投掷阶段都可用
       if (true) { // 手牌始终渲染；能否点击/是否灰化完全由 evaluatePlayable 决定（角色技能卡全时点）
         // 渲染签名：内容/可点性/阶段/回合/局ID 未变则跳过整段 DOM 重建（高频调用下的性能与悬停状态保护）
-        var __handSig = (battleState._sessionId || 0) + '|' + battleState.turn + '|' + battleState.phase + '|' + battleState.currentPlayer + '|' + battleState.p1.cost + '|' +
+        /* 【2026-10-15 作者报「手牌会有 1~2 张卡图消失然后很快刷新出来（每次结算/出牌后都会）」⇒ 结构修 ✓】
+           根因：签名里含 `battleState.p1.cost`（音韵值），而**音韵值在每次结算/出牌后都会变**
+             ⇒ 签名每次都不同 ⇒ **每次都整段 `hand.innerHTML` 重建** ⇒ `<img>` 被销毁再新建
+             ⇒ 新元素要重新准备解码位图（每张卡图解码后约 2.5MB，缓存有限）⇒ 少数几张空白一瞬 ✗
+           修法（结构层，不是加 if 压症状）：
+             把签名拆成**两部分** ——
+               · 构成签名（哪些卡、什么费）：**只有它变了**才需要重建 DOM（图片随之刷新是对的）
+               · 状态签名（回合/阶段/音韵/可点性）：构成没变时**只做"灰化与可点性"的原地更新**，
+                 复用已有 DOM 节点 ⇒ `<img>` 元素自始至终存活、**不会再闪** ✓
+             行为等价性：可点性/灰化/提示本来就只取决于状态签名，原地更新与重建得到同样结果 ✓ */
+        var __handComp = (battleState._sessionId || 0) + '|' +
+          battleState.p1.hand.map(function (c) { return c.name + '#' + (c.cost === undefined ? '-' : c.cost); }).join(',') + '||' +
+          (battleState.p1.eventCards || []).map(function (c) { return c.name + '#' + ((c._isMusic || c._category === 'music_cards') ? 'M' : 'E'); }).join(',');
+        var __handState = __handComp + '|' + battleState.turn + '|' + battleState.phase + '|' + battleState.currentPlayer + '|' + battleState.p1.cost + '|' +
           battleState.p1.hand.map(function(c, i) {
             var pv = evaluatePlayable(c, 'p1');
             return c.name + '#' + (c.cost === undefined ? '-' : c.cost) + '#' + (pv.ok ? '1' : '0') + '#' + (pv.reason || '');
           }).join(',') + '||' +
           (battleState.p1.eventCards || []).map(function(c) { return c.name + '#' + ((c._isMusic || c._category === 'music_cards') ? 'M' : 'E'); }).join(',');
+        var __handSig = __handState;                   /* 沿用旧变量名，别处引用不受影响 ✓ */
         if (__handSig !== window.__lastHandSig) {
           window.__lastHandSig = __handSig;
+          var __needRebuild = (__handComp !== window.__lastHandComp);
+          window.__lastHandComp = __handComp;
+          /* —— 构成未变 ⇒ 原地更新可点性/灰化，**不碰 <img>** ⇒ 卡图不再闪 ✓ —— */
+          if (!__needRebuild && hand.querySelectorAll('.hand-card').length === (battleState.p1.hand.length + (battleState.p1.eventCards || []).length)) {
+            try { __softUpdateHand(hand, isActionPhase, isPlayerTurn); } catch (e) { __needRebuild = true; }
+          } else {
+            __needRebuild = true;
+          }
+          if (__needRebuild) {
           // 诊断：主要阶段内手牌全部不可用时，把各卡原因写入战斗日志（玩家可复制反馈）。
           // 注意（2026-09-16）：**结算进行中不写这条**。收尾路径是"先渲染、后释放锁"，渲染时整副手牌
           // 都因为"效果/连锁结算中"而不可用 —— 这时写进日志的提示会永久留在日志里，
@@ -923,6 +946,7 @@ function __updateBattleUI_impl() {
             }).join('');
           }
           hand.innerHTML = handHtml;
+          }      /* 【2026-10-15】闭合 if (__needRebuild)（漏补过一次 ⇒ 语法错，见本次修复说明）✓ */
         }
       } else {
         hand.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:12px;">' + 
@@ -1601,6 +1625,45 @@ function __peekSetImg(img, url) {
     pre.src = url;
     if (pre.complete && pre.naturalWidth > 0) { try { img.src = url; } catch (e) {} __place(); }
   } catch (e) { try { if (img) img.src = url; } catch (e2) {} }
+}
+/* 【2026-10-15 作者报「手牌卡图会消失然后很快刷新出来（每次结算/出牌后都会）」⇒ 结构修 ✓】
+   用途：**手牌构成没变**时，只更新"灰化 / 可点性 / 提示"这些**状态类**信息，
+         **完全不重建 DOM** ⇒ `<img>` 元素自始至终存活 ⇒ 卡图不会再闪 ✓
+   为什么不能靠整段重建：重建会销毁并新建 <img>，新元素要重新准备解码位图
+     （每张卡图解码后约 2.5MB，浏览器解码缓存有限）⇒ 少数几张空白一瞬 ✗
+   行为等价性：灰化/可点性/提示本来就只由状态决定，原地更新与重建结果一致 ✓
+   ⚠ 只用 `.hand-card` 定位（不碰卡图等其它元素）✓ */
+function __softUpdateHand(hand, isActionPhase, isPlayerTurn) {
+  try {
+    if (!hand || !battleState || !battleState.p1) return;
+    var nodes = Array.prototype.slice.call(hand.querySelectorAll('.hand-card'));
+    var handCards = (battleState.p1.hand || []);
+    var evCards = (battleState.p1.eventCards || []);
+    if (nodes.length !== (handCards.length + evCards.length)) return;   /* 对不上 ⇒ 交给整段重建兜底 ✓ */
+    var idx = 0, i;
+    for (i = 0; i < handCards.length; i++) {
+      var el = nodes[idx++], card = handCards[i];
+      var pv = null; try { pv = evaluatePlayable(card, 'p1'); } catch (e) { pv = { ok: false, reason: '' }; }
+      var canClick = !!(pv && pv.ok);
+      try {
+        el.className = 'hand-card' + (canClick ? ' playable' : '');
+        el.style.cssText = canClick ? '' : 'opacity:0.4;cursor:not-allowed;filter:grayscale(0.55);';
+        el.setAttribute('onclick', canClick ? ('useCard(' + i + ')') : 'showBlockedReason(this)');
+        el.setAttribute('data-block-reason', canClick ? '' : String((pv && pv.reason) || '未知原因'));
+        el.setAttribute('title', '左键使用，右键查看效果：' + (card.name || '') + (canClick ? '' : ('（不可用：' + ((pv && pv.reason) || '') + '）')));
+      } catch (e) {}
+    }
+    for (i = 0; i < evCards.length; i++) {
+      var el2 = nodes[idx++], c2 = evCards[i];
+      if (!el2) continue;
+      var isMusic = !!(c2._isMusic || c2._category === 'music_cards');
+      var evCanClick = isMusic ? (isActionPhase && isPlayerTurn) : ((isActionPhase && isPlayerTurn) || !isPlayerTurn);
+      try {
+        el2.style.cssText = evCanClick ? '' : 'opacity:0.4;cursor:not-allowed;';
+        el2.setAttribute('onclick', evCanClick ? (isMusic ? ('useMusicCard(' + i + ')') : ('useEventCard(' + i + ')')) : '');
+      } catch (e) {}
+    }
+  } catch (e) {}
 }
 function __fdPeekShow(el, index) {
   try {
