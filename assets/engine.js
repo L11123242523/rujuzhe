@@ -14040,7 +14040,14 @@ function getActiveBuffs(user) {
     P('stat', '🌊', '领域', (__domShown.actionsLeft ? ('剩' + __domShown.actionsLeft + '次行动') : '生效中'),
       '比翼恋理领域（前后' + (__domShown.range != null ? __domShown.range : '?') + '格内友方）：' + __domParts.join(' · '), 'dom');
   }
-  if ((p.defense||0) > 0) P('stat','🛡️','防御','+'+p.defense,'防御值上升，受到的伤害减少','def');
+  /* 【2026-10-15 作者报「只看到增加2防御值，没看到剩余持续时常」⇒ 补显示 ✓】
+     机制本来就是对的（`_defUps` 记时长、`lapseDefenseUp` 每回合递减、到期恢复），
+     缺的只是**显示** ⇒ 有 `_defUps` 时把剩余次数一并写出来（与领域「剩N次行动」、持续回复「剩余N回合」同一口径 ✓） */
+  if ((p.defense||0) > 0) {
+    var __duLeft = (p._defUps && p._defUps.length) ? p._defUps.reduce(function (a, d) { return a + (d.actions || 0); }, 0) : 0;
+    P('stat','🛡️','防御','+'+p.defense + (__duLeft ? ('(剩' + __duLeft + '次行动)') : ''),
+      (__duLeft ? ('防御值上升（持续' + __duLeft + '次行动，到期自动恢复），受到的伤害减少') : '防御值上升，受到的伤害减少'),'def');
+  }
   if ((p.defense||0) < 0) P('debuff','🛡️','防御',''+p.defense,'防御值下降（为负），受到的伤害增加','debuff');
   if (p._intellectBonus) P('stat','🔷','理智伤害','+'+p._intellectBonus,'理智属性伤害增加 '+p._intellectBonus,'san');
   if (p._judgeDamageBonus) P('stat','🎲','判定伤害','+'+p._judgeDamageBonus,'判定伤害增加 '+p._judgeDamageBonus,'jud');
@@ -17260,6 +17267,13 @@ function applyDefenseUp(who, amount, actions) {
   if (actions != null) { q._defUps = q._defUps || []; q._defUps.push({ amount: amount, actions: actions }); }
   else { q.defenseBase += amount; }
   recalcDefense(who);
+  /* 【2026-10-15 作者报「只看到增加2防御值，没看到剩余持续时常」⇒ 日志也写明时长 ✓】
+     放在**唯一源头**：ops 路径（__opsResource 的 def_up，实测得分走这条）与文本兜底路径都经由本函数
+     ⇒ 一处覆盖两条路，不会再出现"改了兜底却没生效" ✗（第一版就踩了这个：兜底那条 `__defUpHandledByOps`
+       为真时根本不执行）。actions 可能为 null（无时长的加防）⇒ 那时不写时长 ✓ */
+  try {
+    addBattleLog(who, '防御值提升' + amount + '点' + (actions != null ? ('（持续' + actions + '次行动）') : '') + '，当前防御' + (q.defense || 0));
+  } catch (e) {}
 }
 
 /* 【2026-10-14】「持续N次行动」的**加**防御流逝（与 lapseDefenseDown 同一族、同一处调用 ✓） */
