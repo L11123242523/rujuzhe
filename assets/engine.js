@@ -502,7 +502,15 @@ var Online = {
     var v=(raw||'').trim()||this._savedRelay();
     if(!v){
       // 本地打开调试：默认连本机中继；线上：默认连自带的中继域名
-      if(location.hostname==='127.0.0.1'||location.hostname==='localhost') return 'ws://localhost:2567';
+      /* 【2026-10-15 作者报「安装版没法创建房间（不能联机）」⇒ 结构修 ✓（实测根因：本条把软件版误判为本地调试）
+         软件版自身 origin 就是 http://127.0.0.1:51943 ⇒ 命中本判据 ⇒ 去连不存在的 ws://localhost:2567 ⇒ 建房失败 ✗
+         修法：改由**软件版外壳显式声明**（window.__RJZ_DESKTOP__ / URL 带 rjz_desktop=1）⇒ 才跳过本分支；
+         这样「本地调试」与「软件版」不再靠 hostname 撞车，网页端行为一字不变 ✓ */
+      var __isDesktopApp = false;
+      try {
+        __isDesktopApp = !!(window.__RJZ_DESKTOP__ || (location.search && location.search.indexOf('rjz_desktop=1') >= 0));
+      } catch (e) {}
+      if(!__isDesktopApp && (location.hostname==='127.0.0.1'||location.hostname==='localhost')) return 'ws://localhost:2567';
       var d=this._defaultRelay;
       return (d.indexOf('://')>=0) ? d.replace(/\/+$/,'') : (((location.protocol==='https:')?'wss://':'ws://')+d);
     }
