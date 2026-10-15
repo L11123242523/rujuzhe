@@ -21785,7 +21785,19 @@ function __yongzouGraveHit() {
       addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓（第' + __yzTimes + '次触发），对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害');
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
-    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地（第' + __yzTimes + '次触发），选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], function (i) { __hit(i === 0 ? 'p2' : 'p1'); });
+    /* 【2026-10-15 作者报「选对对手造成却打到自己」（房主、当场被反杀）⇒ 结构修 ✓】
+       原来写死 `i === 0 ? 'p2' : 'p1'`：座位是**常量字面量**，与文案「对手/自己」只靠顺序约定维系 ⇒
+       任何顺序/视角/重复执行的偏差都会直接变成「选对手却打自己」，且日志看不出选了谁 ✗
+       修法：目标改为**跟着当前回合方算出来的命名变量**（与同段 21789 行 `__hit(foeOf(tp))` 同口径 ✓），
+       并在选择那一刻写一条日志（可追溯到底打了谁）✓ */
+    var __mySeat = tp;
+    var __foeSeat = (typeof foeOf === 'function') ? foeOf(tp) : (tp === 'p1' ? 'p2' : 'p1');
+    function __yzPick(i) {
+      var __t = (i === 0) ? __foeSeat : __mySeat;
+      try { addBattleLog(tp, '【永奏进行曲】本次选择：对' + playerDisplayName(__t) + '造成 ' + dmg + ' 点无序伤害' + (__t === tp ? '（自己）' : '（对手）')); } catch (e) {}
+      __hit(__t);
+    }
+    if (tp === 'p1' && typeof showChoiceModal === 'function') showChoiceModal('永奏进行曲', '自己回合第' + n + '张卡进入墓地（第' + __yzTimes + '次触发），选择受到' + dmg + '点无序伤害的一名玩家', '', ['对对手造成', '对自己造成'], __yzPick);
     else __hit(foeOf(tp));
     return true;
   } catch (e) { console.error('永奏进行曲进墓触发出错', e); return false; }
