@@ -7900,9 +7900,18 @@ function __cardTimingAllowed(card, side, timing) {
     var isTurn = !!(battleState && battleState.currentPlayer === side);
     if (/自己回合|自己的回合|我方回合/.test(txt) && !/对手回合|对方回合|任意|任何/.test(txt) && !isTurn) return false;
     if (/对手回合|对方回合/.test(txt) && !/自己回合|自己的回合|任意|任何/.test(txt) && isTurn) return false;
-    /* ④ 没写阶段：技能卡/事件卡＝全时点；其余默认主要阶段 */
+    /* ④ 没写阶段：技能卡/事件卡＝全时点；其余默认主要阶段
+       【2026-10-15 作者第 9 项：「只有技能卡是全时点，一些写了在自己或对手回合也能发动的卡
+         在对手回合的时点其实不如技能卡」⇒ 结构修 ✓
+         根因：本函数上面③已按卡面的**回合字样**判过"哪一方的回合可以发动" ✓，
+           但这里只认 `全时点/任意时点/任何时候/任意时机` 这几个**字样** ⇒
+           卡面写「**自己或其他玩家的回合**…才能发动」的卡（荷鲁斯之眼/永眠之棺/无首刺虫/崩塌之乌托邦）
+           落到默认分支 = **只允许主要阶段** ⇒ 投掷/结束阶段一律 false ✗ —— 与技能卡不等权 ✗
+         与注释 7867 声明的判定顺序（卡面**回合**字样 **先于** 默认主要阶段）一致：
+           卡面自己写了"跨回合可发动"⇒ 视为**全时点**（真正的时点资格仍由③按回合方把关 ✓）✓ */
+    var __crossTurnText = /自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/.test(txt);
     if (!allowed) {
-      var fullTime = (card._category === 'skill_cards') || /全时点|任意时点|任何时候|任意时机/.test(txt);
+      var fullTime = (card._category === 'skill_cards') || __crossTurnText || /全时点|任意时点|任何时候|任意时机/.test(txt);
       if (fullTime) return true;
       return ph === 'main1' || ph === 'main2';
     }
@@ -7926,7 +7935,16 @@ function __runTimingTriggers(timing, ctx, next) {
           try { __pcPicks = (typeof collectChainable === 'function') ? (collectChainable(side, null) || []) : []; } catch (e) { __pcPicks = []; }
           __pcPicks.forEach(function (pk) {
             var c = pk && pk.card; if (!c) return;
-            if (c._category !== 'skill_cards' && pk.from !== 'event') return;      // 只列全时点类
+            /* 【2026-10-15 作者第 9 项】原来是「只列技能卡与事件卡」⇒ 卡面自称
+               「自己或其他玩家的回合…才能发动」的道具卡（荷鲁斯之眼/永眠之棺/无首刺虫/崩塌之乌托邦）
+               永远进不了候选 ✗（实测：候选总数 1、过滤后 0、被这道闸挡掉的恰是它们）✗
+               现在：**卡面写了跨回合可发动 ⇒ 与技能卡同权**（真正的时点资格仍由下面
+               `__cardTimingAllowed` 按卡面的回合/阶段字样把关 ✓，不会把只限自己回合的卡放进来 ✓） */
+            var __pTxt = String((c.effect || '') + ' ' + (c.sp || '') + ' ' + (c.text || ''));
+            var __pFull = (c._category === 'skill_cards') || pk.from === 'event' ||
+              /全时点|任意时点|任何时候|任意时机/.test(__pTxt) ||
+              /自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/.test(__pTxt);
+            if (!__pFull) return;                                                  // 其余卡不进阶段时点（行为不变）✓
             if (!__cardTimingAllowed(c, side, timing)) return;                     // 【卡时点】按卡面限定可发动的时点
             if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
             cands.push({
