@@ -2781,7 +2781,32 @@ var CARD_PLAY_CONDITIONS={
      归属："它能不能被主动打出"这件事**只有一个判定处**：`evaluatePlayable` 末尾读的这张特例条件表
        （`CARD_PLAY_CONDITIONS`，既有惯例：来自地狱的盒子 / 底牌 同表）⇒ 判在这里，UI 自动变灰 ✓，
        不另在 handler 里补 if、也不改 cardData ✗（唯一入口 ✓）。 */
-  '无首刺虫':function(card,me,bs){ return {ok:false,reason:'【无首刺虫】只能在"有玩家造成伤害时"从手牌**舍弃**发动（受伤响应里选它）——不能主动打出'}; }
+  '无首刺虫':function(card,me,bs){ return {ok:false,reason:'【无首刺虫】只能在"有玩家造成伤害时"从手牌**舍弃**发动（受伤响应里选它）——不能主动打出'}; },
+  /* 【2026-10-15 作者报「典籍之残页：当前不能使用的限制条件是牌组和墓地不存在角色携带卡（但是应该改成牌组不存在角色携带卡）」⇒ 结构修 ✓】
+     卡面（逐字读的）：「自己的回合才能使用，**从牌组**把一张角色携带卡（攻击卡或技能卡）加入手卡。」
+     而通用判据（evaluatePlayable 的"牌组检索"分支，engine.js:2853-2856）判的是 **牌组 + 墓地** ⇒ 偏宽松：
+     墓地有携带卡、牌组没有时**仍能打出**（打出后检索不到任何东西）✗
+     ⚠ 为什么不动那条通用判据：同判据还命中【钢笔】，而钢笔卡面是「从**牌组、墓地或者移出游戏**的卡中
+       将一张攻击卡或技能卡加入手卡」⇒ 改通用判据会把钢笔改坏 ✗
+     ⇒ 用**该卡专属**的收口（本表就是"能不能主动打出"的既有唯一特例表 ✓）：
+       只在**牌组**里找角色携带卡（=攻击卡/技能卡，与检索实现同一判据 ✓），找不到就不让发动 ✓
+     （角色携带卡 = attack_cards / skill_cards —— 与 SP① 里 collectZoneCards 的口径一致 ✓） */
+  /* 【2026-10-15 连带修】实测发现同族问题：【钢笔】卡面写「从牌组、墓地**或者移出游戏**的卡中
+     将一张攻击卡或技能卡加入手卡」，其实现（编译产物 search[deck,grave,removed]）**也取三区** ✓
+     但通用判据只查 deck+grave ✗ ⇒ 移出区有货时被**误拦**（实测：牌组空/墓地空/移出区有 ⇒ ok:false）
+     ⇒ 同样用该卡专属收口：三区任一有 ⇒ 可发动 ✓
+     （移出区 = removed + removedFromGame 两者之和，与引擎既有口径一致 ✓） */
+  '钢笔':function(card,me,bs){
+    var __pool = [].concat(me.deck||[], me.grave||[], me.removed||[], me.removedFromGame||[]);
+    var __has = __pool.some(function(c){ return c && (c._category === 'attack_cards' || c._category === 'skill_cards'); });
+    if (!__has) return {ok:false, reason:'牌组、墓地和移出游戏里都没有攻击卡/技能卡，无法检索 ⇒ 不能发动【钢笔】'};
+    return true;
+  },
+  '典籍之残页':function(card,me,bs){
+    var __has = (me.deck||[]).some(function(c){ return c && (c._category === 'attack_cards' || c._category === 'skill_cards'); });
+    if (!__has) return {ok:false, reason:'牌组里没有角色携带卡（攻击卡/技能卡），无法检索 ⇒ 不能发动【典籍之残页】'};
+    return true;
+  }
 };
 // ===== [超频]状态：可透支音韵值（基础最多5点，Lv7起最多7点；透支发生时扣除持有者3点同步）=====
 function __overclockLoanCap(who) {
@@ -2852,6 +2877,10 @@ function checkCardResource(card,me,bs){
   // 从牌组检索/选卡加入手卡
   if(eff.indexOf('牌组')>=0 && /加入手|检索|从牌组/.test(eff) && eff.indexOf('放回')<0){
     if(/攻击卡或技能卡/.test(eff)){
+      /* 【2026-10-15 注释补充·逻辑不动】本判据把**牌组+墓地**都算进去，是为【钢笔】那类
+         卡面写「从牌组、墓地或者移出游戏的卡中…加入手卡」的卡准备的（它们的检索源本就含墓地 ✓）。
+         而卡面**只写「从牌组」**的卡（如【典籍之残页】）不该吃这条宽松判据 ⇒
+         它已改由 `CARD_PLAY_CONDITIONS['典籍之残页']` 单独收口（只看牌组 ✓），此处保持原样以护住钢笔 ✓ */
       var hasAT=[].concat(me.deck||[],me.grave||[]).some(function(c){return c&&(c._category==='attack_cards'||c._category==='skill_cards');});
       if(!hasAT) return {ok:false,reason:'牌组与墓地中都没有攻击卡/技能卡，无法检索'};
     } else if(!vsOther && L(me.deck)===0){ return {ok:false,reason:'你的牌组已空，无法从中选择卡牌'}; }
@@ -2915,6 +2944,19 @@ function evaluatePlayable(card,player,opts){
   if(!card) return {ok:false,reason:'没有这张卡'};
   if(!battleState||!battleState[player]) return {ok:false,reason:'战斗尚未开始'};
   var me=battleState[player], name=card.name||'', eff=card.effect||card.text||'', phase=battleState.phase;
+  /* 【2026-10-15 结构修·卡专属条件**优先于通用判据**】
+     原来 `CARD_PLAY_CONDITIONS` 只在函数**最末尾**查（约 3063 行），而通用「牌组检索」判据在前半段
+     （约 2853 行）就会 `return ok:false` ⇒ **特例表根本走不到** ✗
+     （实测：【钢笔】牌组空/墓地空/移出区有 ⇒ 仍被通用判据拦下，我为它加的三区条件没被执行。）
+     现在：先查一次特例表——命中即以其为**权威**（不通过就返回；通过则**跳过**通用判据，避免又被拦 ✗）；
+     未命中 ⇒ 照常走原有通用判据（其它卡一字不变 ✓）。末尾那次查表保留作兜底 ✓ */
+  var __condEarly = CARD_PLAY_CONDITIONS[name];
+  if (typeof __condEarly === 'function') {
+    var __rEarly = null;
+    try { __rEarly = __condEarly(card, me, battleState); } catch (e) { __rEarly = null; }
+    if (__rEarly && __rEarly.ok === false) return __rEarly;
+    if (__rEarly === true || (__rEarly && __rEarly.ok === true)) return {ok:true, reason:''};
+  }
   var fromFaceDown=(opts.fromFaceDown===true)||(card._activatedFromFaceDown===true);
   var isSkill=card._category==='skill_cards';
   var isChain=isChainOnlyCard(card);
