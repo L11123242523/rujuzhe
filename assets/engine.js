@@ -655,27 +655,78 @@ var Online = {
     if(this._isServerAuthority()) { h.engine=true; h.delta=1; }   // delta=1：声明"我能吃增量视图"（批次 4 安全闸）
     return h;
   },
+  /* 【2026-10-15 作者报「偶尔弹超时和部署失败」⇒ 结构修 ✓】
+     实测：中继本身是好的（56 次「建房→立刻连 ws」全通）；偶发失败是**瞬时抖动**，而旧实现**不重试**、
+     还弹一句写给开发者看的话（「请确认中继已部署 / 运行 node online_server.js」）⇒ 作者误以为是部署挂了 ✗
+     现在：① 首次失败（onerror 或 8 秒没 open）⇒ 隔 0.8/1.6/2.4 秒**自动重试最多 3 次**（玩家往往察觉不到）；
+           ② 重试期间状态栏写进度；全部失败才提示，且用**玩家能懂的话**；
+           ③ 开发者细节（地址、node online_server.js）改为 console 日志，便于我排查 ✓
+     注意：只重试「**首次连接**」；已连上之后的掉线走既有的重连/宽限逻辑，不在这里管 ✓ */
   _connect:function(onOpen, roomCode){
     var self=this;
     try{ if(this.ws){ try{this.ws.close();}catch (e) { try { console.error('[catch] assets/engine.js:643', e); } catch (e2) {} } } }catch (e) { try { console.error('[catch] assets/engine.js:643', e); } catch (e2) {} }
-    var target=roomCode?this._roomUrl(roomCode):this.relayBase;
-    this.endpoint=target;
-    var ws;
-    try{ ws=new WebSocket(target); }
-    catch(e){ this.status('连接失败：'+e.message+'（地址：'+target+'）'); showToast('连接失败：'+e.message, 'warn'); return; }
-    this.ws=ws;
-    var opened=false;
-    ws.onopen=function(){ opened=true; self.connected=true; if(onOpen) onOpen(); };
-    ws.onmessage=function(ev){
-      var m=null; try{ m=JSON.parse(ev.data); }catch(e){ return; }
-      self._onServer(m);
-    };
-    ws.onclose=function(){ self._onClose(); };
-    ws.onerror=function(){
-      self.status('连接出错（地址：'+self.endpoint+'）。请确认：① 中继服务器已启动（本地 node online_server.js）② 地址是 ws:// 或 wss:// 的主机名 ③ https 页面必须用 wss://');
-      showToast('联机服务器连接失败：' + self.endpoint + '\n本地调试请先运行 node online_server.js；线上请确认中继已部署', 'warn');
-    };
-    setTimeout(function(){ if(!opened){ self.status('连接超时（地址：'+self.endpoint+'）。请确认中继服务器已启动：本地调试运行 node online_server.js；线上确认中继已部署。'); showToast('连接超时：'+self.endpoint+'\n请确认服务器已启动', 'warn'); } },8000);
+    var MAX_RETRY=3, DELAYS=[800,1600,2400];
+    var attempt=0;
+    self._connectTry=0;   /* 供探针读取：本函数发起了几次尝试 */
+    function targetNow(){ return roomCode ? self._roomUrl(roomCode) : self.relayBase; }
+    function cleanup(){ if(self._connectRetryTimer){ try{ clearTimeout(self._connectRetryTimer); }catch(e){} self._connectRetryTimer=null; } if(self._connectTimeoutTimer){ try{ clearTimeout(self._connectTimeoutTimer); }catch(e){} self._connectTimeoutTimer=null; } }
+    function giveUp(){
+      /* 玩家视角的话（不出现 node / 中继 等开发者术语） */
+      try{ showToast('联机服务器暂时连不上，请稍后再试（或换个网络）', 'warn'); }catch(e){}
+      self.status('联机服务器暂时连不上（已重试 '+MAX_RETRY+' 次）。\n可以：① 稍后再点一次「创建房间」 ② 换个网络再试 ③ 单机对战不受影响 ✓');
+    }
+    function attemptConnect(){
+      attempt++; self._connectTry=attempt;
+      var target=targetNow();
+      self.endpoint=target;
+      var ws;
+      try{ ws=new WebSocket(target); }
+      catch(e){
+        try{ console.error('[联机] WebSocket 构造失败：'+e.message+'（地址：'+target+'）'); }catch(e2){}
+        if(attempt<=MAX_RETRY) return scheduleRetry();
+        return giveUp();
+      }
+      self.ws=ws;
+      var opened=false, settled=false;
+      function retryOrGiveUp(why){
+        if(settled || opened) return;
+        settled=true;
+        if(attempt<=MAX_RETRY){ scheduleRetry(why); } else { giveUp(); }
+      }
+      ws.onopen=function(){
+        opened=true;
+        cleanup();   /* 连上了 ⇒ 清掉待重试与超时定时器，避免串台 ✓ */
+        self.connected=true;
+        if(onOpen) onOpen();
+      };
+      ws.onmessage=function(ev){
+        var m=null; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+        self._onServer(m);
+      };
+      ws.onclose=function(){ self._onClose(); };
+      ws.onerror=function(){
+        /* 开发者信息进 console；玩家只在「重试也失败」后看到友好提示 ✓ */
+        try{ console.error('[联机] 连接出错（地址：'+target+'）—— 本地调试需先运行 node online_server.js；线上需中继可用'); }catch(e){}
+        retryOrGiveUp('onerror');
+      };
+      self._connectTimeoutTimer=setTimeout(function(){
+        if(!opened){
+          try{ console.error('[联机] 连接超时（地址：'+target+'）'); }catch(e){}
+          try{ if(ws) ws.close(); }catch(e){}
+          retryOrGiveUp('timeout');
+        }
+      },8000);
+    }
+    function scheduleRetry(why){
+      cleanup();
+      var d=DELAYS[Math.min(attempt-1, DELAYS.length-1)];
+      self.status('联机服务器暂时连不上，正在重试（第 '+attempt+'/'+MAX_RETRY+' 次）…');
+      try{ console.error('[联机] 第 '+attempt+' 次尝试失败（'+why+'），'+d+'ms 后重试；地址='+self.endpoint); }catch(e){}
+      self._connectRetryTimer=setTimeout(function(){ self._connectRetryTimer=null; attemptConnect(); }, d);
+    }
+    /* 首次尝试用当前 relayBase（房主）或房号 URL（加入者）；每次重试都**重算**目标 ✓ */
+    this.relayBase=this._wsUrl(this._serverInput());
+    attemptConnect();
   },
   _onServer:function(m){
     var self=this;
