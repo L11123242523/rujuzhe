@@ -9105,7 +9105,22 @@ function resolveChainStack(effect, onDone) {
         try {
           /* 【2026-10-13】把 done 交出去 ⇒ 这一环的交互做完才推进下一环 ✓
              【2026-10-13 S2 ✓】第 4 参 = **发动前选定的目标**（节点上带着 ✓）⇒ 直接用、不再倒推文本 ✓ */
-          if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); }, e.target || null);
+          /* 【2026-10-15 作者报「圆桌会议在连锁时使用只会让自己到达 game 格」⇒ 结构修 ✓】
+             根因：这些**特例事件卡**（__EVENT_CASE_A/B：圆桌会议/大风/独舞/王车易位/赌徒游戏/躁动之心/
+             闲庭信步/交互冲动/即兴演出/命运之回声）的效果写在**特例分支**里，**不在卡面文本**里；
+             而通用卡管线（__executeCardEffectBody）按卡面文本编译 ops ⇒ 只作用「使用者自己」 ✗
+             （实测：连锁时 圆桌会议 只让 p1 降入迷+瞬移，p2 一动不动）
+             修法：这些卡**优先走它们唯一的实现入口** useEventCardFor（它本就是为连锁路径准备的：
+             支持按卡名兜底取卡 + _alreadyInPublicGrave 防重复入墓 ✓）；其余卡保持通用管线不变 ✓ */
+          var __specEvt = (typeof __EVENT_CASE_A !== 'undefined' && __EVENT_CASE_A[__evCard.name]) || (typeof __EVENT_CASE_B !== 'undefined' && __EVENT_CASE_B[__evCard.name]);
+          if (__specEvt && typeof useEventCardFor === 'function') {
+            /* 连锁的**结算时点**不一定在主要阶段（移动时/受伤害时等）⇒ 置一次性放行标记，
+               让 useEventCardFor 跳过「请在主要阶段使用」的阶段闸（发动资格在结成连锁时已校验过 ✓） */
+            try { battleState.__fromChainResolve = true; } catch (e) {}
+            try { useEventCardFor(e.by, -1, __evCard.name, function () { finished(); }); }
+            finally { try { battleState.__fromChainResolve = false; } catch (e) {} }
+          }
+          else if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); }, e.target || null);
           else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () { finished(); });
           else finished();
         } catch (err) { console.error('事件卡连锁结算异常', err); finished(); }
@@ -12427,19 +12442,28 @@ function triggerTileEffect(player) {
       break;
     case 'game': {
       // GAME格（权威）：支付500金币，先猜→播硬币动画→定格对比，猜中抽2（全程可见，区分未猜中/未执行）
+      /* 【2026-10-15 作者第 7 项·A：可见性】作者报「圆桌会议应该是让到达的玩家依次猜硬币
+         （当前是由触发者猜…）」——实测机制本身是"到达的**依次各猜各抽**"（联机双机已验证），
+         但**看不出来谁在猜**：付费/跳过/结果都只写在到达者自己名下，另一方屏幕上没线索。
+         ⇒ 这里只补**战斗日志的可见性**（不改任何结算顺序与数值）：
+            · 轮到谁猜、猜了什么、硬币是什么、结果如何，都写成一条**双方都看得到**的日志 ✓
+            · 金币不足被跳过时也写明（原来只有一行，容易被当成"对手没被问"）✓ */
       if (!p.gold) p.gold = 0;
-      if (p.gold < 500) { addBattleLog(player, 'GAME格：金币不足500，无法游玩（当前' + p.gold + '金币）'); break; }
+      if (p.gold < 500) {
+        addBattleLog(player, '【GAME格】' + playerDisplayName(player) + '金币不足500（当前' + p.gold + '），跳过本次猜硬币');
+        break;
+      }
       p.gold -= (p, 500);
-      addBattleLog(player, '到达GAME格 - 支付500金币猜硬币（剩余' + p.gold + '金币）');
+      addBattleLog(player, '【GAME格】轮到' + playerDisplayName(player) + '猜硬币：支付500金币（剩余' + p.gold + '金币）');
       var __gamePlay = function (guess) {
         judgePerform(player, { kind: 'coin', label: 'GAME 猜硬币' }, function (coin, __cancelled) {
           if (__cancelled || coin == null) { addBattleLog(player, 'GAME格：硬币判定被连锁无效，不抽牌'); updateBattleUI(); return; }
           var pick = guess || (GameRNG.coin() ? '正面' : '反面');
           if (pick === coin) {
-            addBattleLog(player, '🎮 你猜【' + pick + '】，硬币为【' + coin + '】→ 猜中！抽2张牌');
+            addBattleLog(player, '🎮 【GAME格】' + playerDisplayName(player) + '猜【' + pick + '】，硬币为【' + coin + '】→ 猜中！抽2张牌');
             for (var _gi = 0; _gi < 2; _gi++) { var drawnGame = drawCard(player); if (drawnGame) addBattleLog(player, '抽到第' + (_gi + 1) + '张【' + drawnGame.name + '】'); }
           } else {
-            addBattleLog(player, '🎮 你猜【' + pick + '】，硬币为【' + coin + '】→ 未猜中，不抽牌（效果已结算，仅判定失败）');
+            addBattleLog(player, '🎮 【GAME格】' + playerDisplayName(player) + '猜【' + pick + '】，硬币为【' + coin + '】→ 未猜中，不抽牌（效果已结算，仅判定失败）');
           }
           updateBattleUI();
         });
@@ -20708,9 +20732,14 @@ function __eventCasesB(card, player, p, done, env) {
 
 function useEventCardFor(player, index, name, done) {
   if (!battleState) return;
+  /* 【2026-10-15】连锁逆结算调用本函数时置的一次性标记：用它放行下面两道闸
+     （① 效果结算中 ② 主要阶段）——连锁**逆结算本身就处于「效果结算中」**，不放行一步也走不动 ✗
+     只对「连锁逆结算」这一种调用放行；其它调用一字不动 ✓ */
+  var __fromChainEarly = false;
+  try { __fromChainEarly = !!battleState.__fromChainResolve; } catch (e) { __fromChainEarly = false; }
   var __ecFoe = foeOf(player);
   var __ecOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
-  if (typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
+  if (!__fromChainEarly && typeof effectEngine !== 'undefined' && effectEngine && __eeLocked()) { addBattleLog('system', '效果结算中，暂时不能使用事件卡' + ((typeof __eeWaitReason === 'function' && __eeWaitReason()) ? ('（' + __eeWaitReason() + '）') : '')); if (done) done(); return; }
   var __oppTurn = battleState.currentPlayer !== player;
   
   var card = battleState[player].eventCards ? battleState[player].eventCards[index] : null;
@@ -20775,7 +20804,9 @@ function useEventCardFor(player, index, name, done) {
   }
   
   // 阶段检查：事件卡全时点——对手回合任意阶段可连锁发动；自己回合需主要阶段（有特殊时点的卡除外）
-  if (!__oppTurn && battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
+  /* 【2026-10-15】连锁逆结算时放行阶段闸：此刻的 phase 是「结算时点」，不是「发动资格」
+     （资格在结成连锁那一刻已校验过 ✓）。标记在函数开头读好（__fromChainEarly），这里直接用 ✓ */
+  if (!__fromChainEarly && !__oppTurn && battleState.phase !== 'main1' && battleState.phase !== 'main2' && 
       effectText.indexOf('受到伤害时') < 0 && effectText.indexOf('移动时') < 0) {
     if (player === 'p1') showToast('当前阶段不能使用事件卡，请在主要阶段使用！', 'warn');
     if (done) done();
