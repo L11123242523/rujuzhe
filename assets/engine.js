@@ -12569,9 +12569,16 @@ function triggerTileEffect(player) {
       addBattleLog(player, '到达Story格 - 抽取乐谱卡');
       var musicCardsData = (window.cardData && window.cardData.music_cards) ? window.cardData.music_cards : null;
       if (musicCardsData && musicCardsData.length > 0) {
-        // 乐谱卡按固定顺序：序幕→渐起→回响→高涨→尾声→谢幕
+        /* 【2026-10-15 作者口径】乐谱卡按固定顺序抽：序幕→渐起→回响→高涨→尾声→谢幕，
+           **只有 6 张、取完即止（不循环）** ✓
+           原来写的是 `[_musicIndex % 长度]` ⇒ 取完第 6 张后**回到第 1 张**（循环）✗
+           ⇒ 去掉取模：下标越过最后一张就不再抽，并写一条日志让玩家看得见 ✓ */
         if (!battleState[player]._musicIndex) battleState[player]._musicIndex = 0;
-        var musicCard = JSON.parse(JSON.stringify(musicCardsData[battleState[player]._musicIndex % musicCardsData.length]));
+        if (battleState[player]._musicIndex >= musicCardsData.length) {
+          addBattleLog(player, '乐谱卡已全部抽完（共 ' + musicCardsData.length + ' 张，不循环）⇒ 本次不再获得乐谱卡');
+          break;
+        }
+        var musicCard = JSON.parse(JSON.stringify(musicCardsData[battleState[player]._musicIndex]));
         battleState[player]._musicIndex++;
         musicCard._category = 'music_cards';
         musicCard._isMusic = true;
@@ -13331,16 +13338,25 @@ function __pileShuffleIn(kind, names) {
   return arr;
 }
 /* 看堆顶（不消耗）：堆空则按 allNames 洗一副新堆 */
-function __pilePeek(kind, allNames) {
+function __pilePeek(kind, allNames, opt) {
+  /* 【2026-10-15】opt.noRefill：该堆**用尽不重洗**（作者口径：事件卡不循环 ✓）
+     其它堆不传该选项 ⇒ 行为与原来完全一致 ✓ */
+  opt = opt || {};
   var pile = __pileGet(kind); if (!pile) return null;
-  if (!pile.length) pile = __pileShuffleIn(kind, allNames);
+  if (!pile.length) {
+    if (opt.noRefill) return null;
+    pile = __pileShuffleIn(kind, allNames);
+  }
   return pile.length ? pile[0] : null;
 }
 /* 从堆顶抽一张（消耗）。opt.name=指定要抽到的卡名（如"必定大吉/和声"）；opt.exclude=要跳过的卡名数组 */
 function __pilePop(kind, allNames, opt) {
   opt = opt || {};
   var pile = __pileGet(kind); if (!pile) return null;
-  if (!pile.length) pile = __pileShuffleIn(kind, allNames);
+  if (!pile.length) {
+    if (opt.noRefill) return null;              /* 【2026-10-15】用尽不重洗 ✓ */
+    pile = __pileShuffleIn(kind, allNames);
+  }
   var exclude = opt.exclude || [];
   var ix = -1;
   if (opt.name) { for (var i = 0; i < pile.length; i++) { if (pile[i] === opt.name) { ix = i; break; } } }
@@ -14157,6 +14173,11 @@ function triggerEventCard(player) {
   }
   
   // 抽取一张事件卡：**预设卡堆优先**（按顺序取名单里的下一张），否则按原机制随机
+  /* 【2026-10-15 作者口径】事件卡**也不循环**：只有卡池里这些张，取完即止。
+     堆模型原来在堆空时会自动重洗补满（__pileShuffleIn）⇒ 抽空后还能再抽到（循环）✗
+     ⇒ 下面调 __pilePeek/__pilePop 时带上 `noRefill: true`：堆空就返回 null，不再抽 ✓
+     （只有 events 这一条堆带此标记；gift_cards / 御神签等其它堆保持原样 ✓） */
+  var __evOpt = { noRefill: true };
   var __presetEventName = (typeof __presetConsume === 'function') ? __presetConsume('events') : null;
   var __presetEvent = null;
   if (__presetEventName) {
@@ -14165,16 +14186,26 @@ function triggerEventCard(player) {
     }
     if (!__presetEvent) addBattleLog(player, '【预设卡堆】名单里的【' + __presetEventName + '】不在本局事件卡池中，已回落到随机');
   }
-  /* 【卡堆模型】事件卡也是一个"堆"：从堆顶抽（预设名单优先）；抽空了自动重洗。
+  /* 【卡堆模型】事件卡也是一个"堆"：从堆顶抽（预设名单优先）。
+     【2026-10-15 作者口径】事件卡**不循环** ⇒ 堆空即止（不再自动重洗补满）。
      里尔亚斯被动①"查询下一张事件卡"看的就是这个堆顶 ⇒ 不需要玩家配置。 */
   var __evAllNames = (__pool || []).map(function (c) { return c.name; });
-  var __evTop = (!__presetEvent && typeof __pilePeek === 'function') ? __pilePeek('events', __evAllNames) : null;
+  var __evTop = (!__presetEvent && typeof __pilePeek === 'function') ? __pilePeek('events', __evAllNames, __evOpt) : null;   /* noRefill：堆空即止，不重洗 ✓ */
   var __evCard = null;
   if (__evTop) {
     for (var __evi = 0; __evi < (__pool || []).length; __evi++) { if (__pool[__evi] && __pool[__evi].name === __evTop) { __evCard = __pool[__evi]; break; } }
-    if (__evCard && typeof __pilePop === 'function') __pilePop('events', __evAllNames, { name: __evCard.name });
+    if (__evCard && typeof __pilePop === 'function') __pilePop('events', __evAllNames, { name: __evCard.name, noRefill: true });   /* noRefill：堆空即止 ✓ */
   }
-  var event = JSON.parse(JSON.stringify(__presetEvent || __evCard || GameRNG.pick(__pool)));
+  /* 【2026-10-15 补·不循环的**关键收口**】原来这里写的是
+       `__presetEvent || __evCard || GameRNG.pick(__pool)`
+     ⇒ 堆空（`__evCard === null`）时会**回落到随机抽** ⇒ 事件卡照样能重复抽到（循环）✗
+     作者口径：事件卡**取完即止** ⇒ 堆空就**不再抽**（写一条日志），不给随机兜底 ✓
+     （`__presetEvent` 是"预设名单"那条路，保留不受影响 ✓） */
+  if (!__presetEvent && !__evCard) {
+    addBattleLog(player, '本局事件卡已全部抽完（不循环）⇒ 本次不再获得事件卡');
+    return;
+  }
+  var event = JSON.parse(JSON.stringify(__presetEvent || __evCard));
   event._category = 'event_cards';
   event.cost = 0;
   
