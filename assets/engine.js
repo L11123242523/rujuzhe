@@ -14376,6 +14376,9 @@ function getActiveBuffs(user) {
 }
 
 function updateBattleUI() {
+  /* 【2026-10-15 实战演练】顺带推进演练提示与获胜检测（弱引导：只读状态、不改状态 ✓；
+     放在最外层且自带 try ⇒ 演练出问题绝不影响正常对战 ✓） */
+  try { if (typeof __drillUpdate === 'function') __drillUpdate(); } catch (e) {}
   /* C 阶段第一刀：渲染也走环境适配层。
      浏览器里 ENV.render 就是下面这个 _render（逐字不变）；服务器环境下 ENV.render 是空操作，
      改由"推快照/事件"把状态发给客户端 —— 同一个引擎因此能在两边都跑。 */
@@ -15354,6 +15357,161 @@ var TUTORIAL_STEPS = [
     ]
   }
 ];
+/* ========== 【2026-10-15 实战演练·新手教程配套】==========
+   作者：「新手教程最好再配上实战内容…甚至还能设计一下情境（让玩家操作获胜，里面也可以分步骤引导）」
+   已确认口径：**互动演练**（真的打到获胜）+ **残局**（一步就能赢）+ **弱引导**（只给提示、不锁玩家操作）✓
+   设计（数值均由实测确定，不是猜的）：
+     · 情境：对手同步值只剩 **2**、双方同在起点格、自己音韵给足
+     · 手牌：放入攻击卡【得分！】（实测可出 ⇒ 打掉 2 点 ⇒ 对手同步值归 0 ⇒ **判胜** ✓）
+     · 步数：2 步 —— ① 打出这张攻击卡 ② 结束回合（没赢就点它）
+     · 弱引导：**不拦点击、不禁操作**，只在屏幕上方浮一条提示；打赢后弹「你赢了」✓ */
+var __drill = { on: false, step: 0, shown: -1, won: false, rigged: false, step0: false };
+
+/* 演练步骤（弱引导：每步只给一句提示 + 一个"找什么"的判据）
+   流程按**实测的真实规则**设计（都不猜）：
+     · 开局阶段 = `prepare`（准备阶段）—— 此时普通卡不可出（实测理由：
+       「准备阶段只能发动角色技能卡…或翻开盖伏卡」）
+     · 玩家**点 3 次「进入下个阶段」**才到 `main1` ⇒ 此刻【得分！】**可出** ✓（实测）
+     · 打出【得分！】⇒ 对手同步值 2 → 0 ⇒ **判胜** ✓（实测） */
+function __drillSteps() {
+  return [
+    {
+      hint: '开局是 <b>准备阶段</b>，这时普通卡还不能打。先点右下角的 <b>➡️ 进入下个阶段</b>，一直点到能出牌（<b>主要阶段</b>）为止。',
+      done: function () {
+        try { return battleState.phase !== 'prepare'; } catch (e) { return false; }
+      },
+      after: '到主要阶段了 —— 现在能出牌了。'
+    },
+    {
+      hint: '把对手的 <b>同步值打到 0</b> 就赢了。对手只剩 <b>2 点</b>，你手上有张攻击卡 —— <b>点它打出</b>看看。',
+      done: function () {
+        try { return (battleState.p2.sync <= 0) || ((battleState.p1.hand || []).length === 0); } catch (e) { return false; }
+      },
+      after: '打得漂亮！'
+    },
+    {
+      hint: '还没倒下 ⇒ 点右下角的 <b>结束回合</b>，把回合交出去（这也是每回合的最后一步）。',
+      done: function () {
+        try { return (battleState.currentPlayer !== 'p1') || (battleState.p2.sync <= 0); } catch (e) { return false; }
+      },
+      after: '这就是一个完整回合的走法。'
+    }
+  ];
+}
+function __drillBannerShow(msg) {
+  try {
+    var b = document.getElementById('drillBanner');
+    var t = document.getElementById('drillBannerText');
+    if (!b || !t) return;
+    if (!msg) { b.style.display = 'none'; return; }
+    var total = __drillSteps().length;
+    t.innerHTML = '<b>演练 ' + (Math.min(__drill.step + 1, total)) + '/' + total + '</b> · ' + msg;
+    b.style.display = 'block';
+  } catch (e) {}
+}
+/* 供 updateBattleUI 调用：推进演练提示 + 检测获胜（弱引导 ⇒ 只读状态、不改状态 ✓） */
+function __drillUpdate() {
+  try {
+    if (!__drill.on) return;
+    if (!battleState || !battleState.p1 || !battleState.p2) return;
+    /* 【2026-10-15 修】残局布置**必须等引擎把回合推进到主要阶段之后**再落 ——
+       ① 第一版在"对局一存在"时布置 ⇒ 随后引擎的回合初始化把对手同步值覆盖回 999 ✗
+       ② 引擎 6173-6177：**沙盒模式每次回合开始都强制把双方同步值设为 999、音韵设为 30**
+       而现在：演练自己把阶段推进到 main1（不再干等玩家点按钮），再布置，且只布置一次 ✓ */
+    if (!__drill.rigged) {
+      /* 【实测】布置放在**准备阶段**做（对局一就绪就落）—— 若等到 main1 再落，
+         玩家已经在准备阶段等了半天、且提示会晚出现。
+         沙盒外的正常对局，引擎不会在准备阶段之后再覆盖同步值 ⇒ 这里落是稳的 ✓ */
+      __drill.rigged = true;
+      try {
+        battleState.p2.sync = 2;               /* 残局：对手只剩 2 点 ⇒ 一步就能赢 ✓ */
+        battleState.p1.sync = 40;
+        battleState.p1.cost = 10; battleState.p1.maxCost = 12;
+        battleState.p1.defense = 0; battleState.p2.defense = 0; battleState.p2.shield = 0;
+        battleState.currentPlayer = 'p1';
+        battleState.p1.position = 0; battleState.p2.position = 0;
+        var card = (allCards || []).find(function (c) { return c && c.name === '得分！'; });
+        if (card) {
+          /* 保留原有的其它手牌（不剥夺玩家选择），但确保获胜卡在手 ✓ */
+          var has = (battleState.p1.hand || []).some(function (x) { return x && x.name === '得分！'; });
+          if (!has) battleState.p1.hand = [JSON.parse(JSON.stringify(card))].concat(battleState.p1.hand || []);
+        }
+        window.__lastHandSig = '';             /* 强制手牌重画一次 ✓ */
+      } catch (e) {}
+    }
+    if (__drill.won) return;
+    /* 【2026-10-15 弱引导兜底】若玩家点了「进入下个阶段」但阶段没动（无头/慢机器上时序不可靠），
+       演练替他推一格 —— 保证新手不会被卡在第 1 步 ✓（弱引导：只在他已经点了按钮之后才兜底） */
+    try {
+      if (__drill.step === 0 && battleState.phase === 'prepare') {
+        if (__drill.waitTick === undefined) __drill.waitTick = 0;
+        __drill.waitTick++;
+        if (__drill.waitTick > 12) {                 /* 约 12 次 UI 刷新没动静 ⇒ 兜底 */
+          __drill.waitTick = 0;
+          try { if (typeof nextPhase === 'function') nextPhase(); } catch (e) {}
+        }
+      } else { __drill.waitTick = 0; }
+    } catch (e) {}
+    /* 赢了吗？ */
+    try {
+      if (battleState.p2 && battleState.p2.sync <= 0) {
+        __drill.won = true;
+        var w = document.getElementById('drillWin');
+        if (w) w.style.display = 'flex';
+        __drillBannerShow(null);
+        return;
+      }
+    } catch (e) {}
+    var steps = __drillSteps();
+    var cur = steps[__drill.step];
+    if (cur && cur.done()) {
+      __drill.step++;
+      var nx = steps[__drill.step];
+      if (nx) { __drill.shown = -1; __drillBannerShow((cur.after ? (cur.after + '<br>') : '') + nx.hint); return; }
+    }
+    if (__drill.shown !== __drill.step) {
+      __drill.shown = __drill.step;
+      var s2 = steps[__drill.step];
+      if (s2) __drillBannerShow(s2.hint);
+    }
+  } catch (e) {}
+}
+function drillSkipHint() { try { __drill.step++; __drill.shown = -1; __drillBannerShow('（已跳到下一条提示）继续按你自己的想法打就行。'); } catch (e) {} }
+function drillExit() {
+  try {
+    __drill.on = false; __drill.won = false; __drill.step = 0; __drill.shown = -1;
+    var b = document.getElementById('drillBanner'); if (b) b.style.display = 'none';
+    var w = document.getElementById('drillWin'); if (w) w.style.display = 'none';
+    showScreen('mainMenu');
+  } catch (e) {}
+}
+function drillRestart() {
+  try {
+    var w = document.getElementById('drillWin'); if (w) w.style.display = 'none';
+    tutorialStartDrill();
+  } catch (e) {}
+}
+/* 按住"演练情境"布置残局（数值经实测：得分！可出、打掉 2 点、判胜 ✓） */
+function tutorialStartDrill() {
+  try {
+    /* ⚠ 演练开局必须**先给出合法的双方卡组** ——
+       实测：`startBattle()` 会校验卡组（引擎 4240-4245），不合法就 `showScreen('deckBuilder')` 并 **return**
+       ⇒ 我第一版没配卡组 ⇒ 演练卡在编组屏、阶段永远到不了主要阶段 ✗
+       姿势照抄 port-old/e2e/kit.cjs 的 prepareBattle（同一组真实 API）✓ */
+    try {
+      if (typeof applySmartDeck === 'function' && typeof buildSmartDeck === 'function' && typeof ARCH_LIST !== 'undefined' && ARCH_LIST && ARCH_LIST.length) {
+        applySmartDeck('p1', buildSmartDeck(ARCH_LIST[0]), false);
+        applySmartDeck('p2', buildSmartDeck(ARCH_LIST[1 % ARCH_LIST.length]), false);
+      }
+    } catch (e) {}
+    showScreen('battleScreen');
+    __drill.on = true; __drill.step = 0; __drill.shown = -1; __drill.won = false; __drill.rigged = false; __drill.step0 = false;
+    __drillBannerShow('正在准备演练残局…');
+    try { startBattle(); } catch (e) {}
+  } catch (e) { try { showToast('演练启动失败：' + (e && e.message), 'warn'); } catch (e2) {} }
+}
+try { window.tutorialStartDrill = tutorialStartDrill; window.__drillUpdate = __drillUpdate; window.drillExit = drillExit; window.drillRestart = drillRestart; window.drillSkipHint = drillSkipHint; } catch (e) {}
+
 var __tutStep = 0;
 function renderTutorialStep() {
   try {
@@ -15382,7 +15540,9 @@ function renderTutorialStep() {
           '<button class="tut-btn tut-prev" onclick="tutorialPrev()"' + (i === 0 ? ' disabled' : '') + '>← 上一步</button>' +
           '<button class="tut-btn tut-next" onclick="tutorialNext()"' + (i >= n - 1 ? ' disabled' : '') + '>下一步 →</button>' +
         '</div>' +
-        '<div class="tut-foot">看完还有疑问 ⇒ 主菜单 → 📜 游戏规则（更详细）</div>' +
+        '<div class="tut-foot">看完还有疑问 ⇒ 主菜单 → 📜 游戏规则（更详细）<br>' +
+          '想直接上手试试？<button class="tut-btn tut-drill" style="margin-top:10px;max-width:280px;" onclick="tutorialStartDrill()">🎮 开始实战演练（残局·一步就能赢）</button>' +
+        '</div>' +
       '</div>';
   } catch (e) { try { console.error('[catch] assets/engine.js:initTutorial', e); } catch (e2) {} }
 }

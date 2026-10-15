@@ -3676,3 +3676,40 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   #tutorialScreen .tut-btn{ min-height:48px; font-size:14px; }
 }
 /* ===== 新手教程屏样式结束 ===== */
+
+/* ===== 【2026-10-15 实战演练（新手教程配套）】===== */
+/* 提示条：悬浮在画面上方居中，**不遮住操作**（pointer-events 只在按钮上） */
+#drillBanner{ position:fixed; left:50%; transform:translateX(-50%); top:10px; z-index:99990;
+  max-width:min(560px,94vw); padding:10px 14px; border-radius:14px;
+  background:linear-gradient(165deg,rgba(9,14,26,.95),rgba(15,23,40,.95));
+  border:1px solid var(--line-2); border-left:4px solid var(--gold);
+  box-shadow:0 18px 40px -18px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.08);
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); pointer-events:none; }
+#drillBannerText{ color:var(--ink); font-size:14px; line-height:1.7; }
+#drillBannerText b{ color:var(--gold-hi); font-weight:800; }
+#drillBanner .drill-banner-btns{ display:flex; gap:8px; margin-top:8px; pointer-events:auto; }
+#drillBanner .drill-banner-btn{ font-size:12px; padding:5px 10px; border-radius:9px; cursor:pointer;
+  background:var(--glass); border:1px solid var(--line-2); color:var(--ink); transition:all .16s var(--ease); }
+#drillBanner .drill-banner-btn:hover{ border-color:var(--gold); color:var(--gold); }
+#drillBanner .drill-exit{ opacity:.75; }
+/* 获胜弹窗 */
+#drillWin{ position:fixed; inset:0; z-index:99995; display:flex; align-items:center; justify-content:center;
+  background:rgba(4,7,14,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+#drillWin .drill-win-box{ max-width:min(520px,92vw); padding:26px 24px; border-radius:18px; text-align:center;
+  background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)); border:1px solid var(--line-2);
+  box-shadow:0 30px 70px -20px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.08); }
+#drillWin .drill-win-title{ color:var(--gold); font-size:26px; font-weight:900; letter-spacing:1px; margin-bottom:12px; }
+#drillWin .drill-win-text{ color:rgba(255,255,255,.86); font-size:15px; line-height:1.9; margin-bottom:8px; }
+#drillWin .drill-win-text b{ color:var(--gold-hi); }
+#drillWin .drill-win-btns{ display:flex; gap:12px; margin-top:18px; }
+#drillWin .drill-banner-btn{ flex:1; min-height:48px; border-radius:12px; font-size:15px; font-weight:800; cursor:pointer;
+  background:var(--glass); border:1px solid var(--line-2); color:var(--ink); transition:all .18s var(--ease); }
+#drillWin .drill-banner-btn:hover{ border-color:var(--gold); color:var(--gold); }
+#drillWin .drill-exit{ background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)); color:#2b2008; border-color:transparent; }
+@media (max-width:520px){
+  #drillBanner{ top:6px; padding:8px 11px; }
+  #drillBannerText{ font-size:13px; }
+  #drillWin .drill-win-box{ padding:20px 16px; }
+  #drillWin .drill-win-title{ font-size:22px; }
+}
+/* ===== 实战演练样式结束 ===== */
