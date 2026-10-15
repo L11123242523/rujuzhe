@@ -594,8 +594,13 @@ var Online = {
     this._rememberRelay((this._serverInput()||'').trim());
     var http=this._httpOf(this.relayBase);
     this.status('正在向中继服务器申请房号…\n'+http+'/newroom'+(this._isServerAuthority()?'\n（服务器权威模式：规则跑在服务器里，双方都只是客户端）':''));
-    fetch(http+'/newroom', { cache:'no-store' })
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    /* 申请房号也走重试（0.6/1.2/2.0 秒，最多 3 次）⇒ 瞬时抖动自动恢复 ✓ */
+    this._withRetry(function(){
+      return fetch(http+'/newroom', { cache:'no-store' }).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+    }, 3, [600,1200,2000], function(n, d, err){
+      self.status('联机服务器有点忙，正在重试（第 '+n+'/3 次）…');
+      try{ console.error('[联机] 申请房号第 '+n+' 次失败（'+((err&&err.message)||err)+'），'+d+'ms 后重试；地址='+http+'/newroom'); }catch(e){}
+    })
       .then(function(j){
         var code=String((j&&j.code)||'').toUpperCase();
         if(!/^[A-Z0-9]{4}$/.test(code)) throw new Error('服务器未返回有效房号');
@@ -605,8 +610,9 @@ var Online = {
       })
       .catch(function(e){
         var msg=(e&&e.message)||String(e);
-        self.status('申请房号失败：'+msg+'\n地址：'+http+'/newroom\n（本地调试请先运行 node online_server.js）');
-        showToast('无法创建房间：'+msg+'\n（本地调试请先运行 node online_server.js）', 'warn');
+        try{ console.error('[联机] 申请房号失败：'+msg+'（地址：'+http+'/newroom）—— 本地调试需先运行 node online_server.js；线上需中继可用'); }catch(e2){}
+        self.status('联机服务器暂时连不上（已重试 3 次）。\n可以：① 稍后再点一次「创建房间」 ② 换个网络再试 ③ 单机对战不受影响 ✓');
+        showToast('联机服务器暂时连不上，请稍后再试（或换个网络）', 'warn');
       });
   },
   joinRoom:function(){
@@ -662,10 +668,27 @@ var Online = {
            ② 重试期间状态栏写进度；全部失败才提示，且用**玩家能懂的话**；
            ③ 开发者细节（地址、node online_server.js）改为 console 日志，便于我排查 ✓
      注意：只重试「**首次连接**」；已连上之后的掉线走既有的重连/宽限逻辑，不在这里管 ✓ */
+  /* 【2026-10-15 联机加固·第 1 步】带**有上限的确定性重试**，专治「瞬时抖动」。
+     为什么需要：建房是两步（先 fetch /newroom 拿房号，再连 ws）；只要任一步抖一下，旧实现就直接报错 ✗
+     与铁律 0 不冲突：这不是「靠时间猜状态」的兜底阈值，而是「同一请求失败后重发有限次」（失败最终仍如实上报）✓ */
+  _withRetry:function(fn, tries, delays, onProgress){
+    var self=this; tries=tries||3; delays=delays||[600,1200,2000];
+    function attemptOnce(n){
+      return Promise.resolve()
+        .then(function(){ return fn(); })
+        .catch(function(err){
+          if(n>=tries) throw err;
+          var d=delays[Math.min(n-1, delays.length-1)];
+          try{ if(onProgress) onProgress(n, d, err); }catch(e){}
+          return new Promise(function(res){ setTimeout(res, d); }).then(function(){ return attemptOnce(n+1); });
+        });
+    }
+    return attemptOnce(1);
+  },
   _connect:function(onOpen, roomCode){
     var self=this;
     try{ if(this.ws){ try{this.ws.close();}catch (e) { try { console.error('[catch] assets/engine.js:643', e); } catch (e2) {} } } }catch (e) { try { console.error('[catch] assets/engine.js:643', e); } catch (e2) {} }
-    var MAX_RETRY=3, DELAYS=[800,1600,2400];
+    var MAX_RETRY=3, DELAYS=[600,1200,2000];   /* 与申请房号的重试节奏一致 ⇒ 最坏总时长可控 ✓ */
     var attempt=0;
     self._connectTry=0;   /* 供探针读取：本函数发起了几次尝试 */
     function targetNow(){ return roomCode ? self._roomUrl(roomCode) : self.relayBase; }
