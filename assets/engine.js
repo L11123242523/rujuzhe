@@ -17014,6 +17014,57 @@ function __movePreviewEnd() {
   try { __busSetChooserUi(false); } catch (e) { try { console.error('[catch] assets/engine.js:15713', e); } catch (e2) {} }
 }
 
+/* 【2026-10-15 作者报「谢幕后退过程中触碰到其他玩家了没有造成4面骰判定伤害」⇒ 结构修 ✓】
+   卡面 SP：后退过程中触碰到其他玩家 ⇒ 造成 1 次四面骰判定伤害；目标与自己同格 ⇒ 改为六面骰。
+   实测：该效果的实现**原本不存在**（parseAttackRange 只把它用于「可玩性判定」）✗
+   这里补上收口：路径判定复用 canReachByRange 的 pathBack（含第0步=同格），
+   判定伤害走统一出口（judgePerform → dealDamageWithResponse{judge:true}），与「来自地狱的盒子SP」同一范式 ✓
+   仅在**后退**移动时生效（n<0）；只对其他玩家生效（自己不算）✓ */
+function __resolveBackPathTouch(user, n) {
+  try {
+    if (!n || n >= 0) return;            /* 只处理后退 ✓ */
+    var p = (typeof battleState !== 'undefined') ? battleState[user] : null;
+    if (!p) return;
+    var from = (p._lastMoveFrom != null) ? p._lastMoveFrom : ((p.position - n) % 42 + 42) % 42;
+    var steps = Math.abs(n);
+    var foes = [];
+    Object.keys(battleState).forEach(function (k) {
+      if (!/^p\d+$/.test(k) || k === user) return;
+      var q = battleState[k]; if (!q || q.position == null) return;
+      /* 后退路径上的判定（复用现成实现；同格 = 第0步） */
+      var onPath = false;
+      try { onPath = canReachByRange({ kind: 'pathBack', n: steps }, from, q.position); } catch (e) {}
+      /* ⚠ 同格必须在**移动前**判定：applyMove 已把 p.position 改成落点，
+         用移动后位置判同格永远为 false（实测踩过：同格情形不触发）✗
+         `from` = 本次移动前所在格 ⇒ 对手若在 from 即「起步同格」，按卡面走六面骰 ✓ */
+      var sameCell = (q.position === from) || (q.position === p.position);
+      if (onPath || sameCell) foes.push({ who: k, sameCell: sameCell });
+    });
+    if (!foes.length) return;
+    foes.forEach(function (fo) {
+      var foe = fo.who;
+      var q = battleState[foe]; if (!q) return;
+      var sameCell = fo.sameCell;
+      var sides = sameCell ? 6 : 4;
+      var label = '谢幕·SP' + (sameCell ? '（同格·六面骰）' : '（路径触碰·四面骰）');
+      function __doRoll() {
+        var cb = function (roll, __cxl) {
+          if (__cxl || roll == null) { addBattleLog(user, '【谢幕·SP】判定被连锁无效，不造伤害'); return; }
+          try { dealDamageWithResponse(foe, roll, '谢幕·SP', null, null, user, { judge: true }); } catch (e) {}
+          addBattleLog(user, '【谢幕·SP】后退路径上触碰到' + playerDisplayName(foe) + '，' + sides + '面骰' + roll + '点 ⇒ 造成' + roll + '点判定伤害' + (sameCell ? '（同格）' : ''));
+        };
+        if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: sides, label: label }, cb);
+        else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: sides, label: label }, cb);
+        else cb(__rollFor(user, sides, label));
+      }
+      var __ol = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
+      if (__ol && user === 'p2') {
+        /* 联机：客人（p2）的判定由其本人确认（与其它座位判定同一套入口）✓ */
+        try { onlineDecideModal('p2', '谢幕·SP（对手）', '后退路径触碰判定', '将进行 ' + sides + ' 面骰判定伤害', ['继续'], __doRoll); } catch (e) { __doRoll(); }
+      } else { __doRoll(); }
+    });
+  } catch (e) { try { console.error('[catch] assets/engine.js 谢幕路径触碰', e); } catch (e2) {} }
+}
 function applyMove(user, signedN) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
   /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
@@ -17043,6 +17094,10 @@ function applyMove(user, signedN) {
   }
   rioAccumulateMove(user, n);
   accumulateMovePassives(user, n, oldPos); // 卡牌效果移动同样累计直尺SP/小春先机
+  /* 【2026-10-15】后退路径触碰判定（【谢幕】SP）⇒ 仅后退时生效 ✓
+     放在这里的原因：_lastMoveFrom/_lastMoveSteps 已在上面记好、且**尚未**触发落点格子效果
+     （与「移动中触碰」的语义一致：先触碰造伤，再结算落点格子）✓ */
+  try { __resolveBackPathTouch(user, n); } catch (e) {}
   if (p._rioMizugiSP && !p._rioMizugiFirstMove) {
     p._rioMizugiFirstMove = true;
     if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
