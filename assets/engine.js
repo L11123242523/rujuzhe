@@ -12353,6 +12353,18 @@ function __queueTileEffect(player) {
    （格子效果等）。引擎标准的 effectEngine._pendingTriggers 属引擎核心，暂时并存；
    但**排空点只有一个**（__drainAllWhenIdle），顺序固定：先引擎触发、后自有容器。 */
 var __drainRetryTimer = null;
+/* 【2026-10-15 作者报「狡黠之跃（联机·客机）跳到对行没触发格子效果」⇒ 先加**只读诊断** ✓
+   原来排空重试撞到上限时是**静默 return** ⇒ 排队的效果被丢掉、日志里一点痕迹都没有（无从定位）✗
+   这里抽成独立小函数（不塞进 __drainAllWhenIdle 的函数体，避免动了那道门禁的窗口判定）✓
+   **只写日志**：不改任何判定、不改流程、不重试更多次 ✓ */
+function __logTileDrainGiveUp(tries) {
+  try {
+    var __why = '';
+    try { if (typeof __effectsResolving === 'function' && __effectsResolving()) __why += '效果结算未退出 '; } catch (e) {}
+    try { if (typeof TW !== 'undefined' && TW && TW.active) __why += '连锁状态机仍在运行 '; } catch (e) {}
+    addBattleLog('system', '⚠【格子效果·诊断】排队的格子效果重试 ' + tries + ' 次（约 6 秒）仍未空闲 ⇒ 放弃处理（原因：' + (__why || '未知') + '）');
+  } catch (e) {}
+}
 function __drainAllWhenIdle(reason) {
   try {
     var tries = 0;
@@ -12366,7 +12378,11 @@ function __drainAllWhenIdle(reason) {
     function __step() {
       __drainRetryTimer = null;
       try {
-        if (!__idle()) { if (++tries <= 40) { __drainRetryTimer = setTimeout(__step, 200); } return; }
+        if (!__idle()) {
+          if (++tries <= 40) { __drainRetryTimer = setTimeout(__step, 200); }
+          else { __logTileDrainGiveUp(tries); }   /* 【2026-10-15】只写诊断日志，不改流程 ✓ */
+          return;
+        }
         try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) { try { console.error('[catch] assets/engine.js:11278', e); } catch (e2) {} }
         try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:11279', e); } catch (e2) {} }
       } catch (e) { try { console.error('[catch] assets/engine.js:11280', e); } catch (e2) {} }
