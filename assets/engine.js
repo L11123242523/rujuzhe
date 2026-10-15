@@ -15286,12 +15286,119 @@ function closeAnnouncements() {
   if (m) m.classList.remove('active');
 }
 
+/* ========== 【2026-10-15 作者优化点 2：新手教程】==========
+   形式：**单独一屏 + 分步引导**（作者选定）；文字由 AI 起草、**作者审核**后再定稿 ✓
+   与规则页同款做法：内容在这里生成、填进 #tutorialContent（不散落在 game.html）✓
+   内容口径：**只讲已有的真实规则**（回合流程照抄 initRules 的六阶段；胜因照抄"同步值归 0"），
+            不含任何我自己发明的机制；拿不准的写法会在这里标注待作者确认 ✓ */
+var TUTORIAL_STEPS = [
+  {
+    title: '🎯 这个游戏怎么算赢',
+    body: [
+      '把对手的**同步值**打到 **0**，你就赢了。',
+      '你自己的**同步值**掉到 0，你就输了 —— 所以别只顾着进攻。',
+      '双方同步值都显示在界面上（❤️ 同步值），随时能看。'
+    ]
+  },
+  {
+    title: '🎲 一个回合有几步',
+    body: [
+      '每个回合按顺序走 6 步：',
+      '1️⃣ **准备阶段** — 回复 5 点音韵值，抽 1 张牌',
+      '2️⃣ **主要阶段 1** — 出牌（攻击卡 / 技能卡 / 道具卡）',
+      '3️⃣ **投骰阶段** — 投骰子，决定这回合走几步',
+      '4️⃣ **移动** — 棋子按点数移动，**落到的格子会触发效果**',
+      '5️⃣ **主要阶段 2** — 还能继续出牌',
+      '6️⃣ **结束阶段** — 手牌上限 5 张，多的要弃掉'
+    ]
+  },
+  {
+    title: '💎 出牌要花音韵值',
+    body: [
+      '每张卡左上角的数字就是它的**费用**（要花多少音韵值）。',
+      '音韵值每回合**准备阶段回复 5 点**，显示在界面上（💎 音韵值）。',
+      '音韵值不够的卡会**灰掉**，点它会告诉你不行的原因。',
+      '卡出完会进**墓地**；有些卡能从墓地回收再用一次。'
+    ]
+  },
+  {
+    title: '🗺️ 地图与格子',
+    body: [
+      '棋盘是一圈格子，你的棋子和对手各占一格。',
+      '**落到的格子会触发效果**：抽卡格、馈赠格、灵感格、事件格、GAME 格…',
+      '格子效果是**双方都能用**的 —— 走在对手前面抢先踩到强势格子，也是战术。',
+      '界面右上角可以切换视角；拖动旋转、滚轮缩放能看清每一格。'
+    ]
+  },
+  {
+    title: '⬆️ 升级与激励点数',
+    body: [
+      '打牌和触发格子会累积**激励点数**（界面上能看到进度条）。',
+      '攒满后**升级**，等级越高能做的事情越多。',
+      '**引导核心**可以消耗 1 个直接推进升级进度。',
+      '角色有【被动】和【SP】两种效果：**队长**提供被动 + SP，**队员**只提供 SP。'
+    ]
+  },
+  {
+    title: '✅ 第一次玩，照着做就行',
+    body: [
+      '1. 先在主菜单点 **🃏 卡组编组**，选一队角色、配好卡组（第一次可以先用默认的）',
+      '2. 点 **⚔️ 单机对战** 开局',
+      '3. 轮到你时，**第一步先出牌** —— 低费的攻击卡或道具卡都行',
+      '4. 然后点 **进入投骰阶段**，投骰子、走棋子',
+      '5. 走到格子上，**看看格子触发了什么**（这是这游戏最有意思的地方）',
+      '6. 音韵值用完了就点 **结束回合**',
+      '⚠️ 别急着赢 —— 第一局的目标是**看懂流程**。',
+      '看不懂某张卡？**鼠标悬停**（手机：**长按**）就能看大图。',
+      '还有更详细的规则：主菜单 → **📜 游戏规则** ✓'
+    ]
+  }
+];
+var __tutStep = 0;
+function renderTutorialStep() {
+  try {
+    var box = document.getElementById('tutorialContent');
+    if (!box) return;
+    var n = TUTORIAL_STEPS.length;
+    var i = Math.max(0, Math.min(n - 1, __tutStep));
+    var st = TUTORIAL_STEPS[i];
+    var dots = '';
+    for (var k = 0; k < n; k++) dots += '<span class="tut-dot' + (k === i ? ' on' : '') + '"></span>';
+    var bodyHtml = (st.body || []).map(function (line) {
+      /* 只把 **…** 包起来的部分加粗（轻量处理，避免引入 markdown 依赖）✓ */
+      return '<p class="tut-line">' + String(line).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</p>';
+    }).join('');
+    box.innerHTML =
+      '<div class="tut-wrap">' +
+        '<div class="tut-top">' +
+          '<span class="tut-count">第 ' + (i + 1) + ' / ' + n + ' 步</span>' +
+          '<span class="tut-dots">' + dots + '</span>' +
+        '</div>' +
+        '<div class="tut-card">' +
+          '<h3 class="tut-title">' + st.title + '</h3>' +
+          bodyHtml +
+        '</div>' +
+        '<div class="tut-nav">' +
+          '<button class="tut-btn tut-prev" onclick="tutorialPrev()"' + (i === 0 ? ' disabled' : '') + '>← 上一步</button>' +
+          '<button class="tut-btn tut-next" onclick="tutorialNext()"' + (i >= n - 1 ? ' disabled' : '') + '>下一步 →</button>' +
+        '</div>' +
+        '<div class="tut-foot">看完还有疑问 ⇒ 主菜单 → 📜 游戏规则（更详细）</div>' +
+      '</div>';
+  } catch (e) { try { console.error('[catch] assets/engine.js:initTutorial', e); } catch (e2) {} }
+}
+function tutorialNext() { if (__tutStep < TUTORIAL_STEPS.length - 1) { __tutStep++; renderTutorialStep(); } }
+function tutorialPrev() { if (__tutStep > 0) { __tutStep--; renderTutorialStep(); } }
+function tutorialGoto(i) { __tutStep = Math.max(0, Math.min(TUTORIAL_STEPS.length - 1, parseInt(i, 10) || 0)); renderTutorialStep(); }
+function initTutorial() { __tutStep = 0; renderTutorialStep(); }
+try { window.initTutorial = initTutorial; window.tutorialNext = tutorialNext; window.tutorialPrev = tutorialPrev; window.tutorialGoto = tutorialGoto; } catch (e) {}
+
 // 页面加载完成后初始化
 window.addEventListener('load', function() {
   initCards();
   __captureCardDefs();          // 载入期冻下"干净的"卡牌定义主数据（新实例各持一份深拷贝）
   tryLoadDeckConfig();
   initRules();
+  initTutorial();               /* 【2026-10-15 优化点 2】新手教程：与规则页同一时机渲染一次 ✓ */
   renderAnnouncements();        // 公告（含历史公告）与规则页同一时机渲染一次，点按钮直接显示
   console.log('游戏加载完成，共 ' + allCards.length + ' 张卡牌');
   // 调试/自动化钩子：?debug3d=1 直接进入对战（便于无头浏览器截图检查 3D 地图）

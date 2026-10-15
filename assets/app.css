@@ -3651,6 +3651,28 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   body:not(.ui-classic) #battleScreen .grave-zone{ width:72px !important; height:88px !important; }
 }
 
-
-
-
+/* ===== 【2026-10-15 新手教程屏（优化点 2）】===== */
+#tutorialScreen .tut-wrap{ max-width:760px; margin:0 auto; padding:6px 4px 28px; }
+#tutorialScreen .tut-top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 2px 12px; flex-wrap:wrap; }
+#tutorialScreen .tut-count{ color:var(--gold); font-weight:800; letter-spacing:.6px; font-size:14px; }
+#tutorialScreen .tut-dots{ display:flex; gap:6px; align-items:center; }
+#tutorialScreen .tut-dot{ width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.22); display:inline-block; transition:background .2s var(--ease),transform .2s var(--ease); }
+#tutorialScreen .tut-dot.on{ background:var(--gold); transform:scale(1.25); }
+#tutorialScreen .tut-card{ background:linear-gradient(165deg,var(--md2-glass),var(--md2-glass2)); border:1px solid var(--line-2); border-radius:var(--r-lg); padding:20px 22px; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); box-shadow:0 20px 44px -22px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.07); }
+#tutorialScreen .tut-title{ color:var(--gold); font-size:20px; font-weight:900; letter-spacing:.6px; margin-bottom:14px; }
+#tutorialScreen .tut-line{ color:rgba(255,255,255,.86); line-height:1.9; font-size:15px; margin-bottom:8px; }
+#tutorialScreen .tut-line b{ color:var(--gold-hi); font-weight:800; }
+#tutorialScreen .tut-nav{ display:flex; gap:12px; margin-top:16px; }
+#tutorialScreen .tut-btn{ flex:1; min-height:50px; border-radius:12px; font-size:15px; font-weight:800; letter-spacing:.5px; cursor:pointer; background:var(--glass); border:1px solid var(--line-2); color:var(--ink); transition:all .18s var(--ease); }
+#tutorialScreen .tut-btn:hover:not(:disabled){ border-color:var(--gold); color:var(--gold); transform:translateY(-1px); }
+#tutorialScreen .tut-next{ background:linear-gradient(135deg,var(--gold-hi),var(--gold-deep)); color:#2b2008; border-color:transparent; }
+#tutorialScreen .tut-next:hover:not(:disabled){ color:#2b2008; filter:brightness(1.06); }
+#tutorialScreen .tut-btn:disabled{ opacity:.35; cursor:not-allowed; }
+#tutorialScreen .tut-foot{ margin-top:14px; text-align:center; color:rgba(255,255,255,.55); font-size:13px; }
+@media (max-width:520px){
+  #tutorialScreen .tut-card{ padding:16px 15px; }
+  #tutorialScreen .tut-title{ font-size:18px; }
+  #tutorialScreen .tut-line{ font-size:14px; line-height:1.85; }
+  #tutorialScreen .tut-btn{ min-height:48px; font-size:14px; }
+}
+/* ===== 新手教程屏样式结束 ===== */
