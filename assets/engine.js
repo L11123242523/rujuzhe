@@ -3182,10 +3182,49 @@ function enterOnlineDeckMode() {
   } catch (e) { try { console.error('[catch] assets/engine.js:3015', e); } catch (e2) {} }
 }
 /** 主菜单 → 联机对战：切卡组 → 进大厅 → 刷新状态栏（三件事以前只做了后两件） */
+/* 【2026-10-15 作者点名需求】房间里编辑联机卡组 —— 两个入口函数
+   为什么需要：卡组编辑按钮原来只在主菜单，房间里没有入口；玩家只能「离开房间 → 回主菜单改 → 重新建房」✗
+   实测确认：切到卡组界面**不会**断开联机连接（wsState 仍为 1、房号仍在、deckSetMode 仍为 'online'）
+   ⇒ 所以只要提供入口 + 返回路，并且**绝不调用 Online.leave()**，就能"边等对手边改卡组" ✓
+   返回去向：进卡组界面前记下**当时在哪个界面**，返回时回到那里（大厅 / 主菜单）✓ */
+var __deckFromScreen = null;
+function __refreshDeckBackBtn() {
+  try {
+    var b = document.getElementById('deckBackBtn');
+    if (!b) return;
+    var inRoom = (typeof Online !== 'undefined' && Online && Online.connected);
+    if (__deckFromScreen === 'onlineLobby' && inRoom) { b.textContent = '← 返回房间'; b.title = '回到房间（不会离开房间）'; }
+    else { b.textContent = '← 返回主菜单'; b.title = ''; }
+  } catch (e) {}
+}
+/** 从**房间**里打开联机卡组编辑（不离开房间） */
+function openDeckBuilderFromRoom() {
+  __deckFromScreen = 'onlineLobby';
+  try { enterOnlineDeckMode(); } catch (e) {}
+  openDeckBuilder('online');
+  __refreshDeckBackBtn();
+}
+/** 卡组界面的返回按钮：从房间进来就回房间，否则回主菜单 */
+function returnFromDeckBuilder() {
+  var back = __deckFromScreen;
+  __deckFromScreen = null;
+  /* 保存这次编辑（与"返回主菜单"同样的落盘路径，保证不丢）✓ */
+  try { if (typeof saveDeckConfig === 'function') saveDeckConfig(); } catch (e) {}
+  try {
+    if (back === 'onlineLobby' && typeof Online !== 'undefined' && Online && Online.connected) {
+      showScreen('onlineLobby');
+      try { Online.status('已更新联机卡组。按「✓ 准备」后，新卡组会在开局时生效 ✓'); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
+  showScreen('mainMenu');
+}
 function openOnlineLobby() {
   enterOnlineDeckMode();
   try { showScreen('onlineLobby'); } catch (e) { try { console.error('[catch] assets/engine.js:3020', e); } catch (e2) {} }
   try { Online.refreshLobby(); } catch (e) { try { console.error('[catch] assets/engine.js:3021', e); } catch (e2) {} }
+  __deckFromScreen = null;   /* 回大厅 ⇒ 下次从卡组界面返回时按"回主菜单"处理（除非又从房间进来）✓ */
+  __refreshDeckBackBtn();
 }
 /** 一键清空某一方（作者要求：现在只能一张张换） */
 function clearDeckSide(player) {
@@ -25622,6 +25661,8 @@ try { window.__cloneDeckSlots = __cloneDeckSlots; } catch (e) {}
 try { window.applySmartDeck = applySmartDeck; } catch (e) {}
 try { window.randomDeck = randomDeck; } catch (e) {}
 try { window.recommendDeck = recommendDeck; } catch (e) {}
+try { window.openDeckBuilderFromRoom = openDeckBuilderFromRoom; } catch (e) {}
+try { window.returnFromDeckBuilder = returnFromDeckBuilder; } catch (e) {}
 try { window.nonNull = nonNull; } catch (e) {}
 try { window.carryBelongs = carryBelongs; } catch (e) {}
 try { window.validateDeck = validateDeck; } catch (e) {}
