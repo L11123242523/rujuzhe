@@ -8026,6 +8026,29 @@ function __phaseOfTiming(timing) {
   if (t.indexOf('end') === 0) return 'end';
   return '';
 }
+/* 【2026-10-16 结构修 ✓·**"是不是全时点卡"只能有一份判据**】
+   背景（实测，不是印象）：雷閃 的名字名单原来写在 `__cardTimingAllowed` **内部**，而阶段时点候选
+   （`__runTimingTriggers`）在调 `__cardTimingAllowed` 之前**还有一道 `__pFull` 闸**，那道闸**不认名单**
+   —— 它只认 `_category==='skill_cards'` / `from==='event'` / 卡面措辞。
+   雷閃 卡面写的是「其他玩家回合」（**没有「自己或」三个字**）⇒ 两道措辞正则都不命中 ⇒ `__pFull` 判 false
+   直接丢，名单**永远够不着** ⇒ 作者要的"像技能卡一样（投掷/结束阶段也能主动发动）"**一直没达成** ✗
+   A/B 实测：同一份输入 `collectChainable('p1') = ["鼓舞@hand","雷閃@permSP"]`，
+   阶段时点窗口候选却只有 `["鼓舞"]` —— 技能卡进了、雷閃没进。
+   ⇒ 修法：把"全时点"收成**这一个**判据（名单 + 措辞），两道闸共用 ✓；
+     不再一处写名单、一处写措辞（同一件事写两份正是本仓库反复踩的坑 ✗）。
+   ⚠ 名单里只放"卡面自述跨回合可发动、且没有盖伏前置"的卡；要增减请作者点名 ✓ */
+var __FULLTIME_BY_NAME = ['雷閃'];
+var __FULLTIME_TEXT = /全时点|任意时点|任何时候|任意时机|自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/;
+function __isFullTimeCard(card, from, txt) {
+  try {
+    if (!card) return false;
+    if (card._category === 'skill_cards') return true;                 /* 技能卡＝全时点（作者 2026-09-13 口径） */
+    if (from === 'event') return true;                                 /* 事件卡＝全时点 */
+    if (__FULLTIME_BY_NAME.indexOf(String(card.name || '')) >= 0) return true;
+    var t = (txt != null) ? String(txt) : String((card.effect || '') + ' ' + (card.sp || '') + ' ' + (card.text || ''));
+    return __FULLTIME_TEXT.test(t);
+  } catch (e) { return false; }
+}
 function __cardTimingAllowed(card, side, timing) {
   try {
     if (!card) return false;
@@ -8061,19 +8084,19 @@ function __cardTimingAllowed(card, side, timing) {
            落到默认分支 = **只允许主要阶段** ⇒ 投掷/结束阶段一律 false ✗ —— 与技能卡不等权 ✗
          与注释 7867 声明的判定顺序（卡面**回合**字样 **先于** 默认主要阶段）一致：
            卡面自己写了"跨回合可发动"⇒ 视为**全时点**（真正的时点资格仍由③按回合方把关 ✓）✓ */
-    var __crossTurnText = /自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/.test(txt);
+    /* 【2026-10-16】本函数里的"跨回合 / 全时点"措辞判据已并入**唯一判据** `__isFullTimeCard`（见其上方注释） */
     /* 【2026-10-15 作者点名单卡·结构修 ✓】雷閃 卡面写的是「这个效果**在**其他玩家回合也能发动」——
-       **没有「自己或」三个字** ⇒ 上面那条 `__crossTurnText` 不命中（实测：跨回合正则命中=false）✗
+       **没有「自己或」三个字** ⇒ 上面那条跨回合正则不命中（实测：跨回合正则命中=false）✗
        ⇒ 落到默认分支 = 只允许主要阶段 ⇒ **准备/投掷/结束阶段全被否** ✗
        作者实测现象：「雷闪虽然写了可以在对手回合发动，但是不像技能卡一样是全时点」✓
        作者裁决（2026-10-15）：**只修雷閃这一张** ⇒ 这里用**显式名单**登记（清晰、可审计；
          不去放宽措辞正则 —— 那会把 14 张「**可盖伏在**其他玩家回合使用」的连锁专用卡
          一起错误地放成全时点 ✗，实测放宽会误伤 20 张）。
        ⚠ 名单里只放"卡面自述跨回合可发动、且没有盖伏前置"的卡；要增减请作者点名 ✓ */
-    var __FULLTIME_BY_NAME = ['雷閃'];
-    var __namedFull = __FULLTIME_BY_NAME.indexOf(String(card.name || '')) >= 0;
     if (!allowed) {
-      var fullTime = (card._category === 'skill_cards') || __crossTurnText || __namedFull || /全时点|任意时点|任何时候|任意时机/.test(txt);
+      /* 【2026-10-16 结构修 ✓】全时点判据收到 `__isFullTimeCard`（名单 + 措辞共用一份）：
+         原来这里自己拼一份（skill || 跨回合措辞 || 名单 || 全时点措辞），而阶段时点那道闸另拼一份 ⇒ 名单漏在那边 ✗ */
+      var fullTime = __isFullTimeCard(card, null, txt);
       if (fullTime) return true;
       return ph === 'main1' || ph === 'main2';
     }
@@ -8103,10 +8126,10 @@ function __runTimingTriggers(timing, ctx, next) {
                现在：**卡面写了跨回合可发动 ⇒ 与技能卡同权**（真正的时点资格仍由下面
                `__cardTimingAllowed` 按卡面的回合/阶段字样把关 ✓，不会把只限自己回合的卡放进来 ✓） */
             var __pTxt = String((c.effect || '') + ' ' + (c.sp || '') + ' ' + (c.text || ''));
-            var __pFull = (c._category === 'skill_cards') || pk.from === 'event' ||
-              /全时点|任意时点|任何时候|任意时机/.test(__pTxt) ||
-              /自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/.test(__pTxt);
-            if (!__pFull) return;                                                  // 其余卡不进阶段时点（行为不变）✓
+            /* 【2026-10-16 结构修 ✓】这道闸改成与 `__cardTimingAllowed` **共用唯一判据** `__isFullTimeCard`
+               （名单 + 措辞一份）。原来这里自己拼一份、**不认名单** ⇒ 雷閃 因为卡面写「其他玩家回合」
+               （无「自己或」）被判 false 直接丢掉，v411 加的名单**永远够不着** ✗（A/B 实测见 `__isFullTimeCard` 上方注释）。 */
+            if (!__isFullTimeCard(c, pk.from, __pTxt)) return;                     // 其余卡不进阶段时点（其余卡行为不变）✓
             if (!__cardTimingAllowed(c, side, timing)) return;                     // 【卡时点】按卡面限定可发动的时点
             if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
             cands.push({
