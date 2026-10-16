@@ -7134,7 +7134,10 @@ var CardAnim = {
       el.className = 'md-card-fly';
       el.style.width = from.w + 'px'; el.style.height = from.h + 'px';
       el.style.left = '0px'; el.style.top = '0px';
-      el.innerHTML = src ? ('<img src="' + src + '" alt="">') : ('<div class="md-card-fly-name">' + String(label || (card && card.name) || '') + '</div>');
+      /* 【2026-10-15 结构修】图片**进动画前先预解码** + 动画内 `<img>` **同步解码** ⇒
+         元素一插入就能显示（原来新建元素要异步解码、280ms 动画早结束了 ⇒ 时有时无 ✗）✓ */
+      try { if (typeof __chainImgWarmUp === 'function') __chainImgWarmUp(src); } catch (e) {}
+      el.innerHTML = src ? ('<img src="' + src + '" alt="" decoding="sync">') : ('<div class="md-card-fly-name">' + String(label || (card && card.name) || '') + '</div>');
       /* 【__UI_PHASE6·③】卡上浮出链节号（作者要求"卡上浮出链节 C1"）。
          ⚠ 飞行体默认 overflow:hidden，加了角标必须放开裁切，否则徽章会被切掉。 */
       if (chainNo != null) {
@@ -7172,6 +7175,26 @@ var CardAnim = {
     } catch (e) { try { console.error('出牌动画异常（不影响结算）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:6619', e2); } catch (e2) {} } }
   }
 };
+/* ========== 【2026-10-15 作者报「连锁动画里卡图时有时无」⇒ 结构修 ✓】==========
+   根因：动画每次**新建 `<img>` 元素**（本文件 7137 行），而新建的元素要**重新解码**；
+        飞行动画只有 **280ms**，`new Image()` 默认**异步解码** ⇒ 解码完成时动画往往已结束
+        （元素被移除）⇒ 玩家看到的就是**忽隐忽现** ✗
+   修法（两条互补，都不改动画时序）：
+     ① **提前预解码**：第一次拿到某张卡图时，用 `new Image()` 预热浏览器的**解码缓存**；
+     ② 动画内的 `<img>` 用 `decoding="sync"` ⇒ 从缓存取位图时**同步解码**，
+        元素一插入就能显示（不再有"空白一瞬"）✓
+   为什么这是结构修：把"靠解码速度碰运气"换成"**图片进入动画前就已解码**"这一确定性前提 ✓
+   未改动：动画时长/缓动/位移/链节号徽标/落点闪光 一律原样 ✓ */
+var __chainImgWarm = {};
+function __chainImgWarmUp(src) {
+  try {
+    if (!src || __chainImgWarm[src]) return;
+    __chainImgWarm[src] = 1;
+    var im = new Image();
+    try { im.decoding = 'async'; } catch (e) {}
+    im.src = src;
+  } catch (e) {}
+}
 var ChainAnim = {
   /* 【作者 2026-10-06 明确要求：删掉连锁动画】
      做法：下方紧接着把本对象的全部视觉方法替换成 no-op（保留对象本身与字段，
@@ -7317,7 +7340,14 @@ var ChainAnim = {
       if (!src && card && card.name && typeof __chainImgResolve === 'function') {
         try { src = __chainImgResolve(card) || ''; } catch (e) { try { console.error('[catch] assets/engine.js 动画兜底查图', e); } catch (e2) {} }
       }
-      el.innerHTML = src ? ('<img src="' + src + '" alt="">')
+      /* 【2026-10-15 作者报「连锁结算动画里卡图时有时无」⇒ 结构修 ✓】
+         根因：本元素每次**新建 `<img>`**，而新元素要**重新解码**；本段动画只有 **460ms**，
+               `<img>` 默认**异步解码** ⇒ 解码完成时元素往往已被移除（`kill`）⇒ **忽隐忽现** ✗
+         修法：① 先**预解码**（__chainImgWarmUp 预热浏览器解码缓存）
+               ② `<img>` 用 `decoding="sync"` ⇒ 从缓存取位图时**同步解码**，一插入就显示 ✓
+         时间/位移/徽标/光环/兜底一律未改 ✓ */
+      try { if (typeof __chainImgWarmUp === 'function') __chainImgWarmUp(src); } catch (e) {}
+      el.innerHTML = src ? ('<img src="' + src + '" alt="" decoding="sync">')
         : ('<div class="md-chain-resolve-name">' + String(label || (card && card.name) || '') + '</div>');
       var bg = document.createElement('div'); bg.className = 'md-chain-resolve-badge'; bg.textContent = 'C' + (i + 1) + ' 结算';
       el.appendChild(bg);
