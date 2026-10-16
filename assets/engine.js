@@ -5775,9 +5775,10 @@ function initBattle() {
   function __gameStartRegenDraw(w) {
     var __gp = battleState[w]; if (!__gp) return;
     var __gteam = (deckConfig[w].chars || []).filter(Boolean), __greg = 5;
-    if (__gp._kaedeMizugiRegen || __gp._aoiRegenPct) {
-      var __gpct = (__gp._kaedeMizugiRegen ? 0.5 : 0) + (__gp._aoiRegenPct ? 0.5 : 0);
-      __greg = Math.floor(5 * (1 + __gpct));
+    /* 【2026-10-17 清理·死读】原来这里还判 `__gp._aoiRegenPct`（葵SP 旧卡面的"自然回复+50%"）——
+       该条已按新卡面删除、**全库没有任何地方再置位它**（见 SP 登记处的注释）⇒ 读点纯残留，删掉 ✓（行为不变） */
+    if (__gp._kaedeMizugiRegen) {
+      __greg = Math.floor(5 * (1 + 0.5));
     }
     if (__gp._yuSP) __greg += __gteam.filter(function (c) { return c.attribute === '无序'; }).length;
     if (__gp._frostRegen) __greg += 1;
@@ -6286,9 +6287,9 @@ function startTurn() {
   if (battleState[player]._firstRegenSkipped) {
     (function(){
       var __p = battleState[player], __team = (deckConfig[player].chars||[]).filter(Boolean), __reg = 5;
-      if (__p._kaedeMizugiRegen || __p._aoiRegenPct) {
-        var __regenPct = (__p._kaedeMizugiRegen ? 0.5 : 0) + (__p._aoiRegenPct ? 0.5 : 0);
-        __reg = Math.floor(5 * (1 + __regenPct));
+      /* 【2026-10-17 清理·死读】同 gameStart 那一处：`_aoiRegenPct`（葵SP 旧卡面条目）已无置位点 ⇒ 删读点 ✓ */
+      if (__p._kaedeMizugiRegen) {
+        __reg = Math.floor(5 * (1 + 0.5));
       }
       if (__p._yuSP) __reg += __team.filter(function(c){return c.attribute==='无序';}).length;
       if (__p._frostRegen) __reg += 1;
@@ -9312,9 +9313,8 @@ function resolveChainStack(effect, onDone) {
         try {
           playerIds().forEach(function (w) {
             var __wp = battleState[w]; if (!__wp) return;
-            var __imm = false;
-            try { __imm = (((deckConfig || {})[w] || {}).chars || []).some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); }); } catch (e3) {}
-            if (__imm) { addBattleLog(by, '大风：【' + w + '】编入里绪/光太郎，不受影响'); return; }
+            var __imm = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(w) : null;
+            if (__imm) { addBattleLog(by, '大风：【' + w + '】' + __imm + ' ⇒ 不受影响'); return; }
             if (!__wp.moveDebuff) __wp.moveDebuff = {};
             __wp.moveDebuff.nextMoveMinus2 = true;
           });
@@ -11193,6 +11193,30 @@ function __restoreTempExiled(player) {
   __tp._tempExiled = [];
   if (typeof updateBattleUI === 'function') updateBattleUI();
 }
+/* 【2026-10-17 新增·王车易位"持续两轮"的**唯一**递减/恢复出口】
+   作者 2026-10-17 口径：**一轮 = 当前轮次最后一名行动的玩家结束回合**（＝"一轮结束"）。
+   ⇒ 调用点只有两个，且都放在 `round++` 的**同一个分支里**（真正"这一轮结束"那一刻）：
+      · `endTurn` 收尾里"联机后手方本机 +1 轮"那一支
+      · `aiEndTurn` 收尾里"单机/主机 +1 轮"那一支
+   ⚠ 原来它挂在 `endTurn.__afterDiscard` 里 ⇒ **每次 p1 结束回合都递减**（顺序上早半步、与"轮"的定义不符）✗ */
+function __tickSwappedTiles() {
+  try {
+    if (!(battleState._swappedTiles && battleState._swappedTiles.length > 0)) return;
+    for (var i = battleState._swappedTiles.length - 1; i >= 0; i--) {
+      var swap = battleState._swappedTiles[i];
+      swap.turnsLeft--;
+      if (swap.turnsLeft <= 0) {
+        MAP_TILES[swap.tile1].type = swap.original1.type;
+        MAP_TILES[swap.tile1].name = swap.original1.name;
+        MAP_TILES[swap.tile2].type = swap.original2.type;
+        MAP_TILES[swap.tile2].name = swap.original2.name;
+        addBattleLog('system', '王车易位效果结束，第' + swap.tile1 + '格和第' + swap.tile2 + '格恢复原始效果');
+        battleState._swappedTiles.splice(i, 1);
+      }
+    }
+  } catch (e) { try { console.error('[catch] assets/engine.js __tickSwappedTiles', e); } catch (e2) {} }
+}
+
 function endTurn() {
   if (battleState.currentPlayer !== 'p1') return;
   if (battleState._over) return;
@@ -11209,22 +11233,10 @@ function endTurn() {
   
   // 结束阶段：手牌上限5张（玩家自选弃牌；AI 自动弃尾张）
   function __afterDiscard() {
-  // 处理王车易位效果恢复
-  if (battleState._swappedTiles && battleState._swappedTiles.length > 0) {
-    for (var i = battleState._swappedTiles.length - 1; i >= 0; i--) {
-      var swap = battleState._swappedTiles[i];
-      swap.turnsLeft--;
-      if (swap.turnsLeft <= 0) {
-        // 恢复原始效果
-        MAP_TILES[swap.tile1].type = swap.original1.type;
-        MAP_TILES[swap.tile1].name = swap.original1.name;
-        MAP_TILES[swap.tile2].type = swap.original2.type;
-        MAP_TILES[swap.tile2].name = swap.original2.name;
-        addBattleLog('system', '王车易位效果结束，第' + swap.tile1 + '格和第' + swap.tile2 + '格恢复原始效果');
-        battleState._swappedTiles.splice(i, 1);
-      }
-    }
-  }
+  /* 【2026-10-17 修·王车易位的"持续两轮"按**轮**计（作者 2026-10-17 口径：
+     "轮 = 当前轮次最后一名行动的玩家结束回合 ⇒ 一轮结束"）
+     ⇒ 递减/恢复**不在这里**（这里每次 p1 结束回合都跑 ⇒ 顺序上早半步），
+     已移到**轮结束那一刻**（两处 `round++` 处各调一次 `__tickSwappedTiles()` ✓，见本函数下方与 `aiEndTurn`）✗ */
   
   // 重置蓝宝之杖每回合首次标记
   if (battleState.p1._lanzhangUsed) battleState.p1._lanzhangUsed = false;
@@ -11242,6 +11254,7 @@ function endTurn() {
     // 联机：末位玩家=真实 p2（后手方）。后手方本机为 p1，其结束回合时同样 +1 轮，与主机端 aiEndTurn 对齐
     if (typeof Online !== 'undefined' && Online.active && Online.mySide === 'p2') {
       battleState.round = (battleState.round || 1) + 1;
+      __tickSwappedTiles();   /* 【2026-10-17】王车易位按"轮"递减 ⇒ 只在轮结束（round++）这一刻走 ✓ */
     }
     try { __replayCaptureTurn('p1'); } catch (e) { try { console.error('[catch] assets/engine.js:9963', e); } catch (e2) {} }
     // 切换到AI/远端
@@ -11513,13 +11526,17 @@ function aiMaybeUseEvent(done) {
     L('圆桌会议[对手]：降入迷玩家 ' + (__rt.join('/') || '（无）') + ' 移至 GAME 格');
     __finished(); return;
   }
-  // 大风：终止所有移动动作；双方下次位移-2（里绪/光太郎免疫）
+  // 大风：终止所有移动动作；双方下次位移-2（里绪/光太郎 队伍编入 或 霜烬免疫 ⇒ 不挂）
   if (nm === '大风') {
     battleState._stopAllMove = true;
     playerIds().forEach(function (w) {
       var q = battleState[w]; if (!q) return;
-      var __cap = (q.captain && q.captain.name) || '';
-      if (__cap.indexOf('里绪') >= 0 || __cap.indexOf('光太郎') >= 0) return; // 免疫
+      /* 【2026-10-17 修·判据错了层】原来这里判的是 **`q.captain.name`（队长）**，
+         而事件/连锁路径判的是"**队伍里编入了里绪/光太郎**" ⇒ 里绪/光太郎只当队员时，
+         AI 用大风会把 -2 误盖到他们头上 ✗（且这里还缺霜烬免疫）。
+         现在统一调 `__windImmuneSeat`（唯一真相 ✓，见交接清单 §31.3）。 */
+      var __imm = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(w) : null;
+      if (__imm) { addBattleLog(aiSeat(), '大风：【' + w + '】' + __imm + ' ⇒ 不受影响'); return; }
       if (!q.moveDebuff) q.moveDebuff = {};
       q.moveDebuff.nextMoveMinus2 = true;
     });
@@ -12159,6 +12176,7 @@ function aiEndTurn(seat) {
     // 因此在后手方本机上 aiEndTurn 对应先手结束回合，不再 +1 轮。
     if (!(typeof Online !== 'undefined' && Online.active) || Online.mySide === 'p1') {
       battleState.round = (battleState.round || 1) + 1;
+      __tickSwappedTiles();   /* 【2026-10-17】王车易位按"轮"递减 ⇒ 只在轮结束（round++）这一刻走 ✓（作者口径） */
     }
     try { __replayCaptureTurn(aiSeat()); } catch (e) { try { console.error('[catch] assets/engine.js:10848', e); } catch (e2) {} }
     battleState.currentPlayer = nextPlayerOf(aiSeat());   // B·一：原来写死 'p1'（1v1 等价，多人才能轮到第 3 个座位）
@@ -17916,6 +17934,21 @@ function frostBlockDebuff(by, who) {
   return false;
 }
 
+/* 【2026-10-17 收口·**大风的"免疫判据"只写一处**】作者 2026-10-17「全修」点名（见交接清单 §31.3）：
+   同一判据原来写了两套：**AI 侧判的是"队长"（`q.captain.name`）、且缺霜烬免疫**，
+   而事件/连锁路径判的是"**队伍里编入了里绪/光太郎**"＋霜烬免疫
+   ⇒ 里绪/光太郎只当**队员**时，AI 用大风会把 -2 误盖到他们头上 ✗（作者报过"我队伍里有里绪不该免疫吗"）。
+   现在：唯一真相 = 本函数（"队伍编入 里绪/光太郎" 或 "霜烬被动免疫"），四条路径都调它 ✓。
+   返回**免疫原因**（无免疫 ⇒ null），日志由各调用方按自己的座位措辞写 ✓（不在这里写座位无关的日志）。 */
+function __windImmuneSeat(seat) {
+  try {
+    var __chars = (((typeof deckConfig !== 'undefined' && deckConfig) || {})[seat] || {}).chars || [];
+    if (__chars.some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); })) return '编入里绪/光太郎';
+  } catch (e) {}
+  try { if (typeof frostImmune === 'function' && frostImmune(seat)) return '【霜烬被动】同步高于26，免疫大风位移减益'; } catch (e) {}
+  return null;
+}
+
 function recalcDefense(who) {
   var q = battleState[who]; if (!q) return;
   if (q.defenseBase === undefined || q.defenseBase === null) q.defenseBase = (q.defense || 0) - (q._defDowns || []).reduce(function (a, d) { return a + d.amount; }, 0);
@@ -19472,14 +19505,9 @@ function __opsBuff(op, ctx, next, env) {
       playerIds().forEach(function (w) {
         if (op.delta < 0) {
           if (typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, w)) return;
-          /* 里绪 / 光太郎 免疫大风（与事件卡结算同一口径 ✓，见 engine.js:18917 那段 ✓） */
-          var __windImm = false;
-          try {
-            __windImm = (((deckConfig || {})[w] || {}).chars || []).some(function (c) {
-              return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0);
-            });
-          } catch (e1) {}
-          if (__windImm) { addBattleLog(user, '大风：【' + w + '】编入里绪/光太郎，不受影响'); return; }
+          /* 里绪 / 光太郎 免疫大风：判据已收口到 `__windImmuneSeat`（唯一真相 ✓，见交接清单 §31.3） */
+          var __windImm = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(w) : null;
+          if (__windImm) { addBattleLog(user, '大风：【' + w + '】' + __windImm + ' ⇒ 不受影响'); return; }
         }
         var q = battleState[w]; q._nextMoveAdjust = (q._nextMoveAdjust || 0) + op.delta;
       });
@@ -20976,14 +21004,10 @@ function __eventCasesB(card, player, p, done, env) {
   var __ecFoe = env.__ecFoe, __ecOL = env.__ecOL, effectText = env.effectText, __oppTurn = env.__oppTurn;
   switch (card.name) {
     case '大风':
-      // 终止移动，双方下次位移-2（里绪/光太郎免疫）
+      // 终止移动，双方下次位移-2（里绪/光太郎免疫；判据收口在 __windImmuneSeat ✓）
       playerIds().forEach(function (pl) {
-        var __im = false;
-        try { __im = ((deckConfig[pl].chars || [])).some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); }); } catch (e) { try { console.error('[catch] assets/engine.js:18630', e); } catch (e2) {} }
-        if (__im) { addBattleLog(player, '大风：【' + pl + '】编入里绪/光太郎，不受影响'); return; }
-        var __dp = battleState[pl];
-        if (typeof frostImmune === 'function' && frostImmune(pl)) { addBattleLog(pl, '【霜烬被动】同步高于26，免疫大风位移减益'); return; }
-        /* 【2026-10-12 今晚修·双扣】这里不再设 nextMoveMinus2（大风统一由 op adjust_next_move_all 实现，含免疫） */
+        var __im = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(pl) : null;
+        if (__im) { addBattleLog(player, '大风：【' + pl + '】' + __im + ' ⇒ 不受影响'); return; }
         void 0;
       });
       addBattleLog(player, '大风：所有玩家下次位移效果-2（里绪/光太郎免疫）');
