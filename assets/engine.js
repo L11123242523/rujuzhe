@@ -18292,6 +18292,15 @@ function computeDamageValue(user, target, opt) {
     final = Math.floor(final * (1 + __dfPct / 100));
     logs.push('小恶魔的投喂·最终伤害+' + __dfPct + '%（剩' + (ap._devilFeedActions || 0) + '次行动）');
   }
+  /* 【2026-10-17 新增·**最终伤害倍率**（唯一出口）】卡面写"下一次使用**伤害×1.2**"这类**倍率**时走这里 ——
+     与 `extraFinal`（+N）分开：倍率必须作用在**最终伤害**这一层（本函数所有加减**都算完之后**）✓。
+     第一个用户：【红宝之杖·运】SP（作者 2026-10-17 口径：+20% = **最终伤害×1.2**）。
+     不传 `finalMul` ⇒ 与以前逐字一致 ✓（不改变任何现有卡的行为）。 */
+  if (opt.finalMul && opt.finalMul !== 1) {
+    var __fmVal = Math.max(0, Math.floor(final * opt.finalMul));
+    logs.push('最终伤害×' + opt.finalMul + '（' + final + '→' + __fmVal + '）');
+    final = __fmVal;
+  }
   if (final < 0) final = 0;
   return { value: final, logs: logs, attr: attr, core: core, defense: def, atk: atk, base: base, kind: kind, tags: tags, isAtk: isAtk, isItem: isItem, isSkill: isSkill, pierce: pierce, judge: !!opt.judge };
 }
@@ -18337,7 +18346,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
       dealDamageWithResponse(target, base, op.source || '效果', function () {
         // 伤害后触发（琉璃/宫樱子/琉璃水着/羽奈/妖刀/蓝宝）已统一收口进 dealDamageWithResponse 的 __finish，此处不再重复触发
         if (done) done();
-      }, __attr, user, { judge: !!op.judge, srcCard: srcCard, kind: op.kind, extraFinal: extraFinal || 0, coinFail: __coinFail, selfInflicted: target === user });
+      }, __attr, user, { judge: !!op.judge, srcCard: srcCard, kind: op.kind, extraFinal: extraFinal || 0, finalMul: op.finalMul || 1, coinFail: __coinFail, selfInflicted: target === user });
     }
     /* 血之佑戒·红泪拉克莎（卡面 2026-09-25 版）：一回合一次，造成伤害时可以支付2点同步值让**最终伤害+1**。
        与"善意面具·金币增伤"同款落点（造伤前的选发窗口），区别只是费用用同步值、每回合一次。 */
@@ -19023,6 +19032,36 @@ function __opsDamage(op, ctx, next, env) {
         p.cost -= k;
         if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
         if (ctx && ctx.card) ctx.card._lastPaidCost = k; // 记录本次实际支付额：费用比较类效果（爱德华/惠等）按实际支付额计
+        /* 【2026-10-17 补·【红宝之杖·运】SP ⇒ 结构修】卡面 SP 原文：
+           「每次付**7**以上音韵打出后，**下一次使用伤害+20%**。**叠加5次后从第6次开始直接秒杀目标**。」
+           原来**整段没实现**（卡面 sp 单独编译 = null；作者 2026-10-17 点名确认要补）。
+           · 口径（作者确认）：+20% = **最终伤害×1.2** ⇒ 走 `computeDamageValue` 新增的 `finalMul` ✓
+           · "叠加"= 每付一次 7 以上积一层（`_hongbaoStacks`），加成按层数累加（×1.2、×1.4…）✓
+           · "**下一次**使用"⇒ 本次吃掉的加成用完即清 ✓
+           · "叠加5次后从第6次开始直接秒杀"⇒ 层数≥5 起**此后每次都秒杀**（把目标同步打到 0，走既有伤害管线）；
+             要改成"只秒一次"就把 `__HB_KILL_AT` 那句下面的层数清零即可（本行有标注）✓
+           · 层数/加成记在**座位**上、跨回合累计（与"叠加"一致，无回合重置）✓ */
+        var __hbCard = !!(ctx && ctx.card && String(ctx.card.name || '').indexOf('红宝之杖') >= 0);
+        if (__hbCard) {
+          var __HB_KILL_AT = 5;
+          var __hbStacks = p._hongbaoStacks || 0;
+          var __hbKill = __hbStacks >= __HB_KILL_AT;
+          var __hbMul = 1 + ((p._hongbaoPct || 0) / 100);
+          p._hongbaoPct = 0;                                   /* "下一次使用" ⇒ 本次用掉即清 ✓ */
+          if (k >= 7) { p._hongbaoStacks = __hbStacks + 1; p._hongbaoPct = 20 * (__hbStacks + 1); }
+          if (__hbKill) {
+            var __hbT = battleState[target] || {};
+            var __hbNeed = Math.max(0, __hbT.sync || 0);
+            addBattleLog(user, '【红宝之杖·运·SP】已叠加 ' + __hbStacks + ' 次 ⇒ **直接秒杀目标**（打掉其全部同步值 ' + __hbNeed + '）');
+            applyDamageOps(user, target, { judge: false, base: __hbNeed, kind: op.kind }, next);
+            return;
+          }
+          if (__hbMul > 1) {
+            addBattleLog(user, '【红宝之杖·运·SP】下一次使用伤害 +' + Math.round((__hbMul - 1) * 100) + '% ⇒ 本次**最终伤害×' + __hbMul + '**');
+            applyDamageOps(user, target, { judge: false, base: k, kind: op.kind, finalMul: __hbMul }, next);
+            return;
+          }
+        }
         applyDamageOps(user, target, { judge: false, base: k, kind: op.kind }, next);
       }
       if (user === 'p1' && typeof showChoiceModal === 'function' && __pmax > op.min) {
@@ -23007,7 +23046,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   // ===== 统一伤害公式：调用方只给基础值，这里统一结算 攻击力/防御/属性克制/各类最终增伤（opts.raw/sourceless=已是最终值，不再叠加）=====
   var __dmgCalc = null;
   if (!(opts.raw || opts.sourceless) && attacker) {
-    __dmgCalc = computeDamageValue(attacker, target, { base: damage, judge: opts && opts.judge, attr: attackerAttr, srcCard: opts && opts.srcCard, kind: opts && opts.kind, extraFinal: opts && opts.extraFinal });
+    __dmgCalc = computeDamageValue(attacker, target, { base: damage, judge: opts && opts.judge, attr: attackerAttr, srcCard: opts && opts.srcCard, kind: opts && opts.kind, extraFinal: opts && opts.extraFinal, finalMul: opts && opts.finalMul });
     damage = __dmgCalc.value; (__dmgCalc.logs || []).forEach(function (lg) { addBattleLog(attacker, '【增伤】' + lg); });
   }
   var __pierceShield = (__dmgCalc && __dmgCalc.pierce) || (opts && opts.pierceShield) || false;
@@ -24964,6 +25003,14 @@ function placeAfterUse(user, card, isPerm) {
     card._recycled = false;
     p.deck.push(card);
     addBattleLog(user, card.name + '为回收卡，本次使用后放回牌组最下方');
+  } else if (card._returnToHandAfterUse) {
+    /* 【2026-10-17 新增·卡面"结算后**不进入墓地而是返回手卡**"（【这不是逃跑！】SP）】
+       与 `_recycled`（回牌组最下方）/ `_skipGraveOnce`（蓝图）同级 —— 去向在这里**唯一决定**，
+       用完即清 ✓（避免卡对象跨局复用把标志带进下一局）。 */
+    card._returnToHandAfterUse = false;
+    p.hand.push(card);
+    try { if (typeof __emitAddHand === 'function') __emitAddHand(user, card, 'use'); } catch (e) {}
+    addBattleLog(user, '【' + card.name + '】按卡面效果**返回手卡**（不进入墓地）');
   } else if (card._skipGraveOnce) {
     // 蓝图转化：该卡已作为被复制的卡回到手牌，本次结算不送入墓地
     card._skipGraveOnce = false;
@@ -25720,6 +25767,71 @@ var SPECIAL_CARD_HANDLERS = {
     }
   },
 
+  /* ============================================================
+  【秘技！摸头杀】（无序·攻击·费2，入间予携带）—— 2026-10-17 作者点名补
+  卡面：对同一行内的一名其他玩家造成 **1** 点无序属性伤害，并且附加一次 4 面骰判定伤害。
+  SP：若**目标包含枫**则基础伤害提升至 **2** 点。
+  为什么必须按名特判：`effect` 单独编译是对的（base 1 + d4 判定），但 **effect+sp 合并后
+  `compileStepOps` = null** ⇒ 整段退回文本兜底 ⇒ 兜底把 SP 里的"2"当固定伤害
+  （**实测**：目标队伍有没有枫，基础伤害都是 2，与卡面"默认 1"不符）✗
+  —— 与【邪恶南瓜攻击！】同一类（见 getSpecialHandler 的说明）。 */
+  '秘技！摸头杀': {
+    play: function (card, user, done) {
+      var foe = (typeof foeOf === 'function') ? foeOf(user) : ((user === 'p1') ? 'p2' : 'p1');
+      var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); };
+      var __inRow = true;
+      try { if (typeof __inTileRange === 'function') __inRow = __inTileRange(user, foe, { dir: 'row', range: 21 }); } catch (e) {}
+      if (!__inRow) { addBattleLog(user, '【秘技！摸头杀】目标不在同一行内 ⇒ 不造成伤害'); __fin(); return; }
+      var __hasKaede = false;
+      try { __hasKaede = ((typeof __teamOfSeat === 'function' ? __teamOfSeat(foe) : []) || []).some(function (c) { return c && String(c.name || '').indexOf('枫') >= 0; }); } catch (e) {}
+      var __base = __hasKaede ? 2 : 1;
+      addBattleLog(user, '【秘技！摸头杀】对' + playerDisplayName(foe) + '造成' + __base + '点无序属性伤害' + (__hasKaede ? '（目标队伍含枫 ⇒ 基础伤害提升至2点）' : '（目标队伍不含枫 ⇒ 1点）'));
+      dealDamageWithResponse(foe, __base, card.name, function () {
+        try {
+          if (typeof judgePerform === 'function') {
+            judgePerform(user, { kind: 'dice', sides: 4, label: card.name + '·判定伤害' }, function (roll, __cancelled) {
+              if (__cancelled || roll == null) { __fin(); return; }
+              dealDamageWithResponse(foe, roll, card.name + '·判定伤害', __fin, null, user, { judge: true });
+            });
+          } else __fin();
+        } catch (e) { __fin(); }
+      }, '无序', user, { kind: 'attribute' });
+    }
+  },
+
+  /* ============================================================
+  【这不是逃跑！】（战术·技能·费2，入间予携带）—— 2026-10-17 作者点名补
+  卡面：自己回合发动，后退 3 格。
+  SP：如果在后退过程中**经过了其他玩家**可以发动，此卡结算后**不进入墓地而是返回手卡**。
+      这个效果**一回合只能发动一次**。
+  为什么必须按名特判：SP 那句被编译层**错编译成 `move:-1`**（实测 `compileStepOps(sp)` =
+  `[{op:'move',n:-1}]`）⇒ 不只"返回手卡"没实现，还会**多退一格** ✗。 */
+  '这不是逃跑！': {
+    play: function (card, user, done) {
+      var p = battleState[user];
+      var __from = (p && p.position) || 0;
+      var __foes = (typeof othersOf === 'function') ? othersOf(user) : [foeOf(user)];
+      var __passed = false;
+      for (var s = 1; s <= 3 && !__passed; s++) {
+        var g = (((__from - s) % 42) + 42) % 42;
+        for (var i = 0; i < __foes.length; i++) { var q = battleState[__foes[i]]; if (q && q.position === g) { __passed = true; break; } }
+      }
+      var __once = !!(p && p._notEscapeTurn === battleState.turn);
+      var __willReturn = __passed && !__once;
+      try { if (typeof applyMove === 'function') applyMove(user, -3); } catch (e) { try { console.error('这不是逃跑·后退出错', e); } catch (e2) {} }
+      addBattleLog(user, '【这不是逃跑！】后退3格到第' + ((p && p.position) || 0) + '格');
+      if (__willReturn) {
+        p._notEscapeTurn = battleState.turn;                  /* 一回合一次：座位级 + 回合号当唯一真相 ✓ */
+        try { card._returnToHandAfterUse = true; } catch (e) {}
+        addBattleLog(user, '【这不是逃跑！·SP】后退过程中经过了其他玩家 ⇒ 本回合一次：结算后**返回手卡**');
+      } else if (__passed && __once) {
+        addBattleLog(user, '【这不是逃跑！·SP】本回合已经发动过该 SP ⇒ 本次结算后正常送入墓地');
+      }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
+      if (done) done();
+    }
+  },
+
   '邪恶南瓜攻击！': {
     play: function (card, user, done) {
       var N = card.name, foe = (user === 'p1') ? 'p2' : 'p1';
@@ -26008,6 +26120,12 @@ function getSpecialHandler(card) {
      通用兜底又把文本里的 33 当成固定伤害（实测打出 36 = 33 + baseDamage 2 + 被动 1）。
      ⇒ 与上面三张同款：显式声明"这张卡必须走 SPECIAL 特判"。 */
   if (n === '邪恶南瓜攻击！') return h;
+  /* 【2026-10-17 作者点名·这两张卡的 SP 也必须走特判】
+     · 【秘技！摸头杀】：`effect+sp` 合并后 `compileStepOps` = null ⇒ 退回文本兜底 ⇒
+        兜底把 SP 里的"2"当固定伤害（实测：目标队伍**没有枫**时也打 2，卡面要求默认 **1**）✗
+     · 【这不是逃跑！】：SP 那句被**错编译成 `move:-1`**（实测）⇒ 不只"返回手卡"整段丢失，
+        还会**多退一格** ✗ */
+  if (n === '秘技！摸头杀' || n === '这不是逃跑！') return h;
   /* 【2026-10-14 新卡·永眠之棺】卡面要"选场上一张卡"且是到回合结束的持续无效 ⇒ 必须走特判 ✓ */
   if (n === '永眠之棺') return h;
   /* 【2026-10-14 作者报「死灵令牌的『选一张手卡公开』没执行」⇒ 结构修 ✓】
