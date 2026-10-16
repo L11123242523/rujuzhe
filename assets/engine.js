@@ -6605,33 +6605,16 @@ function collectChainable(player, effect){
         var __ch = (effect && effect._chain) || [];
         for (var __k = 0; __k < __ch.length; __k++) {
           var __n = __ch[__k];
-          /* 【2026-10-15 结构修 · 作者报「雷閃用掉后仍弹是否连锁、还能发，时好时坏」】
-           原来只认**对象引用**（__n.card === c）✗ —— 联机快照/克隆后，永续区里的卡是**新对象**，
-           同名但不同引用 ⇒ 判 false ⇒ 去重失效 ⇒ 同回合内再次产出候选 ✗（这就是「偶尔」的来源）
-           ⇒ 改为**稳定身份**：permSP 键 + 座位（与引用无关），或**同名** ✓ */
-        if (__n && ((__n.kind === 'permSP' && __n.permSP === 'leishan' && __n.by === player)
-          || (__n.card === c)
-          || (__n.card && c && __n.card.name && __n.card.name === c.name))) { __alreadyOnChain = true; break; }
+          if (__n && (__n.card === c || (__n.kind === 'permSP' && __n.permSP === 'leishan' && __n.by === player))) { __alreadyOnChain = true; break; }
         }
         if (!__alreadyOnChain) {
           for (var __k2 = 0; __k2 < out.length; __k2++) {
-            /* 【2026-10-15 同上】待选里也按**同名**判（原来只认对象引用 ⇒ 克隆后漏判 ✗）✓ */
-          if (out[__k2] && out[__k2].card && c && (out[__k2].card === c || out[__k2].card.name === c.name)) { __alreadyOnChain = true; break; }
+            if (out[__k2] && out[__k2].card === c) { __alreadyOnChain = true; break; }
           }
         }
       } catch (e) {}
       if (__alreadyOnChain) return;
       out.push({ card: c, from: 'permSP', index: i, permSP: 'leishan' });
-      /* 【2026-10-15 只读诊断】作者报「偶尔触发」⇒ 固定场景复现不出，留一条现场日志 ✓ */
-      try {
-        var __lsMark = (battleState[player] && battleState[player]._leishanSPTurn);
-        window.__leishanOfferCount = (window.__leishanOfferCount || 0) + 1;
-        addBattleLog(player, '🔍【雷閃·诊断】产出连锁候选：本回合=' + battleState.turn +
-          '，座位标记=' + (__lsMark === undefined ? '(未设)' : __lsMark) +
-          '，当前玩家=' + battleState.currentPlayer +
-          '，永续区仍有雷閃=' + ((battleState[player].permanent || []).some(function (x) { return x && x.name === '雷閃'; })) +
-          '，本回合第 ' + window.__leishanOfferCount + ' 次产出');
-      } catch (e) {}
     });
   } catch (e) {}
   // 事件卡（全时点）：也可作为连锁响应发动（如大风在移动将执行前终止所有移动）
