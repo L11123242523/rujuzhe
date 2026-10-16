@@ -7134,6 +7134,14 @@ var CardAnim = {
       el.className = 'md-card-fly';
       el.style.width = from.w + 'px'; el.style.height = from.h + 'px';
       el.style.left = '0px'; el.style.top = '0px';
+      /* 【2026-10-15 作者要求】座位级角色能力（seatEffect）/永续道具 SP（permSP）**没有自己的卡图**，
+         其占位卡的 name 也是短名（如「露璐缇雅·破坏」）⇒ 这里按 `_animOwnerName` 取**角色卡本身**的卡图 ✓ */
+      if (!src && card && card._animOwnerName && typeof __animOwnerCardByKey === 'function') {
+        try {
+          var __ownerCard = __animOwnerCardByKey(card._animOwnerName, card._animOwnerBy);
+          if (__ownerCard) src = (__ownerCard.image_url || __ownerCard.avatar_url) || '';
+        } catch (e) {}
+      }
       /* 【2026-10-15 结构修】图片**进动画前先预解码** + 动画内 `<img>` **同步解码** ⇒
          元素一插入就能显示（原来新建元素要异步解码、280ms 动画早结束了 ⇒ 时有时无 ✗）✓ */
       try { if (typeof __chainImgWarmUp === 'function') __chainImgWarmUp(src); } catch (e) {}
@@ -7175,6 +7183,93 @@ var CardAnim = {
     } catch (e) { try { console.error('出牌动画异常（不影响结算）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:6619', e2); } catch (e2) {} } }
   }
 };
+/* ========== 【2026-10-15 作者要求：给没卡图的被动/SP 补动画 —— **用角色卡本身**】==========
+   背景：座位级角色能力（`seatEffect`）与永续道具 SP（`permSP`）**没有自己的卡图**，
+         链上只画一行文字 ⇒ 作者要"用角色卡本身"的卡图来表现它 ✓
+   做法（两件事，各司其职）：
+     ① `__animOwnerCardByKey`：按**引擎自己的口径**把效果键映射到"提供它的角色卡"——
+        `seatEffect:'edward'` → 露璐缇雅·爱德华、`'lily'` → 莉莉·缇雅菲洛
+        （依据＝本文件 6004/6005 的 FLAGS 表和"角色SP生效标志"表，+100 处两张卡的 SP 名也对上 ✓）
+        `permSP:'leishan'` → **雷閃**（它本身就是一张**有卡图的永续道具卡** ⇒ 用那张 ✓）
+     ② `CardAnim.play` 在"占位卡没有可读卡图"时，按 `_animOwnerName` 去玩家队伍里取**角色卡**的卡图 ⇒
+        与"有卡图的卡"走**同一条飞卡动画**（不新造动画种类 ✓）
+   未改动：动画时长/缓动/位置/徽标/落点闪光一律原样；也未改任何结算逻辑 ✓ */
+function __animOwnerNameOf(key) {
+  var M = { edward: '露璐缇雅·爱德华', lily: '莉莉·缇雅菲洛', leishan: '雷閃' };
+  return M[key] || '';
+}
+/* 【2026-10-15 作者要求：给没卡图的被动/SP 补动画 —— 用角色卡本身】
+   `__animSrcNameOf(触发器id)`：显式映射"这个被动/SP 用哪张卡来表现"。
+   · 角色类 ⇒ **角色卡本身**（宫樱子/琉璃(水着)/冬马/宁雨清/…）
+   · 道具给的效果（钢笔 / 妖刀五月雨 / 蓝宝之杖·命 / 贪欲者的烙印 / 永奏进行曲 / 钢笔）⇒ 那张道具卡
+   为什么写成显式表：与引擎既有的 `FLAGS`(5988) / `BUFF_SP_FLAGS`(14320) 同款做法 ——
+     清晰、可审计；**未登记的 id 一律返回 null ⇒ 不动画**（绝不瞎给图）✓ */
+var __ANIM_SRC_BY_ID = {
+  'ruri-mizugi-sp': '琉璃(水着)',
+  'ruri-judge-passive': '小沙香琉璃',
+  'liuli-hw-sp-leave': '琉璃(万圣祭)',
+  'liuli-hw-passive': '琉璃(万圣祭)',
+  'toma-sp-leave': '现实间冬马',
+  'toma-main1': '现实间冬马',
+  'sakura-heal-sync': '宫樱子',
+  'hina-aggression-item': '雨宫羽奈',
+  'yu-fervor-judge': '入间予',
+  'yu-prepare-end': '入间予',
+  'kaede-mizugi-after-damage': '枫(水着)',
+  'sena-mizugi-recover': '星奈(水着)',
+  'ning-draw-recover': '宁雨清',
+  'ning-addhand-drain': '宁雨清',
+  'ning-addhand-drain-remove': '宁雨清',
+  'edward-sp-main1': '露璐缇雅·爱德华',
+  'aoi-gospel-second-roll': '小野葵',
+  'gangbi-sp-grave': '钢笔',
+  'yaodao-after-damage': '妖刀五月雨',
+  'lanzhang-after-judge': '蓝宝之杖·命',
+  'greed-mark-accumulate': '贪欲者的烙印',
+  'yongzou-grave-hit': '永奏进行曲'
+};
+function __animSrcNameOf(id) {
+  return __ANIM_SRC_BY_ID[id] || '';
+}
+/* 按名字取一张卡（优先玩家队伍里的那张，保证是"他的" ✓；取不到再退卡池） */
+function __animCardByName(nm, player) {
+  try {
+    if (!nm) return null;
+    if (player && typeof battleState !== 'undefined' && battleState && battleState[player]) {
+      var seat = battleState[player];
+      var zones = [seat.chars || [], [seat.captain], seat.permanent || [], seat.hand || [], seat.eventCards || []];
+      for (var z = 0; z < zones.length; z++) {
+        var arr = zones[z] || [];
+        for (var i = 0; i < arr.length; i++) {
+          var c = arr[i];
+          if (c && String(c.name) === nm && (c.image_url || c.avatar_url)) return c;
+        }
+      }
+    }
+    var all = (allCards || []).filter(function (c) { return c && (String(c.name) === nm || String(c.name).indexOf(nm) >= 0); });
+    /* 优先有卡图的 */
+    for (var k = 0; k < all.length; k++) { if (all[k].image_url || all[k].avatar_url) return all[k]; }
+    return all[0] || null;
+  } catch (e) { return null; }
+}
+function __animOwnerCardByKey(key, player) {
+  try {
+    var nm = __animOwnerNameOf(key);
+    if (!nm) return null;
+    var list = (allCards || []).filter(function (c) { return c && String(c.name).indexOf(nm) >= 0; });
+    /* 优先：该玩家队伍里正是这名角色的那张卡（保证是"他的"角色卡 ✓） */
+    if (player && typeof battleState !== 'undefined' && battleState && battleState[player]) {
+      var team = (battleState[player].chars || []).filter(Boolean);
+      for (var i = 0; i < team.length; i++) {
+        if (team[i] && String(team[i].name).indexOf(nm) >= 0) return team[i];
+      }
+      var cap = battleState[player].captain;
+      if (cap && String(cap.name).indexOf(nm) >= 0) return cap;
+    }
+    return list[0] || null;
+  } catch (e) { return null; }
+}
+
 /* ========== 【2026-10-15 作者报「连锁动画里卡图时有时无」⇒ 结构修 ✓】==========
    根因：动画每次**新建 `<img>` 元素**（本文件 7137 行），而新建的元素要**重新解码**；
         飞行动画只有 **280ms**，`new Image()` 默认**异步解码** ⇒ 解码完成时动画往往已结束
@@ -7479,7 +7574,23 @@ function __scanTriggers(timing, ctx) {
         /* 【2026-10-03】SP 类效果"伴随主效果一起结算"⇒ 标了 direct 的一律立即执行、不入队不开窗 */
         direct: !!d.direct,
         label: (typeof d.label === 'function') ? String(d.label(ctx, owner)) : String(d.label || d.id),
-        fire: function (next) { try { d.fire(ctx, owner); } finally { if (typeof next === 'function') next(); } }
+        fire: function (next) {
+          /* 【2026-10-15 作者要求：给没卡图的被动/SP 补动画（用角色卡本身）】⇒ 结构修 ✓
+             为什么挂在这里：**全部 23 个被动/SP 触发器都经 `__mk` 这一个包装点**（本函数 7515）⇒
+               在这一处补动画，23 个一次覆盖，不必逐个改 `fire`（那会变成打补丁）✓
+             表现形式：与"有卡图的卡"**同一条飞卡动画**（CardAnim.play + 链节号 C 徽标）✓
+             取哪张图：`__animSrcNameOf(id, ctx, owner)` 显式映射 ——
+               角色类效果 ⇒ **角色卡本身**；道具给的效果（钢笔/妖刀/蓝宝之杖/贪欲烙印…）⇒ 那张道具卡 ✓
+             不承重：整段 try 包住，动画出错绝不影响效果结算 ✓ */
+          try {
+            var __aim = (typeof __animSrcNameOf === 'function') ? __animSrcNameOf(d.id, ctx, owner) : null;
+            if (__aim && typeof CardAnim !== 'undefined' && CardAnim.play) {
+              var __ac = (typeof __animCardByName === 'function') ? __animCardByName(__aim, owner) : null;
+              if (__ac) CardAnim.play(__ac, (typeof d.label === 'function') ? String(d.label(ctx, owner)) : String(d.label || d.id), null);
+            }
+          } catch (e) {}
+          try { d.fire(ctx, owner); } finally { if (typeof next === 'function') next(); }
+        }
       };
     };
     for (var i = 0; i < __TRIGGERS.length; i++) {
@@ -9047,6 +9158,13 @@ function resolveChainStack(effect, onDone) {
       else { cur = e.kind === 'set' ? e.to : Math.max(0, cur + e.delta); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】生效，点数/位移变为 ' + cur); }
     } else if (e.kind === 'seatEffect') {
     /* 座位级角色能力（非卡片）：在逆结算时执行（发动时只上链，符合连锁语义） */
+    /* 【2026-10-15 作者要求】结算时补上"用角色卡本身"的飞卡动画（没卡图的被动/SP）✓ */
+    try {
+      var __seOwner = __animOwnerCardByKey(e.seatEffect, e.by);
+      if (__seOwner && typeof CardAnim !== 'undefined' && CardAnim.play) {
+        CardAnim.play({ name: __seOwner.name, _animOwnerName: e.seatEffect, _animOwnerBy: e.by }, e.name, i + 1);
+      }
+    } catch (e) {}
     try {
       if (e.seatEffect === 'edward' && typeof activateEdwardSP === 'function') { activateEdwardSP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else if (e.seatEffect === 'lily' && typeof activateLilySP === 'function') { activateLilySP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
@@ -9054,6 +9172,10 @@ function resolveChainStack(effect, onDone) {
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) { try { console.error('[catch] assets/engine.js:8312', e2); } catch (e2) {} } }
   } else if (e.kind === 'permSP') {
     /* 【2026-10-14 雷閃·SP 全时点】逆结算时执行；SP 的**实现只有一份**（复用已有处理器 ✓） */
+    /* 【2026-10-15 作者指出】雷閃**本来就有专属表现** —— 造成伤害时播放专属电流声
+       `__sfx.play('leishan')`（见本文件 22833 行 `__leishanZap` 一带），而且它是张**有卡图的永续道具卡**
+       ⇒ **不需要**再补动画 ✓
+       所以这里**刻意不加**动画：只给"真正没有动画"的**座位级角色能力**（露璐缇雅·破坏 / 莉莉·回收）补 ✓ */
     try {
       /* 【2026-10-14 修】这里原来只读模块内变量 `PERMANENT_ACTIVE_HANDLERS` ⇒ 取不到（实测日志："找不到对应实现，跳过"）
          ⇒ 加 `window.PERMANENT_ACTIVE_HANDLERS` 回退（该表在文件末尾已挂到 window ✓）。 */
