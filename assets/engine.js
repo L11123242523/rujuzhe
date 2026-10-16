@@ -6136,8 +6136,16 @@ function startTurn() {
   try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:5751', e); } catch (e2) {} }
   /* 【2026-10-14 新卡·永眠之棺】同一处、同一口径：'直到本回合结束'的效果无效也按回合号统一清理 ✓ */
   try { if (typeof clearTurnScopedCardStates === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedCardStates(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:回合到期卡状态', e); } catch (e2) {} }
-  /* 【2026-10-14 雷閃·SP】座位级「一回合一次」标记也在这里按回合号清（与上面同一处、同一口径 ✓） */
-  try { if (battleState) playerIds().forEach(function (w) { if (battleState[w]) delete battleState[w]._leishanSPTurn; }); } catch (e) { try { console.error('[catch] 雷閃座位标记清理', e); } catch (e2) {} }
+  /* 【2026-10-15 作者报「雷閃一直连锁」复发 ⇒ 结构修 ✓】
+     原来这里每回合**无条件删除** `_leishanSPTurn`（座位级"一回合一次"的记忆），
+     而那道闸的判据是 `me._leishanSPTurn === battleState.turn` —— **严格回合号相等**：
+     回合号一变化，旧标记**本身就失效**，**根本不需要删除** ✗
+     ⇒ 一旦这个"删除"在不合时宜的时刻跑到（联机快照/重放让"回合开始"再跑一次、
+       或一条连锁还没收完就跨了回合边界），标记就被**提前抹掉** ⇒ 闸失效 ⇒
+       雷閃还能被重复询问、还能再发（正是作者报的"偶尔复发"）✗
+     ⇒ 结构修：**删掉这个删除动作**，让"回合号"当唯一真相（新回合 turn 已变 ⇒ 旧标记自然不匹配）✓
+       语义不变：正常对局里"上一回合的标记"本来就因为回合号不同而无效 ✓
+       换来的是：**不再可能被"重复的回合开始"提前清掉** ✓（不是加兜底，是去掉一条多余的写） */
   /* 【2026-10-07 结构修·**窗口不许跨过回合边界**】
      实测（浏览器 E2E 冒烟的真实日志）：上一个回合开着的时点窗口没人关，就一路带到下一个回合，
      它那本账（tw<id> / __decide:chainChoice#N）永久挂着 —— 日志里 tw2 存活超过 33 秒。
