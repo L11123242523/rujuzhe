@@ -2617,27 +2617,15 @@ function onlineUseSkillP2(done) {
     options[i].run(done);
   });
 }
-/* ---- 最佳化·SP（远端位 p2 侧镜像）---- */
+/* ---- 最佳化·SP（远端位 p2 侧镜像）----
+   【2026-10-16 结构修 ✓】效果本体已收进**唯一出口** `__zuijiahuaApply`，本函数只留
+   "远端位的发动确认弹窗"这一层 ✓（原来这里自己写了一整份 ⇒ 与 p1 / AI 两份各自演化，
+   卡面 2026-09-28 新增的那段伤害**只在这里实现了** ✗ —— 作者点名 A3）。 */
 function onlineZuijiahuaP2(done) {
   var p = battleState.p2;
-  var ix = -1;
-  (p.grave || []).forEach(function (c, i) { if (ix < 0 && c && c.name === '最佳化') ix = i; });
-  if (ix < 0) { if (done) done(); return; }
+  if (!(p.grave || []).some(function (c) { return c && c.name === '最佳化'; })) { if (done) done(); return; }
   onlineDecideModal('p2', '最佳化·SP（对手）', '把墓地的这张卡移出游戏才能发动', '提升自身1点攻击力，是否发动？', ['发动', '不发动'], function (o) {
-    if (o === 0) {
-      var card = p.grave.splice(ix, 1)[0];
-      (p.removed = p.removed || []).push(card);
-      try { if (typeof runTiming === 'function') runTiming(TIMING.ON_REMOVE, { player: 'p2', card: card }); } catch (e) { try { console.error('[catch] assets/engine.js:2505', e); } catch (e2) {} }
-      p.attackBuff = (p.attackBuff || 0) + 1;
-      addBattleLog('p2', '【最佳化·SP】把墓地的【最佳化】移出游戏，自身攻击力+1（当前攻击+' + p.attackBuff + '）');
-      updateBattleUI();
-      /* 新卡面（2026-09-28）新增段：「那之后可以对1名玩家造成1点**混沌**属性伤害」——对对手 */
-      var __zjFoe2 = foeOf('p2');
-      if (battleState[__zjFoe2]) {
-        addBattleLog('p2', '【最佳化·SP】那之后对' + (__zjFoe2 === 'p2' ? '自己' : '对手') + '造成1点混沌属性伤害');
-        dealDamageWithResponse(__zjFoe2, 1, '最佳化·SP', null, '混沌', 'p2', { kind: 'attribute' });
-      }
-    }
+    if (o === 0) __zuijiahuaApply('p2');
     if (done) done();
   });
 }
@@ -13133,9 +13121,38 @@ function activateEdwardSP(seat) {
 // ===== 琉璃(万圣祭)·回收（主动发动；p1 侧）=====
 // 卡面：「此外，琉璃可以支付3点同步值来回收自己效果处理区的永续种类的卡。」
 // 口径：无次数限制（由同步值成本限流）；"回收"=加入手卡（与结构化指令层"加入手卡|回收"同义）。
-// ===== 最佳化·SP（卡面 2026-09-25 版）：把墓地的这张卡移出游戏 → 自身攻击力+1 =====
+// ===== 最佳化·SP（卡面 2026-09-28 版）：把墓地的这张卡移出游戏 → 自身攻击力+1 → 那之后造成1点混沌伤害 =====
 // 口径：移出游戏是"发动费用"，从墓地移出并触发 ON_REMOVE 时点；攻击力+1 走统一 attackBuff
 //（规则：攻击力÷2向下取整才是伤害加成，所以+1 未必立刻改变伤害 —— 与规则书一致，不做特殊处理）。
+/* 【2026-10-16 结构修 ✓·**同一效果只留一份实现**】作者点名 A3：卡面「那之后可以对1名玩家造成1点**混沌**属性伤害」
+   这一段，原来**只有联机远端位**那份实现了（p1 玩家侧与 AI 座两份都漏）✗ ——
+   根因是同一张卡在本引擎里被写了**三份**（p1 `activateZuijiahuaSP` ／ AI `activateZuijiahuaSPFor` ／
+   远端位 `onlineZuijiahuaP2`），三份各自演化 ⇒ 卡面改了只改到一份。
+   ⇒ 收成**唯一结算出口** `__zuijiahuaApply(player)`：移出墓地 + ON_REMOVE 时点 + 攻击力+1 +
+     那之后的 1 点混沌伤害 + 按座位记账/日志，全在这一处 ✓；三个入口只保留各自的"前置/界面" ✓。
+   ⚠ 以后改这张卡的任何数值，**只改这一处**（探针 `probe-zuijiahua-paths.cjs` 钉住"入口里不许再有效果本体"）。 */
+function __zuijiahuaApply(player) {
+  var p = battleState && battleState[player];
+  if (!p) return false;
+  var ix = -1;
+  (p.grave || []).forEach(function (c, i) { if (ix < 0 && c && c.name === '最佳化') ix = i; });
+  if (ix < 0) return false;
+  var card = p.grave.splice(ix, 1)[0];
+  (p.removed = p.removed || []).push(card);
+  try { if (typeof runTiming === 'function') runTiming(TIMING.ON_REMOVE, { player: player, card: card }); } catch (e) { try { console.error('最佳化·SP 的 ON_REMOVE 时点出错（不影响结算）', e); } catch (e2) {} }
+  p.attackBuff = (p.attackBuff || 0) + 1;
+  var __pre = (typeof isAISeat === 'function' && isAISeat(player)) ? '（对手）' : '';   /* 三份旧日志措辞逐字保留 ✓ */
+  addBattleLog(player, '【最佳化·SP】' + __pre + '把墓地的【最佳化】移出游戏，自身攻击力+1（当前攻击+' + p.attackBuff + '）');
+  /* 卡面（2026-09-28）新增段：「那之后可以对1名玩家造成1点**混沌**属性伤害」——对对手（三端同一处 ✓） */
+  var foe = (typeof foeOf === 'function') ? foeOf(player) : null;
+  if (foe && battleState[foe]) {
+    addBattleLog(player, '【最佳化·SP】' + __pre + '那之后对' + (foe === player ? '自己' : '对手') + '造成1点混沌属性伤害');
+    dealDamageWithResponse(foe, 1, '最佳化·SP', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, '混沌', player, { kind: 'attribute' });
+  }
+  if (typeof updateBattleUI === 'function') updateBattleUI();
+  return true;
+}
+/* p1 玩家侧入口（墓地点 ⚡）：只保留"结算锁提示"这一层前置，效果本体在唯一出口里 ✓ */
 function activateZuijiahuaSP() {
   /* 【不再静默】（2026-09-28：作者报"最佳化的墓地效果无法发动"）
      原来碰到结算锁就**无声 return** ⇒ 玩家只看到"点不动"。现在锁住时给出明确提示与日志，
@@ -13147,31 +13164,10 @@ function activateZuijiahuaSP() {
     if (typeof showToast === 'function') showToast('有结算正在进行，请稍后再发动【最佳化·SP】', 'warn');
     return;
   }
-  var p = battleState.p1;
-  var ix = -1;
-  (p.grave || []).forEach(function (c, i) { if (ix < 0 && c && c.name === '最佳化') ix = i; });
-  if (ix < 0) { showToast('墓地没有【最佳化】', 'warn'); return; }
-  var card = p.grave.splice(ix, 1)[0];
-  (p.removed = p.removed || []).push(card);
-  try { if (typeof runTiming === 'function') runTiming(TIMING.ON_REMOVE, { player: 'p1', card: card }); } catch (e) { try { console.error('[catch] assets/engine.js:11818', e); } catch (e2) {} }
-  p.attackBuff = (p.attackBuff || 0) + 1;
-  addBattleLog('p1', '【最佳化·SP】把墓地的【最佳化】移出游戏，自身攻击力+1（当前攻击+' + p.attackBuff + '）');
-  updateBattleUI();
+  if (!__zuijiahuaApply('p1')) { if (typeof showToast === 'function') showToast('墓地没有【最佳化】', 'warn'); }
 }
 /** 同上，但按座位参数化（AI 侧用；联机远端走 onlineZuijiahuaP2 的弹窗路径） */
-function activateZuijiahuaSPFor(player) {
-  var p = battleState && battleState[player]; if (!p) return false;
-  var ix = -1;
-  (p.grave || []).forEach(function (c, i) { if (ix < 0 && c && c.name === '最佳化') ix = i; });
-  if (ix < 0) return false;
-  var card = p.grave.splice(ix, 1)[0];
-  (p.removed = p.removed || []).push(card);
-  try { if (typeof runTiming === 'function') runTiming(TIMING.ON_REMOVE, { player: player, card: card }); } catch (e) { try { console.error('[catch] assets/engine.js:11831', e); } catch (e2) {} }
-  p.attackBuff = (p.attackBuff || 0) + 1;
-  addBattleLog(player, '【最佳化·SP】（对手）把墓地的【最佳化】移出游戏，自身攻击力+1（当前攻击+' + p.attackBuff + '）');
-  if (typeof updateBattleUI === 'function') updateBattleUI();
-  return true;
-}
+function activateZuijiahuaSPFor(player) { return __zuijiahuaApply(player); }
 function activateLiuliHWRecycle() {
   if (__resolveLocked()) return;
   var p = battleState.p1;
