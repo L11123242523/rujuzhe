@@ -3040,7 +3040,10 @@ function evaluatePlayable(card,player,opts){
   // 3) 技能卡：必须编入对应形态角色才能用（同名不同形态不通用）；且每回合一次（按卡牌实例：用后进墓即离场重置，回收回手可再发动）
   if(isSkill){
     if(!teamHasCardCharacter(player,card)) return {ok:false,reason:'队伍未编入【'+(card.character_full||card.character||'对应角色')+'】，不能使用其技能卡【'+name+'】（同名不同形态不通用，需编入对应形态）'};
-    if(card._skillUsedThisTurn) return {ok:false,reason:'技能卡【'+name+'】本回合已经使用过了（每回合一次）'};
+    /* 【2026-10-15 作者裁决：技能卡**不再有**「同一张卡每回合一次」的限制 ⇒ 本闸已删除 ✓
+       作者原话：「其实技能卡就不应该有限制」→ 选定「完全删掉限制（可能变成连发）」
+       被删掉的是这一句：`if(card._skillUsedThisTurn) return {ok:false,…}`（原来会提示"每回合一次"）
+       保留的仍是**合法闸**：上面那句"队伍须编入对应角色"、费用、时点、结算中不可插入等 ✓ */
   }
   /* 【2026-10-07 新增·**额外同步值使用条件**】卡面写"这张卡需要支付 N 点同步值才能使用"时，
      它是**前置条件**（作者 2026-10-07 明确：同步值小于 N 就不能使用该卡），不是费用字段。
@@ -6136,12 +6139,8 @@ function startTurn() {
   try { if (typeof clearTurnScopedDefDowns === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedDefDowns(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:5751', e); } catch (e2) {} }
   /* 【2026-10-14 新卡·永眠之棺】同一处、同一口径：'直到本回合结束'的效果无效也按回合号统一清理 ✓ */
   try { if (typeof clearTurnScopedCardStates === 'function' && battleState) playerIds().forEach(function (w) { clearTurnScopedCardStates(w); }); } catch (e) { try { console.error('[catch] assets/engine.js:回合到期卡状态', e); } catch (e2) {} }
-  /* 【2026-10-15 作者报「技能卡被上回合锁住」⇒ 结构修 ✓】
-     技能卡的"本回合已用"是**跨回合的瞬时状态**（按卡实例记 `_skillUsedThisTurn`），
-     但清它的地方原本只有 `placeAfterUse` 末尾那一句，而那里有**两条提前 return** 会绕过它
-     ⇒ 标记永远留下 ⇒ 之后每个回合都被误判"本回合已经使用过了（每回合一次）"✗
-     ⇒ 改为与本引擎"直到本回合结束"的状态**同一处、同一口径**：**每回合开始统一清理** ✓ */
-  try { if (typeof __clearTurnScopedSkillMarks === 'function') __clearTurnScopedSkillMarks(); } catch (e) { try { console.error('[catch] 技能卡本回合标记清理', e); } catch (e2) {} }
+  /* 【2026-10-15 作者裁决：技能卡不再有「每回合一次」限制 ⇒ 原来这里那一族
+     "每回合清理技能卡本回合已用标记"的调用已整段删除 ✓（标记本身不再被写入） */
   /* 【2026-10-15 作者报「雷閃一直连锁」复发 ⇒ 结构修 ✓】
      原来这里每回合**无条件删除** `_leishanSPTurn`（座位级"一回合一次"的记忆），
      而那道闸的判据是 `me._leishanSPTurn === battleState.turn` —— **严格回合号相等**：
@@ -6273,9 +6272,6 @@ function startTurn() {
   
   // 准备阶段
   battleState.phase = 'prepare';
-  battleState[player].usedSkillsThisTurn = [];
-  // 清掉残留在手牌/盖伏/永续区技能卡实例上的“本回合已用”标记（进墓时已清，此处为跨回合保险）
-  ['hand','faceDownCards','permanent'].forEach(function(zn){ (battleState[player][zn]||[]).forEach(function(c){ if(c) delete c._skillUsedThisTurn; }); });
   battleState[player]._sacrificeUsedThisTurn = 0; // 重置每回合一次的技能使用记录
   battleState[player]._busRolledThisAction = false;   // 【2026-10-03】公交/地铁：每次自己行动期间只能投 1 次四面骰
   if (battleState[player]._onAnchor) { addBattleLog(player, '回合开始：从公交/地铁锚点回到第' + battleState[player].position + '格'); battleState[player]._onAnchor = 0; }
@@ -6494,7 +6490,8 @@ function collectChainable(player, effect){
        只校验：角色在本队、费用够、本回合未用过、盖伏当回合不能翻。 */
     if (c._category === 'skill_cards') {
       if (from === 'event') return;                                   // 事件区里不会有技能卡
-      if (c._skillUsedThisTurn) return;                               // 每回合一次
+      /* 【2026-10-15 作者裁决】技能卡不再有「每回合一次」限制 ⇒ 这句闸已删除 ✓
+       （被删掉的原句：`if (c._skillUsedThisTurn) return;`） */
       if (typeof teamHasCardCharacter === 'function' && !teamHasCardCharacter(player, c)) return;
       var __skCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
       if ((parseInt(c.cost,10)||0) > (me.cost||0) + __skCap) return;
@@ -24821,9 +24818,9 @@ function recordSkillUse(card, user) {
   }
   if (!card || card._category !== 'skill_cards') return;
   var p = battleState[user];
-  if (!p.usedSkillsThisTurn) p.usedSkillsThisTurn = [];
-  if (p.usedSkillsThisTurn.indexOf(card.name) < 0) p.usedSkillsThisTurn.push(card.name);
-  card._skillUsedThisTurn = true; // 实例级“本回合已用”：进墓离场时清除，回收回手可再发动
+  /* 【2026-10-15 作者裁决】技能卡不再记「本回合已用」 ⇒ 原来这里的记账已整段删除 ✓
+     被删掉的是这两句：`p.usedSkillsThisTurn.push(card.name)` 与 `card._skillUsedThisTurn = true`
+     效果：同一张技能卡**回收回手后可以再次发动**，同一回合内多次也可以（作者已知悉）✓ */
 }
 
 function __revertBlueprintCopy(card) {
@@ -24834,35 +24831,6 @@ function __revertBlueprintCopy(card) {
   addBattleLog('system', '【魔法蓝图】结算完毕，变回蓝图原貌');
 }
 
-/* 【2026-10-15 作者报「技能卡被上回合锁住」⇒ 结构修 · 唯一清理入口】
-   技能卡的"本回合已用"是**跨回合的瞬时状态**（按卡实例记 `card._skillUsedThisTurn`）。
-   本函数是它**唯一**的清理入口：任何"这张卡这一轮用完了"的时机都调它 ✓
-   为什么要有唯一入口：原来只有 `placeAfterUse` 末尾那一句，而它前面有**两条提前 return**
-     ⇒ 命中时标记永远留下 ⇒ 之后每个回合都被误判"本回合已用"✗（就是作者报的现象） */
-function __clearSkillUsedMark(card) {
-  try {
-    if (!card) return;
-    delete card._skillUsedThisTurn;
-  } catch (e) {}
-}
-/* 每回合开始：把散落在各区域里的"本回合已用"标记统一清掉（跨回合状态 ⇒ 按回合号清理 ✓）
-   与"直到本回合结束"的状态同一处、同一口径（见 startTurn 顶部那一族清理）✓ */
-function __clearTurnScopedSkillMarks() {
-  try {
-    if (!battleState) return;
-    var zones = ['hand', 'permanent', 'faceDownCards', 'eventCards', 'grave', 'removed', 'deck'];
-    playerIds().forEach(function (w) {
-      var p = battleState[w]; if (!p) return;
-      zones.forEach(function (zn) {
-        var arr = p[zn]; if (!Array.isArray(arr)) return;
-        for (var i = 0; i < arr.length; i++) {
-          var c = arr[i];
-          if (c && c._category === 'skill_cards' && c._skillUsedThisTurn) __clearSkillUsedMark(c);
-        }
-      });
-    });
-  } catch (e) {}
-}
 function placeAfterUse(user, card, isPerm) {
   /* 【2026-10-09 第2件】用卡结束 ⇒ 清掉"本次使用中"的归属标记（与 payAndRemove 成对，同生同灭） */
   try { if (card) card._inUseBy = null; } catch (e) { try { console.error('[catch] assets/engine.js:21945', e); } catch (e2) {} }
@@ -24882,33 +24850,19 @@ function placeAfterUse(user, card, isPerm) {
       card._alreadyInPublicGrave = false;
       __chainC1Exit(user, card);
       addBattleLog(user, '【' + (card.name || '?') + '】已在发动时放入公共墓地，不再送入个人墓地');
-      /* 【2026-10-15 结构修】这条提前 return 原来**绕过**了末尾的标记清理 ⇒ 技能卡被永久锁住 ✗ */
-      __clearSkillUsedMark(card);
       return;
     }
     var __takenAway = __chainC1WasTakenAway(user, card);
     if (__takenAway) {
       __chainC1Exit(user, card);
       addBattleLog(user, '【' + (card.name || '?') + '】结算期间已被其他效果移出效果处理区，按其落点结算，不再走"按种类送墓"');
-      /* 【2026-10-15 结构修】同上：这条提前 return 也绕过清理 ⇒ 补上 ✓ */
-      __clearSkillUsedMark(card);
       return;
     }
     __chainC1Exit(user, card);
   }
-  // 技能卡用后必离场（进墓/回牌组）：清除实例级“本回合已用”标记，使其被回收回手后可再次发动（未回收则卡在墓地，自然无法一回合连发）
-  if (card && card._category === 'skill_cards') delete card._skillUsedThisTurn;
-  /* 【2026-10-15 作者报「技能卡（好孩子的奖励 / 小恶魔的投喂）老是被上回合锁住，
-     说不让用、一回合只能使用一次，可卡面根本没这条限制」⇒ 结构修 ✓
-     根因：上面**两条提前 return**（`_alreadyInPublicGrave` / `__chainC1WasTakenAway`）会绕过本函数
-       末尾那句 `delete card._skillUsedThisTurn` ⇒ 该卡实例上的"本回合已用"标记**永远留着**
-        ⇒ 之后**每个回合**出牌闸都判它"本回合已经使用过了（每回合一次）"✗
-     修法：不再指望"某一条去向分支顺手清掉"，而是把它当**跨回合的瞬时状态**——
-        在 `startTurn()` 里**按回合统一清理**（与本引擎"直到本回合结束"的状态同一处、同一口径）✓
-        · 这样无论卡走过哪条分支（回收/被搬走/已入公共墓地…），下一回合一定不再被旧标记锁住
-        · 同回合内"已用"标记仍然有效 ⇒ 不会出现"同一回合连发两次"✓
-     同时把两处提前 return 也补上清理（当回合内被回收时立刻可再用，符合原设计意图）✓ */
-  __clearSkillUsedMark(card);
+  /* 【2026-10-15 作者裁决】技能卡不再有「同一张卡每回合一次」的限制 ⇒ 原来这里那一整段
+     "本回合已用"的标记与清理（`delete card._skillUsedThisTurn`、`__clearSkillUsedMark(card)`）
+     已全部删除 ✓ 现在技能卡**可以被回收回手后再次发动**，同一回合内多次也可以（作者已知悉）✓ */
   /* 【2026-10-14 收口·唯一出口】下面各条分支已经把这张卡的**去向**定完了（回收/蓝图跳过/销毁/
      事件卡→公共墓地/乐谱卡→公共墓地/按种类送墓…）⇒ 这里在**公共尾巴**上补一次 C1 收尾：
      任何一条去向分支漏了"撤 C1 占位"都不会再把标记漂在卡上 ⇒ UI 不会一直画「C1 结算中」✗。
