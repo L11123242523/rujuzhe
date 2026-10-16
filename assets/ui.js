@@ -1335,6 +1335,45 @@ function renderChainBar(effect, opt) {
   bar.classList.add('show');
 }
 
+/* 【2026-10-17 作者点名·"查看牌组和墓地时无法确认顺序"】唯一真相 = 下面这两个函数：
+     · `__zoneOrderBadge(zone, idx, total)` → 这张卡在本区域里的**位置标签**（写清哪端是最上/最下）
+     · `__zoneOrderHint(zone)`             → 列表顶部那句**方向说明**
+   口径（与引擎内部约定一致，代码里的注释已互证）：
+     · 牌组：`deck[0]` = **最上方** = 下一张会抽到的卡（`takeTopCard` 走 `shift`）；末位 = **最下方**（回收卡回这里）
+     · 墓地：`grave[0]` = **最下方** = 最早进墓；末位 = **最上方** = 最近进墓（`moveCardToGrave` 走 push）
+     · 移出区 / 公共墓地：顺序不敏感 ⇒ 只给序号
+   ⚠ 三处查看口都调它（本机牌组列表 / 本机墓地列表 / 通用查看列表）⇒ 以后只有一份口径 ✓
+   为什么原来看不出顺序：牌组列表进来先 `sort(按名字)` 把顺序抹掉了 ✗（本次一并去掉排序） */
+function __zoneOrderBadge(zone, idx, total) {
+  if (!(total > 0) || idx < 0 || idx >= total) return '';
+  var n = idx + 1;
+  if (total === 1) {
+    if (zone === 'deck') return '#1 · 牌组唯一一张（最上＝最下，下一抽就是它）';
+    if (zone === 'grave') return '#1 · 墓地唯一一张（最上＝最下）';
+  }
+  if (zone === 'deck') {
+    if (idx === 0) return '#' + n + ' · 牌组最上方（下一抽）';
+    if (idx === total - 1) return '#' + n + ' · 牌组最下方';
+    return '#' + n + ' / ' + total;
+  }
+  if (zone === 'grave') {
+    if (idx === 0) return '#' + n + ' · 墓地最下方（最早进墓）';
+    if (idx === total - 1) return '#' + n + ' · 墓地最上方（最近进墓）';
+    return '#' + n + ' / ' + total;
+  }
+  if (zone === 'removed' || zone === 'public_grave') return '#' + n + ' / ' + total;
+  return '';
+}
+function __zoneOrderHint(zone) {
+  if (zone === 'deck') return '顺序：从左到右 = 牌组最上方 → 最下方（最上方那张 = 下一张会抽到的卡）';
+  if (zone === 'grave') return '顺序：从左到右 = 墓地最下方（最早进墓） → 最上方（最近进墓）';
+  if (zone === 'removed') return '按移出游戏的先后排列（顺序不敏感）';
+  if (zone === 'public_grave') return '按进入公共墓地的先后排列';
+  return '';
+}
+try { window.__zoneOrderBadge = __zoneOrderBadge; } catch (e) {}
+try { window.__zoneOrderHint = __zoneOrderHint; } catch (e) {}
+
 function showDeckList() {
   if (!battleState) return;
   var modal = document.getElementById('cardListModal');
@@ -1347,12 +1386,19 @@ function showDeckList() {
   if (battleState.p1.deck.length === 0) {
     content.innerHTML = '<div style="color:rgba(255,255,255,0.5);padding:20px;">牌组为空</div>';
   } else {
-    // 按卡牌名称排序显示
-    var sortedDeck = battleState.p1.deck.slice().sort(function(a, b) {
-      return (a.name || '').localeCompare(b.name || '');
-    });
-    for (var i = 0; i < sortedDeck.length; i++) {
-      var card = sortedDeck[i];
+    /* 【2026-10-17 作者点名·"查看牌组无法确认顺序"】
+       原来这里**先按卡名排序**再显示 ⇒ 牌组顺序信息被抹掉、玩家根本看不出哪张是最上/最下 ✗
+       ⇒ 改成**按牌组真实顺序**显示，每张卡上标出它在牌组里的位置（唯一真相 `__zoneOrderBadge` ✓） */
+    var deckArr = battleState.p1.deck;
+    var __dhint = (typeof __zoneOrderHint === 'function') ? __zoneOrderHint('deck') : '';
+    if (__dhint) {
+      var hintDiv = document.createElement('div');
+      hintDiv.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.65);padding-bottom:8px;';
+      hintDiv.textContent = __dhint;
+      content.appendChild(hintDiv);
+    }
+    for (var i = 0; i < deckArr.length; i++) {
+      var card = deckArr[i];
       var div = document.createElement('div');
       div.className = 'card-list-item';
       div.setAttribute('data-list-card', card.name || '');
@@ -1367,11 +1413,13 @@ function showDeckList() {
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };
       /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
       div.onclick = (function(c){ return function() { __openGraveCardDetail(c); }; })(card);
-      div.innerHTML = '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
+      var __dbadge = (typeof __zoneOrderBadge === 'function') ? __zoneOrderBadge('deck', i, deckArr.length) : '';
+      div.innerHTML = (__dbadge ? '<div style="font-size:10px;font-weight:bold;color:#feca57;margin-bottom:3px;">' + __dbadge + '</div>' : '') +
+        '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
         '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">' + (card.effect || '').substring(0, 50) + '...</div>';
-      div.title = card.name + '\n费用:' + (card.cost || 0) + '\n' + (card.effect || '') + '\n（点击查看完整效果）';
+      div.title = (__dbadge ? __dbadge + '\n' : '') + card.name + '\n费用:' + (card.cost || 0) + '\n' + (card.effect || '') + '\n（点击查看完整效果）';
       content.appendChild(div);
     }
   }
@@ -1403,6 +1451,14 @@ function showGraveList(zone) {
     tabBar.appendChild(b);
   });
   content.appendChild(tabBar);
+  /* 【2026-10-17 作者点名·"查看墓地无法确认顺序"】顶部写清方向：从左到右 = 最下方 → 最上方（唯一真相 ✓） */
+  var __ghint = (typeof __zoneOrderHint === 'function') ? __zoneOrderHint(zcur) : '';
+  if (__ghint) {
+    var __gHintDiv = document.createElement('div');
+    __gHintDiv.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.65);padding-bottom:8px;';
+    __gHintDiv.textContent = __ghint;
+    content.appendChild(__gHintDiv);
+  }
   if (!list.length) {
     var empty=document.createElement('div');empty.style.cssText='color:rgba(255,255,255,0.5);padding:20px;text-align:center;';
     empty.textContent=(zcur==='removed'?'移出游戏区为空':'墓地为空');content.appendChild(empty);
@@ -1425,11 +1481,13 @@ function showGraveList(zone) {
         /* 【2026-10-09 作者目标第4项】墓地/移出区的卡：**悬停即浮出放大的原图**（闭包里有 card ⇒ 直接取名字） */
         div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) { try { console.error('[catch] assets/ui.js:1335', e); } catch (e2) {} } };
         div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1336', e); } catch (e2) {} } };
-        div.innerHTML='<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
+        var __gbadge = (typeof __zoneOrderBadge === 'function') ? __zoneOrderBadge(zcur, idx, list.length) : '';
+        div.innerHTML=(__gbadge?'<div style="font-size:10px;font-weight:bold;color:#feca57;margin-bottom:3px;">'+__gbadge+'</div>':'')+
+          '<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
           '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;line-height:1.3;">'+(card.effect||'').substring(0,50)+'...</div>'+spBtn;
-        div.title=card.name+'\n费用:'+(card.cost||0)+'\n'+(card.effect||'');
+        div.title=(__gbadge?__gbadge+'\n':'')+card.name+'\n费用:'+(card.cost||0)+'\n'+(card.effect||'');
         if (canSP) { var btn=div.querySelector('[data-sp]'); btn.onclick=function(ev){
           ev.stopPropagation();
           /* 【2026-10-12 作者报："墓地移出还是会留在墓地而不是手牌区"，且是**所有**墓地移出卡的通病 ✓】
