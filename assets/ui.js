@@ -1058,11 +1058,19 @@ function renderZoneSlots(pl) {
   (P.permanent || []).forEach(function (c, i) { if (c && c._chainC1) __c1entries.push({ card: c, type: 'chainC1', index: i }); });
   var __all = list.concat(__c1entries);   // 常驻/盖伏在前，C1 进队尾 → 有空位就先占空位
   var html = '';
+  /* 【2026-10-17 作者点第 10 项·**效果处理区也标位置**】空位本来写着「空位N」，但**占用的格子没有编号** ⇒
+     玩家看不出哪张卡在第几格（而"从效果处理区取一张"这类效果是按格位来的）。
+     这里给每个占用格加一个"第N格"小标签（与牌组/墓地的短标签同一套观感 ✓，9px、不折行） */
+  var __slotIdx = function (k, over) {
+    return '<div style="font-size:9px;font-weight:600;color:rgba(254,202,87,.82);line-height:1.1;margin-bottom:2px;white-space:nowrap;">' +
+      (over ? '超出3格' : ('第' + k + '格')) + '</div>';
+  };
   for (var i = 0; i < 3; i++) {
     var it = __all[i];
     if (!it) { html += '<div class="permanent-slot empty">空位' + (i + 1) + '</div>'; continue; }
     if (it.type === 'chainC1') {
       html += '<div class="permanent-slot permanent-card chain-c1" title="连锁 C1（结算中）：' + (it.card.name || '') + ' — 结算完毕后按种类送墓">' +
+        __slotIdx(i + 1) +
         (it.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + it.card.image_url + '" class="slot-img" alt="' + it.card.name + '">' : '') +
         '<div class="slot-name">' + (it.card.name || '') + '</div><div class="slot-type">C1 结算中</div></div>';
       continue;
@@ -1078,6 +1086,7 @@ function renderZoneSlots(pl) {
       html += '<div class="permanent-slot permanent-card face-down" title="' + fdTitle + '"' +
         (mine ? ' onclick="' + fdOnclick + '"' : '') + fdHover +
         ' style="background:linear-gradient(135deg,#2c3e50,#34495e);' + (mine ? 'cursor:pointer;' : 'cursor:default;') + '">' +
+        __slotIdx(i + 1) +
         '<div class="slot-name" style="color:#feca57;">盖伏</div><div class="slot-type">' + fdType + '</div></div>';
     } else {
       /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面写「这个效果在其他玩家回合也能发动」的永续卡（雷閃），
@@ -1093,6 +1102,7 @@ function renderZoneSlots(pl) {
       var permPeek = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(it.card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
       html += '<div class="permanent-slot permanent-card"' + permPeek + ' title="' + permTitle + '"' +
         (permOnclick ? ' onclick="' + permOnclick + '"' : '') + ' style="' + permStyle + '">' +
+        __slotIdx(i + 1) +
         (it.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + it.card.image_url + '" class="slot-img" alt="' + it.card.name + '">' : '') +
         '<div class="slot-name">' + it.card.name + '</div><div class="slot-type">永续' +
         (mine ? (permCanAct ? '(点击发动)' : '(不可主动发动)') : '（对手）') + '</div></div>';
@@ -1104,6 +1114,7 @@ function renderZoneSlots(pl) {
     var __x = __all[__k];
     if (!__x || __x.type !== 'chainC1') continue;
     html += '<div class="permanent-slot permanent-card chain-c1 chain-c1-over" title="连锁 C1（结算中，**超出效果处理区 3 格上限**）：' + (__x.card.name || '') + '">' +
+      __slotIdx(0, true) +
       (__x.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + __x.card.image_url + '" class="slot-img" alt="' + __x.card.name + '">' : '') +
       '<div class="slot-name">' + (__x.card.name || '') + '</div><div class="slot-type">C1·超出上限</div></div>';
   }
@@ -1415,9 +1426,11 @@ function showDeckList() {
       div.style.cssText = 'width:120px;padding:8px;background:rgba(0,0,0,0.3);border:2px solid rgba(255,255,255,0.2);border-radius:6px;cursor:pointer;transition:all 0.2s;';
       div.onmouseover = function() { this.style.borderColor = '#feca57'; };
       /* 【2026-10-11 作者视频 bug.mp4 证实】客机打开「牌组（5张）」列表，悬停**任意一项**浮出的都是
-         **最后一张**（视频里是"弱点分析"）✗ 根因：`var card = sortedDeck[i]` 是函数级作用域，所有迭代共用它，
-         而悬停闭包在**悬停那一刻**才读 ⇒ 读到的永远是循环结束后的最后一张。
-         修法：给这两个闭包各自绑定"当时的这张卡"（不动循环结构；与同文件墓地列表那处的 IIFE 同款思路）。 */
+         **最后一张**（视频里是"弱点分析"）✗ 根因：当时那个 `var card = sortedDeck[i]` 是函数级作用域，
+         所有迭代共用它，而悬停闭包在**悬停那一刻**才读 ⇒ 读到的永远是循环结束后的最后一张。
+         修法：给这两个闭包各自绑定"当时的这张卡"（不动循环结构；与同文件墓地列表那处的 IIFE 同款思路）。
+         【2026-10-17 补】v422 起本列表**不再按卡名排序**（改为真实牌组顺序）、遍历变量是 `deckArr[i]`
+         ⇒ 上面那句引用的 `sortedDeck` 已不存在，此处一并订正免得后来人误以为排序还在 ✓ */
       div.onmouseenter = (function(c){ return function() { try { __cardPeekShow(this, encodeURIComponent(c.name || '')); } catch (e) { try { console.error('[catch] assets/ui.js:1274', e); } catch (e2) {} } }; })(card);
       div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1275', e); } catch (e2) {} } };
       div.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.2)'; };

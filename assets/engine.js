@@ -9315,8 +9315,10 @@ function resolveChainStack(effect, onDone) {
             var __wp = battleState[w]; if (!__wp) return;
             var __imm = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(w) : null;
             if (__imm) { addBattleLog(by, '大风：【' + w + '】' + __imm + ' ⇒ 不受影响'); return; }
-            if (!__wp.moveDebuff) __wp.moveDebuff = {};
-            __wp.moveDebuff.nextMoveMinus2 = true;
+            /* 【2026-10-17 统一·作者「5 可以统一」】原来这里挂的是**另一套字段** `moveDebuff.nextMoveMinus2`，
+               而指令层 op（`adjust_next_move_all`）挂 `_nextMoveAdjust` ⇒ 同一件事两套字段（读者也两拨 ✗）。
+               现在统一到 `_nextMoveAdjust`（状态栏会显示它 ✓）—— 与效果体、指令层同一个字段 ✓ */
+            __wp._nextMoveAdjust = (__wp._nextMoveAdjust || 0) - 2;
           });
         } catch (e4) { try { console.error('[catch] assets/engine.js:8464 大风 debuff', e4); } catch (e5) {} }
       };
@@ -10340,11 +10342,11 @@ function executeMoveEffect(effect) {
   var oldPos = p.position;
   // 单次位移最多20格
   var actualMoveAmount = Math.min(moveAmount, 20);
-  // 大风影响：本次位移-2
-  if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) {
-    p.moveDebuff.nextMoveMinus2 = false;
-    actualMoveAmount = Math.max(0, actualMoveAmount - 2);
-    addBattleLog(player, '大风影响：本次位移-2');
+  // 【2026-10-17 统一·作者「5 可以统一」】位移调整只有**一个字段** `_nextMoveAdjust`（原来是两套字段并存 ✗）
+  if (p._nextMoveAdjust) {
+    actualMoveAmount = Math.max(0, actualMoveAmount + p._nextMoveAdjust);
+    addBattleLog(player, '位移量调整' + (p._nextMoveAdjust > 0 ? '+' : '') + p._nextMoveAdjust);
+    p._nextMoveAdjust = 0;
   }
   var moveDir = (effect._reverseDir || p._nextMoveReverse) ? -1 : 1; // 颠倒骰子/方向反转
   if (p._nextMoveReverse) p._nextMoveReverse = false;
@@ -11862,7 +11864,8 @@ function aiExecuteMove(dice, callback) {
   if (p._fixedNextMove) { actualMove = p._fixedNextMove; p._fixedNextMove = 0; }
   if (p._nextMoveAdjust) { actualMove += p._nextMoveAdjust; p._nextMoveAdjust = 0; }
   if (p._moveInterrupted) { p._moveInterrupted = false; actualMove = 0; addBattleLog(aiSeat(),'对手本次移动被打断'); }
-  if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) { p.moveDebuff.nextMoveMinus2 = false; actualMove = Math.max(0, actualMove - 2); addBattleLog(aiSeat(),'大风影响：AI本次位移-2'); }
+  /* 【2026-10-17 统一·作者「5 可以统一」】删掉这里原来的旧字段那一支（`moveDebuff.nextMoveMinus2`）——
+     上面 11863 已经统一消费 `_nextMoveAdjust` ⇒ 两支同时存在会让 AI 的位移被**扣两次** ✗（潜在双扣） */
   if (actualMove < 0) actualMove = 0;
 
   // 移动连锁时点（手牌+盖伏均可连锁，走统一双方连锁引擎）
@@ -15036,6 +15039,9 @@ function __logPass(rec) {
       if (t === 'judge' && !/判定|校准|骰|硬币|改点|重判/.test(m)) return false;
       if (t === 'dmg' && !/伤害|受伤|同步值|护盾/.test(m)) return false;
       if (t === 'phase' && rec.type !== 'phase') return false;
+      /* 【2026-10-17 作者点第 11 项·补「关键时点」合并类目】= 连锁/时点 ∪ 判定 ∪ 伤害/同步 ∪ 阶段
+         （作者原话是"只看关键时点"；原来的下拉只有单类目 ⇒ 得来回切 ✗） */
+      if (t === 'key' && rec.type !== 'phase' && !/连锁|时点窗口|入链|PASS|逆结算|判定|校准|骰|硬币|改点|重判|伤害|受伤|同步值|护盾/.test(m)) return false;
       if (t === 'p1' && rec.type !== 'p1' && rec.actor !== 'p1') return false;
       if (t === 'p2' && rec.type !== 'p2' && rec.actor !== 'p2') return false;
     }
@@ -17388,8 +17394,8 @@ function __previewLandingTile(player, signedN) {
   if (!p) return null;
   var n = Math.max(-20, Math.min(20, signedN));
   var dir = n >= 0 ? 1 : -1;
-  /* 大风影响：下一次位移 -2（与 applyMove 同款，只算不写） */
-  if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) n = (Math.abs(n) >= 2) ? (n - 2 * dir) : 0;
+  /* 【2026-10-17 统一·作者「5 可以统一」】预览要跟 `applyMove` **同一个字段**算（否则落点预览与实际不符 ✗） */
+  if (p._nextMoveAdjust) n = n + p._nextMoveAdjust;
   if (n === 0) return p.position;                       // 位移 0 = 原地跳一下（位置不变）
   var dest = ((p.position + n) % 42 + 42) % 42;
   try {
@@ -17475,11 +17481,11 @@ function applyMove(user, signedN) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
   /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
   try { if (typeof __busOffNetwork === 'function') __busOffNetwork(p); } catch (e) { try { console.error('[catch] assets/engine.js:15719', e); } catch (e2) {} }
-  // 大风影响：下次位移-2（用后即清）
-  if (p.moveDebuff && p.moveDebuff.nextMoveMinus2) {
-    p.moveDebuff.nextMoveMinus2 = false;
-    n = (Math.abs(n) >= 2) ? (n - 2 * __dir) : 0;
-    addBattleLog(user, '大风影响：本次位移-2');
+  // 【2026-10-17 统一·作者「5 可以统一」】用后即清：位移调整唯一字段 `_nextMoveAdjust`
+  if (p._nextMoveAdjust) {
+    n = Math.max(-20, Math.min(20, n + p._nextMoveAdjust));
+    addBattleLog(user, '位移量调整' + (p._nextMoveAdjust > 0 ? '+' : '') + p._nextMoveAdjust);
+    p._nextMoveAdjust = 0;
   }
   p._lastMoveFrom = oldPos; p._lastMoveSteps = n; // 记录移动前位置/步数，供“路径上”类效果（风纪委员Lv7）使用
   /* 【2026-10-03 作者口径】位移 0 = **原地跳一下**：位置不变，但照常结算当前格子的效果
