@@ -11705,6 +11705,12 @@ function aiScoreCard(c) {
 // AI出牌辅助函数（递归使用卡牌，走完整效果处理流程）
 function aiPlayCards(maxActions, callback) {
   if (battleState._over) { if (callback) callback(); return; }
+  /* 【2026-10-15 作者要求】新手【实战演练】里 **AI 不许出卡** ✓
+     为什么放在这一层：aiTurn 的出牌就是调用本函数（11549）——
+       在这里直接回调 ⇒ **跳过"出牌"这一步，回合其余部分照常走**（阶段推进/投骰/结束回合）
+       ⇒ 不会把 AI 回合卡死（比"整个 aiTurn 返回"稳）✓
+     演练未开启时 `__drill.on` 为 false ⇒ 正常对战的 AI 行为一字不变 ✓ */
+  try { if (typeof __drill !== 'undefined' && __drill && __drill.on) { if (callback) callback(); return; } } catch (e) {}
   /* 同上：等待玩家对"是否发动/是否连锁"作答期间，AI 每一步都要**停下等**，不能抢在对手思考时操作。 */
   if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiPlayCards', null) : battleState._awaitingDecision) {
     setTimeout(function () { try { aiPlayCards(maxActions, callback); } catch (e) { console.error('aiPlayCards 等待重试出错', e); } }, 250);
@@ -15419,9 +15425,7 @@ function __drillUpdate() {
        ② 引擎 6173-6177：**沙盒模式每次回合开始都强制把双方同步值设为 999、音韵设为 30**
        而现在：演练自己把阶段推进到 main1（不再干等玩家点按钮），再布置，且只布置一次 ✓ */
     if (!__drill.rigged) {
-      /* 【实测】布置放在**准备阶段**做（对局一就绪就落）—— 若等到 main1 再落，
-         玩家已经在准备阶段等了半天、且提示会晚出现。
-         沙盒外的正常对局，引擎不会在准备阶段之后再覆盖同步值 ⇒ 这里落是稳的 ✓ */
+      /* 【实测】布置放在准备阶段做（对局一就绪就落）—— sandbox 外的正常对局，引擎不会覆盖同步值 ✓ */
       __drill.rigged = true;
       try {
         battleState.p2.sync = 2;               /* 残局：对手只剩 2 点 ⇒ 一步就能赢 ✓ */
@@ -15430,12 +15434,27 @@ function __drillUpdate() {
         battleState.p1.defense = 0; battleState.p2.defense = 0; battleState.p2.shield = 0;
         battleState.currentPlayer = 'p1';
         battleState.p1.position = 0; battleState.p2.position = 0;
-        var card = (allCards || []).find(function (c) { return c && c.name === '得分！'; });
-        if (card) {
-          /* 保留原有的其它手牌（不剥夺玩家选择），但确保获胜卡在手 ✓ */
-          var has = (battleState.p1.hand || []).some(function (x) { return x && x.name === '得分！'; });
-          if (!has) battleState.p1.hand = [JSON.parse(JSON.stringify(card))].concat(battleState.p1.hand || []);
-        }
+        /* 【2026-10-15 作者要求】演练手牌要**覆盖每种卡**、让玩家认识卡的类型 ✓
+           作者明确"可以无视编组风格"⇒ 直接从卡池取代表卡塞进手牌（不走编组规则）✓
+           选卡口径：**费用都在音韵之内、效果一眼能懂**（都不是我编的，全部来自卡池原文）✓
+             攻击卡【得分！】—— 演练的"获胜卡"（实测可斩杀）
+             技能卡【认真起来了！】—— 最直白的技能卡（自己回合前进3格）
+             单次道具【柔软枕头】—— 回同步 + 前进，效果最好懂
+             永续道具【设计师的直尺】—— 示例永续区那一类
+           其余类型（馈赠卡/乐谱卡/事件卡）**不在手牌区**：馈赠卡由馈赠格给、乐谱卡由 Story 格给、
+           事件卡由卡牌格给 —— 演练结束后玩家在对战里自然会遇到，不硬塞（避免改变机制）✓ */
+        var __want = [
+          ['attack_cards', '得分！'],
+          ['skill_cards', '认真起来了！'],
+          ['item_single', '柔软枕头'],
+          ['item_permanent', '设计师的直尺']
+        ];
+        var __repo = [];
+        __want.forEach(function (pair) {
+          var c = (allCards || []).find(function (x) { return x && x.name === pair[1]; });
+          if (c) __repo.push(JSON.parse(JSON.stringify(c)));
+        });
+        if (__repo.length) battleState.p1.hand = __repo;
         window.__lastHandSig = '';             /* 强制手牌重画一次 ✓ */
       } catch (e) {}
     }
