@@ -8242,7 +8242,7 @@ registerTrigger({
   },
   mandatory: false,
   label: function () { return '露璐缇雅·破坏（每回合一次）'; },
-  fire: function (ctx, owner) { if (typeof activateEdwardSP === 'function') activateEdwardSP(); }
+  fire: function (ctx, owner) { if (typeof activateEdwardSP === 'function') activateEdwardSP(owner); }
 });
 
 registerTrigger({
@@ -9187,7 +9187,7 @@ function resolveChainStack(effect, onDone) {
       }
     } catch (e) {}
     try {
-      if (e.seatEffect === 'edward' && typeof activateEdwardSP === 'function') { activateEdwardSP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
+      if (e.seatEffect === 'edward' && typeof activateEdwardSP === 'function') { activateEdwardSP(e.by); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else if (e.seatEffect === 'lily' && typeof activateLilySP === 'function') { activateLilySP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】找不到对应能力实现，跳过'); }
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) { try { console.error('[catch] assets/engine.js:8312', e2); } catch (e2) {} } }
@@ -13070,23 +13070,41 @@ function activateLilySP() {
     else updateBattleUI();
   } else updateBattleUI();
 }
-// 露璐缇雅·破坏（破坏者≥3，每回合一次；破坏后被炸玩家回4音韵）
-function activateEdwardSP() {
-  var p = battleState.p1;
-  if (__breakerCount('p1') < 3) { showToast('队伍破坏者合计不足3名（当前' + __breakerCount('p1') + '），不能发动', 'warn'); return; }
-  showChoiceModal('露璐缇雅 SP', '选择要破坏哪个玩家区域内的卡', '', ['破坏自己区域', '破坏对手区域'], function (o) {
-    var who = o === 0 ? 'p1' : 'p2';
+/* 露璐缇雅·破坏（破坏者≥3，每回合一次；破坏后被炸玩家回4音韵）
+   【2026-10-15 结构修 ✓·**座位归属**】本函数原来**写死 p1**：判据 `__breakerCount('p1')`、
+   弹窗 `showChoiceModal`（ui.js:660 内部写死 `ENV.ask('p1', …)`）、记账 `p._edwardSPTurn`、
+   目标换算 `who = o === 0 ? 'p1' : 'p2'`、日志座位。而它的两个入口**座位都不是 p1**：
+     · 对手回合的座位级连锁候选 ⇒ 逆结算（engine.js:9190，链节点自带 `by` ✓）
+     · 自己回合的 main1_start 触发器（engine.js:8245，框架本来就传 `owner` ✓）
+   实测（port-old/probe-edward-seat.cjs，修前 6 项红）：**p2 座位发动 ⇒ 破坏的是 p1 的卡、
+   弹窗弹给 p1、次数记在 p1 头上、p2 自己的次数没被消费 ⇒ 同一回合可重复发动**（强度失控）。
+   ⇒ 修法：座位**贯穿**整条执行（判据 / 记账 / 目标换算 / 日志 / 提问对象），两处入口各自传入座位；
+     不再有任何一处写死 p1 ✗。
+   提问对象按座位分派（都是既有出口，不新造抽象）：
+     · AI 座位（单机下的非 p1 座位）⇒ 选择类自动决策，口径与 `aiUseActiveSP` 里既有的露璐缇雅决策同一条
+       （破坏**对手**区域 ✓）
+     · 其余（本机 p1 / 联机远端位）⇒ `onlineDecideModal(座位, …)`：p1 走本机弹窗（与改前逐字一致 ✓）、
+       联机房主把问题**发给客人本人** ✓（原来问的是房主自己 ✗） */
+function activateEdwardSP(seat) {
+  /* 座位以**事实**为准（该座位在对局里存在就是它），不写死 'p1'/'p2' 名单 ✓；不传 ⇒ 本机玩家 p1（旧调用方） */
+  var s = (seat && battleState[seat]) ? seat : 'p1';
+  var p = battleState[s], foe = foeOf(s);
+  if (__breakerCount(s) < 3) { showToast('队伍破坏者合计不足3名（当前' + __breakerCount(s) + '），不能发动', 'warn'); return; }
+  function __applyEdward(o) {
+    var who = (o === 0) ? s : foe;
     var zone = (battleState[who].permanent || []).length ? 'permanent' : 'hand';
-    if (!(battleState[who][zone] || []).length) { showToast(who === 'p1' ? '自己区域没有可破坏的卡' : '对手区域没有可破坏的卡', 'warn'); return; }
-    chooseZoneCard('p1', who, zone, '选择要破坏的1张卡', function (c, i) {
+    if (!(battleState[who][zone] || []).length) { showToast(who === s ? '自己区域没有可破坏的卡' : '对手区域没有可破坏的卡', 'warn'); return; }
+    chooseZoneCard(s, who, zone, '选择要破坏的1张卡', function (c, i) {
       if (i < 0) return;
-      p._edwardSPTurn = battleState.turn;
+      p._edwardSPTurn = battleState.turn;                /* 按**发动者座位**记账 ✓ */
       battleState[who][zone].splice(i, 1); moveCardToGrave(who, c, 'destroy');
       battleState[who].cost = Math.min(battleState[who].cost + 4, battleState[who].maxCost);
-      addBattleLog('p1', '【露璐缇雅SP】破坏' + (who === 'p1' ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
+      addBattleLog(s, '【露璐缇雅SP】破坏' + (who === s ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
       updateBattleUI();
     });
-  });
+  }
+  if (isAISeat(s)) { __applyEdward(1); return; }          /* AI 座位：自动决策（破坏对手区域） */
+  onlineDecideModal(s, '露璐缇雅 SP', '选择要破坏哪个玩家区域内的卡', '', ['破坏自己区域', '破坏对手区域'], __applyEdward);
 }
 // AI 主动型 SP 决策（玩家由 useCharacterPassive 手动发动；AI 自动按收益发动，每回合一次门控一致）
 // ===== 琉璃(万圣祭)·回收（主动发动；p1 侧）=====
