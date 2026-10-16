@@ -2597,7 +2597,7 @@ function onlineUseSkillP2(done) {
   if (p._kasumiPassive && !p._kasumiUsedThisTurn) options.push({ name: '霞·整肃', desc: '选至多2张手卡和1张永续区卡放回牌组洗切，抽相同数量，放回3张回3音韵', run: function (n) { onlineKasumiP2(n); } });
   if (p._megumiSP && p._megumiSPTurn !== T) options.push({ name: '惠·乐曲', desc: 'α回4音韵抽1 / β献祭且那次回费+2 / γ回6同步+抽1馈赠 / δ献祭次数+1并造4理智', run: function (n) { onlineMegumiP2(n); } });
   if (p._koharuSP && (p._koharuTimesThisTurn || 0) < 3) options.push({ name: '小春·先机', desc: '消耗1/2/3点先机追加一个掷骰阶段，每耗1点回1音韵（本回合已用' + (p._koharuTimesThisTurn || 0) + '次）', run: function (n) { onlineKoharuP2(n); } });
-  if (p._lilySP && p._lilySPTurn !== T) options.push({ name: '莉莉·回收', desc: '墓地最下方1卡回牌组最下方，单次且新最下方非单次时视为使用并回1音韵', run: function (n) { onlineLilyP2(n); } });
+  if (p._lilySP && p._lilySPTurn !== T) options.push({ name: '莉莉·回收', desc: '墓地最下方1卡放回牌组最下方；若放回的是单次卡且新最下方非单次，视为使用并回1音韵（每回合一次）', run: function (n) { onlineLilyP2(n); } });
   // 最佳化·SP（卡面 2026-09-25 版）：墓地的这张卡移出游戏 → 自身攻击力+1（与 p1 同表同序）
   if ((p.grave || []).some(function (c) { return c && c.name === '最佳化'; })) {
     options.push({ name: '最佳化·SP', desc: '把墓地的【最佳化】移出游戏，提升自身1点攻击力', run: function (n) { onlineZuijiahuaP2(n); } });
@@ -2608,6 +2608,22 @@ function onlineUseSkillP2(done) {
   }
   if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
     options.push({ name: '羽奈(往昔)·置顶', desc: '把自己墓地最下方一张卡以正面朝上的形式放到牌组最上方（每回合一次）', run: function (n) { onlineYunaiPastP2(n); } });
+  }
+  /* 【2026-10-16 A6 结构修·**联机远端位菜单补齐里尔亚斯两项**】作者点名：p1 菜单（useCharacterPassive）里有
+     「福金与穆宁·预视 / 弃抽」，而这张"远端位镜像"菜单**两项都没有** ⇒ 联机时**客人用不了自己的里尔亚斯被动** ✗
+     · 预视：只"查看"，与 p1 同口径；远端位用 onlineDecideModal 把内容显示给**客人本人** ✓
+     · 弃抽：复用已按座位参数化的 `__lilithDiscardDraw('p2', n)`（内部对非 AI 座位走 pickFromList ⇒ 问客人本人 ✓） */
+  if (p._lilithPassive) {
+    options.push({ name: '福金与穆宁·预视', desc: '查看下一张事件卡的内容（无须发动）', run: function (n) {
+      try {
+        var __txt = __peekNextEventCard('p2');
+        addBattleLog('p2', '【里尔亚斯被动·预视】' + String(__txt).replace(/\n/g, ' '));
+        onlineDecideModal('p2', '福金与穆宁·预视（对手）', '查看下一张事件卡的内容（无须发动）', String(__txt), ['知道了'], function () { if (n) n(); });
+      } catch (e) { if (n) n(); }
+    }});
+  }
+  if (p._lilithPassive && p._lilithDDTurn !== T && (p.hand || []).length) {
+    options.push({ name: '福金与穆宁·弃抽', desc: '选1张手卡送入墓地，然后抽1张（若弃到混沌属性的卡，再对一名玩家造成2点混沌属性伤害）', run: function (n) { __lilithDiscardDraw('p2', n); } });
   }
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({ name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p2') + '）', run: function (n) { onlineEdwardP2(n); } });
   if ((p._guideCore || 0) > 0) options.push({ name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', run: function (n) { useGuideCore('p2'); n(); } });
@@ -8283,13 +8299,14 @@ registerTrigger({
    （同时确认 _lilithPassive 在队长位是 true、菜单两项都在，所以 ①/② 两种猜测都不是。）
    这里把原 trigger 的 fire 体原样搬回来当主动入口（结算尾巴 __lilithAfterDiscard 一直在，未动）。
    ============================================================ */
-function __lilithDiscardDraw(owner) {
+function __lilithDiscardDraw(owner, done) {
+  var __fin = function () { if (typeof done === 'function') done(); };
   try {
     owner = owner || 'p1';
-    var q = battleState && battleState[owner]; if (!q) return;
-    if (!q._lilithPassive) { addBattleLog(owner, '【里尔亚斯·Huginn&Muninn】被动未生效（须在队长位）'); return; }
-    if (q._lilithDDTurn === battleState.turn) { if (typeof showToast === 'function') showToast('本回合已经发动过「弃抽」', 'warn'); return; }
-    if (!(q.hand || []).length) { if (typeof showToast === 'function') showToast('没有手卡可弃', 'warn'); return; }
+    var q = battleState && battleState[owner]; if (!q) { __fin(); return; }
+    if (!q._lilithPassive) { addBattleLog(owner, '【里尔亚斯·Huginn&Muninn】被动未生效（须在队长位）'); __fin(); return; }
+    if (q._lilithDDTurn === battleState.turn) { if (typeof showToast === 'function') showToast('本回合已经发动过「弃抽」', 'warn'); __fin(); return; }
+    if (!(q.hand || []).length) { if (typeof showToast === 'function') showToast('没有手卡可弃', 'warn'); __fin(); return; }
     q._lilithDDTurn = battleState.turn;      // 先占本回合次数（与旧触发口径一致）
     /* 弃卡 + 送墓 + 因效果送墓的墓地时点，与旧 trigger 完全一致 */
     function __dropPick(card) {
@@ -8298,8 +8315,13 @@ function __lilithDiscardDraw(owner) {
         if (ix >= 0) { q.hand.splice(ix, 1); (q.grave = q.grave || []).push(card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, card, 'effect'); }
       }
       __lilithAfterDiscard(owner, card);
+      __fin();
     }
-    if (owner === 'p1' && typeof pickFromList === 'function') {
+    /* 【2026-10-16 A6 结构修·**非 AI 座位一律问本人**】原来这里写死 `owner === 'p1'` ⇒ 联机时
+       p2（客人）落到下面的 AI 兜底 = **系统替客人决定丢哪张** ✗（与"客人用不了里尔亚斯被动"是同一族的漏点）。
+       `pickFromList` 本身就按座位路由（p1 本机弹窗 / 联机远端位 `ENV.ask` 问客人 ✓）⇒ 这里只判"是不是 AI 座位" ✓。 */
+    var __lilithIsAI = (typeof isAISeat === 'function') ? !!isAISeat(owner) : (owner !== 'p1');
+    if (!__lilithIsAI && typeof pickFromList === 'function') {
       var __list = (q.hand || []).map(function (c) { return { card: c, zone: 'hand' }; });
       pickFromList(owner, __list, '里尔亚斯·Huginn&Muninn：选1张手卡送入墓地，然后抽1张', 1, function (picks) {
         var pk = picks && picks[0];
@@ -12983,7 +13005,7 @@ function useCharacterPassive() {
      ⇒ 主动入口随之丢失：p1 侧菜单没有它，只剩 main1_start 的选发窗口候选。
      作者 2026-10-09 明确"莉莉的技能就是玩家主动发动的" ⇒ 此处恢复菜单项。 */
   if (p._lilySP && p._lilySPTurn !== T && (p.grave || []).length) {
-    options.push({name: '莉莉·回收', desc: '墓地最下方1张卡放回牌组最下方（每回合一次）', action: activateLilySP});
+    options.push({name: '莉莉·回收', desc: '墓地最下方1卡放回牌组最下方；若放回的是单次卡且新最下方非单次，视为使用并回1音韵（每回合一次）', action: activateLilySP});
   }
   /* 【已移除（作者 2026-09-28）】最佳化·SP **不是角色技能**，而是"墓地发动"效果：
      现在点墓地里那张卡上的 ⚡ 就能发动（见 GRAVE_SP_DEFS 里的表项），不该挂在角色技能菜单。 */
@@ -13042,8 +13064,13 @@ function activateMegumiSP() {
         sacrificeCards('p1', [{card: c, zone: 'hand'}], false, function () { updateBattleUI(); });
       });
     }
-    else if (o === 2) { p.sync = Math.min(p.sync + 4, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p1'); addBattleLog('p1', '【惠SP·乐曲γ】回复4同步并抽取1张馈赠卡'); updateBattleUI(); }
-    else { p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p1', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p2', 3, '惠SP·乐曲δ', function () { updateBattleUI(); }, '理智'); }
+    /* 【2026-10-16 A1/A2 结构修·**多端对齐卡面**】作者点名：p1 侧这两项还是**平衡性调整前的旧值** ——
+       卡面原文「③乐曲γ，回复**6**点同步值并抽取一张[馈赠卡]④乐曲δ，本回合献祭次数+1，
+       那之后对一名其他玩家造成**4**点理智属性伤害」；而联机远端位（2720/2721）与 AI 座（13194/13195）
+       早就是 6 / 4 ⇒ 只有 p1 这一份漏改（同一效果写三份的老毛病）。
+       本次只把 p1 对齐到卡面（数值与另两端一致）✓，不改卡面、不改另两端 ✓。 */
+    else if (o === 2) { p.sync = Math.min(p.sync + 6, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p1'); addBattleLog('p1', '【惠SP·乐曲γ】回复6同步并抽取1张馈赠卡'); updateBattleUI(); }
+    else { p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p1', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p2', 4, '惠SP·乐曲δ', function () { updateBattleUI(); }, '理智'); }
   });
 }
 // 小春·先机（每回合首次耗1，之后+1，最多耗3；每耗1回1音韵并追加掷骰阶段）
@@ -13338,16 +13365,20 @@ function aiUsePermanentActive(player, done) {
       if (typeof checkMoveTriggers === 'function') checkMoveTriggers(player, mv, old);
       syncNext(card, act); return;
     }
-    if (h === 'huginn') { // 福金与穆宁（一局一次）：付3音韵从墓地/移出回收[侵略]，攻击力+1
+    if (h === 'huginn') { // 福金与穆宁（一局一次）：付3音韵从墓地/移出回收[侵略]，之后造成的最终伤害+1
       if (p.cost < 3) { next(); return; }
       var pool = [];
-      (p.grave || []).forEach(function (c) { if (matchCardQuery(c, ['侵略'], null, null)) pool.push({ c: c, z: 'grave' }); });
-      (p.removed || []).forEach(function (c) { if (matchCardQuery(c, ['侵略'], null, null)) pool.push({ c: c, z: 'removed' }); });
+      /* 【2026-10-16 A4/A5 结构修·**AI 侧对齐玩家侧**】原来这两行用旧的 `matchCardQuery(c, ['侵略'], …)`
+         （实测会放行非[侵略]卡）且下面加的是 `attackBuff+1`（旧口径）；
+         玩家侧早已按作者口径改成"按 tag/属性/类型判[侵略]" + "最终伤害+1（`_teamFinalDmgUp`）" ⇒
+         这里改用**同一个判据** `__isAggroCard` 与**同一个通道** `_teamFinalDmgUp` ✓ */
+      (p.grave || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'grave' }); });
+      (p.removed || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'removed' }); });
       if (!pool.length) { next(); return; }
       var pk = pool[0]; p.cost -= 3;
       var arr = pk.z === 'grave' ? p.grave : p.removed; var ix = arr.indexOf(pk.c); if (ix >= 0) arr.splice(ix, 1);
-      p.hand.push(pk.c); p.attackBuff = (p.attackBuff || 0) + 1;
-      L('对手【福金与穆宁】付3音韵回收【' + pk.c.name + '】，攻击力+' + p.attackBuff);
+      p.hand.push(pk.c); p._teamFinalDmgUp = (p._teamFinalDmgUp || 0) + 1;
+      L('对手【福金与穆宁】付3音韵回收【' + pk.c.name + '】，之后造成的最终伤害+1（累计+' + p._teamFinalDmgUp + '）');
       syncNext(card, act); return;
     }
     if (h === 'phone') { // 智能手机：扣700金币①攻击+1 / ②手卡送墓打3理智；金币充裕时才追加500
@@ -23970,6 +24001,16 @@ var PERMANENT_ONPLAY_HANDLERS = {
   }
 };
 
+/* 【2026-10-16 A5 结构修·**"[侵略]卡"只留一份判据**】作者点名 A5：福金与穆宁"从墓地/移出回收一张
+   [侵略]标签的卡"，**玩家侧**与 **AI 侧**各写了一份判据 —— 玩家侧 2026-10-12 已按作者口径
+   （"回收效果居然能回收非侵略标签的卡"）改成按 **tag / attribute / type / subtype** 判，
+   而 AI 内联那份**还在用旧的 `matchCardQuery`**（实测会放行非[侵略]卡）✗。
+   ⇒ 收成这一个函数，两处共用 ✓（以后改判据只改这里）。 */
+function __isAggroCard(c) {
+  return !!(c && (c.attribute === '侵略' || (c.tags && c.tags.indexOf('侵略') >= 0) ||
+    (typeof c.type === 'string' && c.type.indexOf('侵略') >= 0) ||
+    (typeof c.subtype === 'string' && c.subtype.indexOf('侵略') >= 0)));
+}
 var PERMANENT_ACTIVE_HANDLERS = {
   /* 【2026-10-14 新卡·雷閃·SP ⇒ 结构修 ✓】卡面：「一回合一次，把牌组最上方的那张卡送入墓地来发动，
      对一名其他玩家造成1点神圣属性伤害。这个效果在其他玩家回合也能发动。」
@@ -24076,13 +24117,11 @@ var PERMANENT_ACTIVE_HANDLERS = {
     if (p.cost < 3) { if (user === 'p1') showToast('【福金与穆宁】音韵不足3点。', 'warn'); return false; }
     /* 【2026-10-12 作者报："回收效果居然能回收非侵略标签的卡" ✗】卡面：「从墓地或移出游戏的卡中选一张
        **[侵略]标签**的卡加入手卡」 ✓ ⇒ 判定必须**认标签/属性本身** ✓，不再用 matchCardQuery（实测它放行了
-       非侵略卡，例如混沌属性的【小恶魔的投喂】✗）。判据与 `engine.js:12058` 那一族的写法保持一致 ✓ */
-    var __isAggro = function (c) {
-      return !!(c && (c.attribute === '侵略' || (c.tags && c.tags.indexOf('侵略') >= 0) || (typeof c.type === 'string' && c.type.indexOf('侵略') >= 0) || (typeof c.subtype === 'string' && c.subtype.indexOf('侵略') >= 0)));
-    };
+       非侵略卡，例如混沌属性的【小恶魔的投喂】✗）。判据与 `engine.js:12058` 那一族的写法保持一致 ✓
+       【2026-10-16 A5 结构修 ✓】该判据已提成模块级唯一函数 `__isAggroCard`（AI 内联那份原来还在用 matchCardQuery ✗） */
     var pool = [], zone = [];
-    p.grave.forEach(function (c) { if (__isAggro(c)) { pool.push(c); zone.push('grave'); } });
-    (p.removed || []).forEach(function (c) { if (__isAggro(c)) { pool.push(c); zone.push('removed'); } });
+    p.grave.forEach(function (c) { if (__isAggroCard(c)) { pool.push(c); zone.push('grave'); } });
+    (p.removed || []).forEach(function (c) { if (__isAggroCard(c)) { pool.push(c); zone.push('removed'); } });
     if (!pool.length) { if (user === 'p1') showToast('【福金与穆宁】墓地与移出区都没有[侵略]卡。', 'warn'); return false; }
     function __applyHuginn(idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
