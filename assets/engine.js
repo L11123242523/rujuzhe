@@ -11372,178 +11372,27 @@ function aiMaybeUseEvent(done) {
     if (typeof checkBattleEnd === 'function') checkBattleEnd();
     if (done) done();
   }
-  function hasChar(k) { try { var __aic = deckOf(aiSeat()); return ((__aic && __aic.chars) || []).some(function (c) { return c && c.name && c.name.indexOf(k) >= 0; }); } catch (e) { return false; } }
+  /* 【2026-10-17 结构修·作者「B 可以了」：**AI 不再内联重写事件卡效果**】
+     原来同一件事写两份：玩家走 `__EVENT_CASE_A/B` 名字表 → `__eventCasesA/B`；AI 在本函数里**又抄了 170 行**
+     ⇒ 两份各自漂移（大风那次 bug 就是这么来的：AI 侧判「队长」、玩家侧判「队伍编入」✗）。
+     现在 AI 直接调**同一份效果体** ✓ —— 效果体里凡是需要选择的点，都按**既有约定**「单机 AI 座自己决定」处理：
+       · 【即兴演出】=8 选玩家：早就有这一分支（引擎里那处注释写着「取值口径与引擎自己的 AI 实现一致」）✓
+       · 【闲庭信步】三选一、【命运之回声】×2（回收 / 选卡破坏）：本次按同一约定补齐 ✓
+     顺带修掉两处**AI 侧旧偏差**（都是那份内联抄写自己的问题，收成一份后自然消失）：
+       · AI 用事件卡投骰时**漏了 `__diceControlAsk`** ⇒ AI 在这几张卡上没有控骰；统一效果体一律走它 ✓
+       · 【命运之回声·露璐缇雅】旧 AI 是从**对手**移出区回收给**对手** ✗ ⇒ 统一体按卡面「自己把一张移出游戏的卡
+         加入手卡」从**自己**移出区回收给自己 ✓；破坏目标也保持「只动对手的卡、对手没有就什么都不做」（不能自毁 ✓）
+     ⚠ 唯一代价：AI 侧日志措辞由旧的「…[对手]：…」变成统一体的措辞（同一件事只写一份的必然结果，作者已知悉 ✓） */
   function __applyAiEvent() {
-  // --- 独奏：20面骰，条件全部适用；回费/降自己入迷（越近0越接近破局胜利） ---
-  if (nm === '独奏') {
-    var d20 = __rollFor(aiSeat(), 20, '独奏[对手]·20面骰');   // 【2026-10-11】走唯一投骰出口 ✓（本卡无自带予处理 ⇒ 不会双触发 ✓）
-    if (d20 % 2 === 0) recoverCost(aiSeat(), 2, '独奏[对手]');
-    if (d20 % 10 === 4) p.fascination = Math.max(0, p.fascination - 1);
-    if (d20 % 4 === 0) recoverCost(aiSeat(), 2, '独奏[对手]');
-    if (d20 >= 16) p.fascination = Math.max(0, p.fascination - 1);
-    if (hasChar('惠')) p.fascination = Math.max(0, p.fascination - 1);
-    L('独奏[对手]：20面骰' + d20 + '点结算完毕（费' + p.cost + '，入迷' + p.fascination + '）');
-    __finished(); return;
+    /* ⚠ `aiFoe()` 返回的是**座位对象**（与 `aiMe()` 同族），而效果体要的是**座位名**（它按 `battleState[seat]` 取）
+       —— 第一版直接把 `foe` 传进 `env.__ecFoe` ⇒【命运之回声】处 `battleState[__ecFoe]` 为 undefined 崩掉 ✗
+       （探针 `probe-event-one-body.cjs` 当场抓到）。这里改用座位名 ✓ */
+    var __aiFoeSeat = (typeof foeOf === 'function') ? foeOf(aiSeat()) : ((aiSeat() === 'p1') ? 'p2' : 'p1');
+    var __evtEnv = { __ecFoe: __aiFoeSeat, __ecOL: false, effectText: (card.effect || card.text || ''), __oppTurn: battleState.currentPlayer !== aiSeat() };
+    if (typeof __EVENT_CASE_A !== 'undefined' && __EVENT_CASE_A[nm]) __eventCasesA(card, aiSeat(), p, null, __evtEnv);
+    else if (typeof __EVENT_CASE_B !== 'undefined' && __EVENT_CASE_B[nm]) __eventCasesB(card, aiSeat(), p, null, __evtEnv);
+    else addBattleLog(aiSeat(), '【' + nm + '】效果尚未实现');
   }
-  // --- 即兴演出：2/3枚骰；<8回3费；=8给对手+1入迷（拖慢对手）；>8降自身1入迷 ---
-  if (nm === '即兴演出') {
-    var meg = hasChar('惠'); var dN = meg ? 3 : 2, sum = 0, rolls = [];
-    for (var ri = 0; ri < dN; ri++) { var rr = GameRNG.dice(6); rolls.push(rr); sum += rr; }
-    __rollForAfter(aiSeat(), '即兴演出[对手]·' + dN + '枚六面骰');   // 【2026-10-11】多骰相加算一次投掷 ⇒ 循环外触发一次 ✓
-    if (meg) recoverCost(aiSeat(), 3, '即兴演出[松山惠][对手]');
-    if (sum < 8) recoverCost(aiSeat(), 3, '即兴演出[对手]');
-    else if (sum === 8) { foe.fascination = Math.min((foe.fascination || 0) + 1, 6); L('即兴演出[对手]：' + sum + '点，回复对手1点入迷'); }
-    else p.fascination = Math.max(0, p.fascination - 1);
-    if (!meg) L('即兴演出[对手]：' + rolls.join('+') + '=' + sum + '点结算完毕');
-    __finished(); return;
-  }
-  // --- 闲庭信步：前进1格回2费（里绪两项都执行） ---
-  if (nm === '闲庭信步') {
-    var rioXT = hasChar('里绪') && !hasChar('里绪(水着)');
-    recoverCost(aiSeat(), 2, '闲庭信步[对手]'); applyMove(aiSeat(), 1);
-    if (rioXT) triggerTileEffect(aiSeat());
-    L('闲庭信步[对手]：前进1格回2音韵' + (rioXT ? '（现实间里绪：追加原地跳跃一次）' : ''));
-    __finished(); return;
-  }
-  // --- 躁动之心：3次校准(12/8/6面≥6)，成功N次降N入迷；予每次+1费 ---
-  if (nm === '躁动之心') {
-    /* 【2026-10-11 作者澄清】"有就行"= 事件卡里的条件按"队伍里有这个人"判定 ✓
-       ⇒ 恢复自带的 `yu2`；本处骰子**不**走唯一投骰出口 ✗（否则队长是予时会与 `_yuPassive` 双重触发 ⇒ 每次回 2 点 ✗✗） */
-    var yu2 = hasChar('予') && !hasChar('予(水着)');
-    var sc = 0;
-    /* 【2026-10-14 收口】躁动之心是**三次独立校准**（12/8/6 面各一次）⇒ 每次都是一次投掷 ✓
-       ⇒ 逐次补 `__rollForAfter`（原来 3 枚骰直连 `GameRNG.dice`、一次都不算 ⇒ 漏计投掷 ✗）。
-       ⚠ 卡自带的 `yu2`（队伍里有予 ⇒ 每次回 1 音韵）**保留不动** ✓ —— 那是**本卡卡面**的补偿，
-         与【予·被动·每 3 次投掷回 1】是两件事（后者按"3 次投掷"独立累计 ✓）。
-       ⚠ 本段上面"本处骰子**不**走唯一投骰出口"的旧注释**已作废**：现口径=投掷动作就该计入 ✓。 */
-    { var __r1 = GameRNG.dice(12); __rollForAfter(aiSeat(), '躁动之心[对手]·第1次校准(12面)'); if (__r1 >= 6) sc++; }
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    { var __r2 = GameRNG.dice(8); __rollForAfter(aiSeat(), '躁动之心[对手]·第2次校准(8面)'); if (__r2 >= 6) sc++; }
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    { var __r3 = GameRNG.dice(6); __rollForAfter(aiSeat(), '躁动之心[对手]·第3次校准(6面)'); if (__r3 >= 6) sc++; }
-    if (yu2) recoverCost(aiSeat(), 1, '躁动之心[入间予][对手]');
-    if (sc > 0) p.fascination = Math.max(0, p.fascination - sc);
-    L('躁动之心[对手]：校准成功' + sc + '次，降低' + sc + '点入迷（当前' + p.fascination + '）');
-    __finished(); return;
-  }
-  // --- 交互冲动：瞬移至最近/任意交互格并+500（枫/予 升级金币） ---
-  if (nm === '交互冲动') {
-    var interactTiles = [];
-    for (var it = 0; it < MAP_TILES.length; it++) {
-      var tt = MAP_TILES[it];
-      if (tt.type === 'shop' || tt.type === 'bus' || tt.type === 'subway' || tt.type === 'power' || (tt.name || '').indexOf('交互') >= 0) interactTiles.push(it);
-    }
-    if (interactTiles.length) {
-      var tgt;
-      if (hasChar('枫') && !hasChar('枫(水着)')) tgt = GameRNG.pick(interactTiles);
-      else {
-        tgt = interactTiles[0]; var md = ringMinDist(p.position, tgt);
-        for (var jj = 1; jj < interactTiles.length; jj++) { var dd = ringMinDist(p.position, interactTiles[jj]); if (dd < md) { md = dd; tgt = interactTiles[jj]; } }
-      }
-      p.position = tgt;
-      if (typeof triggerTileEffect === 'function') triggerTileEffect(aiSeat());
-      L('交互冲动[对手]：瞬移至第' + tgt + '格【' + MAP_TILES[tgt].name + '】');
-    }
-    var k2 = hasChar('枫') && !hasChar('枫(水着)'), y2 = hasChar('予') && !hasChar('予(水着)');
-    p.gold = (p.gold || 0) + ((k2 && y2) ? 2000 : (k2 ? 1000 : 500));
-    L('交互冲动[对手]：获得' + ((k2 && y2) ? 2000 : (k2 ? 1000 : 500)) + '金币（当前' + p.gold + '）');
-    __finished(); return;
-  }
-  // --- 赌徒游戏：500金币3/4骰；两同2000/三同3000/全异后退1格 ---
-  if (nm === '赌徒游戏') {
-    var payD = (p, 500);
-    if ((p.gold || 0) < payD) { __finished(); return; }
-    p.gold -= payD;
-    var myN = hasChar('木原') ? 4 : 3, arr = [], counts = {};
-    for (var dk = 0; dk < myN; dk++) { var dv = GameRNG.dice(6); arr.push(dv); counts[dv] = (counts[dv] || 0) + 1; }
-    __rollForAfter(aiSeat(), '赌徒游戏[对手]·' + myN + '枚六面骰');   // 【2026-10-11】多骰相加算一次投掷 ⇒ 循环外触发一次 ✓
-    var mx = 1;
-    for (var kk in counts) mx = Math.max(mx, counts[kk]);
-    if (mx >= 3) { p.gold += 3000; L('赌徒游戏[对手]：三同，+3000金币（现' + p.gold + '）'); }
-    else if (mx === 2) { p.gold += 2000; L('赌徒游戏[对手]：两同，+2000金币（现' + p.gold + '）'); }
-    else { L('赌徒游戏[对手]：全异，后退1格'); applyMove(aiSeat(), -1); }
-    __finished(); return;
-  }
-  // --- 命运之回声：对手场上功能卡破坏并移出本局（露璐缇雅可回收1张移出卡） ---
-  if (nm === '命运之回声') {
-    /* 【2026-10-14 结构修·与人类/联机侧同口径】候选池原来只取 `permanent` ⇒ 盖放区那张不在候选里 ✗。
-       "场上"的唯一口径 = `permanent + faceDownCards + eventCards + musicCards`（见 `__cardIsOnFieldNow`）⇒
-       这里补齐**盖放区**，并从**原来那个区**移出（原来写死 permanent ✗）。AI 侧沿用既有"取第一个候选"的选择策略，不变。 */
-    var poolP = [];
-    (foe.permanent || []).forEach(function (c) { poolP.push({ c: c, z: 'permanent' }); });
-    (foe.faceDownCards || []).forEach(function (c) { poolP.push({ c: c, z: 'faceDownCards' }); });
-    if (!poolP.length) { __finished(); return; }
-    var dcard = poolP[0].c, __dzone = poolP[0].z;
-    var di2 = (foe[__dzone] || []).indexOf(dcard);
-    if (di2 >= 0) foe[__dzone].splice(di2, 1);
-    if (!foe.removedFromGame) foe.removedFromGame = [];
-    foe.removedFromGame.push(dcard);
-    /* 【同类补齐（作者要求举一反三）】移出游戏必须发 ON_REMOVE 时点（那里挂着"不因使用离开区域"的统一钩子）——
-       不发的落点会漏掉琉璃(万圣祭)SP/冬马SP 这类触发。 */
-    /* 【座位参数化】不要在这里直接写 battleState.p1/p2 —— 用 playerIds() 反查座位（B·一 批次的静态检查会拦） */
-    try {
-      if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') {
-        var __dSeat = null;
-        playerIds().forEach(function (w) { if (battleState[w] === foe) __dSeat = w; });
-        runTiming(TIMING.ON_REMOVE, { player: __dSeat, card: dcard });
-      }
-    } catch (e) { console.error('命运之回声移出时点发射出错', e); }
-    L('命运之回声[对手]：破坏对手【' + dcard.name + '】并移出本局游戏');
-    if (hasChar('露璐缇雅') && (foe.removedFromGame.length > 1 || (foe.removed || []).length)) {
-      var poolR = (foe.removedFromGame || []).concat(foe.removed || []);
-      var rc2 = poolR[0];
-      var arrR = foe.removedFromGame.indexOf(rc2) >= 0 ? foe.removedFromGame : foe.removed;
-      var ir = arrR.indexOf(rc2); if (ir >= 0) arrR.splice(ir, 1);
-      foe.hand.push(rc2); L('命运之回声[露璐缇雅][对手]：回收移出卡【' + rc2.name + '】加入对手手卡');
-    }
-    __finished(); return;
-  }
-  // --- 王车易位：AI 随机交换两个格子的效果，持续两轮 ---
-  if (nm === '王车易位') {
-    if (!battleState._swappedTiles) battleState._swappedTiles = [];
-    var w1 = GameRNG.int(42), w2 = GameRNG.int(42);
-    while (w2 === w1) w2 = GameRNG.int(42);
-    var o1 = { type: MAP_TILES[w1].type, name: MAP_TILES[w1].name };
-    var o2 = { type: MAP_TILES[w2].type, name: MAP_TILES[w2].name };
-    MAP_TILES[w1].type = o2.type; MAP_TILES[w1].name = o2.name;
-    MAP_TILES[w2].type = o1.type; MAP_TILES[w2].name = o1.name;
-    battleState._swappedTiles.push({ tile1: w1, tile2: w2, original1: o1, original2: o2, turnsLeft: 2 });
-    L('王车易位[对手]：交换第' + w1 + '格与第' + w2 + '格效果，持续两轮');
-    __finished(); return;
-  }
-  // 圆桌会议：所有玩家降1入迷，降了的玩家移到 GAME 格（AI 也能用）
-  if (nm === '圆桌会议') {
-    var __rt = [];
-    ['p2', 'p1'].forEach(function (w) {
-      var q = battleState[w]; if (!q) return;
-      if ((q.fascination || 0) > 0) { q.fascination = Math.max(0, q.fascination - 1); __rt.push(w); }
-    });
-    var __gTile = -1;
-    for (var gi = 0; gi < MAP_TILES.length; gi++) { if (MAP_TILES[gi].type === 'game') { __gTile = gi; break; } }
-    __rt.forEach(function (w) {
-      if (__gTile >= 0) { battleState[w].position = __gTile; if (typeof triggerTileEffect === 'function') triggerTileEffect(w); }
-    });
-    L('圆桌会议[对手]：降入迷玩家 ' + (__rt.join('/') || '（无）') + ' 移至 GAME 格');
-    __finished(); return;
-  }
-  // 大风：终止所有移动动作；双方下次位移-2（里绪/光太郎 队伍编入 或 霜烬免疫 ⇒ 不挂）
-  if (nm === '大风') {
-    battleState._stopAllMove = true;
-    playerIds().forEach(function (w) {
-      var q = battleState[w]; if (!q) return;
-      /* 【2026-10-17 修·判据错了层】原来这里判的是 **`q.captain.name`（队长）**，
-         而事件/连锁路径判的是"**队伍里编入了里绪/光太郎**" ⇒ 里绪/光太郎只当队员时，
-         AI 用大风会把 -2 误盖到他们头上 ✗（且这里还缺霜烬免疫）。
-         现在统一调 `__windImmuneSeat`（唯一真相 ✓，见交接清单 §31.3）。 */
-      var __imm = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(w) : null;
-      if (__imm) { addBattleLog(aiSeat(), '大风：【' + w + '】' + __imm + ' ⇒ 不受影响'); return; }
-      if (!q.moveDebuff) q.moveDebuff = {};
-      q.moveDebuff.nextMoveMinus2 = true;
-    });
-    L('大风[对手]：终止所有移动动作；双方下次位移-2（里绪/光太郎免疫）');
-    __finished(); return;
-  }
-  } // end __applyAiEvent
   
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制
   beforeEffectExecution({ player: aiSeat(), _stage: 'effect_activate', kind: 'effect_activate', card: card, description: '对手发动事件卡【' + nm + '】（效果将执行前，可连锁）' }, function (res) {
@@ -20954,6 +20803,9 @@ function __eventCasesA(card, player, p, done, env) {
               updateBattleUI();
             }
             if (__ecOL && player === 'p2') onlineDecideModal('p2', '命运之回声（对手）', '露璐缇雅·爱德华', '破坏后将一张移出游戏的卡加入手卡', __opts, __recycle);
+            /* 【2026-10-17】单机 AI 座自己决定（与即兴演出那处同一约定 ✓）：回收**自己移出区**的第一张
+               （口径修正：旧 AI 内联版是从**对手**移出区回收给对手 ✗，统一版按卡面"自己把一张移出游戏的卡加入手卡"✓） */
+            else if (!__ecOL && player !== 'p1') __recycle(0);
             else showChoiceModal('命运之回声', '露璐缇雅·爱德华', '破坏后将一张移出游戏的卡加入手卡', __opts, __recycle);
           } else addBattleLog(player, '【露璐缇雅】移出区无卡可回收');
         }
@@ -20964,6 +20816,14 @@ function __eventCasesA(card, player, p, done, env) {
           Online.awaitAnswer({ label: '命运之回声·选卡破坏（对手）', cards: __pool.map(function(c,i){ return c.name + '（' + (__sides[i]===player?'自己':'对方') + '）'; }) }, function (v) {
             __destroy(Array.isArray(v) ? v[0] : v);
           });
+        } else if (!__ecOL && player !== 'p1') {
+          /* 【2026-10-17】单机 AI 座自己决定（与即兴演出那处同一约定 ✓）：取**对手**的第一个候选
+             —— ⚠ 不能直接用 `__destroy(0)`：候选池里**也含自己的卡**（顺序=对手永续→对手盖放→自己永续→自己盖放）
+             ⇒ 对手场上没有可破坏的卡时会**自毁** ✗；旧 AI 内联版就是"只在对手有卡时才动" ✓ 这里保持同口径 */
+          var __foeIdx = -1;
+          for (var __fi = 0; __fi < __pool.length; __fi++) { if (__sides[__fi] === __ecFoe) { __foeIdx = __fi; break; } }
+          if (__foeIdx >= 0) __destroy(__foeIdx);
+          else addBattleLog(player, '命运之回声：对手场上没有可破坏的功能卡');
         } else showCardPickerMulti(__pool, '命运之回声：选场上1张功能卡破坏并移出本局游戏', function (idx) { __destroy(Array.isArray(idx) ? idx[0] : idx); });
       }
       else addBattleLog(player, '命运之回声：场上没有可破坏的功能卡');
@@ -21004,11 +20864,22 @@ function __eventCasesB(card, player, p, done, env) {
   var __ecFoe = env.__ecFoe, __ecOL = env.__ecOL, effectText = env.effectText, __oppTurn = env.__oppTurn;
   switch (card.name) {
     case '大风':
-      // 终止移动，双方下次位移-2（里绪/光太郎免疫；判据收口在 __windImmuneSeat ✓）
+      /* 【2026-10-17 修·**大风的效果原来根本没生效**（探针 probe-event-one-body.cjs 实测三条入口）】
+         人（真实入口 useEventCard）/ 人（useEventCardFor）/ AI 跑大风，结果都是**只写一条日志**：
+         双方都没被挂 -2、`_nextMoveAdjust` 也是 undefined ✗
+         病根：2026-10-12 为修"双扣"（作者实测 8→4）把这一支里的硬编码去掉、改成"统一由卡面编译出的
+         op `adjust_next_move_all` 实现"——但**事件卡根本不走指令层**（走的就是本函数）✗
+         ⇒ 主阶段用大风 = 空放（只有"作为连锁响应"那条路经 `stop_move` 分支真生效 ✓ 那条路本次未动）。
+         修法：效果**收回本函数**（唯一出口 ✓）——挂 `_nextMoveAdjust`：
+         它是**移动管线真正读的字段**（`engine.js` 10756 / 11863）且**状态栏会显示**（14490）✓；
+         免疫判据调 `__windImmuneSeat`（§31.3 已收成一份 ✓）。
+         ⚠ `_stopAllMove` 经 grep 实证**全库只有写、没有读**（死标志）⇒ 不再置它 ✗（"终止进行中的移动"
+           由连锁路径的取消动作实现 ✓）。 */
       playerIds().forEach(function (pl) {
         var __im = (typeof __windImmuneSeat === 'function') ? __windImmuneSeat(pl) : null;
         if (__im) { addBattleLog(player, '大风：【' + pl + '】' + __im + ' ⇒ 不受影响'); return; }
-        void 0;
+        var __wp = battleState[pl]; if (!__wp) return;
+        __wp._nextMoveAdjust = (__wp._nextMoveAdjust || 0) - 2;
       });
       addBattleLog(player, '大风：所有玩家下次位移效果-2（里绪/光太郎免疫）');
       break;
@@ -21217,6 +21088,11 @@ function __eventCasesB(card, player, p, done, env) {
       })();
       if (__ecOL && player === 'p2') {
         onlineDecideModal('p2', '闲庭信步（对手）', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', __xtOpts, __xtApply);
+      } else if (!__ecOL && player !== 'p1') {
+        /* 【2026-10-17 结构修·作者「B 可以了」：AI 与玩家共用同一份事件卡效果体】
+           单机 AI 座**自己决定、立刻结算**，不再弹给真人 —— 与上面【即兴演出】那处同一约定 ✓（那里早有先例）。
+           取值口径与引擎自己的 AI 实现一致：AI 取①「前进1格并回2音韵」（里绪在场时由 __xtApply(0) 内一并执行跳跃 ✓）。 */
+        __xtApply(0);
       } else {
         showChoiceModal('闲庭信步', card.name, __rioXT ? '现实间里绪：两项效果先后都执行' : '选择一项效果', __xtOpts, __xtApply);
       }
