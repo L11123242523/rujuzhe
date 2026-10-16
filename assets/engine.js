@@ -5675,7 +5675,7 @@ function initBattle() {
       captain: cap, teamAttribute: ta, sync: sync, maxSync: sync, fascination: 6, cost: __lilithSeatFactory ? 2 : 0, maxCost: __lilithSeatFactory ? 14 : 12,
       deck: deck, hand: [], grave: [], permanent: [], defense: 0, shield: 0, position: 0, gold: 0, level: 1,
       motivation: 0, closedTile: null, passedStart: 0, eventCards: [], musicCards: [], negativeEffects: [],
-      attackBuff: 0, moveBuff: null, moveDebuff: null, faceDownCards: [],
+      attackBuff: 0, moveBuff: null, faceDownCards: [],
       _eliminated: false   // 作者口径：同步值归零 = 出局（1v1 时出局即对局结束，语义不变）
     };
   }
@@ -9325,7 +9325,9 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，不重复处理'); }
       else {
         actionAlive = false; effect.cancelled = true; __doneSet[i] = true;
-        battleState._stopAllMove = true;
+        /* 【2026-10-17 清死标志·作者「全做」】原来这里还有 `battleState._stopAllMove = true`，
+           而**全库无人读它**（grep 实证 0 读）⇒ 死写入，删掉 ✓。真正"终止这次移动"的是上面两行
+           （`actionAlive=false; effect.cancelled=true`）—— 这也正是 2026-10-12 那次"以为写了就生效"的同款陷阱。 */
         /* 【2026-10-12 今晚修·双扣】这里**不再**自行挂 debuff ✗ ——
            大风统一由卡面编译出的 op `adjust_next_move_all` 实现 ✓（免疫判据也收口在它的执行器里 ✓）
            原来这里也设 `nextMoveMinus2` ⇒ 与 op 叠加 ⇒ 同一次大风扣两次（作者实测 8→4 ✓ 已修 ✓） */
@@ -9339,7 +9341,8 @@ function resolveChainStack(effect, onDone) {
       var __evStop2 = __evCard && __evCard.name && (__evCard.name.indexOf('大风') >= 0 || /终止.*移动/.test(__evCard.effect || ''));
       if (__evStop2 && (effect._stage === 'move' || effect.type === 'move' || effect._stage === 'dice_result')) { actionAlive = false; effect.cancelled = true; }
       if (__evStop2) {
-        battleState._stopAllMove = true;
+        /* 【2026-10-17 清死标志·作者「全做」】删掉 `battleState._stopAllMove = true`（全库 0 读 ⇒ 死写入）；
+           "这次移动被阻止"由上面那行 `actionAlive = false; effect.cancelled = true;` 完成 ✓ */
         /* 【2026-10-12 今晚修·双扣】这里**不再**自行挂 debuff ✗ ——
            大风统一由卡面编译出的 op `adjust_next_move_all` 实现 ✓（免疫判据也收口在它的执行器里 ✓）
            原来这里也设 `nextMoveMinus2` ⇒ 与 op 叠加 ⇒ 同一次大风扣两次（作者实测 8→4 ✓ 已修 ✓） */
@@ -19256,7 +19259,13 @@ function __opsMove(op, ctx, next, env) {
 function __opsDice(op, ctx, next, env) {
   var user = env.user, target = env.target, p = env.p, q = env.q;
   switch (op.op) {
-    case 'modify_dice': p._modifyDiceNext = true; break;
+    case 'modify_dice':
+      /* 【2026-10-17 清死标志·作者「全做」】原来只置 `p._modifyDiceNext = true`，而**全库从无读取点**
+         （连历史留档版本里也没有 ⇒ 不是重构丢的，是一直如此）⇒ 等于没实现，删掉死标志 ✓。
+         实测：唯一编译出本 op 的是【遥控骰子】（文本「修改一次投掷动作中的所有点数」），
+         而那张卡是**连锁卡**，由 `classifyChainCard === 'dice_set'` 的连锁判定路径实现
+         （`applyJudgeChain` 的 dice_set 分支 + 投骰连锁窗）⇒ 本 op 纯遗留 ✓ 卡片功能不受影响。 */
+      break;
     case 'roll_dice': {
       /* 【2026-10-13 bug2】多枚骰必须**逐枚记账** ✓ —— 与移动投掷那套同口径（`p._lastRolls` / `_lastDiceSides` / `_lastDiceCount`，
          见 rollPlayerDice ✓）。理由：条件路由里「有几个数字相同」**只据最终点数判不出来** ✗（赌徒游戏：3枚6面骰）
@@ -19887,7 +19896,7 @@ function runOneOp(op, ctx, next) {
           return;
         } else { __place(((p.position + 3) % 42 + 42) % 42); }
       }
-      else if (op.kind === 'stop_all_move') { battleState._stopAllMove = true; addBattleLog(user, '终止所有进行中的移动动作'); }
+      else if (op.kind === 'stop_all_move') { /* 【2026-10-17 清死标志】原来还置 `battleState._stopAllMove = true`（全库 0 读 ⇒ 死写入）⇒ 删；日志保留 ✓ */ addBattleLog(user, '终止所有进行中的移动动作'); }
       else if (op.kind === 'swap_tile') { addBattleLog(user, '【交换格子效果】可点选地图两个格子交换，持续两轮（已登记）'); }
       else addBattleLog(user, '【机制登记·' + op.kind + '】已登记，等待对应子系统结算');
       break;

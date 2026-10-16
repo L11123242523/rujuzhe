@@ -20,6 +20,7 @@ var NetSync = {
   VERSION: 1,
   _defs: {},        // 当前正在编码时用的那份"已发送"记账（见 _defsByView）
   _defsByView: {},  // 每个收件人各自一份：'view:p1' / 'view:p2' / 'self'
+  _logSentByView: {}, // 【2026-10-17】每个收件人"日志已发到第几条"（日志改走增量通道，见 buildSnapshot）
   _cache: {},       // 客人侧缓存：uid -> 本地卡对象（必须复用同一实例，引擎靠引用比较）
   _uidSeq: 0,
 
@@ -154,12 +155,32 @@ var NetSync = {
     if (!NetSync._defsByView[viewKey]) NetSync._defsByView[viewKey] = {};
     var savedDefs = NetSync._defs;
     NetSync._defs = opts.full ? {} : NetSync._defsByView[viewKey];
+    /* 【2026-10-17 结构修·作者「全做」第 2 项：**日志改走增量通道**】
+       原来日志 (`battleState._logs`) 跟着每份快照**全量重发** —— 实测 ≈124 字节/条、1000 条时每份快照 139KB、
+       2000 条 277KB（一局推几十~上百份 ⇒ 光日志就多传十几~几十 MB，还要反复 encode/decode ✗）。
+       现在：**guest 视图里把 `_logs` 摘掉**，改用 `out.log = {from, lines}` 只发"上次之后新增的那些" ✓；
+       `mode==='self'`（重连恢复用、很少发）仍带全量 ⇒ 恢复路径一字不变 ✓。
+       ⚠ 传输是 WebSocket（可靠有序）⇒ 不会丢增量；重连走 `opts.full`（from=0）⇒ 客户端整体对齐 ✓ */
+    var __logAll = (battleState && Array.isArray(battleState._logs)) ? battleState._logs : [];
+    var __logDelta = (mode === 'guest');
+    var __logFrom = 0;
+    if (__logDelta) {
+      if (typeof NetSync._logSentByView[viewKey] !== 'number') NetSync._logSentByView[viewKey] = 0;
+      __logFrom = opts.full ? 0 : Math.min(NetSync._logSentByView[viewKey], __logAll.length);
+    }
+    var __savedLogs = battleState._logs;
+    if (__logDelta) battleState._logs = undefined;      // 摘掉：encode 会跳过 undefined 的键 ✓
     var raw;
     try {
       raw = NetSync.encode(battleState, out);
     } finally {
+      if (__logDelta) battleState._logs = __savedLogs;
       NetSync._defsByView[viewKey] = NetSync._defs;
       NetSync._defs = savedDefs;
+    }
+    if (__logDelta) {
+      out.log = { from: __logFrom, lines: __logAll.slice(__logFrom) };
+      NetSync._logSentByView[viewKey] = __logAll.length;
     }
     var snap = (mode === 'guest' && viewer !== 'p1') ? NetSync.swapSeats(raw) : raw;
     if (mode === 'guest') {
@@ -282,8 +303,21 @@ var NetSync = {
       holder.__u = u;
     }
     var st = NetSync.decode(snap.state);
+    var __keepLogs = (battleState && Array.isArray(battleState._logs)) ? battleState._logs : null;
     if (!battleState) { try { battleState = st; } catch (e) { return false; } }
     else NetSync._overwrite(battleState, st);
+    /* 【2026-10-17 日志增量·与 buildSnapshot 配套】guest 视图里 `_logs` 被摘掉 ⇒ `_overwrite` 会把它**删掉**
+       （它会把 src 里没有的键从 target 删掉）⇒ 这里必须把本地累积的那份接回去，再按 `snap.log` 追加新增行 ✓
+       否则症状是：每收到一份快照，客人的战斗日志就被清空 ✗ */
+    try {
+      if (battleState && snap.log && Array.isArray(snap.log.lines)) {
+        var __logs = Array.isArray(battleState._logs) ? battleState._logs : (__keepLogs || []);
+        var __from = snap.log.from | 0;
+        if (__from < __logs.length) __logs.length = __from;              /* 重连/重置：对齐到权威起点 */
+        for (var __li = 0; __li < snap.log.lines.length; __li++) __logs.push(snap.log.lines[__li]);
+        battleState._logs = __logs;
+      }
+    } catch (e) { try { console.error('[catch] assets/online.js 日志增量拼接', e); } catch (e2) {} }
     NetSync._lastPlayable = snap.playable || [];
     try {
       if (snap.grave && typeof publicGraveyard !== 'undefined') NetSync._overwrite(publicGraveyard, NetSync.decode(snap.grave));
