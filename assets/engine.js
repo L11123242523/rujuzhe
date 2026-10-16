@@ -6349,12 +6349,37 @@ function startTurn() {
       recoverCost(player, __reg, '回合开始自然回复');
       __p._lastNaturalRegen = __reg;
     })();
-    var drawn = drawCard(player);
-    if (drawn) {
-      addBattleLog(player, '准备阶段：回复5费用，抽到【' + drawn.name + '】');
-      // 准备阶段抽卡动画（用户要求）：纯视觉，不阻塞流程；无头/无布局环境下自动跳过
-      playPrepDrawAnim(player, drawn);
-    }
+    /* 【2026-10-17 作者点名·莉莉被动·逝者之眼（抽卡选择）⇒ **只作用在"每回合的回合抽卡"这一次**】
+       卡面：「莉莉每次抽卡前可以观看牌组最下方的一张卡，然后选择在牌组最上方或最下方抽卡。」
+       作者 2026-10-17 口径：**只把"每回合的回合抽卡"改成先询问**，其他抽卡一律**不动**（维持默认从最上）。
+       实现：询问 ⇒ 置引擎**原有**的抽卡判据 `_lilyDrawFrom`（抽卡口 5975 读它）⇒ 抽 ⇒ **立刻复位**
+         ⇒ 其他任何抽卡都不受影响 ✓（不需要它们改一行）。
+       按座位分流（全仓惯例）：本机 p1 弹窗 ／ 联机远端位问客人 ／ AI 座不询问（保持原行为 ✓）。 */
+    var __prepDraw = function () {
+      var drawn = drawCard(player);
+      if (drawn) {
+        addBattleLog(player, '准备阶段：回复5费用，抽到【' + drawn.name + '】');
+        // 准备阶段抽卡动画（用户要求）：纯视觉，不阻塞流程；无头/无布局环境下自动跳过
+        playPrepDrawAnim(player, drawn);
+      }
+      try { delete battleState[player]._lilyDrawFrom; } catch (e) {}
+    };
+    (function () {
+      var __lp = battleState[player];
+      if (!__lp || !__lp._lilyPassive || !(__lp.deck || []).length) { __prepDraw(); return; }
+      var __bot = __lp.deck[__lp.deck.length - 1];
+      var __botName = (__bot && __bot.name) || '（未知卡）';
+      var __opts = ['从牌组最上方抽', '从牌组最下方抽（' + __botName + '）'];
+      var __pickDraw = function (i) {
+        if (i === 1) { __lp._lilyDrawFrom = 'bottom'; addBattleLog(player, '【莉莉被动·逝者之眼】本次从**牌组最下方**抽（' + __botName + '）'); }
+        else addBattleLog(player, '【莉莉被动·逝者之眼】本次从牌组最上方抽');
+        __prepDraw();
+      };
+      if (typeof isAISeat === 'function' && isAISeat(player)) { __prepDraw(); return; }   /* AI 座不询问（作者口径：其他不动） */
+      if (player === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('莉莉被动·逝者之眼', '牌组最下方为【' + __botName + '】', '选择本次抽卡从哪一头抽', __opts, __pickDraw); return; }
+      if (typeof Online !== 'undefined' && Online.active && player === 'p2' && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '莉莉被动·逝者之眼（对手）', '牌组最下方为【' + __botName + '】', '选择本次抽卡从哪一头抽', __opts, __pickDraw); return; }
+      __prepDraw();
+    })();
   } else {
     battleState[player]._firstRegenSkipped = true;
     addBattleLog(player, '首回合准备阶段：自然回复与抽卡已在游戏开始时结算，不再重复');
