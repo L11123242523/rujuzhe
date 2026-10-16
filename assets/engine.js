@@ -21555,7 +21555,8 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
   var modalTitle = document.getElementById('cardListTitle');
   var content = document.getElementById('cardListContent');
   
-  modalTitle.textContent = title + '（' + cards.length + '张）';
+  /* 【2026-10-17 作者定稿·说明放在标题行旁边（牌组/墓地/公共墓地等共用本查看口）✓ 不另起一行】 */
+  modalTitle.innerHTML = title + '（' + cards.length + '张）' + ((typeof __zoneOrderHintSpan === 'function') ? __zoneOrderHintSpan(zone) : '');
   content.innerHTML = '';
   
   if (cards.length === 0) {
@@ -21572,16 +21573,6 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
       content.appendChild(__stcEmptyBtn);
     }
   } else {
-    /* 【2026-10-17 作者点名·"查看牌组/墓地无法确认顺序"】本函数是**共用查看口**（对手墓地／牌组／
-       公共墓地／移出区／手牌／效果处理区都走它）⇒ 顶部写方向说明、每张卡标位置，口径全用 ui.js 的
-       唯一真相 `__zoneOrderHint` / `__zoneOrderBadge` ✓（牌组：0=最上方=下一抽；墓地：0=最下方=最早） */
-    var __uzHint = (typeof __zoneOrderHint === 'function') ? __zoneOrderHint(zone) : '';
-    if (__uzHint) {
-      var __uzHintDiv = document.createElement('div');
-      __uzHintDiv.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.65);padding-bottom:8px;';
-      __uzHintDiv.textContent = __uzHint;
-      content.appendChild(__uzHintDiv);
-    }
     for (var i = 0; i < cards.length; i++) {
       (function(card, idx) {
         var div = document.createElement('div');
@@ -21602,7 +21593,7 @@ function __askTargetCardsLocal(player, zone, title, selectable, callback) {
           div.onclick = function() { __openGraveCardDetail(card); };
         }
         var __uzBadge = (typeof __zoneOrderBadge === 'function') ? __zoneOrderBadge(zone, idx, cards.length) : '';
-        div.innerHTML = (__uzBadge ? '<div style="font-size:10px;font-weight:bold;color:#feca57;margin-bottom:3px;">' + __uzBadge + '</div>' : '') +
+        div.innerHTML = (__uzBadge ? '<div style="' + ((typeof __ZONE_BADGE_CSS === 'string') ? __ZONE_BADGE_CSS : '') + '">' + __uzBadge + '</div>' : '') +
           '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
           '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +

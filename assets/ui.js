@@ -1335,44 +1335,59 @@ function renderChainBar(effect, opt) {
   bar.classList.add('show');
 }
 
-/* 【2026-10-17 作者点名·"查看牌组和墓地时无法确认顺序"】唯一真相 = 下面这两个函数：
-     · `__zoneOrderBadge(zone, idx, total)` → 这张卡在本区域里的**位置标签**（写清哪端是最上/最下）
-     · `__zoneOrderHint(zone)`             → 列表顶部那句**方向说明**
+/* 【2026-10-17 作者点名·"查看牌组和墓地时无法确认顺序"】唯一真相 = 下面这三个：
+     · `__zoneOrderBadge(zone, idx, total)` → 卡上的**短**位置标签（`#1 · 最上方`）
+     · `__zoneOrderHint(zone)`             → 列表顶部那行**方向说明**（详细口径写在这里）
+     · `__ZONE_BADGE_CSS` / `__ZONE_HINT_INLINE_CSS` → 这两处的**唯一**样式（三处查看口共用）
    口径（与引擎内部约定一致，代码里的注释已互证）：
      · 牌组：`deck[0]` = **最上方** = 下一张会抽到的卡（`takeTopCard` 走 `shift`）；末位 = **最下方**（回收卡回这里）
      · 墓地：`grave[0]` = **最下方** = 最早进墓；末位 = **最上方** = 最近进墓（`moveCardToGrave` 走 push）
      · 移出区 / 公共墓地：顺序不敏感 ⇒ 只给序号
    ⚠ 三处查看口都调它（本机牌组列表 / 本机墓地列表 / 通用查看列表）⇒ 以后只有一份口径 ✓
-   为什么原来看不出顺序：牌组列表进来先 `sort(按名字)` 把顺序抹掉了 ✗（本次一并去掉排序） */
+   为什么原来看不出顺序：牌组列表进来先 `sort(按名字)` 把顺序抹掉了 ✗（本次一并去掉排序）
+   【2026-10-17 作者三轮反馈 ⇒ 最终形态】
+     ① 卡上写 `#1 · 牌组最上方（下一抽）` ⇒ 作者「这字有点影响观感了」（120px 卡宽里折成两行、把卡图挤下去 ✗）；
+     ② 我收紧到 `#1 · 最上方` + 禁止换行时，作者先说「放在牌组那行就好」；
+     ③ 随即作者定「**可以加标签**」⇒ 最终 = **顶部一行说明 + 卡上短标签**（9px、`nowrap`、超出省略号）✓ */
 function __zoneOrderBadge(zone, idx, total) {
   if (!(total > 0) || idx < 0 || idx >= total) return '';
   var n = idx + 1;
-  if (total === 1) {
-    if (zone === 'deck') return '#1 · 牌组唯一一张（最上＝最下，下一抽就是它）';
-    if (zone === 'grave') return '#1 · 墓地唯一一张（最上＝最下）';
-  }
+  if (total === 1) return '#' + n + ' · 唯一一张';
   if (zone === 'deck') {
-    if (idx === 0) return '#' + n + ' · 牌组最上方（下一抽）';
-    if (idx === total - 1) return '#' + n + ' · 牌组最下方';
-    return '#' + n + ' / ' + total;
+    if (idx === 0) return '#' + n + ' · 最上方';
+    if (idx === total - 1) return '#' + n + ' · 最下方';
+    return '#' + n;
   }
   if (zone === 'grave') {
-    if (idx === 0) return '#' + n + ' · 墓地最下方（最早进墓）';
-    if (idx === total - 1) return '#' + n + ' · 墓地最上方（最近进墓）';
-    return '#' + n + ' / ' + total;
+    if (idx === 0) return '#' + n + ' · 最下方';
+    if (idx === total - 1) return '#' + n + ' · 最上方';
+    return '#' + n;
   }
-  if (zone === 'removed' || zone === 'public_grave') return '#' + n + ' / ' + total;
+  if (zone === 'removed' || zone === 'public_grave') return '#' + n;
   return '';
 }
 function __zoneOrderHint(zone) {
-  if (zone === 'deck') return '顺序：从左到右 = 牌组最上方 → 最下方（最上方那张 = 下一张会抽到的卡）';
-  if (zone === 'grave') return '顺序：从左到右 = 墓地最下方（最早进墓） → 最上方（最近进墓）';
+  if (zone === 'deck') return '顺序：左＝最上方（下一张会抽到的卡） → 右＝最下方';
+  if (zone === 'grave') return '顺序：左＝最下方（最早进墓） → 右＝最上方（最近进墓）';
   if (zone === 'removed') return '按移出游戏的先后排列（顺序不敏感）';
   if (zone === 'public_grave') return '按进入公共墓地的先后排列';
   return '';
 }
+/* 卡上短标签的**唯一**样式：9px、不加粗、低对比、**禁止换行**（超出省略号）—— 绝不再把卡图挤下去 ✓ */
+var __ZONE_BADGE_CSS = 'font-size:9px;font-weight:600;color:rgba(254,202,87,.82);margin-bottom:2px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+/* 说明的**行内**形态：拼在标题「牌组（N张）」旁边（作者 2026-10-17 定稿：「把说明放到牌组（6张）旁边」✓）
+   返回 HTML 片段（带前导"·"分隔）；该区域没有说明时返回 ''（不占位）✓ */
+var __ZONE_HINT_INLINE_CSS = 'font-size:11px;font-weight:400;color:rgba(255,255,255,.52);margin-left:10px;';
+function __zoneOrderHintSpan(zone) {
+  var t = __zoneOrderHint(zone);
+  if (!t) return '';
+  return '<span style="' + __ZONE_HINT_INLINE_CSS + '">· ' + t + '</span>';
+}
 try { window.__zoneOrderBadge = __zoneOrderBadge; } catch (e) {}
 try { window.__zoneOrderHint = __zoneOrderHint; } catch (e) {}
+try { window.__zoneOrderHintSpan = __zoneOrderHintSpan; } catch (e) {}
+try { window.__ZONE_BADGE_CSS = __ZONE_BADGE_CSS; } catch (e) {}
+try { window.__ZONE_HINT_INLINE_CSS = __ZONE_HINT_INLINE_CSS; } catch (e) {}
 
 function showDeckList() {
   if (!battleState) return;
@@ -1380,7 +1395,8 @@ function showDeckList() {
   var title = document.getElementById('cardListTitle');
   var content = document.getElementById('cardListContent');
   
-  title.textContent = '牌组（' + battleState.p1.deck.length + '张）';
+  /* 【2026-10-17 作者定稿·**说明放在「牌组（N张）」这一行旁边**】不另起一行（省一行高度、更干净 ✓） */
+  title.innerHTML = '牌组（' + battleState.p1.deck.length + '张）' + __zoneOrderHintSpan('deck');
   content.innerHTML = '';
   
   if (battleState.p1.deck.length === 0) {
@@ -1388,15 +1404,9 @@ function showDeckList() {
   } else {
     /* 【2026-10-17 作者点名·"查看牌组无法确认顺序"】
        原来这里**先按卡名排序**再显示 ⇒ 牌组顺序信息被抹掉、玩家根本看不出哪张是最上/最下 ✗
-       ⇒ 改成**按牌组真实顺序**显示，每张卡上标出它在牌组里的位置（唯一真相 `__zoneOrderBadge` ✓） */
+       ⇒ 改成**按牌组真实顺序**显示，每张卡上标出它在牌组里的位置（唯一真相 `__zoneOrderBadge` ✓）
+       说明那行**不在这里**：作者定稿是放在标题「牌组（N张）」旁边（见上面 `__zoneOrderHintSpan` ✓） */
     var deckArr = battleState.p1.deck;
-    var __dhint = (typeof __zoneOrderHint === 'function') ? __zoneOrderHint('deck') : '';
-    if (__dhint) {
-      var hintDiv = document.createElement('div');
-      hintDiv.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.65);padding-bottom:8px;';
-      hintDiv.textContent = __dhint;
-      content.appendChild(hintDiv);
-    }
     for (var i = 0; i < deckArr.length; i++) {
       var card = deckArr[i];
       var div = document.createElement('div');
@@ -1414,7 +1424,7 @@ function showDeckList() {
       /* 【2026-10-03 作者实测】牌组列表也能点开看这张卡（原来只有名字/费用/效果前 50 字，点不开） */
       div.onclick = (function(c){ return function() { __openGraveCardDetail(c); }; })(card);
       var __dbadge = (typeof __zoneOrderBadge === 'function') ? __zoneOrderBadge('deck', i, deckArr.length) : '';
-      div.innerHTML = (__dbadge ? '<div style="font-size:10px;font-weight:bold;color:#feca57;margin-bottom:3px;">' + __dbadge + '</div>' : '') +
+      div.innerHTML = (__dbadge ? '<div style="' + ((typeof __ZONE_BADGE_CSS === 'string') ? __ZONE_BADGE_CSS : '') + '">' + __dbadge + '</div>' : '') +
         '<img src="' + (card.image_url || '') + '" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">' +
         '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">' + (card.name || '未知') + '</div>' +
         '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:' + (card.cost || 0) + '</div>' +
@@ -1437,7 +1447,8 @@ function showGraveList(zone) {
   var p = battleState.p1;
   var removed = (p.removed || []).concat(p.removedFromGame || []);
   var list = zcur === 'removed' ? removed : p.grave;
-  title.textContent = (zcur === 'removed' ? '移出游戏区' : '墓地') + '（' + list.length + '张）';
+  /* 【2026-10-17 作者定稿】说明放在标题行旁边（与牌组列表同一形态 ✓），不另起一行 */
+  title.innerHTML = (zcur === 'removed' ? '移出游戏区' : '墓地') + '（' + list.length + '张）' + __zoneOrderHintSpan(zcur);
   content.innerHTML = '';
   // 区切换 Tab
   var tabBar = document.createElement('div');
@@ -1451,14 +1462,6 @@ function showGraveList(zone) {
     tabBar.appendChild(b);
   });
   content.appendChild(tabBar);
-  /* 【2026-10-17 作者点名·"查看墓地无法确认顺序"】顶部写清方向：从左到右 = 最下方 → 最上方（唯一真相 ✓） */
-  var __ghint = (typeof __zoneOrderHint === 'function') ? __zoneOrderHint(zcur) : '';
-  if (__ghint) {
-    var __gHintDiv = document.createElement('div');
-    __gHintDiv.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.65);padding-bottom:8px;';
-    __gHintDiv.textContent = __ghint;
-    content.appendChild(__gHintDiv);
-  }
   if (!list.length) {
     var empty=document.createElement('div');empty.style.cssText='color:rgba(255,255,255,0.5);padding:20px;text-align:center;';
     empty.textContent=(zcur==='removed'?'移出游戏区为空':'墓地为空');content.appendChild(empty);
@@ -1482,7 +1485,7 @@ function showGraveList(zone) {
         div.onmouseenter = function() { try { __cardPeekShow(this, encodeURIComponent(card.name || '')); } catch (e) { try { console.error('[catch] assets/ui.js:1335', e); } catch (e2) {} } };
         div.onmouseleave = function() { try { __cardPeekHide(); } catch (e) { try { console.error('[catch] assets/ui.js:1336', e); } catch (e2) {} } };
         var __gbadge = (typeof __zoneOrderBadge === 'function') ? __zoneOrderBadge(zcur, idx, list.length) : '';
-        div.innerHTML=(__gbadge?'<div style="font-size:10px;font-weight:bold;color:#feca57;margin-bottom:3px;">'+__gbadge+'</div>':'')+
+        div.innerHTML=(__gbadge?'<div style="'+((typeof __ZONE_BADGE_CSS === 'string')?__ZONE_BADGE_CSS:'')+'">'+__gbadge+'</div>':'')+
           '<img src="'+(card.image_url||'')+'" style="width:100%;border-radius:4px;display:block;margin-bottom:4px;" onerror="this.style.display=&quot;none&quot;">'+
           '<div style="font-size:12px;font-weight:bold;color:#fff;margin-bottom:4px;">'+(card.name||'未知')+'</div>'+
           '<div style="font-size:10px;color:rgba(255,255,255,0.6);">费用:'+(card.cost||0)+'</div>'+
