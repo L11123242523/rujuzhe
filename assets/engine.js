@@ -8062,8 +8062,18 @@ function __cardTimingAllowed(card, side, timing) {
          与注释 7867 声明的判定顺序（卡面**回合**字样 **先于** 默认主要阶段）一致：
            卡面自己写了"跨回合可发动"⇒ 视为**全时点**（真正的时点资格仍由③按回合方把关 ✓）✓ */
     var __crossTurnText = /自己或(?:者)?(?:其他|别的)?玩家?的?回合|对手回合|对方回合/.test(txt);
+    /* 【2026-10-15 作者点名单卡·结构修 ✓】雷閃 卡面写的是「这个效果**在**其他玩家回合也能发动」——
+       **没有「自己或」三个字** ⇒ 上面那条 `__crossTurnText` 不命中（实测：跨回合正则命中=false）✗
+       ⇒ 落到默认分支 = 只允许主要阶段 ⇒ **准备/投掷/结束阶段全被否** ✗
+       作者实测现象：「雷闪虽然写了可以在对手回合发动，但是不像技能卡一样是全时点」✓
+       作者裁决（2026-10-15）：**只修雷閃这一张** ⇒ 这里用**显式名单**登记（清晰、可审计；
+         不去放宽措辞正则 —— 那会把 14 张「**可盖伏在**其他玩家回合使用」的连锁专用卡
+         一起错误地放成全时点 ✗，实测放宽会误伤 20 张）。
+       ⚠ 名单里只放"卡面自述跨回合可发动、且没有盖伏前置"的卡；要增减请作者点名 ✓ */
+    var __FULLTIME_BY_NAME = ['雷閃'];
+    var __namedFull = __FULLTIME_BY_NAME.indexOf(String(card.name || '')) >= 0;
     if (!allowed) {
-      var fullTime = (card._category === 'skill_cards') || __crossTurnText || /全时点|任意时点|任何时候|任意时机/.test(txt);
+      var fullTime = (card._category === 'skill_cards') || __crossTurnText || __namedFull || /全时点|任意时点|任何时候|任意时机/.test(txt);
       if (fullTime) return true;
       return ph === 'main1' || ph === 'main2';
     }
