@@ -11821,26 +11821,32 @@ function __phaseWaitBusy() {
   } catch (e) { console.error('阶段等待判据出错（按不忙处理）', e); }
   return false;
 }
-function aiTurnPhase(seat, timing, after) {
+/* 【2026-10-18 结构修·**阶段时点守卫只留一份**】
+   原来 aiTurnPhase（对手侧）与 __phaseSeq（玩家侧）各自抄了一遍"1.5 秒静默兜底"，两份会漂移；
+   现在共用本函数。它只在**异常路径**（窗口机器既不开窗也不回调）静默 1.5 秒后推进：
+   正常路径 __runTimingTriggers 会同步/回调；真在等玩家决策时 __phaseWaitBusy() 为真，不会误触发。
+   ⚠ 保留它是**异常守卫**而非正常调度：删掉会把"可恢复的异常"变成"永久卡死"。tag 只影响日志措辞。 */
+function __runTimingWithGuard(timing, ctx, tag, onDone) {
   var __done = false;
-  var __fin = function () {
+  function __fin() {
     if (__done) return; __done = true;
-    try { after(); } catch (e) { console.error('对手阶段时点回调出错 ' + timing, e); }
-  };
+    try { onDone(); } catch (e) { console.error(tag + '回调出错 ' + timing, e); }
+  }
   if (typeof __runTimingTriggers !== 'function') { __fin(); return; }
-  var __seat = seat || aiSeat();
-  try { __runTimingTriggers(timing, { player: __seat, players: ['p1', 'p2'], turnPlayer: __seat }, __fin); }
-  catch (e) { console.error('对手阶段时点 ' + timing + ' 出错（继续推进）', e); __fin(); return; }
-  /* 兜底（与玩家侧同款）：窗口机器若既不开窗也不回调（异常路径），1.5 秒静默后强制推进，
-     避免 AI 阶段边界卡死。真正在等玩家决策时 TW.active 非空，不会误触发。 */
+  try { __runTimingTriggers(timing, ctx, __fin); }
+  catch (e) { console.error(tag + ' ' + timing + ' 出错（继续推进）', e); __fin(); return; }
   var __tries = 0, __quiet = 0;
   var __iv = setInterval(function () {
     if (__done) { clearInterval(__iv); return; }
     var __busy = (typeof __phaseWaitBusy === 'function') ? __phaseWaitBusy() : false;
     if (__busy) { __quiet = 0; }
-    else if (++__quiet >= 6) { clearInterval(__iv); console.warn('对手阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
+    else if (++__quiet >= 6) { clearInterval(__iv); console.warn(tag + ' ' + timing + ' 未回调，兜底推进'); __fin(); }
     if (++__tries > 200) clearInterval(__iv);
   }, 250);
+}
+function aiTurnPhase(seat, timing, after) {
+  var __seat = seat || aiSeat();
+  __runTimingWithGuard(timing, { player: __seat, players: ['p1', 'p2'], turnPlayer: __seat }, '对手阶段时点', after);
 }
 
 function aiTurn(seat) {
@@ -14947,21 +14953,8 @@ function nextPhase() {
     } catch (e) { console.error('清理阶段限时加成出错（忽略）', e); }
   };
   var __phaseSeq = function (timing, after) {
-    var __done = false;
-    var __fin = function () { if (__done) return; __done = true; try { after(); } catch (e) { console.error('阶段时点回调出错 ' + timing, e); } };
-    if (typeof __runTimingTriggers !== 'function') { __fin(); return; }
-    try { __runTimingTriggers(timing, __phaseCtx(), __fin); }
-    catch (e) { console.error('阶段时点 ' + timing + ' 出错（继续推进）', e); __fin(); return; }
-    /* 兜底（2026-10-01）：窗口机器若既不开窗也不回调（异常路径），1.5 秒后强制推进，避免阶段边界卡死。
-       只在"确认没有活动窗口"时兜底；真正在等玩家决策时 TW.active 非空，不会误触发。 */
-    var __tries = 0, __quiet = 0;
-    var __iv = setInterval(function () {
-      if (__done) { clearInterval(__iv); return; }
-      var __busy = (typeof __phaseWaitBusy === 'function') ? __phaseWaitBusy() : false;
-      if (__busy) { __quiet = 0; }
-      else if (++__quiet >= 6) { clearInterval(__iv); console.warn('阶段时点 ' + timing + ' 未回调，兜底推进'); __fin(); }
-      if (++__tries > 200) clearInterval(__iv);
-    }, 250);
+    /* 与对手侧共用同一个守卫（2026-10-18：两份拷贝合并成一份 ✓） */
+    __runTimingWithGuard(timing, __phaseCtx(), '阶段时点', after);
   };
   // 联机：广播阶段推进意图（对方远端位按同一状态机重放）
   if (typeof Online !== 'undefined' && Online.active) {
