@@ -2732,37 +2732,13 @@ function onlineKoharuP2(done) {
   if (done) done();
 }
 function onlineLilyP2(done) {
-  var p = battleState.p2;
-  if (!p.grave.length) { if (done) done(); return; }
-  p._lilySPTurn = battleState.turn;
-  var c = p.grave.shift(); p.deck.push(c);
-  addBattleLog('p2', '【莉莉SP】墓地最下方【' + c.name + '】放回牌组最下方');
-  var __nb = p.grave.length ? p.grave[0] : null;
-  var __ok = c._category === 'item_single' && (!__nb || __nb._category !== 'item_single');
-  if (__ok) {
-    recoverCost('p2', 1, '莉莉SP');
-    addBattleLog('p2', '【莉莉SP】放回的是单次且当前墓地最下方不为单次，视为使用【' + c.name + '】并回复1音韵');
-    var txt = c.effect || c.text || '';
-    if (txt && typeof dispatchStep === 'function') dispatchStep(txt, { user: 'p2', target: 'p1', card: c }, function () { updateBattleUI(); if (done) done(); });
-    else { updateBattleUI(); if (done) done(); }
-  } else { updateBattleUI(); if (done) done(); }
+  /* 联机 P2 入口：只调唯一效果体 ✓ */
+  __lilyApply('p2', done);
 }
 function onlineEdwardP2(done) {
-  var p = battleState.p2;
   if (__breakerCount('p2') < 3) { if (done) done(); return; }
   onlineDecideModal('p2', '露璐缇雅 SP（对手）', '选择要破坏哪个玩家区域内的卡', '', ['破坏自己区域', '破坏对手区域'], function (o) {
-    var who = o === 0 ? 'p2' : 'p1';
-    var zone = (battleState[who].permanent || []).length ? 'permanent' : 'hand';
-    if (!(battleState[who][zone] || []).length) { if (done) done(); return; }
-    chooseZoneCard('p2', who, zone, '选择要破坏的1张卡', function (c, i) {
-      if (i < 0) { if (done) done(); return; }
-      p._edwardSPTurn = battleState.turn;
-      battleState[who][zone].splice(i, 1); moveCardToGrave(who, c, 'destroy');
-      battleState[who].cost = Math.min(battleState[who].cost + 4, battleState[who].maxCost);
-      addBattleLog('p2', '【露璐缇雅SP】破坏' + (who === 'p2' ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
-      updateBattleUI();
-      if (done) done();
-    });
+    __edwardApply('p2', o, done);
   });
 }
 var PHASE_NAME={prepare:'准备阶段',main1:'主要阶段1',roll:'投骰阶段',main2:'主要阶段2',end:'结束阶段'};
@@ -13236,21 +13212,35 @@ function activateKoharuSP() {
   updateBattleUI();
 }
 // 莉莉·回收（每回合一次）
-function activateLilySP() {
-  var p = battleState.p1;
-  if (!p.grave.length) { showToast('墓地为空，没有可回收的卡', 'warn'); return; }
+/* 【2026-10-18 结构修·**莉莉 SP 的唯一效果体**】
+   原来 p1 / 联机 P2 / AI 各写一份。现在三入口只调本函数；seat 贯穿（日志/扣费/出牌/目标）。 */
+function __lilyApply(seat, done) {
+  var p = battleState[seat];
+  function fin() {
+    if (typeof done !== 'function') return;
+    try { done(); } catch (e) { try { console.error('莉莉SP done 回调出错', e); } catch (e2) {} }
+  }
+  if (!p || !(p.grave || []).length) { fin(); return; }
   p._lilySPTurn = battleState.turn;
   var c = p.grave.shift(); p.deck.push(c); // 墓地最下方(grave[0]最早进墓) -> 牌组最下方(末位)
-  addBattleLog('p1', '【莉莉SP】墓地最下方【' + c.name + '】放回牌组最下方');
+  addBattleLog(seat, '【莉莉SP】墓地最下方【' + c.name + '】放回牌组最下方');
   var __nb = p.grave.length ? p.grave[0] : null; // 取走后新的墓地最下方
   var __ok = c._category === 'item_single' && (!__nb || __nb._category !== 'item_single');
   if (__ok) {
-    recoverCost('p1', 1, '莉莉SP');
-    addBattleLog('p1', '【莉莉SP】放回的是单次且当前墓地最下方不为单次，视为使用【' + c.name + '】并回复1音韵');
+    recoverCost(seat, 1, '莉莉SP');
+    addBattleLog(seat, '【莉莉SP】放回的是单次且当前墓地最下方不为单次，视为使用【' + c.name + '】并回复1音韵');
     var txt = c.effect || c.text || '';
-    if (txt && typeof dispatchStep === 'function') dispatchStep(txt, { user: 'p1', target: 'p2', card: c }, function () { updateBattleUI(); });
-    else updateBattleUI();
-  } else updateBattleUI();
+    if (txt && typeof dispatchStep === 'function') {
+      dispatchStep(txt, { user: seat, target: foeOf(seat), card: c }, function () { updateBattleUI(); fin(); });
+      return;
+    }
+  }
+  updateBattleUI(); fin();
+}
+function activateLilySP() {
+  var p = battleState.p1;
+  if (!p.grave.length) { showToast('墓地为空，没有可回收的卡', 'warn'); return; }
+  __lilyApply('p1');
 }
 /* 露璐缇雅·破坏（破坏者≥3，每回合一次；破坏后被炸玩家回4音韵）
    【2026-10-15 结构修 ✓·**座位归属**】本函数原来**写死 p1**：判据 `__breakerCount('p1')`、
@@ -13267,26 +13257,40 @@ function activateLilySP() {
        （破坏**对手**区域 ✓）
      · 其余（本机 p1 / 联机远端位）⇒ `onlineDecideModal(座位, …)`：p1 走本机弹窗（与改前逐字一致 ✓）、
        联机房主把问题**发给客人本人** ✓（原来问的是房主自己 ✗） */
-function activateEdwardSP(seat) {
-  /* 座位以**事实**为准（该座位在对局里存在就是它），不写死 'p1'/'p2' 名单 ✓；不传 ⇒ 本机玩家 p1（旧调用方） */
-  var s = (seat && battleState[seat]) ? seat : 'p1';
-  var p = battleState[s], foe = foeOf(s);
-  if (__breakerCount(s) < 3) { showToast('队伍破坏者合计不足3名（当前' + __breakerCount(s) + '），不能发动', 'warn'); return; }
-  function __applyEdward(o) {
-    var who = (o === 0) ? s : foe;
-    var zone = (battleState[who].permanent || []).length ? 'permanent' : 'hand';
-    if (!(battleState[who][zone] || []).length) { showToast(who === s ? '自己区域没有可破坏的卡' : '对手区域没有可破坏的卡', 'warn'); return; }
-    chooseZoneCard(s, who, zone, '选择要破坏的1张卡', function (c, i) {
-      if (i < 0) return;
-      p._edwardSPTurn = battleState.turn;                /* 按**发动者座位**记账 ✓ */
-      battleState[who][zone].splice(i, 1); moveCardToGrave(who, c, 'destroy');
-      battleState[who].cost = Math.min(battleState[who].cost + 4, battleState[who].maxCost);
-      addBattleLog(s, '【露璐缇雅SP】破坏' + (who === s ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
-      updateBattleUI();
-    });
+/* 【2026-10-18 结构修·**露璐缇雅 SP 的唯一效果体**】
+   原来 p1/联机 P2/AI 各写一份。现在三入口只调本函数；seat 贯穿（判据/记账/目标/提问/日志）。
+   破坏后由**被破坏区域所属玩家**回4音韵（卡面"其回4音韵"）✓。 */
+function __edwardApply(seat, choice, done) {
+  var s = seat, p = battleState[s], foe = (typeof foeOf === 'function') ? foeOf(s) : (s === 'p1' ? 'p2' : 'p1');
+  function fin() {
+    if (typeof done !== 'function') return;
+    try { done(); } catch (e) { try { console.error('露璐SP done 回调出错', e); } catch (e2) {} }
   }
-  if (isAISeat(s)) { __applyEdward(1); return; }          /* AI 座位：自动决策（破坏对手区域） */
-  onlineDecideModal(s, '露璐缇雅 SP', '选择要破坏哪个玩家区域内的卡', '', ['破坏自己区域', '破坏对手区域'], __applyEdward);
+  if (!p || (typeof __breakerCount === 'function' && __breakerCount(s) < 3)) { fin(); return; }
+  var who = (choice === 0) ? s : foe;
+  var zone = (battleState[who].permanent || []).length ? 'permanent' : 'hand';
+  if (!(battleState[who][zone] || []).length) {
+    addBattleLog(s, '【露璐缇雅SP】' + (who === s ? '自己' : '对手') + '区域没有可破坏的卡');
+    fin(); return;
+  }
+  chooseZoneCard(s, who, zone, '选择要破坏的1张卡', function (c, i) {
+    if (i < 0) { fin(); return; }
+    p._edwardSPTurn = battleState.turn;
+    battleState[who][zone].splice(i, 1); moveCardToGrave(who, c, 'destroy');
+    battleState[who].cost = Math.min(battleState[who].cost + 4, battleState[who].maxCost);
+    addBattleLog(s, '【露璐缇雅SP】破坏' + (who === s ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
+    updateBattleUI(); fin();
+  });
+}
+function activateEdwardSP(seat) {
+  /* 座位以**事实**为准；不传 ⇒ 本机玩家 p1（旧调用方） */
+  var s = (seat && battleState[seat]) ? seat : 'p1';
+  if (__breakerCount(s) < 3) { showToast('队伍破坏者合计不足3名（当前' + __breakerCount(s) + '），不能发动', 'warn'); return; }
+  /* AI 座位：不给本机玩家弹窗、自动选"破坏对手区域"（保持旧行为 ✓） */
+  if (isAISeat(s)) { __edwardApply(s, 1); return; }
+  onlineDecideModal(s, '露璐缇雅 SP', '选择要破坏哪个玩家区域内的卡', '', ['破坏自己区域', '破坏对手区域'], function (o) {
+    __edwardApply(s, o);
+  });
 }
 // AI 主动型 SP 决策（玩家由 useCharacterPassive 手动发动；AI 自动按收益发动，每回合一次门控一致）
 // ===== 琉璃(万圣祭)·回收（主动发动；p1 侧）=====
@@ -13422,12 +13426,9 @@ function aiUseActiveSP(player, done) {
     }
     // 莉莉·回收：墓地最底1张回牌组底，单次卡执行其效果
     if (p._lilySP && p._lilySPTurn !== T && p.grave.length) {
-      var lc = p.grave.shift(); p.deck.push(lc); p._lilySPTurn = T;
-      L('对手【莉莉SP】墓地最底【' + lc.name + '】放回牌组最下方');
-      var __nb2 = p.grave.length ? p.grave[0] : null;
-      var __ok2 = lc._category === 'item_single' && (!__nb2 || __nb2._category !== 'item_single');
-      if (__ok2) { recoverCost(player, 1, '莉莉SP[对手]'); if (lc.effect && typeof dispatchStep === 'function') { dispatchStep(lc.effect || lc.text || '', { user: player, target: foe, card: lc }, function () { setTimeout(next, 250); }); return; } }
-      setTimeout(next, 250); return;
+      /* AI 入口：只调唯一效果体 ✓ */
+      __lilyApply(player, function () { setTimeout(next, 250); });
+      return;
     }
     // 最佳化·SP（AI）：墓地有这张卡且攻击力加成没到上限时直接发动（移出墓地换永久+1攻击）
     if ((p.grave || []).some(function (c) { return c && c.name === '最佳化'; })) {
@@ -13453,11 +13454,10 @@ function aiUseActiveSP(player, done) {
       __yunaiPastTopApply(player, function () { setTimeout(next, 250); });
       return;
     }
-    // 露璐缇雅·破坏：破坏者≥3 时破坏对手区域1张，然后其回4音韵
+    // 露璐缇雅·破坏：破坏者≥3 时破坏对手区域1张，然后其回4音韵（AI 入口只调唯一效果体）
     if (p._edwardSP && p._edwardSPTurn !== T && typeof __breakerCount === 'function' && __breakerCount(player) >= 3) {
-      var w = foe, zone = (battleState[w].permanent || []).length ? 'permanent' : (((battleState[w].hand || []).length) ? 'hand' : null);
-      if (zone) { var rc = battleState[w][zone].shift(); moveCardToGrave(w, rc, 'destroy'); battleState[w].cost = Math.min(battleState[w].cost + 4, battleState[w].maxCost); p._edwardSPTurn = T; L('对手【露璐SP】破坏对手区域【' + rc.name + '】，其回4音韵'); }
-      setTimeout(next, 250); return;
+      __edwardApply(player, 1, function () { setTimeout(next, 250); });
+      return;
     }
     // 引导核心：直接升1级（AI 此前拿到核心永不消耗，白给）
     if ((p._guideCore || 0) > 0 && typeof useGuideCore === 'function') {
