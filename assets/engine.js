@@ -2711,18 +2711,19 @@ function onlineKasumiP2(done) {
 function onlineMegumiP2(done) {
   var p = battleState.p2;
   onlineDecideModal('p2', '松山惠 SP·乐曲（对手）', '选择一项乐曲效果', '', ['α 回4音韵并抽1', 'β 献祭一次且那次回费+2', 'γ 回6同步并抽1张馈赠卡', 'δ 献祭次数+1，造4理智'], function (o) {
-    p._megumiSPTurn = battleState.turn;
-    if (o === 0) { p.cost = Math.min(p.cost + 4, p.maxCost); drawCard('p2'); addBattleLog('p2', '【惠SP·乐曲α】回复4音韵并抽1张'); updateBattleUI(); if (done) done(); }
+    /* 与 p1 同一结构：记账下沉到"真正成功"之后（β 无手卡/取消不白耗本回合） */
+    if (o === 0) { p._megumiSPTurn = battleState.turn; p.cost = Math.min(p.cost + 4, p.maxCost); drawCard('p2'); addBattleLog('p2', '【惠SP·乐曲α】回复4音韵并抽1张'); updateBattleUI(); if (done) done(); }
     else if (o === 1) {
       if (!p.hand.length) { addBattleLog('p2', '【惠SP·乐曲β】没有手卡可献祭'); if (done) done(); return; }
       chooseZoneCard('p2', 'p2', 'hand', '乐曲β：选1张手卡献祭（那次回费+1）', function (c, i) {
         if (i < 0) { addBattleLog('p2', '乐曲β已取消'); if (done) done(); return; }
+        p._megumiSPTurn = battleState.turn;
         p._meiSPBeta = true;
         sacrificeCards('p2', [{ card: c, zone: 'hand' }], false, function () { updateBattleUI(); if (done) done(); });
       });
     }
-    else if (o === 2) { p.sync = Math.min(p.sync + 6, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p2'); addBattleLog('p2', '【惠SP·乐曲γ】回复6同步并抽取1张馈赠卡'); updateBattleUI(); if (done) done(); }
-    else { p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p2', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p1', 4, '惠SP·乐曲δ', function () { updateBattleUI(); if (done) done(); }, '理智'); }
+    else if (o === 2) { p._megumiSPTurn = battleState.turn; p.sync = Math.min(p.sync + 6, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p2'); addBattleLog('p2', '【惠SP·乐曲γ】回复6同步并抽取1张馈赠卡'); updateBattleUI(); if (done) done(); }
+    else { p._megumiSPTurn = battleState.turn; p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p2', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p1', 4, '惠SP·乐曲δ', function () { updateBattleUI(); if (done) done(); }, '理智'); }
   });
 }
 function onlineKoharuP2(done) {
@@ -13164,12 +13165,15 @@ function useCharacterPassive() {
 function activateMegumiSP() {
   var p = battleState.p1;
   showChoiceModal('松山惠 SP·乐曲', '选择一项乐曲效果', '', ['α 回4音韵并抽1', 'β 献祭一次且那次回费+2', 'γ 回6同步并抽1张馈赠卡', 'δ 献祭次数+1，造4理智'], function (o) {
-    p._megumiSPTurn = battleState.turn;
-    if (o === 0) { p.cost = Math.min(p.cost + 4, p.maxCost); drawCard('p1'); addBattleLog('p1', '【惠SP·乐曲α】回复4音韵并抽1张'); updateBattleUI(); }
+    /* 【2026-10-18 结构修·记账必须在"真正成功"之后】原来在这里**无条件**写 _megumiSPTurn ⇒
+       β 无手卡 / 取消选卡都会白耗本回合次数（实测：turn=7、_megumiSPTurn=7、手卡=0、什么都没发生）✗
+       ⇒ 记账下沉到各分支：α/γ/δ 在效果成立时；β 在**真的选到要献祭的卡**之后 ✓ */
+    if (o === 0) { p._megumiSPTurn = battleState.turn; p.cost = Math.min(p.cost + 4, p.maxCost); drawCard('p1'); addBattleLog('p1', '【惠SP·乐曲α】回复4音韵并抽1张'); updateBattleUI(); }
     else if (o === 1) {
       if (!p.hand.length) { addBattleLog('p1', '【惠SP·乐曲β】没有手卡可献祭'); return; }
       chooseZoneCard('p1', 'p1', 'hand', '乐曲β：选1张手卡献祭（那次回费+1）', function (c, i) {
         if (i < 0) { addBattleLog('p1', '乐曲β已取消'); return; }
+        p._megumiSPTurn = battleState.turn;
         p._meiSPBeta = true;
         sacrificeCards('p1', [{card: c, zone: 'hand'}], false, function () { updateBattleUI(); });
       });
@@ -13179,8 +13183,8 @@ function activateMegumiSP() {
        那之后对一名其他玩家造成**4**点理智属性伤害」；而联机远端位（2720/2721）与 AI 座（13194/13195）
        早就是 6 / 4 ⇒ 只有 p1 这一份漏改（同一效果写三份的老毛病）。
        本次只把 p1 对齐到卡面（数值与另两端一致）✓，不改卡面、不改另两端 ✓。 */
-    else if (o === 2) { p.sync = Math.min(p.sync + 6, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p1'); addBattleLog('p1', '【惠SP·乐曲γ】回复6同步并抽取1张馈赠卡'); updateBattleUI(); }
-    else { p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p1', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p2', 4, '惠SP·乐曲δ', function () { updateBattleUI(); }, '理智'); }
+    else if (o === 2) { p._megumiSPTurn = battleState.turn; p.sync = Math.min(p.sync + 6, p.maxSync || 999); if (typeof drawGiftCard === 'function') drawGiftCard('p1'); addBattleLog('p1', '【惠SP·乐曲γ】回复6同步并抽取1张馈赠卡'); updateBattleUI(); }
+    else { p._megumiSPTurn = battleState.turn; p._megumiSacBonusThisTurn = (p._megumiSacBonusThisTurn || 0) + 1; addBattleLog('p1', '【惠SP·乐曲δ】本回合献祭次数+1'); dealDamageWithResponse('p2', 4, '惠SP·乐曲δ', function () { updateBattleUI(); }, '理智'); }
   });
 }
 // 小春·先机（每回合首次耗1，之后+1，最多耗3；每耗1回1音韵并追加掷骰阶段）
