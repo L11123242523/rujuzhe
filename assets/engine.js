@@ -2789,6 +2789,12 @@ function chainBlockReason(name){
 // 因此也能在自己回合作为主动卡发动（幸运护符/特制手套/颠倒骰子/Twice）
 function isDualUseChainCard(card){
   if(!card) return false;
+  /* 【2026-10-17 作者实测·修】**幸运护符不算"双面主动卡"**：
+     它的卡面是「抵消一次**即将受到的**伤害及附加效果」⇒ **没有即将到来的伤害时不该能发动** ✗。
+     原来它靠下面那条"卡面写了『自己回合使用』"的正则被算成双面卡 ⇒ 能在空场时凭空发动 ✗（作者实测）。
+     它仍然只在**受伤响应窗口**里可用 —— 那条路直接收"手牌/盖伏护符"（dealDamageWithResponse 里），
+     不经过本函数 ✓。其余三张（特制手套/颠倒骰子/Twice）不受影响 ✓ */
+  if (card.name === '幸运护符') return false;
   var eff=(card.effect||'')+(card.text||'');
   if(!isChainOnlyCard(card)) return false;
   return /自己的?回合(才能|可以)?(使用|从手卡发动)/.test(eff);
