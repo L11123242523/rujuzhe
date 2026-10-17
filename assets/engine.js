@@ -11449,7 +11449,7 @@ function aiMaybeUseEvent(done) {
      （实测：`probe-event-one-body` ⑤ 变红：AI 事件卡离场了却**没进公共墓地** ✗）。
      现在与乐谱卡同一处理：本体照原样调（`done` 仍传 null ✓），链的完成在它返回后立刻回调 ✓ */
   var __c1Body8 = function (d2) { __applyAiEvent(); if (d2) d2(); };
-  beforeEffectExecution({ player: aiSeat(), _stage: 'effect_activate', kind: 'effect_activate', card: card, description: '对手发动事件卡【' + nm + '】（效果将执行前，可连锁）', _c1Body: __c1Body8 }, function (res) {
+  beforeEffectExecution({ player: aiSeat(), _stage: 'effect_activate', kind: 'effect_activate', card: card, description: '对手发动事件卡【' + nm + '】（效果将执行前，可连锁）', _c1Body: __c1Body8, _forceChain: true }, function (res) {
     if (!res) { addBattleLog(aiSeat(), '【' + nm + '】效果被连锁无效，不适用'); __finished(); return; }
     /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 这里只做兜底收尾（__finished 幂等 ✓） */
     __finished();
@@ -21294,7 +21294,7 @@ function useEventCardFor(player, index, name, done) {
     runTiming(TIMING.ON_APPLY, { player: player, card: card });
     __applyEventEffect(d2);
   };
-  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动事件卡【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body6 }, function (res) {
+  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动事件卡【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body6, _forceChain: true }, function (res) {
     if (!res) {
       addBattleLog(player, '【' + card.name + '】效果被连锁无效，不适用');
     }
@@ -21433,7 +21433,7 @@ function useMusicCardFor(player, index, name, done) {
   runTiming(TIMING.ON_ACTIVATE, { player: player, card: card });
   /* 【2026-10-17 全池统一】乐谱卡本体也挂 `_c1Body` ⇒ 在链上 C1 环执行（原来在回调里 ⇒ 链外 ✗） */
   var __c1Body7 = function (d2) { runTiming(TIMING.ON_APPLY, { player: player, card: card }); __applyMusic(); if (d2) d2(); };
-  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动乐谱卡【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body7 }, function (res) {
+  beforeEffectExecution({ player: player, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(player) + '发动乐谱卡【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body7, _forceChain: true }, function (res) {
     if (!res) { addBattleLog(player, '【' + card.name + '】效果被连锁无效，不适用'); __finishMusic(); return; }
     /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 不再重复 ✓ */
   });
@@ -25511,7 +25511,7 @@ function runSingleCardSteps(user, card, target, finalize) {
       else { finalize(); if (done) done(); }
     }, user === 'p1');
   };
-  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）', card: card, _c1Body: __c1Body }, function (res) {
+  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）', card: card, _c1Body: __c1Body, _forceChain: true }, function (res) {
     if (!res) { addBattleLog(user, '【' + card.name + '】发动被反制/无效，不处理其效果'); runTiming(TIMING.ON_EFFECT_DONE, { player: user, card: card, cancelled: true }); finalize(); return; }
     /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 这里**不再重复** ✓ */
   });
@@ -26213,7 +26213,7 @@ function settleSpecialCard(card, handIndex, user, outerDone) {
     runTiming(TIMING.ON_APPLY, { player: user, card: card });
     h.play(card, user, function () { __finalizeSpecial(); if (d2) d2(); });
   };
-  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body5 }, function (res) {
+  beforeEffectExecution({ player: user, _stage: 'effect_activate', kind: 'effect_activate', card: card, description: playerDisplayName(user) + '发动【' + card.name + '】（效果将执行前，可连锁）', _c1Body: __c1Body5, _forceChain: true }, function (res) {
     if (!res) { addBattleLog(user, '【' + card.name + '】效果被连锁无效，不适用'); __finalizeSpecial(); return; }
     /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 不再重复 ✓ */
   });
