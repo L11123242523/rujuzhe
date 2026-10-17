@@ -13794,7 +13794,7 @@ function __drawPickPage(kind, player, cb) {
    卡面 SP：「队伍中的 [增益者][增幅者] 角色合计为三名时改为抽取2张馈赠卡。」
    角色标签口径**复用引擎既有判据**（[突破手] 计数那套）：`ch.tags`（斜杠串）或 `ch.roles`（数组）✓。
    为什么单独一个函数：判据只有一份，读的地方只此一处 ✓（不散落在各处 ✗）。 */
-function __teamHasThreeBenefactors(player) {
+function __teamBenefactorCount(player) {
   try {
     var p = battleState[player];
     var chars = (p && p.characters) || [];
@@ -13806,9 +13806,10 @@ function __teamHasThreeBenefactors(player) {
       var all = tags + '/' + roles;
       if (all.indexOf('增益者') >= 0 || all.indexOf('增幅者') >= 0) n++;
     });
-    return n >= 3;
-  } catch (e) { return false; }
+    return n;
+  } catch (e) { return 0; }
 }
+function __teamHasThreeBenefactors(player) { return __teamBenefactorCount(player) >= 3; }
 function drawGiftCard(player, pickName) {
   if (!battleState) return;
   var p = battleState[player];
@@ -17234,7 +17235,11 @@ function __compileBody(t) {
            · 「持续N次行动 / N次行动内」⇒ actions=N（按一次行动流逝一次 ✓）
            · 没写时长（如【你呀你呀】）⇒ **不传** ⇒ 保持原语义（基础防御值增益）✓ */
       var __duDur = t.match(/持续\s*(\d+)\s*次行动|(\d+)\s*次行动内/);
-      ops.push({ op: 'def_up', amount: du, actions: __duDur ? +(__duDur[1] || __duDur[2]) : null });
+      /* 【2026-10-18 矩阵审计】防御加给谁必须按卡面主语：
+         「提升自身N点防御」⇒ self；「其提升N点防御 / 目标…提升」⇒ target。
+         原来执行器一律加给使用者 ⇒【你呀你呀】"对一名玩家使用，其提升1点防御"加错了人 ✗。 */
+      var __duWho = /其\s*提升|目标[^。；]{0,8}提升|对其提升/.test(t) ? 'target' : 'self';
+      ops.push({ op: 'def_up', amount: du, actions: __duDur ? +(__duDur[1] || __duDur[2]) : null, who: __duWho });
     }
     else uncovered.push('defense');
   }
@@ -19294,7 +19299,9 @@ function __opsResource(op, ctx, next, env) {
     case 'lose_cost': p.cost = Math.max(0, p.cost - op.amount); break;
     case 'gain_shield': p.shield = (p.shield || 0) + op.amount; break;
     case 'def_down': applyDefenseDown(target, op.amount, op.untilTurnEnd ? null : (op.actions || 2)); break;   /* 【2026-10-08】卡面写"直到本回合结束"的走回合清理 */
-    case 'def_up': applyDefenseUp(user, op.amount, op.actions); break;   /* 【2026-10-14】时长照卡面 ✓ */
+    /* 【2026-10-18 矩阵审计】谁加防按卡面主语（op.who）：target ⇒ 所选目标；self/缺省 ⇒ 使用者 ✓
+       （【你呀你呀】是"对一名玩家使用，其提升1点防御"；缺省保持旧行为，不误伤"提升自身"类 ✓） */
+    case 'def_up': applyDefenseUp((op.who === 'target') ? target : user, op.amount, op.actions); break;   /* 【2026-10-14】时长照卡面 ✓ */
     /* 【2026-10-13 修】原来无条件加在 `p`（使用者）头上 ✗ ⇒ 卡面写「选择一名玩家，**其**回N同步」的
        会把同步加回使用者（作者实测）✗。现在与 `loss_sync` 同口径：
          · `op.who === 'target'`（显式目标）或 `ctx.__tgtSubj`（代词主语=所选目标）⇒ 落目标 ✓
@@ -19922,6 +19929,15 @@ function runOneOp(op, ctx, next) {
      上游 `executeEffectSteps` 已按本句原文判过并标了 `ctx.__noTarget` ✓，这里只是执行那个结论 ✓。 */
   var target = ctx.target || __resolveTargetFromText(user, '', 'self').seat;
   var p = battleState[user], q = battleState[target];
+  /* 【2026-10-18 矩阵审计抓到】你呀你呀 SP：「队伍中的[增益者][增幅者]角色合计为2名以上时提升的防御值改为2点。」
+     卡面 SP 不走指令层（SP 编译为 null），在**主效果的 def_up op 执行前**按队伍标签改写 amount ✓
+     —— 判据用 __teamBenefactorCount（与招待券 SP 同一份），不另写一套。 */
+  try {
+    if (op && op.op === 'def_up' && ctx && ctx.card && String(ctx.card.name || '') === '你呀你呀') {
+      var __benN = (typeof __teamBenefactorCount === 'function') ? __teamBenefactorCount(user) : 0;
+      if (__benN >= 2) { op.amount = 2; addBattleLog(user, '【你呀你呀·SP】队伍[增益者][增幅者]合计' + __benN + '名 ⇒ 防御提升改为2点'); }
+    }
+  } catch (e) { try { console.error('[catch] 你呀你呀 SP 改写', e); } catch (e2) {} }
   var env = { user: user, target: target, p: p, q: q, pendingNext: false };
   var __famName = __OPS_OWNER[op.op];
   /* 【只读诊断·默认关闭】window.__OPS_TRACE = true 时才启用：
