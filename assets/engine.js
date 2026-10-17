@@ -14061,16 +14061,23 @@ function __decideLeave(why) {
   } catch (e) { try { console.error('[catch] assets/engine.js:12524', e); } catch (e2) {} }
 }
 var __decideSeq = 0;
-/* kind -> 当前开着的那个 tag。用途：**关窗函数要精确释放自己那一笔账**。
+/* 【2026-10-18 结构修】**不再维护 kind→tag 第二张表**（它与 Decision.tags 是两本账：对账/复位直接收账时清不到它
+   ⇒ 关窗拿旧 tag 再 leave 一次，打出「没有对应的 enter」）。现在只从唯一真相 Decision.snapshot().tags 派生 ✓
+   历史（保留）：关窗函数原来按 kind 记一个 tag，避免"释放错别人的账"。
    旧代码里 closeChoiceModal 释放的是硬编码的 'closeChoiceModal'，而 enter 用的是包装器生成的唯一 tag
    —— 名字根本对不上；旧 leave"不管存不存在都减计数"把这件事掩盖了（代价是会把别人的账一起抹掉）。
    现在按 kind 记住自己的 tag，关窗时只删自己这一笔 ✓ */
-var __decideTagByKind = {};
 function __decideLeaveKind(kind) {
   kind = String(kind || '?');
-  var t = __decideTagByKind[kind];
+  var prefix = '__decide:' + kind + '#';
+  var t = null;
+  try {
+    var tags = (typeof Decision !== 'undefined' && Decision && Decision.snapshot) ? (Decision.snapshot().tags || []) : [];
+    for (var i = tags.length - 1; i >= 0; i--) {
+      if (String(tags[i]).indexOf(prefix) === 0) { t = tags[i]; break; }
+    }
+  } catch (e) { try { console.error('[catch] __decideLeaveKind 取 tag', e); } catch (e2) {} }
   if (!t) return false;
-  delete __decideTagByKind[kind];
   __decideLeave(t);
   return true;
 }
@@ -14151,13 +14158,11 @@ function __decideWrapped(cb, why) {
   try { __decideReconcile('开新窗之前'); } catch (e) { try { console.error('[catch] assets/engine.js:12614', e); } catch (e2) {} }
   var __tag = '__decide:' + kind + '#' + (++__decideSeq);
   __decideEnter(__tag);
-  __decideTagByKind[kind] = __tag;
   var done = false;
   var fn = function () {
     if (!done) {
       done = true;
       __decideLeave(__tag);
-      if (__decideTagByKind[kind] === __tag) delete __decideTagByKind[kind];
     }
     try { if (typeof cb === 'function') return cb.apply(this, arguments); } catch (e) { throw e; }
   };
@@ -14267,7 +14272,6 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
     var __prevCb = pendingChoiceCallback;
     if (__prevCb && __prevCb.__decideTag) {
       try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave(__prevCb.__decideTag); } catch (e) { try { console.error('[catch] assets/engine.js:12732', e); } catch (e2) {} }
-      try { if (__decideTagByKind && __decideTagByKind['choiceModal'] === __prevCb.__decideTag) delete __decideTagByKind['choiceModal']; } catch (e) { try { console.error('[catch] assets/engine.js:12733', e); } catch (e2) {} }
       try { addBattleLog('system', '【询问】上一个弹窗被新的取代（它的应答已不可能到达）⇒ 已收掉它那本"正在决策"的账'); } catch (e) { try { console.error('[catch] assets/engine.js:12734', e); } catch (e2) {} }
     }
   } catch (e) { try { console.error('[catch] assets/engine.js:12736', e); } catch (e2) {} }
