@@ -49,7 +49,7 @@ window.__CARD_DATA__ = {
             "位移"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_dongma.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_dongma.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -87,7 +87,7 @@ window.__CARD_DATA__ = {
             "控制"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_oAjMFutXGf.webp?v=7",
+         "image_url": "assets/images/ui2/img_oAjMFutXGf.webp?v=8",
          "sync": 6,
          "_category": "characters",
          "type": "术士/增幅者/位移手",
@@ -125,7 +125,7 @@ window.__CARD_DATA__ = {
             "资源"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_qLeSrXDAwN.webp?v=7",
+         "image_url": "assets/images/ui2/img_qLeSrXDAwN.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -163,7 +163,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 6,
          "sp_member": false,
-         "image_url": "assets/images/ui2/card_face_songshanhui.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_songshanhui.webp?v=8",
          "_category": "characters",
          "type": "术士/调度者/增益者",
          "sync_value": 6,
@@ -202,7 +202,7 @@ window.__CARD_DATA__ = {
             "防御"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_Gyx7WO51lv.webp?v=7",
+         "image_url": "assets/images/ui2/img_Gyx7WO51lv.webp?v=8",
          "sync": 6,
          "_category": "characters",
          "sync_value": 6,
@@ -240,7 +240,7 @@ window.__CARD_DATA__ = {
             "辅助"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_xiaoyekui.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_xiaoyekui.webp?v=8",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -276,7 +276,7 @@ window.__CARD_DATA__ = {
             "防御"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_RTunmQRx7X.webp?v=5",
+         "image_url": "assets/images/ui2/img_RTunmQRx7X.webp?v=6",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -314,7 +314,7 @@ window.__CARD_DATA__ = {
             "位移手"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_mxWESMi7kU.webp?v=7",
+         "image_url": "assets/images/ui2/img_mxWESMi7kU.webp?v=8",
          "sync": 6,
          "_category": "characters",
          "type": "近卫/位移手",
@@ -352,7 +352,7 @@ window.__CARD_DATA__ = {
             "资源"
          ],
          "sp_member": false,
-         "image_url": "assets/images/ui2/img_vv28zwy3db.webp?v=5",
+         "image_url": "assets/images/ui2/img_vv28zwy3db.webp?v=6",
          "sync": 6,
          "_category": "characters",
          "sync_value": 6,
@@ -391,7 +391,7 @@ window.__CARD_DATA__ = {
             "增益者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_QOINVelwDg.webp?v=7",
+         "image_url": "assets/images/ui2/img_QOINVelwDg.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -431,7 +431,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 4,
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_liuli_shuizhuo.webp?v=6",
+         "image_url": "assets/images/ui2/card_face_liuli_shuizhuo.webp?v=7",
          "image": "assets/images/img_GOMwgHu0y8.webp",
          "sync_value": 4,
          "tags": "猎手/增益者/增幅者",
@@ -468,8 +468,8 @@ window.__CARD_DATA__ = {
             "控制"
          ],
          "sp_member": false,
-         "image_url": "assets/images/ui2/img_IvJzfVxSP3.webp?v=5",
-         "image": "assets/images/ui2/img_IvJzfVxSP3.webp?v=5",
+         "image_url": "assets/images/ui2/img_IvJzfVxSP3.webp?v=6",
+         "image": "assets/images/ui2/img_IvJzfVxSP3.webp?v=6",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -509,7 +509,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 5,
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_MXyCY33zoe.webp?v=7",
+         "image_url": "assets/images/ui2/img_MXyCY33zoe.webp?v=8",
          "_category": "characters",
          "sync_value": 5,
          "dims": {
@@ -545,7 +545,7 @@ window.__CARD_DATA__ = {
             "位移"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_4VvmbV3Vt4.webp?v=7",
+         "image_url": "assets/images/ui2/img_4VvmbV3Vt4.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -581,7 +581,7 @@ window.__CARD_DATA__ = {
             "位移"
          ],
          "sp_member": false,
-         "image_url": "assets/images/ui2/img_qc47HgvVbP.webp?v=7",
+         "image_url": "assets/images/ui2/img_qc47HgvVbP.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -619,7 +619,7 @@ window.__CARD_DATA__ = {
             "功能型"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_xiaoyeyizhi.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_xiaoyeyizhi.webp?v=8",
          "sync": 6,
          "_category": "characters",
          "sync_value": 6,
@@ -642,7 +642,7 @@ window.__CARD_DATA__ = {
             "调度者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_xhzd.webp?v=7",
+         "image_url": "assets/images/ui2/card_xhzd.webp?v=8",
          "sync": 6,
          "_category": "characters",
          "sync_value": 6,
@@ -680,7 +680,7 @@ window.__CARD_DATA__ = {
             "调度者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_yunai_wangxi_v2.webp?v=1",
+         "image_url": "assets/images/ui2/card_yunai_wangxi_v2.webp?v=2",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -718,7 +718,7 @@ window.__CARD_DATA__ = {
             "调度者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_liuli_wansheng.webp?v=6",
+         "image_url": "assets/images/ui2/card_face_liuli_wansheng.webp?v=7",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -771,7 +771,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 5,
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_yingzi.webp?v=7",
+         "image_url": "assets/images/ui2/card_yingzi.webp?v=8",
          "_category": "characters",
          "sync_value": 5,
          "dims": {
@@ -808,7 +808,7 @@ window.__CARD_DATA__ = {
             "辅助"
          ],
          "sp_member": false,
-         "image_url": "assets/images/ui2/card_face_yujianyu.webp?v=8",
+         "image_url": "assets/images/ui2/card_face_yujianyu.webp?v=9",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -847,7 +847,7 @@ window.__CARD_DATA__ = {
             "辅助"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_ynGbhERmQy.webp?v=6",
+         "image_url": "assets/images/ui2/img_ynGbhERmQy.webp?v=7",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -885,7 +885,7 @@ window.__CARD_DATA__ = {
             "辅助"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_WqKZD5V99F.webp?v=7",
+         "image_url": "assets/images/ui2/img_WqKZD5V99F.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -922,7 +922,7 @@ window.__CARD_DATA__ = {
             "控制"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_KKuE94JDue.webp?v=7",
+         "image_url": "assets/images/ui2/img_KKuE94JDue.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -962,7 +962,7 @@ window.__CARD_DATA__ = {
             "增幅者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_feng_shuizhuo.webp?v=6",
+         "image_url": "assets/images/ui2/card_face_feng_shuizhuo.webp?v=7",
          "sync": 4,
          "_category": "characters",
          "sync_value": 4,
@@ -1001,7 +1001,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 5,
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_xingnai_shuizhuo_v2.webp?v=6",
+         "image_url": "assets/images/ui2/card_xingnai_shuizhuo_v2.webp?v=7",
          "_category": "characters",
          "sync_value": 5,
          "dims": {
@@ -1038,7 +1038,7 @@ window.__CARD_DATA__ = {
             "增益者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_lixu_shuizhuo.webp?v=6",
+         "image_url": "assets/images/ui2/card_face_lixu_shuizhuo.webp?v=7",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -2268,7 +2268,7 @@ window.__CARD_DATA__ = {
             "20面骰"
          ],
          "combo_notes": "只前进3格，但进墓后可花1音韵回收，回收后再用会回到牌组底部，1音韵换3格是这个循环的底气。多打几次就能把里绪单回合8格的判定伤害门槛踩满。设计师的直尺负责把位移继续堆高，能量饮料给一次位移翻倍，20面骰保证这3格不会被低点数吞掉。",
-         "image_url": "assets/images/ui2/img_rJAMoFKD8h.webp?v=7",
+         "image_url": "assets/images/ui2/img_rJAMoFKD8h.webp?v=8",
          "character_full": "现实间里绪",
          "_category": "skill_cards",
          "dims": {
