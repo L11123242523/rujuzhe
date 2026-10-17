@@ -6336,7 +6336,7 @@ function startTurn() {
         // 准备阶段抽卡动画（用户要求）：纯视觉，不阻塞流程；无头/无布局环境下自动跳过
         playPrepDrawAnim(player, drawn);
       }
-      try { delete battleState[player]._lilyDrawFrom; } catch (e) {}
+      try { delete battleState[player]._lilyDrawFrom; } catch (e) { try { console.error('[catch] 莉莉抽卡来源标记清理', e); } catch (e2) {} }
     };
     (function () {
       var __lp = battleState[player];
@@ -10226,7 +10226,7 @@ function beforeEffectExecution(effect, callback) {
   }
   function __releaseB(){ if(__releasedB) return; __releasedB=true; if (!__depthReleasedEarly) __eeDepthSub(__eeB,'eeB·释放'); try { __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } try { __eeAfterRelease(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } }
   /* 交给 C1 环调用（环在跑本体前先调它 ✓） */
-  try { effect._releaseLockBeforeC1Body = __releaseLockBeforeC1Body; } catch (e) {}
+  try { effect._releaseLockBeforeC1Body = __releaseLockBeforeC1Body; } catch (e) { try { console.error('[catch] C1 前解锁回调挂载', e); } catch (e2) {} }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
@@ -10249,7 +10249,7 @@ function beforeEffectExecution(effect, callback) {
     effect.cancelled = true; effect.negateKind = 'effect';
     /* 打上"这张卡这一轮已经被判过无效"的标记 ⇒ 下游 `executeEffectSteps` 的同一道闸不再重复记一遍 ✗
        （`effect` 就是该卡本轮的 context，标记会随它传下去 ✓） */
-    try { effect.__ymNegated = true; } catch (e) {}
+    try { effect.__ymNegated = true; } catch (e) { try { console.error('[catch] 永眠已判无效标记', e); } catch (e2) {} }
     __logCardDisabledByYongmian(__c1card, '本次效果不处理');
   }
   effect._chain = [];
@@ -14072,8 +14072,8 @@ function _uiVer() {
       }
     }
     /* 兜底：从当前地址栏的 ?v= 取（某些容器里 script 可能被内联替换） */
-    try { var m2 = String((typeof location !== 'undefined' && location.href) || '').match(/[?&]v=(\d+)/); if (m2) return 'v' + m2[1]; } catch (e2) {}
-  } catch (e) {}
+    try { var m2 = String((typeof location !== 'undefined' && location.href) || '').match(/[?&]v=(\d+)/); if (m2) return 'v' + m2[1]; } catch (e2) { try { console.error('[catch] UI 版本·地址栏兜底', e2); } catch (e3) {} }
+  } catch (e) { try { console.error('[catch] UI 版本读取', e); } catch (e2) {} }
   return '?';
 }
 function __decideEnter(why) {
@@ -16382,7 +16382,7 @@ function getMainEffectText(effectText) {
    ============================================================ */
 function __tgtNormalize(effectText) {
   var t = String(effectText == null ? '' : effectText);
-  try { if (typeof getMainEffectText === 'function') t = getMainEffectText(t); } catch (e) {}
+  try { if (typeof getMainEffectText === 'function') t = getMainEffectText(t); } catch (e) { try { console.error('[catch] 目标文本归一 getMainEffectText', e); } catch (e2) {} }
   /* ① 发动时机/条件措辞：说的是"什么回合/谁有权发动"，**不代表目标** ✓
         （「自己的回合」「其他玩家的回合」两种都剥 —— 前者造成 14 张误判 self、后者造成 3 张误判 foe） */
   t = t.replace(/(自己|自身|我方|本队|其他玩家|对手|对方)的?(回合|阶段|主要阶段|结束阶段|准备阶段)/g, ' ');
@@ -16748,7 +16748,7 @@ function compileStepOps(text, permanent) {
          （唯一真相 = `battleState._openRollWindow` ✓，judgeSettleWindow 开窗置位/关窗清空 ✓）
          ⚠ 编译发生在效果**结算时** ✓ ⇒ 此处能读到实时 `battleState` ✓ */
       var __twRollOpen = false;
-      try { __twRollOpen = !!battleState._openRollWindow; } catch (e0) {}
+      try { __twRollOpen = !!battleState._openRollWindow; } catch (e0) { try { console.error('[catch] 编译·掷骰窗判据', e0); } catch (e2) {} }
       if (!__twRollOpen) return [{ op: 'add_roll_phase', toTarget: true }];
       return [{ op: 'choice', labels: ['为所选玩家追加一个掷骰阶段', '让所选玩家重新进行一次判定'], branches: [
         [{ op: 'add_roll_phase', toTarget: true }],
