@@ -20532,7 +20532,9 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
           if (c.type && c.type.indexOf(tag) >= 0) return true;
           if (c.attribute === tag) return true;                 // 四属性命中
           if (c.tags && c.tags.indexOf(tag) >= 0) return true;   // [侵略]/[移动]等标签命中 tags
-          if (c.archetypes && c.archetypes.join && c.archetypes.join(',').indexOf(tag) >= 0) return true;
+          /* 【2026-10-17 作者实测·修·与 `matchCardQuery` 同一处病根】**不许拿"卡组流派(archetypes)"当标签** ✗
+             （比翼恋理只有 archetypes:["快攻侵略队"] ⇒ 被当成 [侵略] 而可被祓禊回收 ✗）。
+             已核对全池 30 种标签：没有任何标签只能靠 archetypes 匹配 ⇒ 删掉这条兜底 ✓ */
         }
       }
       return false;
