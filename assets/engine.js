@@ -10181,7 +10181,10 @@ function beforeEffectExecution(effect, callback) {
     cb();
   }
   var __q1 = collectChainable('p1', effect), __q2 = collectChainable('p2', effect);
-  if (!__q1.length && !__q2.length) {
+  /* 【2026-10-17 作者实测·补】作者用**连锁动画**判断"入不入连锁"：双方都无可连锁卡时这里走**静默快速路径**
+     ⇒ `renderChainBar`／时点窗口一次都不开 ⇒ 玩家**看不到链条** ✗（实测：链条调用 0 次）。
+     永续卡等"发动"类效果带 `_forceChain` ⇒ **强制走真窗**（无人可连锁也 开→立刻 PASS→关 ✓，链条照常显示）✓ */
+  if (!__q1.length && !__q2.length && !effect._forceChain) {
     addBattleLog('system', '【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : '对手') + '·' +
       (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')), __c1actor);
     addBattleLog('system', '【连锁】双方均无可用连锁卡 → 连续 PASS，直接逆结算');
@@ -23566,7 +23569,7 @@ function onlineActivateFaceDownP2(index, name, done) {
     }
     if (isPermanent) {
       var __permBody4 = function (d2) { resolvePermanentOnPlay(card, 'p2', function () { __finalize(); if (d2) d2(); }); };
-      beforeEffectExecution({ player: 'p2', _stage: 'effect_activate', description: '对手永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody4 }, function (res) {
+      beforeEffectExecution({ player: 'p2', _stage: 'effect_activate', description: '对手永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody4, _forceChain: true }, function (res) {
         if (!res) { moveCardToGrave('p2', card, 'use'); addBattleLog('p2', '【' + card.name + '】的发动被连锁无效，不适用发动时效果，送入墓地'); if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); return; }
         /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 不再重复 ✓ */
       });
@@ -24389,7 +24392,9 @@ function executePermanentActiveFor(user, index, done) {
   var __pEff = {
     type: 'permanentActive', player: user, user: user, card: card,
     description: '永续卡【' + card.name + '】主动效果',
-    _c1NoZone: true
+    _c1NoZone: true,
+    /* 【2026-10-17 作者实测】永续卡的发动类效果**必须看得到连锁**（作者用连锁动画判断 ⇒ 静默快速路径不算入连锁 ✗） */
+    _forceChain: true
   };
   /* 【2026-10-17 结构修·**次数必须"发动瞬间"就记**（我的上一版把它挪进回调 ⇒ 开了个真口子 ✗）】
      实测抓到：窗口开着的时候，这张**正在发动**的卡又被 `collectChainable` 收成响应候选
@@ -24582,7 +24587,7 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
         });
         if (!sa) { continueCardUse('p1', card, effectText, isPermanent, actionType, target, false); if (done) done(); }
       };
-      var __permEff = { player: 'p1', description: '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody };
+      var __permEff = { player: 'p1', description: '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody, _forceChain: true };
       beforeEffectExecution(__permEff, function (res) {
         if (!res) {
           moveCardToGrave('p1', card, 'use');
@@ -25561,7 +25566,7 @@ function settleCardExecution(card, user, target, opts, done) {
       // AI 永续发动同样作为连锁1：双方连锁窗口结束才适用“发动时作为效果处理”
       /* 【2026-10-17 全池统一】本体挂 `_c1Body` ⇒ 在链上 C1 环执行（原来在回调里 ⇒ 链外 ✗） */
       var __permBody3 = function (d2) { resolvePermanentOnPlay(card, user, function () { finalize(); if (d2) d2(); }); };
-      beforeEffectExecution({ player: user, _stage: 'effect_activate', description: playerDisplayName(user) + '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody3 }, function (res) {
+      beforeEffectExecution({ player: user, _stage: 'effect_activate', description: playerDisplayName(user) + '永续卡【' + card.name + '】发动（连锁1）', card: card, kind: 'permanent_activation', _c1Body: __permBody3, _forceChain: true }, function (res) {
         if (!res) { moveCardToGrave(user, card, 'use'); addBattleLog(user, '【' + card.name + '】发动被连锁无效，不适用发动时效果，送入墓地'); updateBattleUI(); if (done) done(); return; }
         /* 本体已在链上 C1 环执行（或由入口兜底执行）⇒ 不再重复 ✓ */
       });
