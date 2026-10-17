@@ -16841,7 +16841,14 @@ function matchCardQuery(c, tags, cats, exclude) {
   if (cats && cats.length && cats.indexOf(c._category) < 0) return false;
   if (exclude && (c.attribute === exclude || (c.type && c.type.indexOf(exclude) >= 0))) return false;
   if (tags && tags.length) {
-    var ok = tags.some(function (tg) { return (c.type && c.type.indexOf(tg) >= 0) || c.attribute === tg || (c.tags && c.tags.indexOf(tg) >= 0) || (c.archetypes && c.archetypes.join && c.archetypes.join(',').indexOf(tg) >= 0); });
+    /* 【2026-10-17 作者实测·修】**标签只认"卡自己的标签"，不能把"卡组流派(archetypes)"当标签** ✗
+       病象：作者报「【祓禊】可以回收【比翼恋理】，但比翼恋理不是[侵略]标签」——
+       比翼恋理 的真实字段是 `type:"领域"`、`tags:无`，只有 `archetypes:["快攻侵略队",…]` ✗
+       而旧代码有一条 `archetypes.join(',').indexOf(tg) >= 0` 的兜底 ⇒ "快攻**侵略**队"里含"侵略" ⇒ 被误判 ✓
+       已核对全池 30 种标签：**没有任何标签**只能靠 archetypes 匹配（「侵略」靠真标签匹配 31 张，
+       archetypes 兜底会额外错收 27 张：四叶草发卡/魔法蓝图/镇定药片/能量饮料/镌刻的艺术/金刚镯…）
+       ⇒ 去掉兜底，只认 `tags` / `type` / `attribute` ✓（《唯一真相》= 卡面自己的标签字段） */
+    var ok = tags.some(function (tg) { return (c.tags && c.tags.indexOf(tg) >= 0) || (c.type && String(c.type).indexOf(tg) >= 0) || c.attribute === tg; });
     if (!ok) return false;
   }
   return true;
