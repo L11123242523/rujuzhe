@@ -6596,7 +6596,7 @@ function collectChainable(player, effect){
       if (!c || c.name !== '荷鲁斯之眼') return;
       out.push({ card: c, from: 'hand', index: i, horus: true });
     });
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] consider 荷鲁斯候选', e); } catch (e2) {} }
   /* 【2026-10-14 作者报「雷閃不能在对手回合发（不像技能卡一样有全时点）」⇒ 结构修 ✓】
      卡面：「…这个效果在**其他玩家回合也能发动**」——作者口径是**像技能卡那样的全时点** ✓：
      任何时点、任何玩家的回合，它都作为**连锁响应候选**出现（与技能卡同权 ✓），
@@ -6626,11 +6626,11 @@ function collectChainable(player, effect){
             if (out[__k2] && out[__k2].card === c) { __alreadyOnChain = true; break; }
           }
         }
-      } catch (e) {}
+      } catch (e) { try { console.error('[catch] consider 雷閃已上链判据', e); } catch (e2) {} }
       if (__alreadyOnChain) return;
       out.push({ card: c, from: 'permSP', index: i, permSP: 'leishan' });
     });
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] consider 雷閃候选', e); } catch (e2) {} }
   // 事件卡（全时点）：也可作为连锁响应发动（如大风在移动将执行前终止所有移动）
   (me.eventCards||[]).forEach(function(c,i){consider(c,'event',i);});
   /* 【座位级连锁候选（作者 2026-09-27 裁决）】主动型"每回合可以发动一次"的角色能力：
@@ -6733,7 +6733,7 @@ function applyChainCard(player,pick,effect,done,target){
   if (pick.horus) {
     effect._chain = effect._chain || [];
     __chainWithC1().push({ kind: 'skill', by: player, name: name, card: c });
-    try { if (c) c._inUseBy = player; } catch (e) {}
+    try { if (c) c._inUseBy = player; } catch (e) { try { console.error('[catch] 连锁 _inUseBy 标记', e); } catch (e2) {} }
     if (typeof me.hand !== 'undefined' && pick.index >= 0 && me.hand[pick.index] === c) me.hand.splice(pick.index, 1);
     addBattleLog(player, '连锁发动【' + name + '】（全时点，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
@@ -6747,7 +6747,7 @@ function applyChainCard(player,pick,effect,done,target){
     __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c });
     /* 【2026-10-14 作者报「主要阶段发一次、跟连锁又发一次」⇒ 结构修 ✓】
        次数**在入链这一刻就消费**（发动即算用掉），且记在**座位**上 ✓ */
-    try { battleState[player]._leishanSPTurn = battleState.turn; } catch (e) {}
+    try { battleState[player]._leishanSPTurn = battleState.turn; } catch (e) { try { console.error('[catch] 雷閃 SP 回合标记', e); } catch (e2) {} }
     addBattleLog(player, '连锁发动【' + name + '·SP】（全时点，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
@@ -9417,9 +9417,9 @@ function resolveChainStack(effect, onDone) {
           if (__specEvt && typeof useEventCardFor === 'function') {
             /* 连锁的**结算时点**不一定在主要阶段（移动时/受伤害时等）⇒ 置一次性放行标记，
                让 useEventCardFor 跳过「请在主要阶段使用」的阶段闸（发动资格在结成连锁时已校验过 ✓） */
-            try { battleState.__fromChainResolve = true; } catch (e) {}
+            try { battleState.__fromChainResolve = true; } catch (e) { try { console.error('[catch] 事件卡连锁放行标记(置真)', e); } catch (e2) {} }
             try { useEventCardFor(e.by, -1, __evCard.name, function () { finished(); }); }
-            finally { try { battleState.__fromChainResolve = false; } catch (e) {} }
+            finally { try { battleState.__fromChainResolve = false; } catch (e) { try { console.error('[catch] 事件卡连锁放行标记(复位)', e); } catch (e2) {} } }
           }
           else if (typeof __executeCardEffectBody === 'function') __executeCardEffectBody(e.by, __evCard, function () { finished(); }, e.target || null);
           else if (typeof useEventCardFor === 'function') useEventCardFor(e.by, -1, __evCard.name, function () { finished(); });
@@ -18057,8 +18057,8 @@ function __windImmuneSeat(seat) {
   try {
     var __chars = (((typeof deckConfig !== 'undefined' && deckConfig) || {})[seat] || {}).chars || [];
     if (__chars.some(function (c) { return c && c.name && (c.name.indexOf('里绪') >= 0 || c.name.indexOf('光太郎') >= 0); })) return '编入里绪/光太郎';
-  } catch (e) {}
-  try { if (typeof frostImmune === 'function' && frostImmune(seat)) return '【霜烬被动】同步高于26，免疫大风位移减益'; } catch (e) {}
+  } catch (e) { try { console.error('[catch] 大风免疫·编入判据', e); } catch (e2) {} }
+  try { if (typeof frostImmune === 'function' && frostImmune(seat)) return '【霜烬被动】同步高于26，免疫大风位移减益'; } catch (e) { try { console.error('[catch] 大风免疫·霜烬判据', e); } catch (e2) {} }
   return null;
 }
 
