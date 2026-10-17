@@ -23442,7 +23442,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       var __b4 = p.sync || 0;
       p.sync = Math.max(0, __b4 - 3);
       addBattleLog(target, '【无首刺虫】结算后自己失去3点同步值（' + __b4 + ' → ' + p.sync + '）');
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] 无首刺虫 结算后失同步', e); } catch (e2) {} }
   }
   // 攻击者“下一次造伤害附带判定”增益（如 夏日畅饮时间！②）：只有真正造成伤害（实际扣除护盾/同步）时才消耗并结算；
   // 未成功造成伤害（被护盾完全抵消等）时不消耗，增益保留到下一次真正造伤。
@@ -24125,7 +24125,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
     var p = battleState[user];
     var __fin = function () { if (typeof updateBattleUI === 'function') updateBattleUI(); if (cb) cb(); };
     var __drawn = null;
-    try { if (typeof drawCard === 'function') __drawn = drawCard(user); } catch (e) {}
+    try { if (typeof drawCard === 'function') __drawn = drawCard(user); } catch (e) { try { console.error('[catch] 死灵令牌 抽卡', e); } catch (e2) {} }
     if (__drawn) addBattleLog(user, '【死灵令牌】抽到【' + (__drawn.name || '?') + '】');
     var __cands = (p && p.hand ? p.hand : []).filter(function (c) { return c; });
     if (!__cands.length) { addBattleLog(user, '【死灵令牌】手卡为空 ⇒ 没有可公开的卡'); __fin(); return; }
@@ -24648,7 +24648,7 @@ function executePermanentActiveFor(user, index, done) {
   if (act.handler === 'leishanSP') { battleState[user]._leishanSPTurn = battleState.turn; __seatMarked = true; }
   var __unmarkOnce = function () {
     __markedFlags.forEach(function (f) { try { card[f] = false; } catch (e) {} });
-    if (__seatMarked) { try { battleState[user]._leishanSPTurn = 0; } catch (e) {} }   /* 0 = 未发动（判据是 === turn ✓） */
+    if (__seatMarked) { try { battleState[user]._leishanSPTurn = 0; } catch (e) { try { console.error('[catch] 雷閃座位复位', e); } catch (e2) {} } }   /* 0 = 未发动（判据是 === turn ✓） */
   };
   beforeEffectExecution(__pEff, function (eff) {
     if (!eff || eff.cancelled) { __unmarkOnce(); try { updateBattleUI(); } catch (e) {} if (done) done(); return; }
@@ -25080,8 +25080,8 @@ function __cardNameIndex() {
   try {
     if (window.__cardNameIdxCache && window.__cardNameIdxCache.length) return window.__cardNameIdxCache;
     var pools = [];
-    try { if (typeof allCards !== 'undefined' && allCards && allCards.length) pools.push(allCards); } catch (e) {}
-    try { if (window.cardData) { ['characters', 'attack_cards', 'skill_cards', 'item_permanent', 'item_single', 'gift_cards', 'music_cards', 'event_cards', 'omikuji'].forEach(function (k) { if (Array.isArray(window.cardData[k])) pools.push(window.cardData[k]); }); } } catch (e) {}
+    try { if (typeof allCards !== 'undefined' && allCards && allCards.length) pools.push(allCards); } catch (e) { try { console.error('[catch] 卡名索引 allCards', e); } catch (e2) {} }
+    try { if (window.cardData) { ['characters', 'attack_cards', 'skill_cards', 'item_permanent', 'item_single', 'gift_cards', 'music_cards', 'event_cards', 'omikuji'].forEach(function (k) { if (Array.isArray(window.cardData[k])) pools.push(window.cardData[k]); }); } } catch (e) { try { console.error('[catch] 卡名索引 cardData', e); } catch (e2) {} }
     var out = [];
     pools.forEach(function (arr) { (arr || []).forEach(function (c) { if (c && c.name) out.push(c.name); }); });
     out = out.filter(function (v, i) { return out.indexOf(v) === i; });
@@ -26326,7 +26326,7 @@ var SPECIAL_CARD_HANDLERS = {
   '特制手套': {
     play: function (card, user, done) {
       var __rollOpen = false;
-      try { __rollOpen = !!battleState._openRollWindow; } catch (e) {}
+      try { __rollOpen = !!battleState._openRollWindow; } catch (e) { try { console.error('[catch] 特制手套 掷骰窗判据', e); } catch (e2) {} }
       var opts = ['从牌组选1张卡加入手卡'];
       if (__rollOpen) opts.push('修改一次掷骰结果');   /* ← 无待定结果时**不提供**该选项 ✓（原来是标记"下一次" ✗） */
       opts.push('选对手墓地1张卡放回其牌组');
