@@ -9134,6 +9134,20 @@ function resolveSimultaneous(tp, candidates, allDone) {
   var scan = (candidates && typeof candidates.scan === 'function') ? candidates.scan : null;
   if (!candidates.length && !scan) { if (typeof allDone === 'function') allDone(); return; }
   TW.open({ type: 'simultaneous', tp: tp, candidates: candidates, scan: scan, done: allDone });
+  /* 【2026-10-17 作者裁决「其余『移出游戏来发动』卡也要进连锁」·UI 补】实测：触发类（simultaneous）窗口
+     虽然**逻辑上已经在连锁里**（候选发动后成为 C1 → 逆结算 C1 → 连锁全部结算完成 ✓），但**从来没画过链条条** ✗
+     （`renderChainBar` 只被"手牌/连锁卡"那几条路调用）⇒ 作者按**连锁动画**判断就会认为"没进连锁" ✗。
+     这里在触发窗口打开时就画一次链条（本窗口的候选 = 这次的触发，第一条就是 CHAIN 1）✓ */
+  try {
+    var __win = (typeof TW !== 'undefined' && TW && TW.active) ? TW.active : null;
+    if (__win && __win.type === 'simultaneous' && typeof renderChainBar === 'function') {
+      var __first = (__win.candidates && __win.candidates[0]) || null;
+      renderChainBar({
+        _chain: (__win.chain || []).slice(0),
+        description: (__first && (__first.label || __first.name)) || (__win.effect && __win.effect.description) || '同时时点的触发'
+      });
+    }
+  } catch (e) { try { console.error('[catch] 触发窗口画链条', e); } catch (e2) {} }
 }
 function __twLegacyResolveSimultaneous(tp, candidates, allDone) {
   /* 【已废弃，S1b 将整段删除】这是旧的多套组链实现之一，仅作对照保留。
