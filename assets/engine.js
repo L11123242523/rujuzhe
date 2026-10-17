@@ -11710,6 +11710,13 @@ function __aiWake() {
     } while (__aiWakeAgain && __aiWaiters.length);
   } catch (e) { try { console.error('[catch] assets/engine.js:10339', e); } catch (e2) {} } finally { __aiWaking = false; }
 }
+/* 【2026-10-18 结构修】把"等决策结束再继续"登记到**唯一的事件唤醒队列**（与 __aiGuard 同一张表），
+   不再用 setTimeout(…,250) 轮询。谁结束等待（Decision.leave / 窗口关闭 / 队列排空）就 __aiWake 一次；
+   万一某条路径漏了唤醒，2 秒的监督者 __eeIdleWatchdog 也会补一次（它是监督者，不是判定函数）。 */
+function __aiDefer(fn) {
+  try { __aiWaiters.push(fn); }
+  catch (e) { try { fn(); } catch (e2) { try { console.error('[catch] __aiDefer', e2); } catch (e3) {} } }
+}
 function __aiGuard(fn) {
   return function () {
     var args = arguments, self = this;
@@ -11839,7 +11846,8 @@ function aiTurn(seat) {
   /* 【时点转交必须等对方决断（作者 2026-09-27 反馈）】若正在等玩家（对手）就"是否发动/是否连锁"作答，
      AI **不得继续行动**（实测：AI 献祭触发对手的琉璃SP询问后，仍继续出牌并结束回合，导致效果跑到对方回合才结算）。 */
   if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiTurn', null) : battleState._awaitingDecision) {
-    setTimeout(function () { try { aiTurn(seat); } catch (e) { console.error('aiTurn 等待重试出错', e); } }, 250);
+    /* 等决策：登记唤醒器，不占定时器（原来 250ms 轮询） */
+    __aiDefer(function () { try { aiTurn(seat); } catch (e) { console.error('aiTurn 等待重试出错', e); } });
     return;
   }
   if (!isAISeat(battleState.currentPlayer)) return;   // B·一：原来写死 !== 'p2'
@@ -12016,7 +12024,8 @@ function aiPlayCards(maxActions, callback) {
   if (battleState._over) { if (callback) callback(); return; }
   /* 同上：等待玩家对"是否发动/是否连锁"作答期间，AI 每一步都要**停下等**，不能抢在对手思考时操作。 */
   if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiPlayCards', null) : battleState._awaitingDecision) {
-    setTimeout(function () { try { aiPlayCards(maxActions, callback); } catch (e) { console.error('aiPlayCards 等待重试出错', e); } }, 250);
+    /* 等决策：登记唤醒器，不占定时器（原来 250ms 轮询） */
+    __aiDefer(function () { try { aiPlayCards(maxActions, callback); } catch (e) { console.error('aiPlayCards 等待重试出错', e); } });
     return;
   }
   if (maxActions <= 0 || aiMe().hand.length === 0) {
