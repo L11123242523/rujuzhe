@@ -8662,7 +8662,7 @@ var TW = {
                   var __cno = __pushTriggerRing(win.effect, tr, __owner);
                   addBattleLog(__owner, '【连锁】' + (tr.label || '触发') + ' 作为 C' + __cno + ' 上链（因发动前提产生）');
                 } catch (e) { try { console.error('[catch] 触发上链', e); } catch (e2) {} }
-                try { done(); } catch (e) {}
+                try { done(); } catch (e) { try { console.error('[catch] 触发入链 done 回调', e); } catch (e2) {} }
               },
               fire: function (next) { next(); }
             });
@@ -9259,7 +9259,7 @@ function resolveChainStack(effect, onDone) {
            ② 本体跑完才 `finished()`（链**等**它）⇒ 本体（含异步交互）全部结算完，链才往下/收尾 ✓ */
         try {
           effect._c1BodyRan = true;
-          try { if (typeof effect._releaseLockBeforeC1Body === 'function') effect._releaseLockBeforeC1Body(); } catch (eRel) {}
+          try { if (typeof effect._releaseLockBeforeC1Body === 'function') effect._releaseLockBeforeC1Body(); } catch (eRel) { try { console.error('[catch] C1 本体前解锁调用', eRel); } catch (e2) {} }
           e.body(finished);
           return;
         } catch (err2) {
@@ -9320,7 +9320,7 @@ function resolveChainStack(effect, onDone) {
         var __psOk = __psFn(e.card || { name: e.name }, e.by);
         __doneSet[i] = true;
         /* 只有**真的发动成功**才消费"一回合一次" ✓（牌组空等未发动 ⇒ 返回 false ⇒ 不扣次数 ✓） */
-        if (__psOk !== false) { try { battleState[e.by]._leishanSPTurn = battleState.turn; } catch (e) {} }   /* 与入链处同一标记 ✓ */
+        if (__psOk !== false) { try { battleState[e.by]._leishanSPTurn = battleState.turn; } catch (e) { try { console.error('[catch] 雷閃SP 连锁结算记账', e); } catch (e2) {} } }   /* 与入链处同一标记 ✓ */
       } else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '·SP】找不到对应实现，跳过'); }
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '·SP】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) {} }
   } else if (e.kind === 'reverse') {
@@ -9536,7 +9536,7 @@ function __chainC1EnsureExited(owner, card) {
     __chainC1Exit(owner, card);
     try { addBattleLog(owner, '【连锁】' + (card.name || '?') + ' 已离开效果处理区，补撤它的 C1 占位（原来是漏了收尾）'); } catch (e) {}
     return true;
-  } catch (e) { return false; }
+  } catch (e) { try { console.error('[catch] C1 补撤占位', e); } catch (e2) {} return false; }
 }
 function __chainC1WasTakenAway(owner, card) {
   try {
@@ -10097,7 +10097,7 @@ function runResponseWindow(opts) {
                 var __cno = __pushTriggerRing(effect, tr, __owner);
                 addBattleLog(__owner, '【连锁】' + (tr.label || '触发') + ' 作为 C' + __cno + ' 上链（因发动前提产生）');
               } catch (e) { try { console.error('[catch] 触发上链', e); } catch (e2) {} }
-              try { done(); } catch (e) {}
+              try { done(); } catch (e) { try { console.error('[catch] 触发入链 done 回调', e); } catch (e2) {} }
             },
             fire: function (next) { next(); }
           });
