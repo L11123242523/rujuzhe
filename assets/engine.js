@@ -10089,7 +10089,14 @@ function beforeEffectExecution(effect, callback) {
   // 作者口径：使用卡时先把这张卡放进永续区（效果处理区）作为 C1（占用格数），结算完毕再按种类送墓
   var __c1card = effect && effect.card;
   var __c1who = (effect && (effect.player || effect.user)) || 'p1';
-  if (__c1card) __chainC1Enter(__c1who, __c1card);
+  /* 【2026-10-17 作者实测·结构修 ✓】**"不占区域"模式**（`effect._c1NoZone`）：
+     有的发动**不该**把卡搬进/搬出效果处理区——
+       · **在场永续卡的主动效果**：卡已经在场，照常搬的话收尾 `placeAfterUse`/`__chainC1Exit` 会把它送墓 ✗
+       · **墓地"移出游戏来发动"**：那张卡的"移出游戏"是**费用** ⇒ 不该进处理区、也不该按种类送墓 ✗
+     这两种仍然**照常开"效果将要执行前"窗口、照常记为 C1**（编号/日志/可被 `negate_effect` 无效 ✓），
+     只是不动物理位置 ✓ —— 病根是"直接调处理体、整段绕过本函数"，不是"卡该不该占格"。 */
+  var __c1NoZone = !!(effect && effect._c1NoZone);
+  if (__c1card && !__c1NoZone) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
   function __releaseB(){ if(__releasedB) return; __releasedB=true; __eeDepthSub(__eeB,'eeB·释放'); try { __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } try { __eeAfterRelease(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } }
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
@@ -24327,12 +24334,37 @@ function executePermanentActiveFor(user, index, done) {
     return;
   }
   addBattleLog(user, '发动永续卡【' + card.name + '】主动效果');
-  var ok = fn(card, user);
-  if (ok && act.flag && !act.noAutoFlag) card[act.flag] = true;
-  /* 【2026-10-14】雷閃（handler 为 leishanSP）的次数记在**座位**上 ⇒ 这里一并写上 ✓（主阶段发过 ⇒ 连锁那边也不再给候选） */
-  try { if (ok && act.handler === 'leishanSP') battleState[user]._leishanSPTurn = battleState.turn; } catch (e) {}
-  updateBattleUI();
-  if (done) done();
+  /* 【2026-10-17 作者实测·结构修 ✓】**永续卡在场发主动效果必须进连锁**（原来这里直接 `fn(card, user)`
+     ⇒ 整段绕过"效果将要执行前"时点 ⇒ 对手连锁不了、永眠之棺也无效不了 ✗；行为扫描实测 8/8 张都是这样 ✗）。
+     现在经**唯一入口** `beforeEffectExecution` 开窗 ✓：
+       · `_c1NoZone` ⇒ 不把这张**已在场**的卡搬进/搬出效果处理区（否则收尾会把它移出场送墓 ✗）
+       · 处理体 `fn` 一行未改，只把"谁来开窗、谁收尾"换掉；`ok`/每回合标记/`done()` 搬进窗口回调 ✓
+       · 被 `negate_effect`（永眠之棺/崩塌之乌托邦）无效时 ⇒ `effect.cancelled` ⇒ 不执行处理体 ✓ */
+  var __pEff = {
+    type: 'permanentActive', player: user, user: user, card: card,
+    description: '永续卡【' + card.name + '】主动效果',
+    _c1NoZone: true
+  };
+  /* 【2026-10-17 结构修·**次数必须"发动瞬间"就记**（我的上一版把它挪进回调 ⇒ 开了个真口子 ✗）】
+     实测抓到：窗口开着的时候，这张**正在发动**的卡又被 `collectChainable` 收成响应候选
+     ⇒ 日志出现「连锁发动【雷閃·SP】」⇒ 同一次发动能发两次 ✗（判据在 6638：`me._leishanSPTurn === turn` 才拦，
+     而我那时还没写它 ✗）。改法：**开窗前**就写标记（卡上的 `act.flag` + 座位上的 `_leishanSPTurn`），
+     处理体若返回 false（如雷閃"牌组空 ⇒ 不发动"）或被无效 ⇒ **退回**标记 ✓（与原来 `ok` 的判据一致 ✓）。 */
+  var __markedFlags = [];
+  if (act.flag && !act.noAutoFlag) { card[act.flag] = true; __markedFlags.push(act.flag); }
+  var __seatMarked = false;
+  if (act.handler === 'leishanSP') { battleState[user]._leishanSPTurn = battleState.turn; __seatMarked = true; }
+  var __unmarkOnce = function () {
+    __markedFlags.forEach(function (f) { try { card[f] = false; } catch (e) {} });
+    if (__seatMarked) { try { battleState[user]._leishanSPTurn = 0; } catch (e) {} }   /* 0 = 未发动（判据是 === turn ✓） */
+  };
+  beforeEffectExecution(__pEff, function (eff) {
+    if (!eff || eff.cancelled) { __unmarkOnce(); try { updateBattleUI(); } catch (e) {} if (done) done(); return; }
+    var ok = fn(card, user);
+    if (!ok) __unmarkOnce();      /* 没发动成功 ⇒ 不记次数（沿用原来的 `ok` 语义 ✓） */
+    updateBattleUI();
+    if (done) done();
+  });
 }
 
 function __resetPermanentActiveFlags(player) {
