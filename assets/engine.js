@@ -3086,7 +3086,7 @@ function evaluatePlayable(card,player,opts){
     if (__goldNeed > 0 && (me.gold || 0) < __goldNeed) {
       return { ok: false, reason: '金币不足' + __goldNeed + '，无法使用【' + name + '】（当前' + (me.gold || 0) + ' 金币）' };
     }
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] evaluatePlayable 金币/透支判据', e); } catch (e2) {} }
   /* 【2026-10-01 作者裁决】"扣除自身 N 点同步值"**不再前置拦截**：允许发动，
      代价按 0 下限扣（不足不补）；若因此归零则由"同步值归零 ⇒ 败北"规则处理（无回复手段时才判负）。
      ⚠ 音韵值（费用）不足仍然拦（上面的 __loanCap 那段不受影响）。 */
@@ -7673,7 +7673,7 @@ function __scanTriggers(timing, ctx) {
             __logCardDisabledByYongmian(__srcCard, '触发类效果不发动');
             continue;
           }
-        } catch (e0) {}
+        } catch (e0) { try { console.error('[catch] __scanTriggers 永眠之棺闸', e0); } catch (e2) {} }
         var ok = true;
         try { ok = (typeof d.cond === 'function') ? !!d.cond(ctx, owner) : true; } catch (e) { console.error('触发条件出错 ' + d.id, e); ok = false; }
         if (!ok) continue;
@@ -17691,7 +17691,7 @@ function __resolveBackPathTouch(user, n) {
       var q = battleState[k]; if (!q || q.position == null) return;
       /* 后退路径上的判定（复用现成实现；同格 = 第0步） */
       var onPath = false;
-      try { onPath = canReachByRange({ kind: 'pathBack', n: steps }, from, q.position); } catch (e) {}
+      try { onPath = canReachByRange({ kind: 'pathBack', n: steps }, from, q.position); } catch (e) { try { console.error('[catch] 后退路径射程判定', e); } catch (e2) {} }
       /* ⚠ 同格必须在**移动前**判定：applyMove 已把 p.position 改成落点，
          用移动后位置判同格永远为 false（实测踩过：同格情形不触发）✗
          `from` = 本次移动前所在格 ⇒ 对手若在 from 即「起步同格」，按卡面走六面骰 ✓ */
@@ -17708,7 +17708,7 @@ function __resolveBackPathTouch(user, n) {
       function __doRoll() {
         var cb = function (roll, __cxl) {
           if (__cxl || roll == null) { addBattleLog(user, '【谢幕·SP】判定被连锁无效，不造伤害'); return; }
-          try { dealDamageWithResponse(foe, roll, '谢幕·SP', null, null, user, { judge: true }); } catch (e) {}
+          try { dealDamageWithResponse(foe, roll, '谢幕·SP', null, null, user, { judge: true }); } catch (e) { try { console.error('[catch] 谢幕·SP 造伤', e); } catch (e2) {} }
           addBattleLog(user, '【谢幕·SP】后退路径上触碰到' + playerDisplayName(foe) + '，' + sides + '面骰' + roll + '点 ⇒ 造成' + roll + '点判定伤害' + (sameCell ? '（同格）' : ''));
         };
         if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: sides, label: label }, cb);
@@ -17755,7 +17755,7 @@ function applyMove(user, signedN) {
   /* 【2026-10-15】后退路径触碰判定（【谢幕】SP）⇒ 仅后退时生效 ✓
      放在这里的原因：_lastMoveFrom/_lastMoveSteps 已在上面记好、且**尚未**触发落点格子效果
      （与「移动中触碰」的语义一致：先触碰造伤，再结算落点格子）✓ */
-  try { __resolveBackPathTouch(user, n); } catch (e) {}
+  try { __resolveBackPathTouch(user, n); } catch (e) { try { console.error('[catch] 后退路径触碰', e); } catch (e2) {} }
   if (p._rioMizugiSP && !p._rioMizugiFirstMove) {
     p._rioMizugiFirstMove = true;
     if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
@@ -19317,7 +19317,7 @@ function __opsResource(op, ctx, next, env) {
             addBattleLog(user, '【闲暇时光·SP】自身同步值低于3 ⇒ 回复量提升50%（' + __xxBefore + ' → ' + __hs + '）');
           }
         }
-      } catch (e) {}
+      } catch (e) { try { console.error('[catch] 闲暇时光·SP 回复量', e); } catch (e2) {} }
       var __hsWho = (op.who === 'target' || (!op.who && ctx && ctx.__tgtSubj)) ? target
         : (op.targetWho === 'self' ? user : (op.targetWho === 'target' ? target : user));
       var __hsP = battleState[__hsWho] || p;
@@ -23464,7 +23464,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         recoverCost(target, 1, '荷鲁斯之眼（每次受伤后）');
         addBattleLog(target, '【荷鲁斯之眼】受到伤害后回复1点音韵值（当前' + (p.cost || 0) + '）');
       }
-    } catch (e) {}
+    } catch (e) { try { console.error('[catch] 荷鲁斯之眼 受伤回音韵', e); } catch (e2) {} }
     __finish(actualDamage);
   }
   /* 【2026-10-14 新卡·无首刺虫 ⇒ 结构修 ✓】"那次最终伤害-75%"的**唯一实现**。
@@ -23725,7 +23725,7 @@ function hasChainTarget(card, stage) {
       if (stage == null || stage === '') return true;
       return stage === 'effect_activate';
     }
-  } catch (e) {}
+  } catch (e) { try { console.error('[catch] hasChainTarget 分类', e); } catch (e2) {} }
   return false;
 }
 
@@ -25395,7 +25395,7 @@ function postUsePassiveHooks(user, card, done) {
             addBattleLog(user, '【过载】因本次抽牌缩短，剩余 ' + p._overload.until + ' 次行动');
           }
         }
-      } catch (e) {}
+      } catch (e) { try { console.error('[catch] 过载抽牌缩短', e); } catch (e2) {} }
       next();
     });
   }
