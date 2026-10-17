@@ -8670,6 +8670,37 @@ var TW = {
           return true;
         });
         win.candidates = __fresh.concat(__kept);
+        /* 【2026-10-18 作者裁决·结构修】**费用期间排队的触发并入本窗候选**（C2、C3…）✓
+           为什么放在这里（而不是开窗的调用点）：无论这个窗口由**哪一处**开（`beforeEffectExecution` /
+           其它内部路径），候选都在**同一个地方**组装 ✓ —— 唯一真相 = `win.effect._preChainTriggers` ✓
+           （作者口径：C1 = 发动它的那张卡、C2 = 因费用触发的卡；实测我起初只在调用点接线 ⇒ 真实场景里窗口由别处开 ⇒ 没生效 ✗） */
+        try {
+          var __xt = (win.effect && win.effect._preChainTriggers) || [];
+          __xt.forEach(function (tr) {
+            if (!tr || typeof tr.fire !== 'function') return;
+            var __owner = tr.owner || win.tp || 'p1';
+            var __lbl = (tr.label || '触发') + '（触发）';
+            if (__triggerRingOnChain(win.effect, tr, __owner)) return;   /* 已作为一环挂在链上 ⇒ 不再提供 ✓ */
+            var __dupe = win.candidates.some(function (c) { return c && String(c.label || '') === __lbl; });
+            if (__dupe) return;
+            win.candidates.push({
+              owner: __owner,
+              label: __lbl,
+              mandatory: !!tr.mandatory,
+              trigger: tr,
+              /* 已上链 ⇒ 不再可选（重扫会新建对象，必须按链上的事实判，不能按候选对象判 ✓） */
+              alive: function () { return !__triggerRingOnChain(win.effect, tr, __owner); },
+              onAdd: function (done) {
+                try {
+                  var __cno = __pushTriggerRing(win.effect, tr, __owner);
+                  addBattleLog(__owner, '【连锁】' + (tr.label || '触发') + ' 作为 C' + __cno + ' 上链（因发动前提产生）');
+                } catch (e) { try { console.error('[catch] 触发上链', e); } catch (e2) {} }
+                try { done(); } catch (e) {}
+              },
+              fire: function (next) { next(); }
+            });
+          });
+        } catch (e) { try { console.error('[catch] 并入费用触发(collect)', e); } catch (e2) {} }
       } catch (e) { addBattleLog('system', '【时点窗口】候选重扫异常，沿用现有候选：' + ((e && e.message) || e)); }
     }
     cb();
@@ -9275,6 +9306,16 @@ function resolveChainStack(effect, onDone) {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else if (hasNum && cur !== e.from) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】锁定的原始值' + e.from + '已被先结算的连锁变为' + cur + '，丢失对象，不处理'); }
       else { cur = e.kind === 'set' ? e.to : Math.max(0, cur + e.delta); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】生效，点数/位移变为 ' + cur); }
+    } else if (e.kind === 'trigger') {
+      /* 【2026-10-18 作者裁决·结构修】**因发动前提（费用）产生的触发**作为一环（C2、C3…）在逆结算里执行 ✓
+         （不是"自己另开一条链"✗ —— 作者口径：C1 = 发动它的那张卡、C2 = 因费用触发的卡） */
+      __doneSet[i] = true;
+      addBattleLog(e.by, '▸ 逆结算 C' + (i + 1) + '【' + (e.name || '触发') + '】（因发动前提产生）');
+      try {
+        if (typeof e.fire === 'function') e.fire();
+      } catch (err) { try { console.error('[catch] 触发环执行出错', err); } catch (e2) {} }
+      finished();
+      return;
     } else if (e.kind === 'seatEffect') {
     /* 座位级角色能力（非卡片）：在逆结算时执行（发动时只上链，符合连锁语义） */
     /* 【2026-10-15 作者要求】结算时补上"用角色卡本身"的飞卡动画（没卡图的被动/SP）✓ */
@@ -9756,6 +9797,40 @@ function __triggerTextOptional(desc) {
     return /(可以|可)(?!叠加|叠|重复)/.test(t);
   } catch (e) { return false; }
 }
+/* 【2026-10-18 作者裁决·结构修】**"正在付发动前提（费用）"的括号**：
+   期间产生的触发**一律排队**（见 `queueOrRunTrigger` 的 `_costPayDepth` 判据），
+   随后由 `beforeEffectExecution` 把它们并进**同一条连锁**当 C2、C3… ✓
+   （作者实测口径：C1 = 发动它的那张卡（小恶魔的投喂）、C2 = 因费用触发的卡（琉璃·万圣祭 SP）） */
+function __beginCostPay() { try { if (effectEngine) effectEngine._costPayDepth = (effectEngine._costPayDepth || 0) + 1; } catch (e) { try { console.error('[catch] __beginCostPay', e); } catch (e2) {} } }
+function __endCostPay() { try { if (effectEngine) effectEngine._costPayDepth = Math.max(0, (effectEngine._costPayDepth || 0) - 1); } catch (e) { try { console.error('[catch] __endCostPay', e); } catch (e2) {} } }
+/* 【2026-10-18 作者裁决·结构修】这条触发是否**已经作为一环挂在链上** —— 唯一判据（看 effect._chain 里
+   kind:'trigger' 的环）。为什么必须有它：窗口每次重扫候选都会**新建候选对象** ⇒ 只按"候选池里有没有"
+   判断已入链会失效（实测：选中琉璃后反复"发动→已在链上⇒不再入链→再发动"，窗口永不关闭、结算深度残留）✗。
+   ⇒ "并入候选"与候选的 alive() 都只问这一个函数 ✓ */
+function __triggerRingOnChain(effect, tr, owner) {
+  try {
+    var ch = (effect && effect._chain) || [];
+    var nm = String((tr && (tr.label || tr.id)) || '触发');
+    for (var i = 0; i < ch.length; i++) {
+      var n = ch[i];
+      if (n && n._isTriggerRing && String(n.by || '') === String(owner || '') && String(n.name || '') === nm) return true;
+    }
+  } catch (e) { try { console.error('[catch] __triggerRingOnChain', e); } catch (e2) {} }
+  return false;
+}
+/* 【2026-10-18 作者裁决·结构修】把"因发动前提产生的触发"压成链环 —— **唯一入口**。
+   必须同时保证 C1（= 发动它的那张卡）在 effect._chain 的第 1 环：
+   逆结算（resolveChainStack）只认 effect._chain；若这里只压触发环，C1 就别在链外跑 ✗
+   （实测：只压触发环 ⇒ 「逆结算 C1【琉璃】」+ 小恶魔的检索落在「连锁全部结算完成」之后 ✗）。
+   这与 applyChainCard 的 __chainWithC1() 是同一口径（链里有一环 ⇒ C1 必须在链上 ✓）。
+   返回压入后的链长（= 该触发的 C 编号）✓ */
+function __pushTriggerRing(effect, tr, owner) {
+  var ch = (effect._chain = effect._chain || []);
+  if (effect._c1Node && ch.indexOf(effect._c1Node) < 0) ch.unshift(effect._c1Node);
+  ch.push({ kind: 'trigger', by: owner, name: (tr.label || '触发'), fire: tr.fire, _isTriggerRing: true });
+  return ch.length;
+}
+
 function queueOrRunTrigger(desc) {
   try {
     if (!desc || typeof desc.fire !== 'function') return 'ran';
@@ -9795,7 +9870,12 @@ function queueOrRunTrigger(desc) {
        ⚠ 只拦这一个直达分支；**不动 __busyNow**（放宽全局判据会把排空闸门堵死，套件已证明 ⇒ 已回滚）。 */
     var __decidingNow = false;
     try { __decidingNow = !!(typeof __playerDeciding === 'function' && __playerDeciding()); } catch (e) { try { console.error('[catch] assets/engine.js:8625', e); } catch (e2) {} }
-    if (!__chainIsBusy() && !__decidingNow) { desc.fire(); return 'ran'; }
+    var __inCostPay = false;
+    try { __inCostPay = !!(effectEngine && (effectEngine._costPayDepth || 0) > 0); } catch (e) { try { console.error('[catch] 费用括号判据', e); } catch (e2) {} }
+    /* 【2026-10-18 作者裁决·结构修】"正在付发动前提（费用）"期间 ⇒ **一律入队、不许当场 fire** ✗
+       否则费用产生的触发会自己开一个窗 ⇒ 抢在发动它的那张卡前面当 C1 ✗
+       （作者实测正是这个：【小恶魔的投喂】的"移出游戏"触发了琉璃·万圣祭 SP ⇒ 琉璃当了 C1、小恶魔的效果掉到链外） */
+    if (!__chainIsBusy() && !__decidingNow && !__inCostPay) { desc.fire(); return 'ran'; }
     effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
     effectEngine._pendingTriggers.push(desc);
     addBattleLog(desc.owner || 'system', '【连锁】结算中产生新效果：' + (desc.label || '效果') + ' → 等本次连锁处理完另开新连锁');
@@ -10031,6 +10111,31 @@ function runResponseWindow(opts) {
           });
         });
       });
+      /* 【2026-10-18 作者裁决·结构修】**费用期间排队的触发并入本链**（C2、C3…）✓
+         作者口径：C1 = 发动它的那张卡（小恶魔的投喂·SP）、C2 = 因费用触发的卡（琉璃·万圣祭·SP）✓
+         上链方式：把这个触发包成一环 push 进 `effect._chain`（逆结算时由 `kind:'trigger'` 分支跑它的 fire ✓） */
+      try {
+        ((opts && opts.extraTriggers) || []).forEach(function (tr) {
+          if (!tr || typeof tr.fire !== 'function') return;
+          var __owner = tr.owner || firstSide;
+          if (__triggerRingOnChain(effect, tr, __owner)) return;   /* 已作为一环挂在链上 ⇒ 不再提供 ✓ */
+          out.push({
+            owner: __owner,
+            label: (tr.label || '触发') + '（触发）',
+            mandatory: !!tr.mandatory,
+            trigger: tr,
+            alive: function () { return !__triggerRingOnChain(effect, tr, __owner); },
+            onAdd: function (done) {
+              try {
+                var __cno = __pushTriggerRing(effect, tr, __owner);
+                addBattleLog(__owner, '【连锁】' + (tr.label || '触发') + ' 作为 C' + __cno + ' 上链（因发动前提产生）');
+              } catch (e) { try { console.error('[catch] 触发上链', e); } catch (e2) {} }
+              try { done(); } catch (e) {}
+            },
+            fire: function (next) { next(); }
+          });
+        });
+      } catch (e) { try { console.error('[catch] 并入费用触发', e); } catch (e2) {} }
       return out;
     },
     onClose: function (finishWindow) {
@@ -10041,6 +10146,9 @@ function runResponseWindow(opts) {
     titleOf: function (who) { return (who === 'p1') ? '效果执行前 · 连锁' : '效果执行前 · 连锁（对手）'; },
     bodyOf: function () { return effect.description || ''; },
     labelOf: function (node, who) {
+      /* 【2026-10-18 作者裁决·结构修】费用产生的触发候选没有 pick/card ⇒ 原来会显示「🔗 ?（undefined费）」✗
+         ⇒ 直接显示它自己的触发标签（作者才能在连锁窗里认出这是琉璃·SP）✓ */
+      if (node && node.trigger) return '🔗 ' + (node.label || '触发');
       var pick = node.pick || {};
       var card = pick.card || {};
       if (who !== 'p1') return '🔗 ' + (card.name || '?');
@@ -10216,11 +10324,22 @@ function beforeEffectExecution(effect, callback) {
     } catch (e) { try { console.error('C1 本体执行出错（按已完成继续）', e); } catch (e2) {} }
     cb();
   }
+  /* 【2026-10-18 作者裁决·结构修】**费用期间排队的触发并入本链** ✓
+     作者真机日志的口径：`C1 = 小恶魔的投喂·SP`、`C2 = 琉璃(万圣祭)·SP（有卡不因使用被移出游戏）` ⇒ **同一条链** ✓
+     做法：把 `_pendingTriggers` 里排队的触发取出来交给窗口（C2、C3…），而不是等本链结束另开 ✗ */
+  var __preTrig = [];
+  try {
+    if (effectEngine && (effectEngine._pendingTriggers || []).length) {
+      __preTrig = effectEngine._pendingTriggers.slice(0);
+      effectEngine._pendingTriggers = [];
+      effect._preChainTriggers = __preTrig;
+    }
+  } catch (e) { try { console.error('[catch] 取排队触发', e); } catch (e2) {} }
   var __q1 = collectChainable('p1', effect), __q2 = collectChainable('p2', effect);
   /* 【2026-10-17 作者实测·补】作者用**连锁动画**判断"入不入连锁"：双方都无可连锁卡时这里走**静默快速路径**
      ⇒ `renderChainBar`／时点窗口一次都不开 ⇒ 玩家**看不到链条** ✗（实测：链条调用 0 次）。
      永续卡等"发动"类效果带 `_forceChain` ⇒ **强制走真窗**（无人可连锁也 开→立刻 PASS→关 ✓，链条照常显示）✓ */
-  if (!__q1.length && !__q2.length && !effect._forceChain) {
+  if (!__q1.length && !__q2.length && !effect._forceChain && !__preTrig.length) {
     addBattleLog('system', '【连锁组成】C1 ' + (__c1who === 'p1' ? '你' : '对手') + '·' +
       (effect.card ? ('【' + (effect.card.name || '') + '】') : (effect.description || '效果')), __c1actor);
     addBattleLog('system', '【连锁】双方均无可用连锁卡 → 连续 PASS，直接逆结算');
@@ -10257,6 +10376,8 @@ function beforeEffectExecution(effect, callback) {
     effect: effect,
     initiator: effect.player || effect.user || __c1who,
     type: 'response',
+    /* 【2026-10-18 作者裁决·结构修】费用期间排队的触发 ⇒ 作为 C2、C3… 并入**这一条**链 ✓ */
+    extraTriggers: (effect._preChainTriggers && effect._preChainTriggers.length) ? effect._preChainTriggers : null,
     onClosed: function (eff, finishWindow) { finish(finishWindow); }
   });
   } catch (e) {
@@ -22562,6 +22683,28 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      原来写 >1 ⇒ 只有"进行曲"一条时落到就地执行，伤害就不在链环里打了。 */
   if (__nbBatch.length >= 1 && typeof resolveSimultaneous === 'function') {
     battleState._leaveHooksBatchedFor = card;     // 让 ON_TO_GRAVE 里的 __noUseLeaveHooks 跳过琉璃/冬马（防重复）
+    /* 【2026-10-18 作者裁决·结构修】正在付**发动前提（费用）** ⇒ **不许自己开窗** ✗
+       把这些触发排进 `_pendingTriggers`，随后由 `beforeEffectExecution` 并入
+       **发动它的那张卡**那条链当 C2、C3… ✓
+       （作者口径：C1 = 发动它的卡（小恶魔的投喂·SP）、C2 = 因费用触发的卡（琉璃(万圣祭)·SP））
+       ⚠ 这一段原来**绕过** `queueOrRunTrigger` 直接 `resolveSimultaneous` ⇒ 我的费用括号管不到它 ✗ ✓ */
+    var __inCostPayLeave = false;
+    try { __inCostPayLeave = !!(effectEngine && (effectEngine._costPayDepth || 0) > 0); } catch (e) { try { console.error('[catch] 费用括号判据(离场触发)', e); } catch (e2) {} }
+    if (__inCostPayLeave) {
+      try {
+        effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
+        __nbBatch.forEach(function (c) {
+          effectEngine._pendingTriggers.push({
+            owner: c.owner || player,
+            label: c.label,
+            mandatory: !!c.mandatory,
+            fire: function () { try { c.fire(); } catch (e) { try { console.error('费用触发执行出错 ' + c.id, e); } catch (e2) {} } }
+          });
+        });
+        addBattleLog(player, '【连锁】费用期间产生的触发 ' + __nbBatch.length + ' 条 ⇒ 并入本次发动的连锁（不自开窗）');
+      } catch (e) { try { console.error('[catch] 费用触发入队', e); } catch (e2) {} }
+      return;
+    }
     try { resolveSimultaneous(player, __nbBatch, function () {}); }
     catch (e) { console.error('非结算中触发窗口出错，退回就地执行', e); try { delete battleState._leaveHooksBatchedFor; } catch (e2) { try { console.error('[catch] assets/engine.js:20036', e2); } catch (e2) {} } __graveBody(); }
     return;
