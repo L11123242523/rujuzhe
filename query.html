@@ -1346,7 +1346,7 @@ img,video,canvas,svg{max-width:100%}
      **以后每次改 cards.js，都要把这个 v= 换成新值**，否则玩家仍会拿到旧数据。 -->
 <!-- ⚠ 【2026-10-14】cards.js 本次有改动（新增 7 张道具卡：典籍之残页/荷鲁斯之眼/金刚镯/无首刺虫/永眠之棺/死灵令牌/雷閃）
      ⇒ 按上面约定把 v= 换成新值 ✓（旧值 20261010b 是上一次改卡的日期） -->
-<script src="./cards.js?v=20261014c"></script>
+<script src="./cards.js?v=20261018a"></script>
 </head>
 <body>
 
@@ -1499,7 +1499,7 @@ img,video,canvas,svg{max-width:100%}
       <div class="slot-row" id="charSlots"></div>
     </div>
     <div class="builder-section">
-      <h3>属性需求 <span class="hint">基础2无序 + 每名角色对应属性2张</span></h3>
+      <h3>属性需求 <span class="hint">基础2无序 + 每名角色对应属性2张；队伍三个角色属性完全相同时，可带 1 张神圣属性道具（顶替一个配额位）</span></h3>
       <div id="attrRequirement" class="attr-req"></div>
       <div style="margin-top:10px;font-size:12px;color:#888" id="attrInfo"></div>
     </div>
@@ -1624,7 +1624,8 @@ img,video,canvas,svg{max-width:100%}
         "判定伤害不适用属性克制增伤与暴击，但吃判定伤害增伤，且最多适用20%控骰能力（骰子点数±1）",
         "多段判定每段单独计算，每段吃增伤",
         "护盾：点数制永久存在，破碎后防止多余伤害",
-        "混沌属性：克制混沌（+1伤害），被所有属性克制但伤害不减少"
+        "混沌属性：克制混沌（+1伤害），被所有属性克制但伤害不减少",
+    "神圣属性：克制除神圣外的所有属性（+1伤害），打神圣不克制，被非神圣打也不克制（不进循环）"
       ]
     },
     "sacrifice": {
@@ -1661,38 +1662,51 @@ img,video,canvas,svg{max-width:100%}
         "无序",
         "理智",
         "热忱",
-        "混沌"
+        "混沌",
+        "神圣"
       ],
       [
         "无序",
         "无克制",
         "克制",
         "被克制",
-        "克制"
+        "克制",
+        "被克制"
       ],
       [
         "理智",
         "被克制",
         "无克制",
         "克制",
-        "克制"
+        "克制",
+        "被克制"
       ],
       [
         "热忱",
         "克制",
         "被克制",
         "无克制",
-        "克制"
+        "克制",
+        "被克制"
       ],
       [
         "混沌",
         "被克制",
         "被克制",
         "被克制",
-        "克制"
+        "克制",
+        "被克制"
+      ],
+      [
+        "神圣",
+        "克制",
+        "克制",
+        "克制",
+        "克制",
+        "无克制"
       ]
     ],
-    "note": "克制时造成的伤害+1点（每段），被克制时伤害不减少"
+    "note": "克制时造成的伤害+1点（每段），被克制时伤害不减少。神圣：打非神圣皆为克制；打神圣不克制；被非神圣打不克制（不进无序/理智/热忱的循环）"
   },
   "map_tiles": {
     "interactive": {
@@ -1998,8 +2012,8 @@ function render(){
 function showDetail(c){
   const mc = document.getElementById('modalContent');
   const attr = c.attribute||'';
-  const color = attr==='无序'?'#94a3b8':attr==='热忱'?'#e94560':attr==='理智'?'#4a9eff':attr==='混沌'?'#a855f7':(c.type&&c.type.includes('御神')?'#f59e0b':c.type&&c.type.includes('事件')?'#06b6d4':c.type&&c.type.includes('馈赠')?'#22c55e':'#94a3b8');
-  const colorDark = attr==='无序'?'#64748b':attr==='热忱'?'#be123c':attr==='理智'?'#1e40af':attr==='混沌'?'#6b21a8':'#64748b';
+  const color = attr==='无序'?'#94a3b8':attr==='热忱'?'#e94560':attr==='理智'?'#4a9eff':attr==='混沌'?'#a855f7':attr==='神圣'?'#f5c518':(c.type&&c.type.includes('御神')?'#f59e0b':c.type&&c.type.includes('事件')?'#06b6d4':c.type&&c.type.includes('馈赠')?'#22c55e':'#94a3b8');
+  const colorDark = attr==='无序'?'#64748b':attr==='热忱'?'#be123c':attr==='理智'?'#1e40af':attr==='混沌'?'#6b21a8':attr==='神圣'?'#b8860b':'#64748b';
   const colorAlpha = color + '33';
   const colorAlpha2 = color + '1a';
   
@@ -2095,7 +2109,7 @@ function showDetail(c){
       const card = findCardByName(name);
       if(card){
         const cattr = card.attribute||'';
-        const ccolor = cattr==='无序'?'#94a3b8':cattr==='热忱'?'#e94560':cattr==='理智'?'#4a9eff':cattr==='混沌'?'#a855f7':'#94a3b8';
+        const ccolor = cattr==='无序'?'#94a3b8':cattr==='热忱'?'#e94560':cattr==='理智'?'#4a9eff':cattr==='混沌'?'#a855f7':cattr==='神圣'?'#f5c518':'#94a3b8';
         html += `<span onclick='showDetail(findCardByName(${JSON.stringify(name)}))' style="cursor:pointer;padding:4px 10px;border-radius:6px;font-size:12px;background:${ccolor}22;color:${ccolor};border:1px solid ${ccolor}44;transition:all .2s" onmouseover="this.style.background='${ccolor}44'" onmouseout="this.style.background='${ccolor}22'">${name}${card.grade?' <span style="opacity:.7">['+card.grade+']</span>':''}</span>`;
       } else {
         html += `<span style="padding:4px 10px;border-radius:6px;font-size:12px;background:#333;color:#888">${name}</span>`;
@@ -3755,6 +3769,22 @@ function randomByArchetype(){
   } else deck.activeMember = null;
   
     // ===== 计算属性需求（无序2张 + 每名非混沌角色对应属性2张）=====
+  /* 【2026-10-14 作者点名】神圣位：队伍三个角色属性完全相同（混沌也算一致）⇒ 可带 1 张神圣属性道具，
+     算在 8 张内、**顶替一个正常配额位**、最多 1 张。口径与引擎 __holySlotInfo 一致 ✓ */
+  const isHolyItemQ = (c) => !!(c && c.attribute === "神圣");
+  const holySlotQ = (chars) => {
+    const list = (chars || []).filter(Boolean);
+    if (list.length !== 3) return { allowed: false, attr: null };
+    const a0 = list[0].attribute;
+    if (!a0 || !list.every((c) => c.attribute === a0)) return { allowed: false, attr: null };
+    return { allowed: true, attr: a0 === "混沌" ? "无序" : a0 };
+  };
+  const applyHolySlotQ = (need, chars, items) => {
+    const holy = (items || []).filter(isHolyItemQ).length;
+    const info = holySlotQ(chars);
+    if (holy > 0 && info.allowed && need[info.attr] > 0) need[info.attr] -= 1;
+    return { holy, allowed: info.allowed, attr: info.attr };
+  };
   const attrNeed = {'无序':2};
   selectedChars.forEach(c=>{
     if(c.attribute!=='混沌') attrNeed[c.attribute] = (attrNeed[c.attribute]||0)+2;
@@ -4569,6 +4599,8 @@ function randomByArchetype(){
     const a = c.attribute;
     if(a && a!=='混沌') attrNeedFix[a] = (attrNeedFix[a]||0)+2;
   }
+  /* 神圣位：顶上位的配额减 1（与引擎同一口径 ✓） */
+  applyHolySlotQ(attrNeedFix, selectedChars, selectedItems);
   const attrHaveFix = {};
   selectedItems.forEach(c=>{attrHaveFix[c.attribute]=(attrHaveFix[c.attribute]||0)+1;});
   
@@ -6805,7 +6837,7 @@ function updateCompare(){
 
   function renderCard(c){
     const attr = c.attribute||'';
-    const color = attr==='无序'?'#888':attr==='热忱'?'#e94560':attr==='理智'?'#4a9eff':attr==='混沌'?'#a855f7':'#888';
+    const color = attr==='无序'?'#888':attr==='热忱'?'#e94560':attr==='理智'?'#4a9eff':attr==='混沌'?'#a855f7':attr==='神圣'?'#f5c518':'#888';
     let h = `<div style="background:#1a1a2e;padding:12px;border-radius:10px;border-top:3px solid ${color}">`;
     if(c.image_url) h += `<div style="text-align:center;margin-bottom:8px"><img decoding="async" onerror="imgRetry(this)" src="${c.image_url}" style="max-width:100%;max-height:200px;border-radius:8px;cursor:pointer" onclick="showCardImage('${c.image_url}','${c.name}')"></div>`;
     h += `<h4 style="color:${color};margin:0 0 6px;font-size:14px">${c.name}</h4>`;
@@ -7320,6 +7352,12 @@ function enhancedValidation(){
     const a = c.attribute;
     if(a && a!=='混沌') attrNeed[a] = (attrNeed[a]||0)+2;
   });
+  /* 【2026-10-14 神圣位】三同属性 ⇒ 1 张神圣道具顶替一个配额位；最多 1 张；不满足则报错（措辞对齐引擎 ✓） */
+  const __holyItems = (deck.items||[]).map(getCard).filter(Boolean).filter(isHolyItemQ);
+  const __holyInfo = holySlotQ(deckChars);
+  if(__holyItems.length > 0 && !__holyInfo.allowed) issues.push('神圣属性道具【不可携带】：需要队伍中 3 个角色属性完全相同（混沌也同样算一致），当前队伍不满足');
+  if(__holyItems.length > 1) issues.push('神圣属性道具最多携带 1 张（当前 ' + __holyItems.length + ' 张）');
+  if(__holyItems.length > 0 && __holyInfo.allowed && attrNeed[__holyInfo.attr] > 0) attrNeed[__holyInfo.attr] -= 1;
   const attrHave = {};
   for(const ref of (deck.items||[])){
     const c = getCard(ref);
