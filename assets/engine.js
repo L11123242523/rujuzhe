@@ -9235,13 +9235,15 @@ function resolveChainStack(effect, onDone) {
          恰好一次由 `effect._c1BodyRan` 保证（外层兜底只在"没跑过"时执行 ✓）；
          本体可能是异步的（选目标/选卡/判定）⇒ 把 `finished` 当 done 传进去，链**等它做完再推进** ✓ */
       if (typeof e.body === 'function') {
+        /* 【2026-10-17 作者裁决：异步效果**完整在链内结算** ✓】两件事一起改：
+           ① **跑本体前先释放结算深度**（`_releaseLockBeforeC1Body`），否则选目标/选卡类本体等玩家输入时
+              结算锁还在链里 ⇒ 与决策机制互相等 ⇒ 死锁（第一版实测结算深度全程卡在 2 ✗）
+           ② 本体跑完才 `finished()`（链**等**它）⇒ 本体（含异步交互）全部结算完，链才往下/收尾 ✓ */
         try {
           effect._c1BodyRan = true;
-          /* ⚠ **执行本体，但不等它回调** —— 我第一版把 `finished` 传进本体当 done（"链等本体做完再推进"）：
-             只要有**任何一条**路的本体不回调（异步分支/异常/没接上），整条链就停摆 ✗
-             （门禁实测：`probe-browser-chain-play` 结算深度**全程卡在 2**、30 个采样全是 2 ✗）。
-             现在：本体在**链上这一环**开始执行（顺序/可被无效都满足作者口径 ✓），链**不依赖**它回调 ✓ 不可能卡死 ✓ */
-          e.body(function () {});
+          try { if (typeof effect._releaseLockBeforeC1Body === 'function') effect._releaseLockBeforeC1Body(); } catch (eRel) {}
+          e.body(finished);
+          return;
         } catch (err2) {
           try { addBattleLog(e.by, '【连锁】C1【' + (e.name || '效果') + '】本体执行异常，按已完成继续：' + ((err2 && err2.message) || err2)); } catch (e3) {}
         }
@@ -10115,7 +10117,21 @@ function beforeEffectExecution(effect, callback) {
   var __c1NoZone = !!(effect && effect._c1NoZone);
   if (__c1card && !__c1NoZone) __chainC1Enter(__c1who, __c1card);
   var __releasedB=false;
-  function __releaseB(){ if(__releasedB) return; __releasedB=true; __eeDepthSub(__eeB,'eeB·释放'); try { __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } try { __eeAfterRelease(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } }
+  /* 【2026-10-17 作者裁决「异步效果要完整在链内结算」·结构修 ✓】
+     C1 环执行效果本体**之前**必须先放掉"结算深度"，否则选目标/选卡类本体在等玩家输入时，
+     结算锁还在链里 ⇒ 与决策机制互相等 ⇒ **死锁**（第一版实测：`probe-browser-chain-play` 结算深度全程=2 ✗）。
+     但**不能**直接复用 `__releaseB()`（它还含"排空触发队列/收尾"⇒ 提前跑到本体之前会乱序 ✗）
+     ⇒ 这里只提前做 `__eeDepthSub`（释放结算深度 ✓），其余收尾仍留在 `__releaseB()` 的链尾 ✓；
+     用 `__depthReleasedEarly` 记账避免重复减（否则深度会变负 ✗）。 */
+  var __depthReleasedEarly = false;
+  function __releaseLockBeforeC1Body() {
+    if (__depthReleasedEarly) return;
+    __depthReleasedEarly = true;
+    try { __eeDepthSub(__eeB, 'eeB·C1本体前释放（让玩家输入不被结算锁挡住）'); } catch (e) { try { console.error('[catch] C1 前释放结算深度', e); } catch (e2) {} }
+  }
+  function __releaseB(){ if(__releasedB) return; __releasedB=true; if (!__depthReleasedEarly) __eeDepthSub(__eeB,'eeB·释放'); try { __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } try { __eeAfterRelease(); } catch (e) { try { console.error('[catch] assets/engine.js:8862', e); } catch (e2) {} } }
+  /* 交给 C1 环调用（环在跑本体前先调它 ✓） */
+  try { effect._releaseLockBeforeC1Body = __releaseLockBeforeC1Body; } catch (e) {}
   // 异常安全：任何抛出都要释放结算锁并把控制权交回调用方，避免深度残留导致全场卡死
   try {
   // 连锁逆结算处理中：不再插入新的连锁窗口（其中触发的诱发效果在整条链结束后另开新连锁）
