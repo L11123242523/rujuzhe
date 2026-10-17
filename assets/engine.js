@@ -78,6 +78,8 @@ function __eeDepthSub(ee, where) {
       setTimeout(function () {
         try { if (typeof __flushPendingTileEffects === 'function') __flushPendingTileEffects(); } catch (e) { try { console.error('[catch] assets/engine.js:79', e); } catch (e2) {} }
         try { if (typeof __tryDrainTriggers === 'function') __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:80', e); } catch (e2) {} }
+        /* 深度归零 = "忙"结束的事件点 ⇒ 补判同步归零（不用 150ms 轮询） */
+        try { if (typeof __syncZeroCheckNow === 'function') __syncZeroCheckNow('深度归零'); } catch (e) { try { console.error('[catch] 深度归零补判', e); } catch (e2) {} }
       }, 0);
     } catch (e) { try { console.error('[catch] assets/engine.js:82', e); } catch (e2) {} }
   }
@@ -12304,20 +12306,24 @@ function __syncZeroBusy() {
   } catch (e) { console.error('同步归零豁免判定出错（按不豁免处理）', e); }
   return false;
 }
-var __syncZeroRecheck = (function () {
-  var timer = null, tries = 0;
-  function arm(ms) { if (timer) return; timer = setTimeout(fire, ms || 120); }
-  function fire() {
-    timer = null;
-    try {
-      if (!battleState || battleState._over) { tries = 0; return; }
-      if (__syncZeroBusy()) { if (tries++ < 200) arm(150); return; }  // 还在忙 ⇒ 继续等（上限 ~30s，不会无限重试）
-      tries = 0;
-      checkBattleEnd();
-    } catch (e) { try { console.error('同步归零补判出错（不影响对局）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:10905', e2); } catch (e2) {} } }
-  }
-  return { arm: arm };
-})();
+/* 【2026-10-18 结构修·**去掉 150ms×200 的专用轮询**】
+   同步归零的"忙完补判"原来靠 __syncZeroRecheck 反复 setTimeout(150) 问"还忙吗"（最坏 30 秒后放弃）。
+   现在改为**事件驱动**：谁把"忙"结束，谁就调一次 __syncZeroCheckNow ——
+     · 结算深度归零（__eeDepthSub 的 0 收口）
+     · 决策释放（__decideLeave）
+     · 时点窗口关闭（TW.close，原本就调 checkBattleEnd）
+     · 2 秒监督者 __eeIdleWatchdog 再兜一次（既有监督者，不新增定时器）
+   只有"确实有人 sync ≤0 且当前不忙"才真的判；不忙时不动作。 */
+function __syncZeroCheckNow(tag) {
+  try {
+    if (typeof battleState === 'undefined' || !battleState || battleState._over) return false;
+    if (!(battleState.p1.sync <= 0 || battleState.p2.sync <= 0)) return false;
+    if (typeof __syncZeroBusy === 'function' && __syncZeroBusy()) return false;
+    checkBattleEnd();
+    return true;
+  } catch (e) { try { console.error('[catch] __syncZeroCheckNow ' + (tag || ''), e); } catch (e2) {} }
+  return false;
+}
 function checkBattleEnd() {
   /* 【2026-10-05 作者实测"游戏结束了 BGM 还不停"】本函数是唯一的"对局结束"判定入口：
      跑完它之后（下一拍）同步一次 BGM 状态 ⇒ 结束时自动淡出停曲（没结束则什么都不做）。 */
@@ -12368,8 +12374,8 @@ function checkBattleEnd() {
   /* 【2026-10-01 豁免闸】同步值归零是事实判负，但"即将归零、回复手段还没轮到"时**先不判负**。
      判据：这一轮还没走完（结算中 / 有活动时点窗口 / 队列里还有待触发 / 正在等弹窗决策）⇒ 延后判定。 */
   var __syncZeroDefer = __syncZeroBusy();
-  /* 确实有人同步 ≤0、只是现在还在忙 ⇒ 挂上补判（忙完立刻判，不等到"再吃一刀"） */
-  if (__syncZeroDefer && (battleState.p1.sync <= 0 || battleState.p2.sync <= 0)) __syncZeroRecheck.arm();
+  /* 确实有人同步 ≤0、只是现在还在忙 ⇒ **不在这里挂计时器**：忙的结束点会调 __syncZeroCheckNow
+     （深度归零 / 决策释放 / TW.close / 2 秒监督者），忙完立刻判，不等到"再吃一刀" ✓ */
     // 同步值归零判定（常规获胜）
   if (battleState.p1.sync <= 0 && !__syncZeroDefer) {
     battleState._over = true;
@@ -14065,13 +14071,19 @@ function __decideEnter(why) {
   } catch (e) { try { console.error('[catch] assets/engine.js:12515', e); } catch (e2) {} }
 }
 function __decideLeave(why) {
-  try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) { Decision.leave(why); return; } } catch (e) { try { console.error('[catch] assets/engine.js:12518', e); } catch (e2) {} }
-  try {
-    if (typeof battleState === 'undefined' || !battleState) return;
-    var n = (battleState._awaitingDecision || 0) - 1;
-    battleState._awaitingDecision = n > 0 ? n : null;
-    if (!battleState._awaitingDecision) battleState._awaitingWhy = '';
-  } catch (e) { try { console.error('[catch] assets/engine.js:12524', e); } catch (e2) {} }
+  var __viaDecision = false;
+  try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) { Decision.leave(why); __viaDecision = true; } } catch (e) { try { console.error('[catch] assets/engine.js:12518', e); } catch (e2) {} }
+  if (!__viaDecision) {
+    try {
+      if (typeof battleState !== 'undefined' && battleState) {
+        var n = (battleState._awaitingDecision || 0) - 1;
+        battleState._awaitingDecision = n > 0 ? n : null;
+        if (!battleState._awaitingDecision) battleState._awaitingWhy = '';
+      }
+    } catch (e) { try { console.error('[catch] assets/engine.js:12524', e); } catch (e2) {} }
+  }
+  /* 决策释放 = "忙"结束的事件点 ⇒ 补判同步归零（不用 150ms 轮询） */
+  try { if (typeof __syncZeroCheckNow === 'function') __syncZeroCheckNow('决策释放'); } catch (e) { try { console.error('[catch] 决策释放补判', e); } catch (e2) {} }
 }
 var __decideSeq = 0;
 /* 【2026-10-18 结构修】**不再维护 kind→tag 第二张表**（它与 Decision.tags 是两本账：对账/复位直接收账时清不到它
@@ -16186,6 +16198,8 @@ function __eeIdleWatchdog() {
     /* 【2026-10-07】监督者每拍兜一次唤醒：万一哪条"等待事实结束"的路径漏了调 __aiWake，
        最坏也只是晚 ≤2 秒（不会永久卡住）。它是监督者，不是判定函数 ⇒ 不算规则层时间。 */
     try { if (typeof __aiWake === 'function') __aiWake(); } catch (e) { try { console.error('[catch] assets/engine.js:14430', e); } catch (e2) {} }
+    /* 同步归零补判的监督者兜底：正常由深度归零/决策释放/TW.close 立即补；这里防漏，最多晚 2 秒。 */
+    try { if (typeof __syncZeroCheckNow === 'function') __syncZeroCheckNow('看门狗'); } catch (e) { try { console.error('[catch] 看门狗补判', e); } catch (e2) {} }
     if (typeof effectEngine === 'undefined' || !effectEngine) return;
     if (typeof battleState === 'undefined' || !battleState) return;
     var ee = effectEngine;
@@ -26849,7 +26863,6 @@ try { window.aiExecuteMove = aiExecuteMove; } catch (e) {}
 try { window.aiEndTurn = aiEndTurn; } catch (e) {}
 try { window.__revertAllBlueprintCopies = __revertAllBlueprintCopies; } catch (e) {}
 try { window.__syncZeroBusy = __syncZeroBusy; } catch (e) {}
-try { window.__syncZeroRecheck = __syncZeroRecheck; } catch (e) {}
 try { window.checkBattleEnd = checkBattleEnd; } catch (e) {}
 try { window.BUS_ANCHORS = BUS_ANCHORS; } catch (e) {}
 try { window.BUS_EDGES = BUS_EDGES; } catch (e) {}
