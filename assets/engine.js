@@ -12967,7 +12967,13 @@ function __breakerCount(player) {
     if (!c) return;
     var nm = c.name || '';
     if (nm.indexOf('露璐缇雅') >= 0 || nm.indexOf('爱德华') >= 0) n += 2;
-    else { var tags = [].concat(c.archetypes || [], c.roles || [], c.tags || []); if (tags.some(function (t) { return (t || '').indexOf('破坏者') >= 0; })) n += 1; }
+    /* 【2026-10-17 作者点名·修】原来这里是 `[].concat(c.archetypes||[], c.roles||[], c.tags||[])` ✗ ——
+       把**卡组流派(archetypes)** 也当成标签去找"破坏者"，与本次修的"比翼恋理被当成[侵略]"是**同一类错** ✗。
+       「破坏者」的**唯一真相**是角色的**角色位 `roles`**（数据实测：27 个角色里只有【琉璃(万圣祭)】
+       `roles:["猎手","破坏者","调度者"]` 带它 ✓；没有任何角色的 archetypes/tags 含"破坏者"）
+       ⇒ 去掉 archetypes（今天计数**完全不变** ✓；以后新角色的流派名叫"破坏者××队"也不会被误算 ✓）。
+       卡面 `tags` 保留（若哪天角色卡真带 [破坏者] 标签，也该算 ✓）。 */
+    else { var tags = [].concat(c.roles || [], c.tags || []); if (tags.some(function (t) { return (t || '').indexOf('破坏者') >= 0; })) n += 1; }
   });
   return n;
 }
