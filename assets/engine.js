@@ -2628,6 +2628,7 @@ function onlineUseSkillP2(done) {
     options.push({ name: '福金与穆宁·弃抽', desc: '选1张手卡送入墓地，然后抽1张（若弃到混沌属性的卡，再对一名玩家造成2点混沌属性伤害）', run: function (n) { __lilithDiscardDraw('p2', n); } });
   }
   if (p._edwardSP && p._edwardSPTurn !== T) options.push({ name: '露璐缇雅·破坏', desc: '破坏者≥3时破坏一名玩家区域1张卡，然后其回4音韵（当前破坏者计数' + __breakerCount('p2') + '）', run: function (n) { onlineEdwardP2(n); } });
+  if (p._rioHWPassive && !p._rioHWSwapUsed && battleState.phase === 'main1') options.push({ name: '里绪（万圣祭）·换位', desc: '选自己队伍的两张角色卡交换位置（一局一次）', run: function (n) { activateRioHWSwap('p2'); if (n) n(); } });
   if ((p._guideCore || 0) > 0) options.push({ name: '使用引导核心', desc: '消耗1个，立即填满当前激励点数累计条并升级（持有' + p._guideCore + '个）', run: function (n) { useGuideCore('p2'); n(); } });
   if (!options.length) { if (done) done(); return; }
   Online.awaitAnswer({ label: '角色技能（对手）', choices: options.map(function(o){ return o.name + '：' + o.desc; }) }, function (i) {
@@ -6643,6 +6644,11 @@ function collectChainable(player, effect){
         out.push({ card: { name: '露璐缇雅·破坏', cost: 0, _category: 'seat_effect', effect: '破坏一名玩家区域内的1张卡，然后其回复4点音韵值' },
           from: 'seatEffect', index: 0, seatEffect: 'edward' });
       }
+      /* 【2026-10-18 新角色·里绪（万圣祭）被动②】一轮一次，其他玩家回合可强制一名玩家献祭。 */
+      if (me._rioHWPassive && me._rioHWForceRound !== battleState.round) {
+        out.push({ card: { name: '里绪（万圣祭）·强制献祭', cost: 0, _category: 'seat_effect', effect: '选一名玩家强制进行一次献祭动作' },
+          from: 'seatEffect', index: 0, seatEffect: 'rioHWForce' });
+      }
       /* 【2026-10-09 作者裁决 A·按卡面】莉莉SP 卡面写的是「**每个自己回合**可以发动」
          ⇒ 它**不该**在对手回合作为连锁响应出现。这里原有的 `seatEffect:'lily'` 候选按 A 删除；
          自己回合的入口＝"角色技能"菜单里的「莉莉·回收」（useCharacterPassive）。
@@ -7710,6 +7716,81 @@ registerTrigger({
     if (typeof drawCard === 'function') drawCard(owner);
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
+});
+/* 【2026-10-18 新角色·里绪（万圣祭）SP】每回合首次献祭后，牌组最上方 1 张送入墓地（编组类）。
+   触发点选 leave-field / reason==='sacrifice'：与"献祭送墓"同一个事件，天然只在该玩家自己献祭时成立。 */
+registerTrigger({
+  id: 'rio-hw-sp-sacrifice',
+  timing: 'leave-field',
+  ownerOf: function (ctx) {
+    var list = [];
+    if (!ctx || ctx.reason !== 'sacrifice' || !ctx.player) return list;
+    playerIds().forEach(function (w) {
+      var q = battleState[w];
+      if (q && q._rioHWSP && q._rioHWSPTurn !== battleState.turn && w === ctx.player) list.push(w);
+    });
+    return list;
+  },
+  cond: function (ctx, owner) {
+    if (!ctx || ctx.reason !== 'sacrifice' || ctx.player !== owner) return false;
+    var q = battleState[owner];
+    return !!(q && q._rioHWSP && q._rioHWSPTurn !== battleState.turn);
+  },
+  mandatory: false,
+  label: function () { return '【里绪（万圣祭）·SP】首次献祭后·牌组顶1张送墓'; },
+  fire: function (ctx, owner) {
+    var q = battleState[owner]; if (!q) return;
+    if (q._rioHWSPTurn === battleState.turn) return;
+    q._rioHWSPTurn = battleState.turn;
+    var top = (q.deck || [])[0];
+    if (!top) { addBattleLog(owner, '【里绪（万圣祭）SP】牌组已空，无法送墓'); updateBattleUI(); return; }
+    q.deck.shift(); q.grave.push(top);
+    addBattleLog(owner, '【里绪（万圣祭）SP】本回合首次献祭后，牌组最上方【' + (top.name || '?') + '】送入墓地');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+});
+/* 【2026-10-18 新角色·里绪（万圣祭）被动①】自己的手卡因献祭送墓时，一回合一次，对一名玩家造成1点热忱。 */
+function __rioHWSacDamage(owner) {
+  var q = battleState[owner]; if (!q) return;
+  function fire(target) {
+    if (!target) return;
+    if (q._rioHWDamageTurn === battleState.turn) return;
+    q._rioHWDamageTurn = battleState.turn;
+    addBattleLog(owner, '【里绪（万圣祭）被动·不给糖就捣蛋】献祭触发，对' + (target === owner ? '自己' : '对手') + '造成1点热忱属性伤害');
+    dealDamageWithResponse(target, 1, '里绪（万圣祭）·不给糖就捣蛋', null, '热忱');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+  if (typeof isAISeat === 'function' && isAISeat(owner)) { fire(foeOf(owner)); return; }
+  if (owner === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
+    onlineDecideModal('p2', '里绪（万圣祭）被动', '对一名玩家造成1点热忱属性伤害', '', ['自己', '对手', '不发动'], function (i) { if (i < 0 || i === 2) return; fire(i === 0 ? owner : foeOf(owner)); });
+    return;
+  }
+  if (owner === 'p1' && typeof showChoiceModal === 'function') {
+    showChoiceModal('里绪（万圣祭）被动', '对一名玩家造成1点热忱属性伤害', '', ['自己', '对手', '不发动'], function (i) { if (i < 0 || i === 2) return; fire(i === 0 ? owner : foeOf(owner)); });
+    return;
+  }
+  fire(foeOf(owner));
+}
+registerTrigger({
+  id: 'rio-hw-sac-damage',
+  timing: 'leave-field',
+  ownerOf: function (ctx) {
+    var list = [];
+    if (!ctx || ctx.reason !== 'sacrifice' || !ctx.player) return list;
+    playerIds().forEach(function (w) {
+      var q = battleState[w];
+      if (q && q._rioHWPassive && q._rioHWDamageTurn !== battleState.turn && w === ctx.player) list.push(w);
+    });
+    return list;
+  },
+  cond: function (ctx, owner) {
+    if (!ctx || ctx.reason !== 'sacrifice' || ctx.player !== owner) return false;
+    var q = battleState[owner];
+    return !!(q && q._rioHWPassive && q._rioHWDamageTurn !== battleState.turn);
+  },
+  mandatory: false,
+  label: function () { return '【里绪（万圣祭）·被动】己方献祭·对一名玩家1热忱'; },
+  fire: function (ctx, owner) { __rioHWSacDamage(owner); }
 });
 registerTrigger({
   id: 'toma-sp-leave',
@@ -9294,6 +9375,7 @@ function resolveChainStack(effect, onDone) {
     } catch (e) {}
     try {
       if (e.seatEffect === 'edward' && typeof activateEdwardSP === 'function') { activateEdwardSP(e.by); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
+      else if (e.seatEffect === 'rioHWForce' && typeof activateRioHWForceSac === 'function') { activateRioHWForceSac(e.by); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else if (e.seatEffect === 'lily' && typeof activateLilySP === 'function') { activateLilySP(); __doneSet[i] = true; addBattleLog(e.by, '【' + e.name + '】角色能力生效'); }
       else { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】找不到对应能力实现，跳过'); }
     } catch (err) { __lostSet[i] = true; try { addBattleLog(e.by, '【' + e.name + '】结算异常，跳过：' + ((err && err.message) || err)); } catch (e2) { try { console.error('[catch] assets/engine.js:8312', e2); } catch (e2) {} } }
@@ -13131,6 +13213,10 @@ function useCharacterPassive() {
   if (p._yunaiPastPassive && p._yunaiPastTopTurn !== T && (p.grave || []).length) {
     options.push({name: '羽奈(往昔)·置顶', desc: '把自己墓地最下方一张卡以正面朝上的形式放到牌组最上方（每回合一次）', action: activateYunaiPastTop});
   }
+  /* 【2026-10-18 新角色·里绪（万圣祭）被动③】一局一次，主要阶段1换位。 */
+  if (p._rioHWPassive && !p._rioHWSwapUsed && battleState.phase === 'main1') {
+    options.push({name: '里绪（万圣祭）·换位', desc: '选自己队伍的两张角色卡交换位置（一局一次）', action: function(){ activateRioHWSwap('p1'); }});
+  }
   /* 入间予·解构与求索 / 现实间冬马·分析大师：都是"可以发动"的**选发** ——
      条件满足时由 __offerOptionalEffect 弹窗询问（发动则作为 C1 进连锁），**不再挂本菜单**
      （作者 2026-09-27 口径：这类应在条件满足时弹窗，而不是放进角色技能菜单）。 */
@@ -13297,6 +13383,73 @@ function __edwardApply(seat, choice, done) {
     addBattleLog(s, '【露璐缇雅SP】破坏' + (who === s ? '自己' : '对手') + '区域【' + c.name + '】，其回复4音韵');
     updateBattleUI(); fin();
   });
+}
+/* 【2026-10-18 新角色·里绪（万圣祭）被动②】一轮一次，其他玩家回合可发动：
+   选一名玩家强制进行一次献祭；没有手卡则改为效果处理区一张卡；都没有则受1点热忱。
+   入口：座位级连锁候选（对手回合）→ 逆结算执行本函数。自动取"手卡最低费/永续第一张"结算，避免暴露隐藏手牌。 */
+function activateRioHWForceSac(seat) {
+  var s = seat || 'p1', p = battleState[s], foe = foeOf(s);
+  if (!p || !p._rioHWPassive) return;
+  if (p._rioHWForceRound === battleState.round) return;
+  function apply(who) {
+    var t = battleState[who]; if (!t) return;
+    p._rioHWForceRound = battleState.round;
+    var zone = (t.hand || []).length ? 'hand' : ((t.permanent || []).length ? 'permanent' : null);
+    addBattleLog(s, '【里绪（万圣祭）被动②】强制' + (who === s ? '自己' : '对手') + '进行一次献祭');
+    if (!zone) {
+      addBattleLog(who, '【不给糖就捣蛋】没有可献祭的卡 ⇒ 受到1点热忱属性伤害');
+      dealDamageWithResponse(who, 1, '里绪（万圣祭）·不给糖就捣蛋', null, '热忱');
+      return;
+    }
+    var arr = t[zone], idx = 0;
+    if (zone === 'hand') {
+      var best = Infinity;
+      arr.forEach(function (c, i) { var cc = Number(c && c.cost) || 0; if (cc < best) { best = cc; idx = i; } });
+    }
+    var card = arr.splice(idx, 1)[0];
+    if (!card) { dealDamageWithResponse(who, 1, '里绪（万圣祭）·不给糖就捣蛋', null, '热忱'); return; }
+    t.grave.push(card);
+    addBattleLog(who, '【不给糖就捣蛋】被强制献祭【' + (card.name || '?') + '】');
+    try { if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, card, 'sacrifice'); } catch (e) { try { console.error('[catch] 里绪万圣祭强献触发', e); } catch (e2) {} }
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+  if (typeof isAISeat === 'function' && isAISeat(s)) { apply(foe); return; }
+  if (s === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
+    onlineDecideModal('p2', '里绪（万圣祭）被动②', '选一名玩家强制进行一次献祭', '', ['自己', '对手'], function (i) { if (i < 0) return; apply(i === 0 ? s : foe); });
+    return;
+  }
+  if (typeof showChoiceModal === 'function') {
+    showChoiceModal('里绪（万圣祭）被动②', '选一名玩家强制进行一次献祭', '', ['自己', '对手'], function (i) { if (i < 0) return; apply(i === 0 ? s : foe); });
+    return;
+  }
+  apply(foe);
+}
+/* 【2026-10-18 新角色·里绪（万圣祭）被动③】一局一次，自己主要阶段1，选队伍两张角色卡交换位置。 */
+function activateRioHWSwap(seat) {
+  var s = seat || 'p1', p = battleState[s];
+  if (!p || !p._rioHWPassive || p._rioHWSwapUsed) return;
+  if (battleState.phase !== 'main1') { if (s === 'p1' && typeof showToast === 'function') showToast('换位只能在主要阶段1发动', 'warn'); return; }
+  var chars = (deckConfig[s] && deckConfig[s].chars) || [];
+  if (chars.length < 2) return;
+  function apply(i, j) {
+    if (i < 0 || j < 0 || i === j || i >= chars.length || j >= chars.length) return;
+    var tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
+    p._rioHWSwapUsed = true;
+    addBattleLog(s, '【里绪（万圣祭）被动③】交换队伍第' + (i + 1) + '与第' + (j + 1) + '张角色卡的位置');
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+  }
+  if (typeof isAISeat === 'function' && isAISeat(s)) { apply(0, 1); return; }
+  var labels = ['1↔2', '1↔3', '2↔3'];
+  function pick(o) { if (o === 0) apply(0, 1); else if (o === 1) apply(0, 2); else if (o === 2) apply(1, 2); }
+  if (s === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
+    onlineDecideModal('p2', '里绪（万圣祭）·换位', '选两张角色卡交换位置（一局一次）', '', labels, function (o) { if (o >= 0) pick(o); });
+    return;
+  }
+  if (typeof showChoiceModal === 'function') {
+    showChoiceModal('里绪（万圣祭）·换位', '选两张角色卡交换位置（一局一次）', '', labels, function (o) { if (o >= 0) pick(o); });
+    return;
+  }
+  apply(0, 1);
 }
 function activateEdwardSP(seat) {
   /* 座位以**事实**为准；不传 ⇒ 本机玩家 p1（旧调用方） */
@@ -21878,7 +22031,7 @@ function __captainPassives(player, p, env) {
       }
       
       // 现实间里绪被动（精确匹配：里绪(水着)是另一形态、被动完全不同，不得触发移动累计造伤）
-      if (charName === '现实间里绪' || (charName.indexOf('现实间里绪') >= 0 && charName.indexOf('水着') < 0)) {
+      if (charName === '现实间里绪' || (charName.indexOf('现实间里绪') >= 0 && charName.indexOf('水着') < 0 && charName.indexOf('万圣祭') < 0)) {
         p._rioPassive = true;
         p._rioMoveCount = 0;
       }
@@ -22001,6 +22154,15 @@ function __captainPassives(player, p, env) {
         // 注意：**不要**在这里给 _attrBonus 加 1 —— 那会把"费用≤3才有的克制+1"变成全局克制+1。
         // 克制那一份由伤害出口的 __lhwOk（费用≤3判定）与费用加伤共用同一个条件。
         addBattleLog(player, '【琉璃(万圣祭)被动·来点喜欢的】自己费用≤3的卡最终伤害+1、且该卡产生属性克制时那次克制伤害+1；可在自己回合主动支付3点同步值回收效果处理区的永续卡');
+      }
+
+      // ===== 里绪（万圣祭）被动【不给糖就捣蛋！】（仅队长）=====
+      if (charName.indexOf('里绪') >= 0 && charName.indexOf('万圣祭') >= 0) {
+        p._rioHWPassive = true;
+        p._rioHWDamageTurn = 0;
+        p._rioHWForceRound = 0;
+        p._rioHWSwapUsed = false;
+        addBattleLog(player, '【里绪（万圣祭）被动·不给糖就捣蛋！】己方献祭后造1热忱；对手回合可强制献祭；一局一次换位');
       }
 
       // ===== 羽奈(往昔)被动【憧憬的正义】（仅队长）=====
@@ -22131,8 +22293,8 @@ function processCharacterPassives(player) {
         /* 【2026-09-28 新卡面】旧 SP 的"每次献祭后回自身1同步"已取消；改为"每次献祭后：下一次使用的技能卡音韵值-1" */
         addBattleLog(player, '【里尔亚斯SP】每回合献祭次数+1，每次献祭后回自身1同步');
       }
-      // 8 里绪（普通）：全队判定伤害+1
-      if (charName.indexOf('里绪') >= 0 && charName.indexOf('水着') < 0) {
+      // 8 里绪（普通）：全队判定伤害+1（万圣祭是另一形态）
+      if (charName.indexOf('里绪') >= 0 && charName.indexOf('水着') < 0 && charName.indexOf('万圣祭') < 0) {
         p._rioSP = true; p._judgeDamageBonus = (p._judgeDamageBonus || 0) + 1;
         addBattleLog(player, '【现实间里绪SP】全队判定伤害+1');
       }
@@ -22186,6 +22348,11 @@ function processCharacterPassives(player) {
       if (charName.indexOf('琉璃') >= 0 && charName.indexOf('万圣祭') >= 0) {
         p._liuliHWSP = true; p._liuliHWSPTurn = 0;
         addBattleLog(player, '【琉璃(万圣祭)SP】一回合一次：有卡不因使用离开原本区域时自己抽1张（编组类）');
+      }
+      // 25.5 里绪（万圣祭）：每回合首次献祭后磨牌顶1张（编组类）
+      if (charName.indexOf('里绪') >= 0 && charName.indexOf('万圣祭') >= 0) {
+        p._rioHWSP = true; p._rioHWSPTurn = 0;
+        addBattleLog(player, '【里绪（万圣祭）SP】每回合首次献祭后，牌组最上方1张送入墓地（编组类）');
       }
       // 26 羽奈(往昔)：自己每有一张公开的卡，全队造成的最终伤害+1（编组类）
       if (charName.indexOf('羽奈') >= 0 && charName.indexOf('往昔') >= 0) {
