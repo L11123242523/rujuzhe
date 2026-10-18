@@ -18630,7 +18630,7 @@ var __sfx = (function () {
     chain: 'assets/audio/chain.wav?v=2', turn: 'assets/audio/turn.wav?v=2',
     win: 'assets/audio/win.wav?v=2', lose: 'assets/audio/lose.wav?v=2',
     /* 【2026-10-15 作者要求】【雷閃】专属音效：电流声（素材由 port-old/gen_audio_leishan.py 生成 ✓） */
-    leishan: 'assets/audio/leishan.wav?v=1'
+    leishan: 'assets/audio/leishan.wav?v=2'   /* 2026-10-18 神罚版重做，缓存键 +1 */
   };
   var BGM_URL = 'assets/audio/bgm.wav?v=1';           /* 旧：合成琶音（作兜底保留） */
   /* 【2026-10-03】真实 BGM 两轨：常驻 / 残血（ncm2audio.py 从 .ncm 解密） */
@@ -18712,18 +18712,25 @@ var __sfx = (function () {
     /* 【2026-10-15】【雷閃】电流声的**合成回退**（素材 leishan.wav 加载失败时用，口径与其它音效一致）：
        高通噪声放电爆发 + 一串随机噼啪（电弧感）+ 高频下滑哨音（电流退去）+ 低频体量。 */
     leishan: function () {
-      /* ① 放电爆发（亮、快） */
-      noise(0.16, 'highpass', 2400, 0.9, 0.34, 0, 1800);
-      /* ② 噼啪电弧：频率与间隔都抖动 */
-      for (var i = 0; i < 9; i++) {
-        noise(0.02 + Math.random() * 0.02, 'bandpass', 3200 + Math.random() * 3200, 2.4,
-              0.16 * (1 - i / 11), 0.03 + i * (0.028 + Math.random() * 0.022));
+      /* 【2026-10-18 神罚版】低频雷击 + 电弧 + 神性低音 + 长尾（素材加载失败时仍要有压迫感） */
+      /* ① 落雷：宽频爆裂 + 低频下坠 */
+      noise(0.18, 'highpass', 2200, 1.0, 0.42, 0, 1600);
+      tone(95, 0.55, 'sine', 0.38, 0, 34);
+      tone(55, 0.65, 'sine', 0.30, 0, 30);
+      noise(0.50, 'lowpass', 170, 0.95, 0.55, 0, 60);
+      /* ② 电弧群 */
+      for (var i = 0; i < 12; i++) {
+        noise(0.018 + Math.random() * 0.018, 'bandpass', 3200 + Math.random() * 3600, 2.4,
+              0.20 * (1 - i / 14), 0.02 + i * (0.026 + Math.random() * 0.020));
       }
-      /* ③ 余韵：滋滋衰减 + 高频下滑 */
-      noise(0.30, 'bandpass', 4200, 0.8, 0.10, 0.06, 900);
-      tone(5200, 0.20, 'sine', 0.05, 0.05, 900);
-      /* ④ 低频体量：不至于只有高频显得单薄 */
-      tone(150, 0.26, 'sine', 0.14, 0, 55);
+      /* ③ 神性低音（失谐谐波群） */
+      tone(55, 0.75, 'sine', 0.20, 0.02);
+      tone(82.5, 0.70, 'triangle', 0.12, 0.03);
+      tone(110, 0.65, 'sine', 0.10, 0.04);
+      /* ④ 长尾：高频先退、低频后收 */
+      noise(0.45, 'bandpass', 3800, 0.7, 0.10, 0.10, 700);
+      tone(5200, 0.22, 'sine', 0.05, 0.08, 800);
+      tone(42, 0.80, 'sine', 0.18, 0.10, 30);
     }
   };
   /* —— 对局 BGM：本地合成的 8 小节循环（柔和琶音 + 低音），可单独开关 —— */
@@ -18863,7 +18870,9 @@ var __sfx = (function () {
         var url = ASSETS[name];
         if (url && typeof Audio === 'function') {
           var a = new Audio(url);
-          try { a.volume = Math.min(1, cfg.vol); } catch (e) { try { console.error('[catch] assets/engine.js:16699', e); } catch (e2) {} }
+          /* 【2026-10-18 作者要求】雷闪要“有压迫感”：单独 +45% 增益（仍受总音量上限 1 限制） */
+          var __boost = (name === 'leishan') ? 1.45 : 1;
+          try { a.volume = Math.min(1, cfg.vol * __boost); } catch (e) { try { console.error('[catch] assets/engine.js:16699', e); } catch (e2) {} }
           var p = a.play();
           if (p && p.catch) p.catch(function () { try { var f = PRESETS[name]; if (f) f(); } catch (e2) { try { console.error('[catch] assets/engine.js:16701', e2); } catch (e2) {} } });
           return;
