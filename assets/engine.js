@@ -18526,7 +18526,9 @@ function __publicCardCount(p) {
   var n = 0;
   /* 【2026-10-14 补】手牌区也要算：**被公开的手卡**同样是「公开的卡」✓
      判据走唯一的 `__isPublicCard` ⇒ 手牌默认未标记 ⇒ 不计入 ✓（语义正确） */
-  ['deck', 'grave', 'permanent', 'hand'].forEach(function (z) {
+  /* 【2026-10-19 作者问】冬马②公开后留在 faceDownCards（_faceUp=true）——这里原来没扫该区，
+     导致死灵令牌/羽奈(往昔)SP 都看不到这张公开卡。加入 faceDownCards；未标 _faceUp 的盖卡仍不计 ✓ */
+  ['deck', 'grave', 'permanent', 'hand', 'faceDownCards'].forEach(function (z) {
     (p[z] || []).forEach(function (c) { if (__isPublicCard(c, z)) n++; });
   });
   return n;
@@ -20175,8 +20177,23 @@ function __opsCards(op, ctx, next, env) {
       var dw = op.who === 'self' ? user : target, dl2 = collectZoneCards(dw, [op.zone], null, null);
       // 没有可破坏的卡时**必须说话**：旧实现静默结束，测试/玩家都会误以为"这张卡坏了"
       if (!dl2.length) { addBattleLog(user, '【' + ((ctx && ctx.card && ctx.card.name) || '效果') + '】目标区域内没有可破坏的卡，本段不适用'); break; }
-      pickFromList(user, dl2, '选择要破坏的卡', 1, function (picks) {
-        picks.forEach(function (pk) { var arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(pk.card); runTiming(TIMING.ON_REMOVE, { player: dw, card: pk.card }); } else { battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { /* 卡面 2026-09-25 版已删除「自己的卡被破坏后受到2点无来源热忱伤害」——旧实现随之移除，不再造成伤害 */ } } addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + '【' + pk.card.name + '】'); });
+      /* 【2026-10-19 作者口径】破坏对手手卡**不是查看手牌**：
+         卡面只写"破坏其1张手卡"，没有"查看" ⇒ 不能把对手整手牌当卡面列出来。
+         自己的手卡仍显示真实卡；对手手卡只给"第N张（内容保密）"，回调用 _realCard 映射。 */
+      var __hideHand = (op.zone === 'hand' && dw !== user);
+      var __choices = dl2.map(function (pk, i) {
+        if (!__hideHand) return pk;
+        return { card: { name: '第' + (i + 1) + '张（内容保密）', _hiddenHand: true }, zone: pk.zone, index: pk.index, _realCard: pk.card };
+      });
+      pickFromList(user, __choices, '选择要破坏的卡', 1, function (picks) {
+        picks.forEach(function (pk) {
+          var __real = pk._realCard || pk.card;
+          var arr = battleState[dw][pk.zone]; var ix = arr ? arr.indexOf(__real) : -1; if (ix < 0) return;
+          arr.splice(ix, 1);
+          if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(__real); runTiming(TIMING.ON_REMOVE, { player: dw, card: __real }); }
+          else { battleState[dw].grave.push(__real); battleState[dw]._lastDestroyed = __real; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, __real, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { /* 卡面 2026-09-25 版已删除「自己的卡被破坏后受到2点无来源热忱伤害」——旧实现随之移除，不再造成伤害 */ } }
+          addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + (__hideHand ? '一张手卡（内容保密）' : '【' + __real.name + '】'));
+        });
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
       }); return;
@@ -25896,12 +25913,20 @@ function postUsePassiveHooks(user, card, done) {
             var __wp = battleState[who];
             if (!__wp || !(__wp.hand || []).length) { addBattleLog(user, '【爱德华被动】' + (who === 'p1' ? '你' : '对手') + '没有手卡，无法破坏'); next(); return; }
             if (user === 'p1' && typeof pickFromList === 'function') {
-              pickFromList('p1', __wp.hand.map(function (c, i) { return { card: c, zone: 'hand', index: i }; }), '爱德华被动：破坏' + (who === 'p1' ? '自己' : '对手') + '一张手卡', 1, function (picks) {
+              /* 【2026-10-19 作者口径】破坏对手手卡不查看：对手手卡只给"第N张（内容保密）"，
+                 自己的手卡才显示真实卡面。 */
+              var __edHide = (who !== user);
+              var __edChoices = __wp.hand.map(function (c, i) {
+                return __edHide ? { card: { name: '第' + (i + 1) + '张（内容保密）', _hiddenHand: true }, zone: 'hand', index: i, _realCard: c }
+                                : { card: c, zone: 'hand', index: i };
+              });
+              pickFromList('p1', __edChoices, '爱德华被动：破坏' + (who === 'p1' ? '自己' : '对手') + '一张手卡', 1, function (picks) {
                 if (picks && picks.length) {
-                  var __ix = __wp.hand.indexOf(picks[0].card); if (__ix >= 0) __wp.hand.splice(__ix, 1);
-                  (__wp.grave = __wp.grave || []).push(picks[0].card);
-                  if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, picks[0].card, 'effect');
-                  addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + '手卡【' + picks[0].card.name + '】');
+                  var __edReal = picks[0]._realCard || picks[0].card;
+                  var __ix = __wp.hand.indexOf(__edReal); if (__ix >= 0) __wp.hand.splice(__ix, 1);
+                  (__wp.grave = __wp.grave || []).push(__edReal);
+                  if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, __edReal, 'effect');
+                  addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + (__edHide ? '一张手卡（内容保密）' : '手卡【' + __edReal.name + '】'));
                 }
                 if (typeof updateBattleUI === 'function') updateBattleUI();
                 next();
