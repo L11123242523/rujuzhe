@@ -12770,20 +12770,24 @@ function __effectsResolving() {
 /** 把挂起的格子效果依次执行（只在"确实没有效果在结算"时执行；否则留到下次出口） */
 function __flushDeferredTileEffects() {
   try {
+    if (__tileQueueFlushing) return 0;                        // 防重入：同一时刻只允许一个排空者
     var bs = (typeof battleState !== 'undefined') ? battleState : null;
     if (!bs || !bs._deferredTileEffects || !bs._deferredTileEffects.length) return 0;
     if (__effectsResolving()) return 0;                       // 还在结算：下次出口再来
+    __tileQueueFlushing = true;
     var n = 0;
-    while (bs._deferredTileEffects.length && !__effectsResolving()) {
-      var w = bs._deferredTileEffects.shift();
-      n++;
-      try {
-        addBattleLog(w, '【格子效果】效果结算完毕 ⇒ 现在结算所在格子的效果');
-        triggerTileEffect(w);
-      } catch (e) { console.error('挂起的格子效果执行出错', e); }
-    }
+    try {
+      while (bs._deferredTileEffects.length && !__effectsResolving()) {
+        var w = bs._deferredTileEffects.shift();
+        n++;
+        try {
+          addBattleLog(w, '【格子效果】效果结算完毕 ⇒ 现在结算所在格子的效果');
+          triggerTileEffect(w);
+        } catch (e) { console.error('挂起的格子效果执行出错', e); }
+      }
+    } finally { __tileQueueFlushing = false; }
     return n;
-  } catch (e) { return 0; }
+  } catch (e) { __tileQueueFlushing = false; return 0; }
 }
 /* 【2026-10-03 作者口径·格子效果排队（连锁中产生）】连锁/效果结算过程中产生的格子效果**不在当前连锁里插队**，
    只入队；等当前连锁**全部结算完成**后（TW.close 里）再取出来处理 —— 与"连锁中产生的新效果
@@ -12792,11 +12796,16 @@ var __tileQueueFlushing = false;
 function __queueTileEffect(player) {
   try {
     if (typeof battleState === 'undefined' || !battleState) return false;
-    try { if (typeof effectEngine !== 'undefined' && effectEngine) { effectEngine._pendingTriggers = effectEngine._pendingTriggers || []; } } catch (e) { try { console.error('[catch] assets/engine.js:11245', e); } catch (e2) {} }
-    var __tq = (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._pendingTriggers) || null;
-    if (!__tq) return false;
-    for (var __ti = 0; __ti < __tq.length; __ti++) { if (__tq[__ti] && __tq[__ti].__tileFor === player) return false; }
-    __tq.push({ id: '__tile', label: '__tile:' + player, __tileFor: player, fire: function () { return triggerTileEffect(player); } });
+    /* 【2026-10-18 作者报「卡牌移动到达的格子效果有概率不处理/延迟很久」·结构修】
+       原来格子效果被塞进 effectEngine._pendingTriggers（那是"连锁触发"的队列），
+       会被 __tryDrainTriggers 当成新连锁节点消费，或与别的触发抢顺序 ⇒ 偶尔漏/晚。
+       格子效果有**自己的生命周期**（当前连锁结束 → 立即结算），必须走专用队列：
+       battleState._deferredTileEffects（已有的 __flushDeferredTileEffects 正是为它写的，
+       但此前没有任何地方 push ⇒ 成了死代码）。
+       去重按座位：同一座位同一时刻只排一次。 */
+    var q = battleState._deferredTileEffects || (battleState._deferredTileEffects = []);
+    if (q.indexOf(player) >= 0) return false;
+    q.push(player);
     var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES[battleState[player].position]) || {};
     addBattleLog(player, '【格子效果】结算中产生（第' + battleState[player].position + '格【' + (t.name || '') + '】）⇒ 排队，等本次连锁全部结算完成后再处理');
     return true;
@@ -12850,38 +12859,22 @@ function __drainAllWhenIdle(reason) {
   } catch (e) { try { console.error('[catch] assets/engine.js:11284', e); } catch (e2) {} }
 }
 function __flushPendingTileEffects() {
+  /* 【2026-10-18】唯一排空入口：专用格子队列（含旧 _pendingTriggers 里遗留的 __tile 条目迁移）。 */
   try {
-    if (__tileQueueFlushing) return;
-    var __all = (typeof effectEngine !== 'undefined' && effectEngine && effectEngine._pendingTriggers) || [];
-      var q = [];
-      for (var __i = 0; __i < __all.length; __i++) { if (__all[__i] && __all[__i].__tileFor) q.push(__all[__i].__tileFor); }
-      if (!q.length) return;
-    if (typeof __effectsResolving === 'function' && __effectsResolving()) {
-      /* 【2026-10-03 端到端实测修】"排了队但没人处理"：收尾那一刻结算上下文可能还没退干净
-         ⇒ 安排一次**延后重试**（上限 40 次 ≈ 6 秒，防死循环），等结算真正结束再处理。 */
-      try {
-        if (!window.__tileFlushRetry) {
-          window.__tileFlushRetry = 0;
-          var __try = function () {
-            window.__tileFlushRetry++;
-            if (window.__tileFlushRetry > 40) { window.__tileFlushRetry = 0; return; }
-            try { if (typeof __effectsResolving === 'function' && __effectsResolving()) { setTimeout(__try, 150); return; } } catch (e) { try { console.error('[catch] assets/engine.js:11302', e); } catch (e2) {} }
-            window.__tileFlushRetry = 0;
-            __flushPendingTileEffects();
-          };
-          setTimeout(__try, 150);
-        }
-      } catch (e) { try { console.error('[catch] assets/engine.js:11308', e); } catch (e2) {} }
-      return;
+    var __ee = (typeof effectEngine !== 'undefined') ? effectEngine : null;
+    if (__ee && (__ee._pendingTriggers || []).length) {
+      var __keep = [];
+      for (var __i = 0; __i < __ee._pendingTriggers.length; __i++) {
+        var __it = __ee._pendingTriggers[__i];
+        if (__it && __it.__tileFor) {
+          var __dq = battleState._deferredTileEffects || (battleState._deferredTileEffects = []);
+          if (__dq.indexOf(__it.__tileFor) < 0) __dq.push(__it.__tileFor);
+        } else __keep.push(__it);
+      }
+      __ee._pendingTriggers = __keep;
     }
-    __tileQueueFlushing = true;
-    var player = q[0];
-
-    for (var __k = __all.length - 1; __k >= 0; __k--) { if (__all[__k] && __all[__k].__tileFor === player) { __all.splice(__k, 1); break; } }
-    try { addBattleLog(player, '【格子效果】本次连锁已全部结算完成 ⇒ 现在处理排队的格子效果'); } catch (e) { try { console.error('[catch] assets/engine.js:11315', e); } catch (e2) {} }
-    try { triggerTileEffect(player); } catch (e) { try { console.error('处理排队格子效果出错', e); } catch (e2) { try { console.error('[catch] assets/engine.js:11316', e2); } catch (e2) {} } }
-    __tileQueueFlushing = false;
-  } catch (e) { __tileQueueFlushing = false; }
+    return (typeof __flushDeferredTileEffects === 'function') ? __flushDeferredTileEffects() : 0;
+  } catch (e) { return 0; }
 }
 function triggerTileEffect(player) {
   /* 【2026-10-05 作者口径修】分两种到达原因：
