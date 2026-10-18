@@ -12449,7 +12449,10 @@ function __syncZeroBusy() {
 function __syncZeroCheckNow(tag) {
   try {
     if (typeof battleState === 'undefined' || !battleState || battleState._over) return false;
-    if (!(battleState.p1.sync <= 0 || battleState.p2.sync <= 0)) return false;
+    /* 【2026-10-18 作者报「入迷值归零判负」·结构修】入迷归零与同步归零共用同一个“忙完补判”事件点；
+       不仅看 sync，也看 fascination。 */
+    if (!(battleState.p1.sync <= 0 || battleState.p2.sync <= 0
+          || battleState.p1.fascination <= 0 || battleState.p2.fascination <= 0)) return false;
     if (typeof __syncZeroBusy === 'function' && __syncZeroBusy()) return false;
     checkBattleEnd();
     return true;
@@ -12523,19 +12526,20 @@ function checkBattleEnd() {
     __finishBattle(true, '你获胜了！', __oppNm + ' 的同步值归零。漂亮的胜利！');
     return true;
   }
-  // 入迷值归零判定（破局获胜）
-  if (battleState.p1.fascination <= 0) {
-    battleState._over = true;
-    __revertAllBlueprintCopies();
-    if (isRL) { onRoguelikeBattleEnd(false); return true; }
-    __finishBattle(false, __oppNm + ' 破局获胜', '你的入迷值归零。破局失败……');
-    return true;
-  }
-  if (battleState.p2.fascination <= 0) {
+  // 入迷值归零判定（**破局胜利**，作者 2026-10-18 明确）
+  // 谁的入迷先归零，谁破局成功；与同步归零共用“忙链延后 + 忙完补判”的同一道闸。
+  if (battleState.p1.fascination <= 0 && !__syncZeroDefer) {
     battleState._over = true;
     __revertAllBlueprintCopies();
     if (isRL) { onRoguelikeBattleEnd(true); return true; }
-    __finishBattle(true, '破局获胜！', __oppNm + ' 的入迷值归零。你以破局方式赢下了对局！');
+    __finishBattle(true, '破局获胜！', '你的入迷值归零，破局成功！');
+    return true;
+  }
+  if (battleState.p2.fascination <= 0 && !__syncZeroDefer) {
+    battleState._over = true;
+    __revertAllBlueprintCopies();
+    if (isRL) { onRoguelikeBattleEnd(false); return true; }
+    __finishBattle(false, __oppNm + ' 破局获胜', __oppNm + ' 的入迷值归零，破局成功。');
     return true;
   }
   return false;
@@ -27168,6 +27172,7 @@ try { window.aiEndTurn = aiEndTurn; } catch (e) {}
 try { window.__revertAllBlueprintCopies = __revertAllBlueprintCopies; } catch (e) {}
 try { window.__syncZeroBusy = __syncZeroBusy; } catch (e) {}
 try { window.checkBattleEnd = checkBattleEnd; } catch (e) {}
+try { window.__syncZeroCheckNow = __syncZeroCheckNow; } catch (e) {}
 try { window.BUS_ANCHORS = BUS_ANCHORS; } catch (e) {}
 try { window.BUS_EDGES = BUS_EDGES; } catch (e) {}
 try { window.BUS_STATION_ANCHOR = BUS_STATION_ANCHOR; } catch (e) {}
