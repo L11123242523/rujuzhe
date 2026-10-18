@@ -21569,7 +21569,8 @@ function __eventCasesA(card, player, p, done, env) {
           : (c._category === 'item_permanent') ? '永续卡'
           : (c._category === 'item_single') ? '单次卡'
           : (c._category === 'item_cards') ? '道具卡' : '卡';
-        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + __kind + '【' + c.name + '】并移出本局游戏');
+        var __hid = (sd !== player && __zn === 'faceDownCards');
+        addBattleLog(player, '命运之回声：破坏' + (sd === player ? '自己' : '对方') + __kind + (__hid ? '（内容保密）' : '【' + c.name + '】') + '并移出本局游戏');
         var __ed = false;
         try { __ed = ((deckConfig[player].chars || [])).some(function (ch) { return ch && ch.name && ch.name.indexOf('露璐缇雅') >= 0; }); } catch (e) { try { console.error('[catch] assets/engine.js:18566', e); } catch (e2) {} }
         if (__ed) {
@@ -21591,8 +21592,15 @@ function __eventCasesA(card, player, p, done, env) {
         updateBattleUI();
       }
       if (__pool.length) {
+        /* 【2026-10-19 作者报】对手盖放卡被选中时能看到卡名/卡图 ⇒ 只给"盖放卡（内容保密）"，
+           仍按同一索引处理；自己的盖放卡正常显示。 */
+        function __echoHidden(side, zone, c) { return side !== player && zone === 'faceDownCards'; }
+        var __viewPool = __pool.map(function (c, i) {
+          return __echoHidden(__sides[i], __zones[i], c) ? { name: '盖放卡（内容保密）', _hidden: true } : c;
+        });
+        function __echoLabel(i) { return __viewPool[i].name + '（' + (__sides[i] === player ? '自己' : '对方') + '）'; }
         if (__ecOL && player === 'p2') {
-          Online.awaitAnswer({ label: '命运之回声·选卡破坏（对手）', cards: __pool.map(function(c,i){ return c.name + '（' + (__sides[i]===player?'自己':'对方') + '）'; }) }, function (v) {
+          Online.awaitAnswer({ label: '命运之回声·选卡破坏（对手）', cards: __pool.map(function(c,i){ return __echoLabel(i); }) }, function (v) {
             __destroy(Array.isArray(v) ? v[0] : v);
           });
         } else if (!__ecOL && player !== 'p1') {
@@ -21603,7 +21611,7 @@ function __eventCasesA(card, player, p, done, env) {
           for (var __fi = 0; __fi < __pool.length; __fi++) { if (__sides[__fi] === __ecFoe) { __foeIdx = __fi; break; } }
           if (__foeIdx >= 0) __destroy(__foeIdx);
           else addBattleLog(player, '命运之回声：对手场上没有可破坏的功能卡');
-        } else showCardPickerMulti(__pool, '命运之回声：选场上1张功能卡破坏并移出本局游戏', function (idx) { __destroy(Array.isArray(idx) ? idx[0] : idx); });
+        } else showCardPickerMulti(__viewPool, '命运之回声：选场上1张功能卡破坏并移出本局游戏', function (idx) { __destroy(Array.isArray(idx) ? idx[0] : idx); });
       }
       else addBattleLog(player, '命运之回声：场上没有可破坏的功能卡');
       break;
