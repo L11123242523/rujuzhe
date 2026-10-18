@@ -15197,6 +15197,19 @@ function __tomaDeclare(player) {
         var declared = ATTRS[o] || '无序';
         pickFromList('p1', pool, '选一张暗置的卡公开（声明：' + declared + '）', 1, function (picks) { __resolve(declared, picks && picks[0]); });
       });
+    } else if (player === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') {
+      /* 【2026-10-19 全端对账】联机 p2 的冬马被动原来落到 AI 分支（随机声明/随机选卡），
+         客人看不到选择。现在与 p1 同权：先问属性，再问暗置卡。 */
+      onlineDecideModal('p2', '冬马被动·分析大师的游刃有余', '声明一种属性（颜色）', '然后选择一名玩家的一张暗置的卡公开', ATTRS, function (o) {
+        var declared = ATTRS[o] || '无序';
+        try {
+          Online.awaitAnswer({ label: '冬马被动·选择暗置卡（声明：' + declared + '）', cards: pool.map(function (x) { return x.card.name; }), need: 1 }, function (v) {
+            var idx = Array.isArray(v) ? v[0] : v;
+            if (typeof idx !== 'number' || idx < 0 || idx >= pool.length) return;
+            __resolve(declared, pool[idx]);
+          });
+        } catch (e) { __resolve(declared, pool[0]); }
+      });
     } else {
       __resolve('无序', pool[GameRNG.range(0, pool.length - 1)]);   // AI：声明无序，随机公开一张
     }
