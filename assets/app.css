@@ -3676,3 +3676,209 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   #tutorialScreen .tut-btn{ min-height:48px; font-size:14px; }
 }
 /* ===== 新手教程屏样式结束 ===== */
+
+
+/* ==================================================================
+   主菜单 v2（2026-10-19）—— 主视觉 + 主操作卡 + 次级功能网格
+   只作用于 #mainMenu.main-menu-v2；不改其它 screen / 战斗界面。
+   ================================================================== */
+#mainMenu.main-menu-v2 {
+  display: none;
+  position: relative;
+  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+  overflow-x: hidden;
+  align-items: center;
+  justify-content: center;
+  background: #070a10;
+}
+#mainMenu.main-menu-v2.active { display: flex; }
+#mainMenu.main-menu-v2 .mm-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(900px 600px at 12% 18%, rgba(254,202,87,.12), transparent 62%),
+    radial-gradient(700px 500px at 86% 78%, rgba(72,219,251,.10), transparent 64%),
+    url('images/ui2/card_face_liuli_wansheng.webp') center 38% / cover no-repeat;
+  filter: blur(2px) saturate(.68) brightness(.42);
+  transform: scale(1.06);
+}
+#mainMenu.main-menu-v2 .mm-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(5,8,14,.96) 0%, rgba(5,8,14,.82) 38%, rgba(5,8,14,.52) 62%, rgba(5,8,14,.88) 100%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.028) 0 1px, transparent 1px 4px);
+}
+#mainMenu.main-menu-v2 .mm-shell {
+  position: relative;
+  z-index: 2;
+  width: min(1180px, 92vw);
+  display: grid;
+  grid-template-columns: minmax(300px, .9fr) minmax(430px, 1.1fr);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: center;
+  padding: 46px 0;
+}
+#mainMenu.main-menu-v2 .mm-hero { max-width: 520px; }
+#mainMenu.main-menu-v2 .mm-eyebrow {
+  color: #c9a96a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#mainMenu.main-menu-v2 .mm-eyebrow span { color: rgba(255,255,255,.28); }
+#mainMenu.main-menu-v2 .game-title {
+  font-size: clamp(64px, 9vw, 112px);
+  line-height: .96;
+  letter-spacing: 10px;
+  margin: 0 0 14px;
+  background: linear-gradient(120deg, #fff8e6 0%, #f3d99a 28%, #c9994e 58%, #fff1c9 82%, #d9ad63 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 10px 26px rgba(0,0,0,.55));
+}
+#mainMenu.main-menu-v2 .game-subtitle {
+  font-size: clamp(13px, 1.4vw, 17px);
+  color: #d9c391;
+  letter-spacing: 8px;
+  margin: 0 0 24px;
+  font-weight: 500;
+}
+#mainMenu.main-menu-v2 .mm-tagline {
+  max-width: 420px;
+  color: rgba(231,238,250,.62);
+  font-size: 14px;
+  line-height: 1.9;
+  margin: 0 0 28px;
+}
+#mainMenu.main-menu-v2 .mm-hero-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(231,238,250,.46);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+#mainMenu.main-menu-v2 .mm-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #7ee0a3;
+  box-shadow: 0 0 12px rgba(126,224,163,.8);
+}
+#mainMenu.main-menu-v2 .mm-actions { display: flex; flex-direction: column; gap: 16px; }
+#mainMenu.main-menu-v2 .mm-primary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#mainMenu.main-menu-v2 .mm-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 92px;
+  padding: 15px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(135deg, rgba(26,34,48,.92), rgba(14,19,29,.88));
+  color: #eef4ff;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 14px 30px -14px rgba(0,0,0,.9);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+#mainMenu.main-menu-v2 .mm-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 14px; bottom: 14px;
+  width: 3px; border-radius: 3px;
+  background: var(--mm-accent, #feca57);
+  opacity: .9;
+}
+#mainMenu.main-menu-v2 .mm-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--mm-accent, #feca57) 55%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 22px 40px -16px rgba(0,0,0,.95);
+}
+#mainMenu.main-menu-v2 .mm-card:active { transform: translateY(0) scale(.995); }
+#mainMenu.main-menu-v2 .mm-pve { --mm-accent: #e86a72; }
+#mainMenu.main-menu-v2 .mm-online { --mm-accent: #46b7e8; }
+#mainMenu.main-menu-v2 .mm-deck { --mm-accent: #e9b45c; }
+#mainMenu.main-menu-v2 .mm-lab { --mm-accent: #a78bfa; }
+#mainMenu.main-menu-v2 .mm-ico {
+  flex: 0 0 38px;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 18px;
+}
+#mainMenu.main-menu-v2 .mm-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+#mainMenu.main-menu-v2 .mm-copy b { font-size: 16px; letter-spacing: 1px; }
+#mainMenu.main-menu-v2 .mm-copy small { color: rgba(231,238,250,.52); font-size: 11px; font-weight: 400; letter-spacing: .2px; }
+#mainMenu.main-menu-v2 .mm-go {
+  margin-left: auto;
+  align-self: flex-start;
+  color: var(--mm-accent, #feca57);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 2px;
+  opacity: .8;
+}
+#mainMenu.main-menu-v2 .mm-secondary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+}
+#mainMenu.main-menu-v2 .mm-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px 13px;
+  min-height: 72px;
+  border-radius: 11px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(15,20,29,.72);
+  color: #dce6f5;
+  cursor: pointer;
+  text-align: left;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+#mainMenu.main-menu-v2 .mm-mini span { font-size: 15px; line-height: 1; margin-bottom: 4px; }
+#mainMenu.main-menu-v2 .mm-mini b { font-size: 12px; letter-spacing: .4px; }
+#mainMenu.main-menu-v2 .mm-mini small { color: rgba(220,230,245,.42); font-size: 10px; }
+#mainMenu.main-menu-v2 .mm-mini:hover {
+  background: rgba(28,38,54,.92);
+  border-color: rgba(254,202,87,.35);
+  transform: translateY(-2px);
+}
+#mainMenu.main-menu-v2 .mm-mini:active { transform: translateY(0); }
+
+@media (max-width: 920px) {
+  #mainMenu.main-menu-v2 { align-items: center; overflow-y: auto; padding-left: 16px; padding-right: 16px; }
+  #mainMenu.main-menu-v2 .mm-shell { grid-template-columns: 1fr; gap: 26px; padding: 34px 0 40px; width: 100%; max-width: 100%; }
+  #mainMenu.main-menu-v2 .mm-hero { max-width: none; min-width: 0; text-align: left; }
+  #mainMenu.main-menu-v2 .mm-eyebrow,
+  #mainMenu.main-menu-v2 .game-subtitle,
+  #mainMenu.main-menu-v2 .mm-tagline { text-align: left; }
+  #mainMenu.main-menu-v2 .mm-actions { min-width: 0; }
+  #mainMenu.main-menu-v2 .mm-card,
+  #mainMenu.main-menu-v2 .mm-mini { max-width: 100%; }
+  #mainMenu.main-menu-v2 .game-title { font-size: 72px; letter-spacing: 6px; }
+  #mainMenu.main-menu-v2 .mm-tagline { margin-bottom: 0; }
+  #mainMenu.main-menu-v2 .mm-primary { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 620px) {
+  #mainMenu.main-menu-v2 .mm-shell { width: 100%; max-width: 100%; }
+  #mainMenu.main-menu-v2 .mm-primary { grid-template-columns: 1fr; }
+  #mainMenu.main-menu-v2 .mm-secondary { grid-template-columns: 1fr 1fr; }
+  #mainMenu.main-menu-v2 .game-title { font-size: 58px; }
+  #mainMenu.main-menu-v2 .mm-card { min-height: 82px; }
+}
