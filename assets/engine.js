@@ -6385,6 +6385,7 @@ function startTurn() {
         var __domReg = (typeof getDomainBuff === 'function') ? ((getDomainBuff(player) || {}).regen || 0) : 0;
         if (__domReg > 0) { __reg += __domReg; addBattleLog(player, '【领域·比翼恋理】每回合自然回复音韵值 +' + __domReg); }
       } catch (e) { console.error('[catch] assets/engine.js:5940 领域自然回复', e); }
+      if (__p._levelRegenPct) { var __lvRegBefore = __reg; __reg = Math.max(1, Math.round(__reg * (1 + __p._levelRegenPct / 100))); addBattleLog(player, '【升级奖励】自然回复 +' + __p._levelRegenPct + '% ⇒ ' + __lvRegBefore + '→' + __reg); }
       recoverCost(player, __reg, '回合开始自然回复');
       __p._lastNaturalRegen = __reg;
     })();
@@ -13901,16 +13902,15 @@ function checkLevelUp(player) {
   if (!p.motivation) p.motivation = 0;
   
   var leveled = false, __upCount = 0;
-  // 先处理升级（连续升级）
+  // 先处理升级（连续升级）；每升 1 级给一次 6 选 1 奖励，不再固定回复 2 同步
   while (p.level < 10) {
     // Lv1→2需要1点，Lv2→3需要2点...Lv5→6需要5点；Lv6起需要7点
     var cost = p.level <= 5 ? p.level : 7;
     if (p.motivation >= cost) {
       p.motivation -= cost;
       p.level++;
-      p.sync = Math.min(p.sync + 2, p.maxSync || p.sync);
       __upCount++;
-      addBattleLog(player, '★升级！Lv' + p.level + '，回复2点同步值（当前同步' + p.sync + '，剩余激励' + p.motivation + '点）');
+      addBattleLog(player, '★升级！Lv' + p.level + '（当前同步' + (p.sync || 0) + '，剩余激励' + p.motivation + '点）——请选择升级奖励');
       leveled = true;
     } else break;
   }
@@ -13926,38 +13926,85 @@ function checkLevelUp(player) {
       showToast('⚠️ 对手升到 Lv' + p.level + '！', 'warn');
     }
     var __hasSup = (p.permanent || []).some(function (c) { return c.name && c.name.indexOf('供给者') >= 0; });
-    // AI：升级奖励默认攻击力+1，避免等待玩家点选（联机远端位不走 AI 自动，与玩家同弹窗序列）
-    if (__hasSup && player !== 'p1' && !(typeof Online !== 'undefined' && Online.active)) { for (var __ai = 0; __ai < __upCount; __ai++) p.attackBuff = (p.attackBuff || 0) + 1; if (__upCount) addBattleLog(player, '【核心的供给者】升级奖励×' + __upCount + '：攻击力+' + __upCount); updateBattleUI(); return; }
-    var __supOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2');
-    function __supOnce(remain) {
-      if (!__hasSup || remain <= 0) { updateBattleUI(); return; }
-      var __supApply = function (i) {
-        if (i === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog(player, '【核心的供给者】升级奖励：攻击力+1'); __supOnce(remain - 1); }
-        else if (i === 1) {
-          if (p._supplierRecovered) { addBattleLog(player, '【核心的供给者】回收移出卡整局限一次，已使用过'); __supOnce(remain - 1); return; }
-          var rm = (p.removed || []).slice();
-          if (!rm.length) { addBattleLog(player, '【核心的供给者】移出区无卡，该项不适用'); __supOnce(remain - 1); return; }
-          function __recoverSup(idx) {
-            var ii = Array.isArray(idx) ? idx[0] : idx;
-            if (ii != null && ii >= 0) { var real = p.removed.indexOf(rm[ii]); if (real >= 0) { var rc = p.removed.splice(real, 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); p._supplierRecovered = true; addBattleLog(player, '【核心的供给者】回收移出卡【' + rc.name + '】加入手卡'); } }
-            __supOnce(remain - 1);
-          }
-          if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）', cards: rm.map(function(c){ return c.name; }) }, __recoverSup);
-          else showCardPickerMulti(rm, '供给者：选一张移出游戏的卡加入手卡', __recoverSup, 1);
-        } else {
-          var __tgt = foeOf(player);
-          if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
-          else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
-          else { dealDamageWithResponse(__tgt, 1 + __rollFor(player, 4, '供给者四面骰'), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }   // 【2026-10-11】走唯一投骰出口 ✓
-        }
-      };
-      if (__supOL) {
-        onlineDecideModal('p2', '核心的供给者·升级奖励（对手）', '每次提升等级后选择一项适用（剩余' + remain + '次）', '', ['① 队伍攻击力+1', '② 选移出区1张加入手卡（整局限一次）', '③ 对一名玩家造成一次四面骰判定伤害'], __supApply);
+    var __opts = ['暴击率 +7%', '自然回复音韵 +10%', '攻击力 +1', '防御值 +1', '回复3点同步值', '回复1点音韵值'];
+    function __applyLevelReward(i) {
+      i = parseInt(i, 10); if (isNaN(i) || i < 0 || i > 5) i = 2;
+      if (i === 0) {
+        p._levelCritRate = (p._levelCritRate || 0) + 7;
+        addBattleLog(player, '【升级奖励】暴击率 +7%（当前 +' + p._levelCritRate + '%）');
+      } else if (i === 1) {
+        p._levelRegenPct = (p._levelRegenPct || 0) + 10;
+        addBattleLog(player, '【升级奖励】自然回复音韵 +10%（当前 +' + p._levelRegenPct + '%）');
+      } else if (i === 2) {
+        p.attackBuff = (p.attackBuff || 0) + 1;
+        addBattleLog(player, '【升级奖励】攻击力 +1（当前攻击+' + ((p.attackBuff || 0) + (p._tempAttack || 0)) + '）');
+      } else if (i === 3) {
+        if (typeof applyDefenseUp === 'function') applyDefenseUp(player, 1);
+        else { p.defenseBase = (p.defenseBase || p.defense || 0) + 1; if (typeof recalcDefense === 'function') recalcDefense(player); }
+        addBattleLog(player, '【升级奖励】防御值 +1');
+      } else if (i === 4) {
+        p.sync = Math.min((p.sync || 0) + 3, p.maxSync || 999);
+        addBattleLog(player, '【升级奖励】回复3点同步值（当前同步' + p.sync + '）');
       } else {
-        showChoiceModal('核心的供给者·升级奖励', '每次提升等级后选择一项适用（剩余' + remain + '次）', '', ['① 队伍攻击力+1', '② 选移出区1张加入手卡（整局限一次）', '③ 对一名玩家造成一次四面骰判定伤害'], __supApply);
+        if (typeof recoverCost === 'function') recoverCost(player, 1, '升级奖励');
+        else p.cost = Math.min((p.cost || 0) + 1, p.maxCost || 999);
+        addBattleLog(player, '【升级奖励】回复1点音韵值（当前音韵' + (p.cost || 0) + '）');
       }
+      if (typeof updateBattleUI === 'function') updateBattleUI();
     }
-    if (__hasSup) __supOnce(__upCount); else updateBattleUI();
+    function __levelReward(remain, done) {
+      if (remain <= 0) { done(); return; }
+      var __pick = function (i) { __applyLevelReward(i); __levelReward(remain - 1, done); };
+      /* AI 座自动选攻击+1；玩家/联机客人自己选。 */
+      if (typeof isAISeat === 'function' && isAISeat(player)) { __pick(2); return; }
+      if (player === 'p1' && typeof showChoiceModal === 'function') {
+        showChoiceModal('升级奖励 Lv' + p.level, '请选择一项升级奖励', '本次升级共 ' + remain + ' 次选择', __opts, __pick);
+        return;
+      }
+      if (player === 'p2' && typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && typeof onlineDecideModal === 'function') {
+        onlineDecideModal('p2', '升级奖励 Lv' + p.level + '（对手）', '请选择一项升级奖励', '本次升级共 ' + remain + ' 次选择', __opts, __pick);
+        return;
+      }
+      __pick(2);
+    }
+    __levelReward(__upCount, function () {
+      /* 核心的供给者：仍按卡面在升级后追加三选一（与上面的通用升级奖励相互独立） */
+      if (__hasSup && player !== 'p1' && !(typeof Online !== 'undefined' && Online.active)) {
+        for (var __ai = 0; __ai < __upCount; __ai++) p.attackBuff = (p.attackBuff || 0) + 1;
+        if (__upCount) addBattleLog(player, '【核心的供给者】升级奖励×' + __upCount + '：攻击力+' + __upCount);
+        updateBattleUI(); return;
+      }
+      var __supOL = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2');
+      function __supOnce(remain) {
+        if (!__hasSup || remain <= 0) { updateBattleUI(); return; }
+        var __supApply = function (i) {
+          if (i === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog(player, '【核心的供给者】升级奖励：攻击力+1'); __supOnce(remain - 1); }
+          else if (i === 1) {
+            if (p._supplierRecovered) { addBattleLog(player, '【核心的供给者】回收移出卡整局限一次，已使用过'); __supOnce(remain - 1); return; }
+            var rm = (p.removed || []).slice();
+            if (!rm.length) { addBattleLog(player, '【核心的供给者】移出区无卡，该项不适用'); __supOnce(remain - 1); return; }
+            function __recoverSup(idx) {
+              var ii = Array.isArray(idx) ? idx[0] : idx;
+              if (ii != null && ii >= 0) { var real = p.removed.indexOf(rm[ii]); if (real >= 0) { var rc = p.removed.splice(real, 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); p._supplierRecovered = true; addBattleLog(player, '【核心的供给者】回收移出卡【' + rc.name + '】加入手卡'); } }
+              __supOnce(remain - 1);
+            }
+            if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）', cards: rm.map(function(c){ return c.name; }) }, __recoverSup);
+            else showCardPickerMulti(rm, '供给者：选一张移出游戏的卡加入手卡', __recoverSup, 1);
+          } else {
+            var __tgt = foeOf(player);
+            if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
+            else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
+            else { dealDamageWithResponse(__tgt, 1 + __rollFor(player, 4, '供给者四面骰'), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }
+          }
+        };
+        if (__supOL) {
+          onlineDecideModal('p2', '核心的供给者·升级奖励（对手）', '每次提升等级后选择一项适用（剩余' + remain + '次）', '', ['① 队伍攻击力+1', '② 选移出区1张加入手卡（整局限一次）', '③ 对一名玩家造成一次四面骰判定伤害'], __supApply);
+        } else {
+          showChoiceModal('核心的供给者·升级奖励', '每次提升等级后选择一项适用（剩余' + remain + '次）', '', ['① 队伍攻击力+1', '② 选移出区1张加入手卡（整局限一次）', '③ 对一名玩家造成一次四面骰判定伤害'], __supApply);
+        }
+      }
+      if (__hasSup) __supOnce(__upCount); else updateBattleUI();
+    });
   }
 }
 
@@ -14983,6 +15030,8 @@ function getActiveBuffs(user) {
   if (p._judgeDamageBonus) P('stat','🎲','判定伤害','+'+p._judgeDamageBonus,'判定伤害增加 '+p._judgeDamageBonus,'jud');
   if (p._attrBonus) P('stat','🎯','克制伤害','+'+p._attrBonus,'属性克制伤害增加 '+p._attrBonus,'jud');
   if (p._critDamageBonus) P('stat','💥','暴击伤害','+'+p._critDamageBonus,'暴击伤害增加 '+p._critDamageBonus,'jud');
+  if (p._levelCritRate) P('stat','🎯','暴击率','+'+p._levelCritRate+'%','升级奖励：暴击率 +'+p._levelCritRate+'%','jud');
+  if (p._levelRegenPct) P('stat','♻️','自然回复','+'+p._levelRegenPct+'%','升级奖励：每回合自然回复音韵 +'+p._levelRegenPct+'%','regen');
   if (p._sacrificeBonus || p._megumiSacBonusThisTurn) P('stat','🔥','献祭次数','+' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)),'每回合可额外献祭 ' + ((p._sacrificeBonus||0)+(p._megumiSacBonusThisTurn||0)) + ' 次','fire');
   if (p._regen) P('stat','❤️','持续回复',p._regen.amount+'/回合','每回合回复'+p._regen.amount+'点同步，剩余'+p._regen.turns+'回合','heal');
   if (p._shenleStack) P('stat','🔔','神乐铃','×'+p._shenleStack,'神乐铃叠加'+p._shenleStack+'层（上限9，使用不消耗，每次使用最终伤害+'+p._shenleStack+'）','san');
@@ -15871,7 +15920,7 @@ function initRules() {
   html += '<p>• 所有玩家开局默认Lv1，最高Lv10</p>';
   html += '<p>• Lv1→Lv5：每级需当前等级-1点激励点数</p>';
   html += '<p>• Lv6起：每升一级需7点激励点数</p>';
-  html += '<p>• 每升1级回复2点同步值</p>';
+  html += '<p>• 每升1级从 6 项升级奖励中选 1 项：暴击率+7% / 自然回复+10% / 攻击力+1 / 防御值+1 / 同步+3 / 音韵+1</p>';
   html += '</div>';
   
   html += '<div class="rules-section"><h3>🎯 永续区规则</h3>';
@@ -15890,6 +15939,17 @@ function initRules() {
    items 改动条目（card 卡名 + chg 改动）。
    数值一律以母本 data/cards.json 与玩家可见的 cards.js / 内联表为准（不许凭记忆写）。 */
 var ANNOUNCEMENTS = [
+  {
+    date: '2026-10-19',
+    title: '等级系统修改：升级奖励 6 选 1',
+    pub: 'v=479',
+    note: '升级不再固定回复 2 点同步值，改为每次升级由升级者自己选择一项：',
+    items: [
+      { card: '等级奖励', chg: '① 暴击率 +7%　② 每回合自然回复音韵 +10%　③ 攻击力 +1　④ 防御值 +1　⑤ 回复3点同步值　⑥ 回复1点音韵值' },
+      { card: '连续升级', chg: '一次升多级时，每升 1 级各选 1 次；选择会累计（暴击率/自然回复可叠加）' },
+      { card: '核心的供给者', chg: '升级后的三选一仍按卡面额外结算（与通用升级奖励相互独立）' }
+    ]
+  },
   {
     date: '2026-10-19',
     title: '平衡性调整 · 第四次补充（冬马 / 宁雨清）',
@@ -16051,7 +16111,7 @@ var TUTORIAL_STEPS = [
     title: '⬆️ 升级与激励点数',
     body: [
       '打牌和触发格子会累积**激励点数**（界面上能看到进度条）。',
-      '攒满后**升级**，等级越高能做的事情越多。',
+      '攒满后**升级**，每升 1 级从 6 项奖励中选 1 项：暴击率+7%、自然回复音韵+10%、攻击力+1、防御值+1、回复3点同步、回复1点音韵。',
       '**引导核心**可以消耗 1 个直接推进升级进度。',
       '角色有【被动】和【SP】两种效果：**队长**提供被动 + SP，**队员**只提供 SP。'
     ]
@@ -18664,7 +18724,7 @@ function computeDamageValue(user, target, opt) {
   var final = core;
   // 暴击：初始暴击率0%，默认爆伤150%；crit_rate/crit_damage 状态与超频加成参与（判定伤害不适用暴击）
   if (!opt.judge && typeof StatusSys !== 'undefined') {
-    var __crate = StatusSys.value(user, 'crit_rate');
+    var __crate = StatusSys.value(user, 'crit_rate') + (ap._levelCritRate || 0);
     if (__crate > 0) {
       var __croll = GameRNG.dice(100);
       if (__croll <= __crate) {
