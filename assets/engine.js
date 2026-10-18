@@ -10735,7 +10735,14 @@ function playDiceRollAnim(who, finalVal, sides, count, cb) {
   ShowQueue.push(function (fin) {
     __playDiceRollAnimShow(who, finalVal, sides, count, function () { try { fin(); } catch (e) { try { console.error('[catch] assets/engine.js:9176', e); } catch (e2) {} } });
   });
-  if (cb) cb();
+  /* 【2026-10-18 作者报「AI 抢跑还是很严重」·结构修】
+     原来逻辑回调**立刻**执行 ⇒ AI 在骰子动画还在转时就 aiExecuteMove（探针实测 aiExecuteMove 时
+     __showBusy=true）⇒ 玩家看到"骰子没停，AI 已经走了/打了"。
+     人类侧保持"逻辑不等演出"（原设计）；AI 侧必须等队列空 —— 统一交给 __aiPace/__aiGuard。 */
+  if (cb) {
+    if (typeof isAISeat === 'function' && isAISeat(who) && typeof __aiPace === 'function') __aiPace(cb, 0);
+    else cb();
+  }
 }
 function __playDiceRollAnimShow(who, finalVal, sides, count, cb) {
   var area = document.getElementById('diceAnimationArea');
@@ -23368,7 +23375,12 @@ function judgeAnimate(user, spec, cb) {
   ShowQueue.push(function (fin) {
     __judgeAnimPlay(user, spec, isCoin, finalVal, function () { try { fin(); } catch (e) { try { console.error('[catch] assets/engine.js:20356', e); } catch (e2) {} } });
   });
-  if (typeof cb === 'function') cb(finalVal);
+  /* 【2026-10-18 同上】AI 的判定伤害/判定结果不能抢在判定动画之前落地；
+     人类侧仍保持逻辑立即继续。 */
+  if (typeof cb === 'function') {
+    if (typeof isAISeat === 'function' && isAISeat(user) && typeof __aiPace === 'function') __aiPace(function () { cb(finalVal); }, 0);
+    else cb(finalVal);
+  }
 }
 
 function __uiJudgeAnimOn() {
