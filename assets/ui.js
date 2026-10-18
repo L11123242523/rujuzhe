@@ -1084,7 +1084,7 @@ function showTilePicker(allTiles, legalTiles, title, hint, cb) {
     close.onclick = function () { try { ov.remove(); } catch (e) {} };
     panel.appendChild(close);
     ov.appendChild(panel);
-    document.body.appendChild(ov);
+    (document.body || document.documentElement).appendChild(ov);
     if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
       try { Map3D.previewTiles((legalTiles || []).map(function (id) { return { id: id, color: 0xffd166 }; })); } catch (e) {}
     }
