@@ -6543,6 +6543,13 @@ function collectChainable(player, effect){
   }
   var out=[];
   var __myTurn = battleState.currentPlayer === player;
+  /* 【2026-10-18】AI 座位不为自己的 rand/rand_result 判定开“是否连锁”窗（它本来就是自动决策，旧行为也没有 rand 候选）；
+     人类座位（单机 p1 / 联机真人）照常收到遥控骰子询问。 */
+  function __chainTargetOk(c) {
+    var ok = hasChainTarget(c, stage);
+    if (ok && (stage === 'rand' || stage === 'rand_result') && typeof isAISeat === 'function' && isAISeat(player)) return false;
+    return ok;
+  }
   function consider(c,from,index){
     if(!c) return;
     var __kd=(typeof RJEngine!=='undefined'&&RJEngine.classifyChainCard)?RJEngine.classifyChainCard(c):null;
@@ -6580,7 +6587,7 @@ function collectChainable(player, effect){
           try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { try { console.error('[catch] assets/engine.js:6089', e); } catch (e2) {} }
           return;
         }
-      } else if (!isChainOnlyCard(c) || !hasChainTarget(c, stage)) return;
+      } else if (!isChainOnlyCard(c) || !__chainTargetOk(c)) return;
     } else if(__kd==='negate_effect'){
       // 反制整效（崩塌之乌托邦类）：仅在“效果将执行前”窗口，且被反制的源效果含 加手/送墓/抽卡/检索
       if(stage!=='effect_activate') return;
@@ -6596,7 +6603,7 @@ function collectChainable(player, effect){
         return;
       }
     } else {
-      if(!isChainOnlyCard(c) || !hasChainTarget(c, stage) || !__matchStage(c)) return;
+      if(!isChainOnlyCard(c) || !__chainTargetOk(c) || !__matchStage(c)) return;
     }
     var __clCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
     if((parseInt(c.cost,10)||0)>(me.cost||0)+__clCap) return;
@@ -14494,6 +14501,7 @@ function onlineDecideModal(side, title, cardName, effect, choices, callback, opt
     if (callback) callback((v === null || v === undefined) ? null : v);
   });
 }
+var __choiceModalOwner = null;
 function _showChoiceModalNow(title, cardName, effect, choices, callback) {
   /* 【2026-10-07 结构修·**排队而不是覆盖**】实测（probe-depth-hunt）：同一张卡【绿宝之杖·择】的结算被跑 4 次，
      其中两处**永远没回调**（op 序列 choice#1✗ → choice#2✓ → draw#3✗ → draw#4✓ → move✓），
@@ -14545,6 +14553,7 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
     }
   } catch (e) { try { console.error('[catch] assets/engine.js:12736', e); } catch (e2) {} }
   pendingChoiceCallback = callback;
+  __choiceModalOwner = callback;
   
   /* 【2026-10-01 抽取页面】卡背模式：N 张背面向下的卡，点哪张就回哪张的下标（与文字选项同一套应答口径） */
   var __cbMode = 0;
@@ -14674,12 +14683,14 @@ try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 7
 try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) { try { console.error('[catch] assets/engine.js:12864', e); } catch (e2) {} }
 
 function closeChoiceModal() {
-  /* 【2026-10-07 结构修】按**类**释放自己那一笔账（原来硬编码 'closeChoiceModal'，与 enter 的 tag 对不上；
-     旧 leave"错了也减"掩盖了它，代价是会把别的窗口的账一起抹掉 ⇒ AI 抢跑）。 */
   try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('choiceModal'); } catch (e) { try { console.error('[catch] assets/engine.js:12869', e); } catch (e2) {} }
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
-  pendingChoiceCallback = null;
+  /* 【2026-10-18 作者报 AI 在人类待答时仍行动·结构修】
+     只清**本弹窗自己的**回调。原来无条件清空，导致连锁/收尾路径调用 closeChoiceModal 时
+     把别的待答句柄一起抹掉 ⇒ AI 判“只剩空账”⇒ 抢跑。 */
+  if (pendingChoiceCallback === __choiceModalOwner) pendingChoiceCallback = null;
+  __choiceModalOwner = null;
   /* 【2026-10-01 修】关窗后必须把队列里排着的询问放出来（原来只清句柄 ⇒ 效果中产生的询问永久卡住） */
   try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('closeChoiceModal'); }, 0); } catch (e) { try { console.error('[catch] assets/engine.js:12874', e); } catch (e2) {} }
 }
@@ -24001,7 +24012,9 @@ function hasChainTarget(card, stage) {
   }
   // 修改骰子点数 / 改变移动方向：投骰阶段、骰子结果将要适用窗口、移动将要执行窗口均可
   if (effect.indexOf('掷骰') >= 0 || effect.indexOf('骰子') >= 0 || name.indexOf('遥控骰子') >= 0 || name.indexOf('颠倒骰子') >= 0 || /改变[^。；]*方向/.test(effect)) {
-    return battleState.phase === 'roll' || rwHas('dice') || rwHas('move');
+    /* 【2026-10-18 作者报校准（结晶碎弧/杂音/和声）没有遥控连锁询问】校准走 judgeSettleWindow 的 rwOpen('rand')；
+       这里原来只认 dice/move/投掷阶段 ⇒ hasChainTarget=false ⇒ 候选被过滤 ⇒ 走“无人可连锁”快速路径，连询问都不弹。 */
+    return battleState.phase === 'roll' || rwHas('dice') || rwHas('move') || rwHas('rand') || rwHas('rand_result');
   }
   // 抵消伤害：需要有即将受到的伤害窗口
   if (effect.indexOf('抵消') >= 0 && effect.indexOf('伤害') >= 0) {
