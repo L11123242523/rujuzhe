@@ -18630,7 +18630,7 @@ var __sfx = (function () {
     chain: 'assets/audio/chain.wav?v=2', turn: 'assets/audio/turn.wav?v=2',
     win: 'assets/audio/win.wav?v=2', lose: 'assets/audio/lose.wav?v=2',
     /* 【2026-10-15 作者要求】【雷閃】专属音效：电流声（素材由 port-old/gen_audio_leishan.py 生成 ✓） */
-    leishan: 'assets/audio/leishan.wav?v=3'   /* 2026-10-18 v3：短促炸裂 + 干净电弧，缓存键 +1 */
+    leishan: 'assets/audio/leishan.wav?v=4'   /* 2026-10-18 v4：雷杀“滋滋”电击声，缓存键 +1 */
   };
   var BGM_URL = 'assets/audio/bgm.wav?v=1';           /* 旧：合成琶音（作兜底保留） */
   /* 【2026-10-03】真实 BGM 两轨：常驻 / 残血（ncm2audio.py 从 .ncm 解密） */
