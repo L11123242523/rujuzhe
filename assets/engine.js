@@ -15748,6 +15748,16 @@ function initRules() {
    数值一律以母本 data/cards.json 与玩家可见的 cards.js / 内联表为准（不许凭记忆写）。 */
 var ANNOUNCEMENTS = [
   {
+    date: '2026-10-18',
+    title: '平衡性调整 · 第四次（入间枫）',
+    pub: 'v=463',
+    note: '依据作者新卡面，入间枫 SP 削弱；卡面与游戏内数值已同步更新：',
+    items: [
+      { card: '入间枫', chg: 'SP：①回复音韵值 4 → 1，并追加「抽1张卡」；②抽1张卡 → 获得1点引导核心；③每回合献祭次数+1 不变' },
+      { card: '入间枫', chg: '被动：卡面文字同步（异色送墓仅按普通送墓处理；仍回复2点音韵值）' }
+    ]
+  },
+  {
     date: '2026-10-14',
     title: '平衡性调整 · 第三次（5 张卡）',
     pub: 'v=326',
@@ -22383,8 +22393,9 @@ function processCharacterPassives(player) {
    ⚠ 表里只放**基础数值**；p.maxCost 上限夹取仍在各自结算处（那是运行时状态，不属于卡面数值）。
    ============================================================ */
 var KAEDE_SP_ALL = [
-  { id: 1, cost: 4, draws: 0, label: '①回复4点音韵值' },   /* 【2026-10-11 第二次平衡性调整】新卡面：4（旧 6 ✗） */
-  { id: 2, cost: 0, draws: 1, label: '②抽1张卡' },          /* 【2026-10-11 第二次平衡性调整】新卡面：1（旧 2 ✗） */
+  /* 【2026-10-18 第四次平衡性调整·作者新卡面】枫 SP 削弱：①回1并抽1；②获得1引导核心；③不变 */
+  { id: 1, cost: 1, draws: 1, label: '①回复1点音韵值并抽1张卡' },
+  { id: 2, cost: 0, draws: 0, core: 1, label: '②获得1点引导核心' },
   { id: 3, cost: 0, draws: 0, label: '③每回合献祭次数+1' }
 ];
 /* 结算一项（唯一出口：三条路共用，数值只从表里取 ✓） */
@@ -22395,6 +22406,7 @@ function __kaedeSPApply(p, player, id) {
     if (!o) return;
     if (o.cost > 0) p.cost = Math.min(p.cost + o.cost, p.maxCost);
     for (var d = 0; d < o.draws; d++) { var c = takeTopCard(player); if (c) p.hand.push(c); }
+    if (o.core) p._guideCore = (p._guideCore || 0) + o.core;
     if (o.id === 3) p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
   } catch (e) { try { console.error('[catch] assets/engine.js __kaedeSPApply', e); } catch (e2) {} }
 }
@@ -22458,16 +22470,15 @@ function kaedeSPSelect(player) {
       var __kOpt = null;
       for (var __ki = 0; __ki < KAEDE_SP_ALL.length; __ki++) { if (KAEDE_SP_ALL[__ki].id === selected.id) __kOpt = KAEDE_SP_ALL[__ki]; }
       if (selected.id === 1) {
-        recoverCost(player, (__kOpt ? __kOpt.cost : 4), '入间枫SP');
-        addBattleLog(player, '【入间枫SP】回复' + (__kOpt ? __kOpt.cost : 4) + '点音韵值，当前' + p.cost + '音韵');
-      } else if (selected.id === 2) {
+        recoverCost(player, (__kOpt ? __kOpt.cost : 1), '入间枫SP');
+        addBattleLog(player, '【入间枫SP】回复' + (__kOpt ? __kOpt.cost : 1) + '点音韵值，当前' + p.cost + '音韵');
         for (var j = 0; j < (__kOpt ? __kOpt.draws : 1); j++) {
           var c = takeTopCard(player);
-          if (c) {
-            p.hand.push(c);
-            addBattleLog(player, '【入间枫SP】抽到【' + c.name + '】');
-          }
+          if (c) { p.hand.push(c); addBattleLog(player, '【入间枫SP】抽到【' + c.name + '】'); }
         }
+      } else if (selected.id === 2) {
+        p._guideCore = (p._guideCore || 0) + (__kOpt ? (__kOpt.core || 1) : 1);
+        addBattleLog(player, '【入间枫SP】获得1点引导核心（当前' + p._guideCore + '）');
       } else if (selected.id === 3) {
         p._sacrificeBonus = (p._sacrificeBonus || 0) + 1;
         addBattleLog(player, '【入间枫SP】每回合献祭次数+1');
@@ -25860,7 +25871,7 @@ function postUsePassiveHooks(user, card, done) {
         next();
       }
       function __kaedeAsk2() {
-        showChoiceModal('入间枫被动·敏锐洞察', '抽1张并展示', '同色保留；异色送墓（视为一次献祭）并回2音韵', ['抽1张并展示', '不抽'], function (o2) {
+        showChoiceModal('入间枫被动·敏锐洞察', '抽1张并展示', '同色保留；异色送墓并回2音韵', ['抽1张并展示', '不抽'], function (o2) {
           if (o2 === 0) __kaedeShow(); else { updateBattleUI(); next(); }
         });
       }
@@ -25872,7 +25883,7 @@ function postUsePassiveHooks(user, card, done) {
       } else if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
         onlineDecideModal('p2', '入间枫被动·敏锐洞察（对手）', '使用[战术]/[增益]卡后', '是否抽取1张馈赠卡？', ['抽1张馈赠卡', '不抽'], function (o) {
           if (o === 0 && typeof drawGiftCard === 'function') drawGiftCard('p2');
-          onlineDecideModal('p2', '入间枫被动·敏锐洞察（对手）', '抽1张并展示', '同色保留；异色送墓（视为一次献祭）并回2音韵', ['抽1张并展示', '不抽'], function (o2) {
+          onlineDecideModal('p2', '入间枫被动·敏锐洞察（对手）', '抽1张并展示', '同色保留；异色送墓并回2音韵', ['抽1张并展示', '不抽'], function (o2) {
             if (o2 === 0) __kaedeShow(); else { updateBattleUI(); next(); }
           });
         });
