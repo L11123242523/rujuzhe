@@ -6301,6 +6301,13 @@ function startTurn() {
      随旧卡面实现一并删除 —— 新被动是"主要阶段声明属性、公开暗置卡"（见 __tomaDeclare）。 */
   
   // 重置每回合被动标记
+  /* 【2026-10-19 鼓舞】位移×2 只在发放时的那个行动内有效；没用掉就到下一次自己回合开始清掉。 */
+  if (battleState[player].moveBuff && battleState[player].moveBuff.doubleMove
+      && battleState[player].moveBuff.grantTurn !== battleState.turn) {
+    battleState[player].moveBuff.doubleMove = false;
+    battleState[player].moveBuff.choice = false;
+    addBattleLog(player, '【鼓舞】位移×2 未使用，已到期');
+  }
   battleState[player]._kasumiUsedThisTurn = false;
   battleState[player]._edwardLastCost = undefined;
   battleState[player]._edwardTriggerCount = 0;
@@ -6805,6 +6812,8 @@ function applyChainCard(player,pick,effect,done,target){
     __chainWithC1().push({ kind: 'skill', by: player, name: name, card: c });
     try { if (c) c._inUseBy = player; } catch (e) { try { console.error('[catch] 连锁 _inUseBy 标记', e); } catch (e2) {} }
     if (typeof me.hand !== 'undefined' && pick.index >= 0 && me.hand[pick.index] === c) me.hand.splice(pick.index, 1);
+    /* 【2026-10-19 作者报「荷鲁斯之眼使用后直接消失」】连锁路径只移出手牌、不送墓；补发动时送墓。 */
+    try { if (c && typeof moveCardToGrave === 'function') moveCardToGrave(player, c, 'use'); } catch (e) {}
     addBattleLog(player, '连锁发动【' + name + '】（全时点，已上链，待逆结算）');
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
@@ -11068,14 +11077,26 @@ function rollDiceForPlayer(player) {
           __startMove();
         });
       }
-      function __startMove() {
-        // 检查是否有位移增益（能量饮料等）
+      function __startMove(__useDouble) {
+        var __mb = battleState[player].moveBuff;
+        /* 【2026-10-19 作者报「鼓舞的位移×2不能让玩家自主控制」】
+           鼓舞的 ×2 是“本次行动内一次”，由玩家决定是否/何时用；不用则保留到下一次移动或回合结束。
+           能量饮料（choice=false）仍是即时生效，不弹窗。 */
+        if (__useDouble === undefined && __mb && __mb.doubleMove && __mb.choice
+            && typeof isAISeat === 'function' && !isAISeat(player)
+            && !(typeof effectEngine !== 'undefined' && effectEngine && effectEngine.autoResolve)) {
+          var __opts = ['使用：本次位移×2（最多+6格）', '保留：本次不适用'];
+          var __pick = function (i) { __startMove(i === 0); };
+          if (player === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('鼓舞·位移×2', '本次移动', '可以消耗鼓舞的位移×2；不使用则保留', __opts, __pick); return; }
+          if (player === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '鼓舞·位移×2（对手）', '本次移动', '可以消耗鼓舞的位移×2；不使用则保留', __opts, __pick); return; }
+        }
         var moveAmount = finalDice;
-        if (battleState[player].moveBuff && battleState[player].moveBuff.doubleMove) {
-          var bonus = Math.min(moveAmount, battleState[player].moveBuff.maxBonus || 6);
+        if (__mb && __mb.doubleMove && __useDouble !== false) {
+          var bonus = Math.min(moveAmount, __mb.maxBonus || 6);
           moveAmount += bonus;
           addBattleLog(player, '位移增益生效：投掷' + finalDice + '点，实际移动' + moveAmount + '格（增加' + bonus + '格）');
-          battleState[player].moveBuff.doubleMove = false;
+          __mb.doubleMove = false;
+          __mb.choice = false;
         }
         // 结构化指令层：固定位移 / 位移增减 / 打断移动
         if (__rp._fixedNextMove) { moveAmount = __rp._fixedNextMove; addBattleLog(player,'固定位移生效：移动'+moveAmount+'格'); __rp._fixedNextMove = 0; }
@@ -14989,6 +15010,19 @@ function getActiveBuffs(user) {
   if (p._nextAttackJudge) { var dn = p._nextAttackJudge.dice==='coin'?'硬币':(p._nextAttackJudge.dice==='d4'?'四面骰':'六面骰'); P('pending','🎯','下次造伤附带',dn,'下一次造成伤害时进行'+dn+'判定，正面/达标追加'+(p._nextAttackJudge.front||2)+'点判定伤害','pend'); }
   if (p._preventNextDamage) P('pending','🛡️','抵消下次伤害','','下一次即将受到的伤害将被抵消','pend');
   if (p._nextCostReduction) P('pending','💰','下次费用','-'+p._nextCostReduction,'下一张使用的卡费用减少'+p._nextCostReduction,'pend');
+  /* 【2026-10-19 作者报「鼓舞的 buff 没有标识」】状态栏显式两条：
+     ① 鼓舞的控骰 +20%（StatusSys control_dice，作用在目标身上）
+     ② 鼓舞的位移×2 待用/可选用（moveBuff，作用在目标身上；是否消耗由玩家在移动时选）。 */
+  try {
+    if (typeof StatusSys !== 'undefined' && StatusSys.has(user, 'control_dice')) {
+      var __cdv = Math.round((StatusSys.value(user, 'control_dice') || 0));
+      if (__cdv > 0) P('stat','🎛️','控骰','+'+__cdv+'%','鼓舞：本次行动内控骰 +'+__cdv+'%（普通投掷最多±5、判定伤害最多±1）','jud');
+    }
+  } catch (e) {}
+  if (p.moveBuff && p.moveBuff.doubleMove) {
+    P('pending','🎵','鼓舞·位移×2', p.moveBuff.choice ? '可选用' : '待生效',
+      '鼓舞：本次行动内一次位移×2（最多+6格）' + (p.moveBuff.choice ? '；移动时会询问是否使用，不使用则保留' : ''), 'pend');
+  }
   if (p._nextMoveAdjust) P('pending','👣','下次位移',(p._nextMoveAdjust>0?'+':'')+p._nextMoveAdjust,'下一次移动的位移量调整 '+(p._nextMoveAdjust>0?'+':'')+p._nextMoveAdjust,'pend');
   if (p._fixedNextMove) P('pending','👣','下次固定移动',p._fixedNextMove+'格','下一次移动固定为 '+p._fixedNextMove+' 格','pend');
   if (p._nextMoveReverse) P('pending','🔁','下次反向','','下一次移动方向反转','pend');
@@ -19864,7 +19898,21 @@ function __opsBuff(op, ctx, next, env) {
     }
     case 'attack_buff': p.attackBuff = (p.attackBuff || 0) + op.amount; break;
     case 'attack_buff_temp': p._tempAttack = (p._tempAttack || 0) + op.amount; addBattleLog(user, '攻击力临时+' + op.amount + '（直到本回合结束）'); break;
-    case 'buff_double_move': p.moveBuff = p.moveBuff || {}; p.moveBuff.doubleMove = true; p.moveBuff.maxBonus = 6; break;
+    case 'buff_double_move': {
+      /* 【2026-10-19 作者报「鼓舞的位移×2不能让玩家自主控制」】
+         1) 卡面是「选择一名玩家，其…」⇒ buff 必须挂在 target，而不是使用者 p；
+         2) 鼓舞允许玩家在本次行动内**选择是否/何时**使用这次 ×2 ⇒ 标 choice（能量饮料不标，仍是即时）。
+         3) 记录 grantTurn，供回合开始清理，避免没用掉就永久挂着。 */
+      var __bmP = (target && battleState[target]) ? battleState[target] : p;
+      var __bmSrc = (ctx && ctx.card && ctx.card.name) || '';
+      __bmP.moveBuff = __bmP.moveBuff || {};
+      __bmP.moveBuff.doubleMove = true;
+      __bmP.moveBuff.maxBonus = 6;
+      __bmP.moveBuff.source = __bmSrc;
+      __bmP.moveBuff.choice = /鼓舞/.test(__bmSrc);
+      __bmP.moveBuff.grantTurn = battleState.turn;
+      break;
+    }
     case 'buff_bonus_move_after': p.moveBuff = p.moveBuff || {}; p.moveBuff.bonusMoveAfter = op.amount; break;
     case 'adjust_next_move': p._nextMoveAdjust = (p._nextMoveAdjust || 0) + op.delta; break;
     /* 【2026-10-12 作者报"只有大风、没使用侦探放大镜，却也减了两次"——真机定位的根因 ✓】
