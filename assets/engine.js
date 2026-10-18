@@ -11487,13 +11487,13 @@ function aiUseCardComplete(handIndex, callback) {
   try {
     var actualCost = computeActualCost(card, aiSeat());
     settleCardExecution(card, aiSeat(), target, { actualCost: actualCost }, function () {
-      if (callback) setTimeout(callback, 300);
+      if (callback) __aiPace(callback, 450);
     });
   } catch (e) {
     console.error('对手卡牌效果处理错误:', e);
     moveCardToGrave(aiSeat(), card, 'use');
     updateBattleUI();
-    if (callback) setTimeout(callback, 300);
+    if (callback) __aiPace(callback, 450);
   }
 }
 
@@ -11647,7 +11647,9 @@ function aiResourceStep(done) {
   } catch (e) {
     console.error('aiResourceStep error', e);
   }
-  if (done) done();
+  /* 【2026-10-18】资源整理（献祭/抽卡/盖伏）也是一串动作 ⇒ 交给节奏闸再进出牌，
+     避免 AI 在同一帧里"献祭+抽2+出牌"全做完。 */
+  if (done) __aiPace(done, 450);
 }
 
 /* 【等待决断的读门 + 超时兜底】AI 的回合驱动用它判断"是否该停下等玩家作答"。
@@ -11722,6 +11724,20 @@ function __aiGuard(fn) {
    ② 再看是不是**真有一件事在等**：弹窗回调 / 弹窗排队 / 选卡器 / 目标选择 / 连锁窗 / 等对手回答。
    两者都成立才等。只有账、没有任何一件事在等 ⇒ 那本账是漏放的，不拦人。
    判不出来时**保守地等**（宁可等，不可抢跑）。 */
+/* 【2026-10-18 作者反馈「人机操作太快会抢跑」·唯一节奏闸】
+   以前 AI 出牌/切阶段用的是裸 setTimeout(300/600)：到点就跑，不等演出队列、也不复查人类窗口 ⇒
+   牌动画还在播、AI 已经出下一张/切下一阶段 = 抢跑。
+   本函数只做一件事：**到点后先过 __aiGuard（演出忙/人类决策中会等），再执行**。
+   ⇒ AI 的"快慢"由演出队列与真实决策决定，不再由固定延时猜。 */
+function __aiPace(fn, ms) {
+  setTimeout(function () {
+    var run = function () {
+      try { fn(); } catch (e) { try { console.error('AI 节奏回调出错', e); } catch (e2) {} }
+    };
+    try { if (typeof __aiGuard === 'function') __aiGuard(run)(); else run(); }
+    catch (e) { run(); }
+  }, Math.max(0, ms || 0));
+}
 function __aiGateBusy() {
   var human = false;
   try {
@@ -11841,7 +11857,7 @@ function aiTurn(seat) {
     
     aiTurnPhase(seat, 'main1_end', function() {
     // 投骰阶段
-    setTimeout(function() {
+    __aiPace(function() {
       /* 【2026-10-03 C2】AI 阶段切换同样清"直到当前阶段结束前"的攻击加成（与玩家侧对称） */
       try { __clearPhaseScopedBuffsImpl(); } catch (e) { try { console.error('[catch] assets/engine.js:10494', e); } catch (e2) {} }
       battleState.phase = 'roll';
@@ -11850,7 +11866,7 @@ function aiTurn(seat) {
       updateBattleUI();
       
       aiTurnPhase(seat, 'roll_start', function() {
-      setTimeout(function() {
+      __aiPace(function() {
         var __aip = aiMe();
         aiRioPreRoll(aiSeat());
         var dice = rollPlayerDice(aiSeat());
@@ -11868,7 +11884,7 @@ function aiTurn(seat) {
           
           aiTurnPhase(seat, 'roll_end', function() {
           // 主要阶段2：AI继续使用卡牌
-          setTimeout(function() {
+          __aiPace(function() {
             /* 【2026-10-03 C2】同上：AI 进入主要阶段2 前清阶段档加成 */
             try { __clearPhaseScopedBuffsImpl(); } catch (e) { try { console.error('[catch] assets/engine.js:10521', e); } catch (e2) {} }
             battleState.phase = 'main2';
@@ -11886,7 +11902,7 @@ function aiTurn(seat) {
               
               aiTurnPhase(seat, 'main2_end', function() {
               // 结束阶段 → 结束回合（补 end_start / end_end 两个时点，与玩家侧一致）
-              setTimeout(function() {
+              __aiPace(function() {
                 /* 【2026-10-03 C2】同上：AI 进入结束阶段前清阶段档加成 */
                 try { __clearPhaseScopedBuffsImpl(); } catch (e) { try { console.error('[catch] assets/engine.js:10539', e); } catch (e2) {} }
                 battleState.phase = 'end';
@@ -27172,3 +27188,4 @@ try { window.settleSpecialCard = settleSpecialCard; } catch (e) {}
 try { window.continueCardUse = continueCardUse; } catch (e) {}
 
 try { window.__aiGuard = __aiGuard; } catch (e) {}
+try { window.__aiPace = __aiPace; } catch (e) {}
