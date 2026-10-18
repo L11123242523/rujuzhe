@@ -3700,8 +3700,8 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   background:
     radial-gradient(900px 600px at 12% 18%, rgba(254,202,87,.12), transparent 62%),
     radial-gradient(700px 500px at 86% 78%, rgba(72,219,251,.10), transparent 64%),
-    url('images/ui2/card_face_liuli_wansheng.webp') center 38% / cover no-repeat;
-  filter: blur(2px) saturate(.68) brightness(.42);
+    url('images/mainmenu-bg.webp') 78% 34% / cover no-repeat;
+  filter: blur(.5px) saturate(.86) brightness(.58);
   transform: scale(1.06);
 }
 #mainMenu.main-menu-v2 .mm-bg::after {
@@ -3709,7 +3709,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(5,8,14,.96) 0%, rgba(5,8,14,.82) 38%, rgba(5,8,14,.52) 62%, rgba(5,8,14,.88) 100%),
+    linear-gradient(90deg, rgba(5,8,14,.94) 0%, rgba(5,8,14,.76) 38%, rgba(5,8,14,.46) 62%, rgba(5,8,14,.86) 100%),
     repeating-linear-gradient(0deg, rgba(255,255,255,.028) 0 1px, transparent 1px 4px);
 }
 #mainMenu.main-menu-v2 .mm-shell {
