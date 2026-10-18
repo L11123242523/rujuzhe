@@ -20233,7 +20233,13 @@ function __opsCards(op, ctx, next, env) {
       var dl = collectZoneCards(__dOw, op.zones, null, null);
       pickFromList(user, dl, op.allowLess ? ('选择要送入墓地的卡（至多' + op.need + '张，可少选）') : '选择要送入墓地的卡', op.need, function (picks) {
         if (op.sacrifice) { sacrificeCards(user, picks, op.thenDraw, next); return; }
-        picks.forEach(function (pk) { var arr = __dP[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); (__dP.grave = __dP.grave || []).push(pk.card); __dP._lastDiscardCard = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(__dOw, pk.card, 'effect'); });
+        picks.forEach(function (pk) {
+          /* 【2026-10-19 作者实测】蓝图复制先哲之馈赠 → 用先哲效果把效果处理区里的复制卡送墓：
+             这里直接 grave.push，绕过 moveCardToGrave 的蓝图复原钩子 ⇒ 墓地残留复制卡面。
+             送墓前先复原（唯一送墓点，所有 discard 路径共用）。 */
+          if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(pk.card);
+          var arr = __dP[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); (__dP.grave = __dP.grave || []).push(pk.card); __dP._lastDiscardCard = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(__dOw, pk.card, 'effect');
+        });
         if (op.thenDraw) drawCard(__dOw);
         if (typeof updateBattleUI === 'function') updateBattleUI();
         next();
