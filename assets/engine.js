@@ -7878,7 +7878,7 @@ registerTrigger({
   },
   cond: function (ctx, owner) { if (ctx && ctx.reason === 'use') return false; if (__missTiming('toma-sp-leave', ctx)) return false; var q = battleState[owner]; return !!(q && q._tomaSP && q._tomaQueuedFor !== ctx.card); },
   mandatory: false,   // 卡面"可以发动" ⇒ 选发
-  label: function (ctx) { return '【现实间冬马·SP】有卡不因使用' + ctx.how + '·造4点无序'; },
+  label: function (ctx) { return '【现实间冬马·SP】有卡不因使用' + ctx.how + '·造2点无序'; },
   fire: function (ctx, owner) {
     var q = battleState[owner]; if (!q) return;
     q._tomaQueuedFor = ctx.card;
@@ -8357,11 +8357,11 @@ registerTrigger({
     return !!(foe && (foe.sync || 0) > 0);
   },
   mandatory: false,   // 卡面"可以扣除…" ⇒ 选发
-  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方3同步'; },
+  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方1同步'; },
   fire: function (ctx, owner) {
     var foe = battleState[foeOf(owner)]; if (!foe) return;
-    foe.sync = Math.max(0, (foe.sync || 0) - 3);
-    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方3点同步值');
+    foe.sync = Math.max(0, (foe.sync || 0) - 1);
+    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方1点同步值');
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
 });
@@ -8375,11 +8375,11 @@ registerTrigger({
     return !!(foe && (foe.sync || 0) > 0);
   },
   mandatory: false,
-  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方3同步'; },
+  label: function (ctx) { return '宁雨清被动·因效果加卡扣对方1同步'; },
   fire: function (ctx, owner) {
     var foe = battleState[foeOf(owner)]; if (!foe) return;
-    foe.sync = Math.max(0, (foe.sync || 0) - 3);
-    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方3点同步值');
+    foe.sync = Math.max(0, (foe.sync || 0) - 1);
+    addBattleLog(owner, '【宁雨清被动】因效果加卡，扣除对方1点同步值');
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
 });
@@ -14895,7 +14895,7 @@ function triggerEventCard(player) {
 // ========== 增益/效果栏：集中登记当前生效的被动、SP、数值增益、待命效果与进度记录 ==========
 // 角色SP生效标志 -> [角色, 简述]
 var BUFF_SP_FLAGS = [
-  ['_tomaSP','冬马','有玩家的卡不因使用离场时：造成4点无序伤害；自己因此受伤则回2音韵；墓地无序卡最多则抽1'],
+  ['_tomaSP','冬马','有玩家的卡不因使用离场时：造成2点无序伤害；自己因此受伤则回2音韵；墓地无序卡最多则抽1'],
   ['_kaedeSP','入间枫','开局从3项效果中选2项适用'],
   ['_kaedeMizugiSP','枫(水着)','自然回费+50%，理智伤害+1'],
   ['_kotaroSP','光太郎','每回合献祭次数+1，首次献祭后三选一'],
@@ -15154,9 +15154,30 @@ function __tomaDeclare(player) {
       if (ix >= 0) arr.splice(ix, 1);                          // 公开 = 从暗置区取出
       addBattleLog(player, '【冬马被动·分析大师】声明「' + declared + '」，公开 ' + owner + ' 的暗置卡【' + (pick.card.name || '') + '】（属性：' + (pick.card.attribute || '无') + '）');
       if ((pick.card.attribute || '') === declared) {
-        (tq.deck = tq.deck || []).push(pick.card);             // 放回持有者牌组最下方
-        addBattleLog(player, '【冬马被动·分析大师】属性相同 → 放回持有者牌组最下方，并对' + owner + '造成4点无序属性伤害');
-        dealDamageWithResponse(owner, 4, '冬马被动·分析大师', null, '无序', player);
+        /* 【2026-10-19 第四次平衡性补充】卡面：属性相同，**其选择**
+           ① 将那张卡放回持有者牌组最下方 ② 受到你造成的4点无序属性伤害。
+           “其”= 暗置卡的持有者（owner），不是冬马；由 owner 选（p1 弹窗 / 联机 p2 / AI 默认放回）。
+           ② 不移动卡，留在原区正面（_faceUp=true）；① 放回牌组底。 */
+        function __tomaSameChoice(owner, card, ix, arr) {
+          var tq2 = battleState[owner];
+          function apply(choice) {
+            if (choice === 0) {
+              (tq2.deck = tq2.deck || []).push(card);
+              addBattleLog(player, '【冬马被动·分析大师】属性相同 → ' + owner + ' 选择放回持有者牌组最下方');
+            } else {
+              arr.splice(ix, 0, card);
+              card._faceUp = true;
+              addBattleLog(player, '【冬马被动·分析大师】属性相同 → ' + owner + ' 选择留在原区正面，并受到4点无序属性伤害');
+              dealDamageWithResponse(owner, 4, '冬马被动·分析大师', null, '无序', player);
+            }
+            if (typeof updateBattleUI === 'function') updateBattleUI();
+          }
+          var __opts = ['① 放回持有者牌组最下方', '② 留在原区正面，受到4点无序伤害'];
+          if (owner === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('冬马被动·分析大师', '属性相同：由你选择处理', '选择①或②', __opts, function (i) { apply(i === 0 ? 0 : 1); }); return; }
+          if (owner === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '冬马被动·分析大师（对手）', '属性相同：由你选择处理', '选择①或②', __opts, function (i) { apply(i === 0 ? 0 : 1); }); return; }
+          apply(0);   // AI 卡主：默认选①放回牌组底（不再吃4点）
+        }
+        __tomaSameChoice(owner, pick.card, ix, arr);
       } else {
         var __can = false;
         try { __can = !!(typeof evaluatePlayable === 'function' && evaluatePlayable(pick.card, owner).ok); } catch (e) { try { console.error('[catch] assets/engine.js:13239', e); } catch (e2) {} }
@@ -15856,6 +15877,17 @@ function initRules() {
    items 改动条目（card 卡名 + chg 改动）。
    数值一律以母本 data/cards.json 与玩家可见的 cards.js / 内联表为准（不许凭记忆写）。 */
 var ANNOUNCEMENTS = [
+  {
+    date: '2026-10-19',
+    title: '平衡性调整 · 第四次补充（冬马 / 宁雨清）',
+    pub: 'v=475',
+    note: '依据最新卡面补充调整以下角色，卡图与游戏内数值已同步更新：',
+    items: [
+      { card: '现实间冬马', chg: '被动·分析大师：属性相同时改为由暗置卡持有者二选一 —— ①放回牌组最下方 ②留在原区正面并受到4点无序伤害；SP：4 → 2 点无序伤害' },
+      { card: '宁雨清', chg: '被动·图书管理员的矜持：因效果把卡加入手卡时扣除其他玩家同步值 3 → 1' },
+      { card: '现实间冬马 / 宁雨清', chg: '卡图同步为最新卡面' }
+    ]
+  },
   {
     date: '2026-10-18',
     title: '平衡性调整 · 第四次（入间枫）',
@@ -18511,8 +18543,8 @@ function __tomaSPLeaveHit(w, owner, card, how) {
   try {
     var d = battleState[w]; if (!d) return;
     var __before = d.sync || 0;
-    addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成4点无序属性伤害');
-    dealDamageWithResponse(owner, 4, '冬马SP', function () {
+    addBattleLog(w, '【冬马SP】有玩家的卡不因使用' + how + '（【' + (card.name || '') + '】）→ 对' + owner + '造成2点无序属性伤害');
+    dealDamageWithResponse(owner, 2, '冬马SP', function () {
       try {
         if ((d.sync || 0) < __before) {
           recoverCost(w, 2, '冬马SP');   // 【2026-10-11 第二次平衡性调整】新卡面：回 2 点（旧 4 ✗）
@@ -22273,9 +22305,9 @@ function __captainPassives(player, p, env) {
       if (charName.indexOf('冬马') >= 0) {
         // 2026-09-26 新卡面（整套换设计）：
         //   被动 = 主要阶段发动一次：声明属性 → 公开一名玩家的一张暗置卡 → 相同放牌组底并造4点无序伤害 / 不同强制使用
-        //   SP   = 有玩家的卡不因使用离开原本区域 → 对其造成4点无序伤害；自己因此受伤则回2音韵、墓地无序卡最多再抽1张
+        //   SP   = 有玩家的卡不因使用离开原本区域 → 对其造成2点无序伤害；自己因此受伤则回2音韵、墓地无序卡最多再抽1张
         p._tomaPassive = true; p._tomaDeclareTurn = 0; p._tomaSP = true;
-        addBattleLog(player, '【现实间冬马】被动·分析大师的游刃有余（声明属性公开暗置卡）；SP·卡不因使用离场时造4点无序伤害');
+        addBattleLog(player, '【现实间冬马】被动·分析大师的游刃有余（声明属性公开暗置卡）；SP·卡不因使用离场时造2点无序伤害');
       }
       
       // 予(普通)被动【解构与求索】（仅队长）：每次投掷后回1音韵 + 准备阶段结束按手卡最多属性四选一
@@ -22402,7 +22434,7 @@ function processCharacterPassives(player) {
     {
       var __team = (deckConfig[player].chars || []).filter(Boolean);
       // 1 冬马：用攻击/技能卡后前进1-3（钩子读 _tomaSP）
-      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【现实间冬马SP】有卡不因使用离开原本区域时对其造成4点无序伤害（自己因此受伤则回2音韵；墓地无序卡最多则再抽1张）'); }
+      if (charName.indexOf('冬马') >= 0) { p._tomaSP = true; addBattleLog(player, '【现实间冬马SP】有卡不因使用离开原本区域时对其造成2点无序伤害（自己因此受伤则回2音韵；墓地无序卡最多则再抽1张）'); }
       // 2 入间枫（普通）：开局3选2
       if (charName.indexOf('枫') >= 0 && charName.indexOf('水着') < 0) {
         p._kaedeSP = true; p._kaedeSPPending = true;
