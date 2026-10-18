@@ -6657,7 +6657,7 @@ function collectChainable(player, effect){
     }
     consider(c,'hand',i);
   });
-  (me.faceDownCards||[]).forEach(function(c,i){consider(c,'faceDown',i);});
+  (me.faceDownCards||[]).forEach(function(c,i){ if(c && c._faceUp === true) return; consider(c,'faceDown',i); });
   /* 【2026-10-14 作者报「荷鲁斯之眼在对手回合根本没法用，它应该和技能卡一样是全时点卡」⇒ 结构修 ✓】
      卡面：「**自己或其他玩家的回合**把这张卡送入墓地才能发动，直到本回合结束前自己每次受到伤害后回复1点音韵值。」
      实测：`classifyChainCard=null`、`isChainOnlyCard=false`、`hasChainTarget=false`
@@ -13956,7 +13956,14 @@ function checkLevelUp(player) {
       if (remain <= 0) { done(); return; }
       var __pick = function (i) { __applyLevelReward(i); __levelReward(remain - 1, done); };
       /* AI 座自动选攻击+1；玩家/联机客人自己选。 */
-      if (typeof isAISeat === 'function' && isAISeat(player)) { __pick(2); return; }
+      if (typeof isAISeat === 'function' && isAISeat(player)) {
+        /* 【2026-10-19 作者点名】AI 不再固定攻击+1：同步见底先补同步，音韵见底先补音韵，防御为0先补防御，否则攻击。 */
+        var __aiReward = 2;
+        if ((p.sync || 0) <= 6) __aiReward = 4;
+        else if ((p.cost || 0) <= 1) __aiReward = 5;
+        else if ((p.defense || 0) <= 0 && (p.sync || 0) < 14) __aiReward = 3;
+        __pick(__aiReward); return;
+      }
       if (player === 'p1' && typeof showChoiceModal === 'function') {
         showChoiceModal('升级奖励 Lv' + p.level, '请选择一项升级奖励', '本次升级共 ' + remain + ' 次选择', __opts, __pick);
         return;
@@ -16960,7 +16967,7 @@ function hasAnyDeclareChain() {
     }
     var inHand = (me.hand || []).some(function(c) { return consider(c, false); });
     if (inHand) return true;
-    var inFd = (me.faceDownCards || []).some(function(c) { return consider(c, true); });
+    var inFd = (me.faceDownCards || []).some(function(c) { return c && c._faceUp !== true && consider(c, true); });
     if (inFd) return true;
     return (me.permanent || []).some(function(c) { return c._faceDown === true && consider(c, true); });
   }
@@ -20494,6 +20501,7 @@ function runOneOp(op, ctx, next) {
           var __tileOpts = __pickable.map(function (x) { return '第' + x + '格 ' + ((MAP_TILES[x] && MAP_TILES[x].name) || ''); });
           var __onTilePick = function (i) { var ix = parseInt(i, 10); if (!isNaN(ix) && __pickable[ix] != null) __applyTilePick(__pickable[ix]); };
           if (typeof isAISeat === 'function' && isAISeat(user)) { __applyTilePick(__pickable[0]); }
+          else if (user === 'p1' && typeof showTilePicker === 'function') { showTilePicker(__allTiles, __pickable, '选择目标格', '高亮格可点击；逃脱只显示合法交互格/公交地铁前后1格', function (tileId) { __applyTilePick(tileId); }); }
           else if (user === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('选择目标格', '请选择要移动到的格子', '', __tileOpts, __onTilePick); }
           else if (user === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '选择目标格（对手）', '请选择要移动到的格子', '', __tileOpts, __onTilePick); }
           else { __applyTilePick(__pickable[0]); }
@@ -23892,6 +23900,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   if (p.faceDownCards) {
     for (var i2 = 0; i2 < p.faceDownCards.length; i2++) {
       var __fc = p.faceDownCards[i2];
+      if (__fc._faceUp === true) continue;   // 正面卡不再按盖伏卡发动
       if (__fc._faceDownTurn === battleState.turn && __fc._faceDownPlayer === target) continue; // 盖伏当回合不可发动
       if (__isCharmCard(__fc) && p.cost >= (parseInt(__fc.cost, 10) || 0)) __fdCharmList.push({ card: __fc, idx: i2 });
     }
@@ -24385,7 +24394,7 @@ function aiPickFaceDownForWindow(effect, seat) {
   var dmg = (effect && (effect.pendingDamage || effect.damage)) || (battleState._curWindowDamage || 0);
   for (var i = 0; i < p.faceDownCards.length; i++) {
     var c = p.faceDownCards[i];
-    if (!c) continue;
+    if (!c || c._faceUp === true) continue;
     // 盖伏当回合不可发动
     if (c._faceDownTurn === battleState.turn && c._faceDownPlayer === aiSeat()) continue;
     // 费用要够（含超频透支）

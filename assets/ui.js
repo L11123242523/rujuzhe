@@ -1043,6 +1043,54 @@ function __updateBattleUI_impl() {
   }
 }
 
+/* 【2026-10-19 作者点名】逃脱/执勤证明的地图选格：可点击格盘（合法格高亮、非法格禁用）。
+   不依赖 3D 地图是否就绪；42 格按 7 列排列，点击合法格回调 tile id。 */
+function showTilePicker(allTiles, legalTiles, title, hint, cb) {
+  try {
+    var old = document.getElementById('tilePickerOverlay'); if (old) old.remove();
+    var legal = {}; (legalTiles || []).forEach(function (x) { legal[x] = 1; });
+    var ov = document.createElement('div');
+    ov.id = 'tilePickerOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;';
+    var panel = document.createElement('div');
+    panel.style.cssText = 'width:min(94vw,760px);max-height:88vh;overflow:auto;background:#141a24;border:1px solid rgba(254,202,87,.45);border-radius:12px;padding:14px;box-shadow:0 18px 50px rgba(0,0,0,.55);';
+    var h = document.createElement('div');
+    h.style.cssText = 'color:#feca57;font-weight:700;font-size:16px;margin-bottom:4px;';
+    h.textContent = title || '选择目标格';
+    panel.appendChild(h);
+    var sub = document.createElement('div');
+    sub.style.cssText = 'color:#9fb0c7;font-size:12px;margin-bottom:10px;';
+    sub.textContent = hint || '点击高亮格子移动';
+    panel.appendChild(sub);
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;';
+    (allTiles || []).forEach(function (id) {
+      var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES[id]) || null;
+      var ok = !!legal[id];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.disabled = !ok;
+      b.style.cssText = 'min-height:56px;padding:5px 3px;border-radius:8px;border:1px solid ' + (ok ? 'rgba(254,202,87,.55)' : 'rgba(255,255,255,.12)') + ';'
+        + 'background:' + (ok ? 'linear-gradient(135deg,#2b3a2b,#1e2a1e)' : '#1b222d') + ';color:' + (ok ? '#f5e6b8' : '#5f6b7a') + ';'
+        + 'cursor:' + (ok ? 'pointer' : 'not-allowed') + ';font-size:11px;line-height:1.25;text-align:center;';
+      b.textContent = '#' + id + ' ' + ((t && t.name) || '');
+      if (ok) b.onclick = function () { try { ov.remove(); } catch (e) {} if (typeof Map3D !== 'undefined' && Map3D && Map3D.clearPreview) { try { Map3D.clearPreview(); } catch (e) {} } cb(id); };
+      grid.appendChild(b);
+    });
+    panel.appendChild(grid);
+    var close = document.createElement('button');
+    close.type = 'button'; close.textContent = '取消';
+    close.style.cssText = 'margin-top:10px;padding:6px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:#222c3a;color:#cbd5e1;cursor:pointer;';
+    close.onclick = function () { try { ov.remove(); } catch (e) {} };
+    panel.appendChild(close);
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
+    if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
+      try { Map3D.previewTiles((legalTiles || []).map(function (id) { return { id: id, color: 0xffd166 }; })); } catch (e) {}
+    }
+  } catch (e) { try { console.error('showTilePicker 出错', e); } catch (e2) {} }
+}
+
 function renderZoneSlots(pl) {
   if (!battleState || !battleState[pl]) return;
   var box = document.getElementById(pl + 'PermanentSlots');
@@ -1655,6 +1703,7 @@ try { window.showChoiceModal = showChoiceModal; } catch (e) {}
 try { window.renderBuffBar = renderBuffBar; } catch (e) {}
 try { window.__updateBattleUI_impl = __updateBattleUI_impl; } catch (e) {}
 try { window.renderZoneSlots = renderZoneSlots; } catch (e) {}
+try { window.showTilePicker = showTilePicker; } catch (e) {}
 try { window.renderBattleMap = renderBattleMap; } catch (e) {}
 try { window.renderMinimap = renderMinimap; } catch (e) {}
 try { window.__renderBattleLogFromState = __renderBattleLogFromState; } catch (e) {}
