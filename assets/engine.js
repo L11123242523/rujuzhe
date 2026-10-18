@@ -19959,7 +19959,18 @@ function __opsCards(op, ctx, next, env) {
   switch (op.op) {
     case 'draw': {
       if (op.ifLevel && ((p.level || 1) < op.ifLevel)) { addBattleLog(user, '等级未到 Lv' + op.ifLevel + '，该追加抽牌不适用'); break; }
-      function __doDraw(__dw) { var __drawn = []; for (var __di = 0; __di < op.n; __di++) { var __dc = drawCard(__dw); if (__dc) __drawn.push(__dc); } playDrawAnim(__dw, __drawn, next); }
+      function __doDraw(__dw) {
+        var __drawn = [];
+        for (var __di = 0; __di < op.n; __di++) { var __dc = drawCard(__dw); if (__dc) __drawn.push(__dc); }
+        /* 【2026-10-18 作者报「伊织“一次性抽两张”被动无法触发”】普通对战的“抽N张”走这里；
+           原来只接了肉鸽 DSL 的 ctx.draw，普通对战完全没接 ⇒ 永不触发。 */
+        playDrawAnim(__dw, __drawn, function () {
+          /* 【2026-10-18 作者澄清：掌握也是抽2张】掌握让**目标玩家**抽2张；
+             伊织的“一次性抽两张”按**任何玩家**抽2张都触发（发动者是编入伊织的座位，自身抽1回1）。 */
+          if (op.n >= 2 && typeof __ioriDrawTwoAll === 'function') __ioriDrawTwoAll(__dw, next);
+          else next();
+        });
+      }
       if (op.who === 'pick_player') { // 绿宝之杖①：统一弹一个选玩家框，列出所有在场玩家，点谁谁抽（不区分友敌/1v1/2v2）
         var __pp = (typeof allInGamePlayers === 'function') ? allInGamePlayers() : playerIds().filter(function (k) { return battleState[k]; });
         if (user === 'p1' && typeof showChoiceModal === 'function') {
@@ -25303,33 +25314,52 @@ function __batSpBonus(seat) {
     }).length;
   } catch (e) { return 0; }
 }
+/* 【2026-10-18 作者澄清】触发条件里的“一次性抽取两张卡”不限于自己抽：任何玩家一次抽2张，
+   编入小野伊织的座位都可以发动（自身抽1并回1）。下面 __ioriDrawTwoAll 负责收集所有伊织座位。 */
+function __ioriDrawTwoAll(drawer, done) {
+  try {
+    var owners = playerIds().filter(function (w) { return battleState[w] && battleState[w]._ioriPassive; });
+    var i = 0;
+    function step() {
+      if (i >= owners.length) { try { if (typeof done === 'function') done(); } catch (e) {} return; }
+      __ioriDrawTwoAsk(owners[i++], step);
+    }
+    step();
+  } catch (e) { try { if (typeof done === 'function') done(); } catch (e2) {} }
+}
 /* 【2026-10-12 作者点名·小野伊织被动·此外】「一次性抽取两张卡的场合可以发动：抽一张并回复自身1点音韵值。」
    · 唯一真相 = **同一次抽卡动作的张数** ✓ —— 由卡效果 DSL 的 `draw(n)`（`engine.js:4876 ✓`）在抽完后调用本函数 ✓
      （那里是"一次抽 N 张"的唯一入口 ✓；N≥2 才问 ✓，绝不按每张分别计数 ✗）
    · 归属判定沿用引擎里既有口径 ✓：`p._ioriPassive`（= 编入了小野伊织 ✓，与 `9408`/`12479`/`19663` 的用法一致 ✓）
    · 三个分支照项目既有模式 ✓：本机 `showChoiceModal` ✓ / 联机 p2 `onlineDecideModal` ✓ / AI 直接发动（纯收益 ✓） */
-function __ioriDrawTwoAsk(seat) {
+function __ioriDrawTwoAsk(seat, done) {
+  var __finish = function () { try { if (typeof done === 'function') done(); } catch (e) {} };
   try {
     var p = battleState[seat];
-    if (!p || !p._ioriPassive) return;
+    if (!p || !p._ioriPassive) { __finish(); return; }
     function __doIt() {
-      try { if (typeof rlDrawCard === 'function') rlDrawCard(seat); } catch (e) { try { console.error('[catch] assets/engine.js 伊织·抽1张', e); } catch (e2) {} }
+      /* 普通对战/肉鸽共用：普通座位走 drawCard，肉鸽没有 battleState 座位才回退 rlDrawCard。 */
+      try {
+        if (battleState && battleState[seat] && typeof drawCard === 'function') drawCard(seat);
+        else if (typeof rlDrawCard === 'function') rlDrawCard(seat);
+      } catch (e) { try { console.error('[catch] assets/engine.js 伊织·抽1张', e); } catch (e2) {} }
       var __cap = (p.maxCost != null) ? p.maxCost : ((p.cost || 0) + 1);
       p.cost = Math.min((p.cost || 0) + 1, __cap);
       addBattleLog(seat, '【小野伊织·此外】一次性抽了两张 ⇒ 抽1张并回复自身1点音韵值（当前' + p.cost + '）');
       try { if (typeof updateBattleUI === 'function') updateBattleUI(); } catch (e) {}
+      __finish();
     }
     var __opts = ['发动：抽1张并回复1音韵', '不发动'];
     if (seat === 'p1') {
-      showChoiceModal('小野伊织·此外', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); });
+      showChoiceModal('小野伊织·此外', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); else __finish(); });
       return;
     }
     if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over) {
-      onlineDecideModal('p2', '小野伊织·此外（对手）', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); });
+      onlineDecideModal('p2', '小野伊织·此外（对手）', '本回合一次性抽取了两张卡', '可以发动：抽一张并回复自身1点音韵值', __opts, function (i) { if (i === 0) __doIt(); else __finish(); });
       return;
     }
     __doIt();   // AI：纯收益 ⇒ 直接发动
-  } catch (e) { try { console.error('[catch] assets/engine.js __ioriDrawTwoAsk', e); } catch (e2) {} }
+  } catch (e) { try { console.error('[catch] assets/engine.js __ioriDrawTwoAsk', e); } catch (e2) {} __finish(); }
 }
 /* 【2026-10-12 作者裁决·结构修 ✓】连锁动画**取图**的唯一入口（三处共用 ✓）
    为什么要有它：这条"按名字兜底取图"的逻辑原本被**抄了三份** ✗（`CardAnim.play` ✓、`ChainAnim._cardResolve` ✓、
@@ -26845,6 +26875,7 @@ try { window.isDualUseChainCard = isDualUseChainCard; } catch (e) {}
 try { window.CARD_PLAY_CONDITIONS = CARD_PLAY_CONDITIONS; } catch (e) {}
 try { window.__overclockLoanCap = __overclockLoanCap; } catch (e) {}
 try { window.__spendCost = __spendCost; } catch (e) {}
+try { window.__ioriDrawTwoAsk = __ioriDrawTwoAsk; } catch (e) {}
 try { window.__settleOverclockLoan = __settleOverclockLoan; } catch (e) {}
 try { window.__lilithBonus = __lilithBonus; } catch (e) {}
 try { window.isDiceModifyCard = isDiceModifyCard; } catch (e) {}
