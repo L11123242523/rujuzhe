@@ -21546,10 +21546,13 @@ function __eventCasesA(card, player, p, done, env) {
          修法：候选池按"场上"口径补齐**盖放区**（`faceDownCards`）✓ —— 与 `__cardIsOnFieldNow` 同口径，
          不新造机制 ✗。命中后按 `zone` 从**原来那个区**移出（原来写死 `permanent` ✗，盖放的卡会移错区）。 */
       var __pool = [], __sides = [], __zones = [];
-      (battleState[__ecFoe].permanent || []).forEach(function (c) { __pool.push(c); __sides.push(__ecFoe); __zones.push('permanent'); });
-      (battleState[__ecFoe].faceDownCards || []).forEach(function (c) { __pool.push(c); __sides.push(__ecFoe); __zones.push('faceDownCards'); });
-      (p.permanent || []).forEach(function (c) { __pool.push(c); __sides.push(player); __zones.push('permanent'); });
-      (p.faceDownCards || []).forEach(function (c) { __pool.push(c); __sides.push(player); __zones.push('faceDownCards'); });
+      /* 【2026-10-19 作者口径】范围=双方**效果处理区**（permanent + faceDownCards）；
+         但**排除正在结算的这张命运之回声本身**（它此刻以 C1 占位在自己的 permanent 里，
+         旧实现把它也列进候选 ⇒ 能看到/炸到自己）。 */
+      (battleState[__ecFoe].permanent || []).forEach(function (c) { if (!c || c === card) return; __pool.push(c); __sides.push(__ecFoe); __zones.push('permanent'); });
+      (battleState[__ecFoe].faceDownCards || []).forEach(function (c) { if (!c || c === card) return; __pool.push(c); __sides.push(__ecFoe); __zones.push('faceDownCards'); });
+      (p.permanent || []).forEach(function (c) { if (!c || c === card) return; __pool.push(c); __sides.push(player); __zones.push('permanent'); });
+      (p.faceDownCards || []).forEach(function (c) { if (!c || c === card) return; __pool.push(c); __sides.push(player); __zones.push('faceDownCards'); });
       function __destroy(idx) {
         if (idx == null || idx < 0) return;
         var sd = __sides[idx], c = __pool[idx], __zn = __zones[idx] || 'permanent';
