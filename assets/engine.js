@@ -2430,7 +2430,7 @@ function onlineUseCardP2(handIndex, cardName, done) {
         p._sakuraFreeUse--;
         addBattleLog('p2', '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
       } else {
-        p.cost -= actualCost;
+        __spendCost(p, actualCost);
         if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2');
       }
       if (battleState.p2.hand[handIndex] === card) battleState.p2.hand.splice(handIndex, 1);
@@ -2834,6 +2834,30 @@ function __costAffordable(player, card) {
   return (p.cost + cap) >= cost;
 }
 // 扣费后音韵值为负时：登记透支日志 + Lv7 扣除3点同步
+/* 【2026-10-18 作者报「AI 音韵值变成 -5，卡组里没有超频」·结构修】
+   所有"支付音韵"走这一个出口：无[超频]时下限 0，有[超频]时下限 -透支额度。
+   只封顶、不拒绝发动（与 2026-10-10 费用闸同一口径）；超频贷款语义由 __settleOverclockLoan 保留。
+   为什么不是逐张卡堵：cost 的扣减点分散在出牌/连锁/盖伏/特殊卡/永久主动/效果支付等 20+ 处，
+   任何一处漏掉都会再次出现负数；统一出口才能保证"不可能为负"。 */
+function __spendCost(who, amount) {
+  try {
+    var p = (typeof who === 'string') ? (battleState && battleState[who]) : who;
+    if (!p) return 0;
+    var n = parseInt(amount, 10);
+    if (!isFinite(n) || n <= 0) return 0;
+    var seat = (p === (battleState && battleState.p1)) ? 'p1' : ((p === (battleState && battleState.p2)) ? 'p2' : null);
+    var cap = seat ? ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(seat) : 0) : 0;
+    var floor = -cap;
+    var before = Number(p.cost) || 0;
+    var after = before - n;
+    if (after < floor) {
+      after = floor;
+      try { if (typeof addBattleLog === 'function') addBattleLog(seat || 'system', '【费用下限】本次应支付' + n + '，余额不足，按' + floor + '结算'); } catch (e) {}
+    }
+    p.cost = after;
+    return before - after;
+  } catch (e) { return 0; }
+}
 function __settleOverclockLoan(who) {
   var p = battleState && battleState[who];
   if (!p || !(p.cost < 0)) return;
@@ -5002,7 +5026,7 @@ function rlPlayCard(handIndex) {
     return;
   }
   
-  p1.cost -= cost;
+  __spendCost('p1', cost);
   p1.hand.splice(handIndex, 1);
   
   // 处理卡牌效果（把实际支付的音韵值传进去：红宝之杖·运 等要按支付量结算）
@@ -6809,7 +6833,7 @@ function applyChainCard(player,pick,effect,done,target){
        这里打一个"本次正由该玩家使用"的标记（守卫认它、placeAfterUse 里清除）。 */
     try { if (c) c._inUseBy = player; } catch (e) { try { console.error('[catch] assets/engine.js:6221', e); } catch (e2) {} }
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
-    me.cost-=(parseInt(c.cost,10)||0);
+    __spendCost(me, (parseInt(c.cost,10)||0));
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else if(pick.from==='event') me.eventCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     if (pick.from === 'event') {
@@ -10486,7 +10510,7 @@ function rioTriggerOnce(player) {
   // 最新卡面：支付1音韵造成四面骰判定伤害；发动时可改为支付2音韵改为六面骰判定伤害（均为无属性判定伤害，吃判定增伤、不吃属性克制）
   function __fire(sides, cost) {
     if ((p.cost || 0) < cost) { addBattleLog(player, '【现实间里绪被动】音韵不足' + cost + '点，无法发动' + sides + '面骰判定造伤'); return; }
-    p.cost -= cost;
+    __spendCost(p, cost);
     // 判定走“结果确定前”连锁窗，可被 Twice 重判/遥控改点；judgePerform 内部套用最多20%控骰
     judgePerform(player, { kind: 'dice', sides: sides, label: '现实间里绪·' + sides + '面骰判定' }, function (roll, __cancelled) {
       if (__cancelled || roll == null) { addBattleLog(player, '【现实间里绪被动】判定被连锁无效，本次不造伤'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
@@ -11388,7 +11412,7 @@ function drawByCost() {
   if (typeof Online !== 'undefined' && Online.active) {
     Online.sendIntent({ type: 'drawCost' });
   }
-  battleState.p1.cost -= __dcNeed;
+  __spendCost(battleState.p1, __dcNeed);
   if (__dcCut > 0) { battleState.p1._domCostDrawTurn = battleState.turn; addBattleLog('p1', '【领域·比翼恋理】本回合首次音韵抽卡，所消耗音韵值-' + __dcCut + '（现' + __dcNeed + '费）'); }
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
   var card = drawCard('p1');
@@ -11759,7 +11783,7 @@ function aiResourceStep(done) {
   // 3) 手牌偏少且音韵富余 → 音韵抽卡（每回合最多 2 次，避免烧光）
     var drawTimes = 0;
     while (p.cost >= 3 && p.hand.length <= 4 && drawTimes < 2) {
-      p.cost -= 3;
+      __spendCost(p, 3);
       var dc = drawCard(aiSeat());
       if (!dc) break;
       drawTimes++;
@@ -13709,7 +13733,7 @@ function aiUsePermanentActive(player, done) {
     if (h === 'ruler') { // 设计师的直尺：支付音韵前进（每1点=1格，至多20；每回合一次）
       if (!(p.cost > 0)) { next(); return; }
       var pay = Math.min(p.cost, 5), mv = Math.min(pay, 20);
-      p.cost -= pay;
+      __spendCost(p, pay);
       var old = p.position; p.position = ((p.position + mv) % 42 + 42) % 42;
       L('对手【设计师的直尺】支付' + pay + '音韵前进' + mv + '格（第' + old + '→第' + p.position + '格）');
       if (typeof triggerTileEffect === 'function') triggerTileEffect(player);
@@ -13726,7 +13750,7 @@ function aiUsePermanentActive(player, done) {
       (p.grave || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'grave' }); });
       (p.removed || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'removed' }); });
       if (!pool.length) { next(); return; }
-      var pk = pool[0]; p.cost -= 3;
+      var pk = pool[0]; __spendCost(p, 3);
       var arr = pk.z === 'grave' ? p.grave : p.removed; var ix = arr.indexOf(pk.c); if (ix >= 0) arr.splice(ix, 1);
       p.hand.push(pk.c); p._teamFinalDmgUp = (p._teamFinalDmgUp || 0) + 1;
       L('对手【福金与穆宁】付3音韵回收【' + pk.c.name + '】，之后造成的最终伤害+1（累计+' + p._teamFinalDmgUp + '）');
@@ -18471,7 +18495,7 @@ function __xhzdEndPhaseOffer(player, done) {
   var __use = function (n) {
     if (!(n > 0)) { done(); return; }
     p._xhzdEndTurnDone = battleState.turn;
-    p.cost -= n;
+    __spendCost(p, n);
     var __heal = n * 2;
     p.sync = Math.min((p.sync || 0) + __heal, p.maxSync || 999);
     addBattleLog(player, '【XHZD SP】回合结束阶段支付' + n + '点音律值，回复' + __heal + '点同步值（同步' + p.sync + '，音韵' + p.cost + '）');
@@ -19336,7 +19360,7 @@ function __opsDamage(op, ctx, next, env) {
       if (op.payExtra) { // 可额外耗音韵增伤（水枪攻击等）：选投入档位，扣点并加基础伤害
         var __pe = op.payExtra, __maxUnit = Math.floor(Math.min(p.cost, __pe.max != null ? __pe.max : 8) / (__pe.perCost || 1));
         function __peApply(oi) {
-          var __u = (oi || 0) * __pe.perCost, __add = (oi || 0) * __pe.perDmg; p.cost -= __u; op.base += __add;
+          var __u = (oi || 0) * __pe.perCost, __add = (oi || 0) * __pe.perDmg; __spendCost(p, __u); op.base += __add;
           if (__add) addBattleLog(user, '额外投入' + __u + '音韵，本次伤害+' + __add + '（合计' + op.base + '）');
           __dealDamage();
         }
@@ -19419,7 +19443,7 @@ function __opsDamage(op, ctx, next, env) {
       // 付N-M音韵造等额伤害（红宝之杖·运）：伤害走统一公式（攻击力/防御/克制/增伤）
       var __pmax = Math.min(op.max, Math.max(op.min, p.cost));
       function __payDeal(k) {
-        p.cost -= k;
+        __spendCost(p, k);
         if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
         if (ctx && ctx.card) ctx.card._lastPaidCost = k; // 记录本次实际支付额：费用比较类效果（爱德华/惠等）按实际支付额计
         /* 【2026-10-17 补·【红宝之杖·运】SP ⇒ 结构修】卡面 SP 原文：
@@ -19665,7 +19689,7 @@ function __opsMove(op, ctx, next, env) {
       var __pe = op, __maxExtra = Math.min(p.cost, 8);
       function __peMove(dir) {
         function __go(extra) {
-          p.cost -= extra;
+          __spendCost(p, extra);
           var __steps = (__pe.base + extra * (__pe.perStep || 1)) * dir;
           addBattleLog(user, '额外投入' + extra + '点音韵，' + (dir > 0 ? '前进' : '后退') + Math.abs(__steps) + '格');
           applyMove(user, __steps); next();
@@ -20009,7 +20033,7 @@ function __opsCards(op, ctx, next, env) {
         if (!picks.length) { next(); return; }
         var tc = picks[0].card, need = (Number(tc.cost) || 0) + (op.extraCost || 0);
         if (p.cost < need) { addBattleLog(user, '音韵不足：发动墓地【' + tc.name + '】需要' + need + '点（其费用' + (tc.cost || 0) + '+' + (op.extraCost || 0) + '）'); next(); return; }
-        p.cost -= need;
+        __spendCost(p, need);
         addBattleLog(user, '支付' + need + '点音韵，发动墓地【' + tc.name + '】的卡牌效果（取卡牌效果，非SP）');
         var subCtx = Object.assign({}, ctx, { card: tc, target: ctx.target || (foeOf(user)) });
         if (tc.effect && typeof dispatchStep === 'function') dispatchStep(tc.effect, subCtx, next);
@@ -23118,7 +23142,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       var choices = ['花费' + recycleCost + '点音韵回收此卡', '不回收'];
       showChoiceModal('墓地回收·' + cardName, cardName, sp || effect, choices, function(choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= recycleCost;
+          __spendCost(p, recycleCost);
           // 从墓地移除
           var idx = p.grave.indexOf(card);
           if (idx >= 0) p.grave.splice(idx, 1);
@@ -23132,7 +23156,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2' && p.cost >= recycleCost) {
       onlineDecideModal('p2', '墓地回收·' + cardName + '（对手）', cardName, sp || effect, ['花费' + recycleCost + '点音韵回收此卡', '不回收'], function (choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= recycleCost;
+          __spendCost(p, recycleCost);
           var idx2 = p.grave.indexOf(card);
           if (idx2 >= 0) p.grave.splice(idx2, 1);
           card._recycled = true;
@@ -23150,7 +23174,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     if (player === 'p1' && p.cost >= 2) {
       showChoiceModal('墓地回收·共鸣', '共鸣', sp, ['花费2点音韵回收此卡', '不回收'], function(choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= 2;
+          __spendCost(p, 2);
           var idx = p.grave.indexOf(card);
           if (idx >= 0) p.grave.splice(idx, 1);
           card._recycled = true;
@@ -23162,7 +23186,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2' && p.cost >= 2) {
       onlineDecideModal('p2', '墓地回收·共鸣（对手）', '共鸣', sp, ['花费2点音韵回收此卡', '不回收'], function (choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= 2;
+          __spendCost(p, 2);
           var idx2 = p.grave.indexOf(card);
           if (idx2 >= 0) p.grave.splice(idx2, 1);
           card._recycled = true;
@@ -23180,7 +23204,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     if (player === 'p1' && p.cost >= 1) {
       showChoiceModal('墓地回收·认真起来了！', '认真起来了！', sp, ['花费1点音韵回收此卡', '不回收'], function(choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= 1;
+          __spendCost(p, 1);
           var idx = p.grave.indexOf(card);
           if (idx >= 0) p.grave.splice(idx, 1);
           card._recycled = true;
@@ -23192,7 +23216,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
     } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2' && p.cost >= 1) {
       onlineDecideModal('p2', '墓地回收·认真起来了！（对手）', '认真起来了！', sp, ['花费1点音韵回收此卡', '不回收'], function (choiceIdx) {
         if (choiceIdx === 0) {
-          p.cost -= 1;
+          __spendCost(p, 1);
           var idx2 = p.grave.indexOf(card);
           if (idx2 >= 0) p.grave.splice(idx2, 1);
           card._recycled = true;
@@ -23214,7 +23238,7 @@ function applyJudgeChain(side, pick, je, done) {
     /* 【里尔亚斯SP】下一次使用的技能卡音韵值-1（新减免替换旧的，用掉即清） */
     var __lilCost = parseInt(c.cost, 10) || 0;
     if (me._skillCostMinus && c._category === 'skill_cards') { __lilCost = Math.max(0, __lilCost - 1); me._skillCostMinus = 0; addBattleLog(me.__seat || 'p1', '【里尔亚斯SP】技能卡音韵值-1（本次实付' + __lilCost + '）'); }
-    me.cost -= __lilCost;
+    __spendCost(me, __lilCost);
     if (pick.from === 'faceDown') me.faceDownCards.splice(pick.index, 1); else me.hand.splice(pick.index, 1);
     (me.grave = me.grave || []).push(c);
   }
@@ -23853,7 +23877,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     /* 【里尔亚斯SP】技能卡音韵值-1（新减免替换旧的，用掉即清） */
     var __lilCost2 = parseInt(cc.cost, 10) || 0;
     if (p._skillCostMinus && cc._category === 'skill_cards') { __lilCost2 = Math.max(0, __lilCost2 - 1); p._skillCostMinus = 0; addBattleLog(target, '【里尔亚斯SP】技能卡音韵值-1'); }
-    p.cost -= __lilCost2; // 盖伏翻开抵消时同样支付费用（"1+/2+"费用卡取基数，避免 NaN 污染）
+    __spendCost(p, __lilCost2); // 盖伏翻开抵消时同样支付费用（"1+/2+"费用卡取基数，避免 NaN 污染）
     moveCardToGrave(target, cc, 'use');
     addBattleLog(target, '发动' + (fromFaceDown?'盖伏的':'') + '【' + cc.name + '】抵消' + damage + '点伤害及附加效果');
     // 各卡抵消后的附带效果按卡面区分（修复全部硬编码成"前进2格"）
@@ -23909,7 +23933,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     /* 【无首刺虫】AI 判据与护符同款：这一下会打死 / 或打完压到危险线（<=8）时才舍弃 ✓ */
     if (__hasTorrent && (__effAi >= p.sync || afterSync <= 8)) { __useTorrent(__torrentList[0].idx); return; }
     if (aiCharm && (__effAi >= p.sync || afterSync <= 8)) {
-      p.cost -= (parseInt(aiCharm.cost,10)||0); if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else p.hand.splice(aiCharmIdx,1);
+      __spendCost(p, (parseInt(aiCharm.cost,10)||0)); if (aiFromFaceDown) p.faceDownCards.splice(aiCharmIdx,1); else p.hand.splice(aiCharmIdx,1);
       moveCardToGrave('p2', aiCharm, 'use');
       addBattleLog('p2', '对手发动【' + aiCharm.name + '】抵消' + damage + '点伤害');
       if (aiCharm.name.indexOf('怪怪幽灵吊坠') >= 0) { recoverCost('p2', 1, '怪怪幽灵吊坠'); }
@@ -24035,7 +24059,7 @@ function onlineActivateFaceDownP2(index, name, done) {
       p._sakuraFreeUse--;
       addBattleLog('p2', '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
     } else {
-      p.cost -= actualCost;
+      __spendCost(p, actualCost);
       if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2');
     }
     if (typeof recordSkillUse === 'function') recordSkillUse(card, 'p2');
@@ -24617,7 +24641,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
     }
     function __applyRuler(oi) {
       if (oi == null || oi < 0) { updateBattleUI(); return; }
-      var pay = oi + 1; p.cost -= pay; var old = p.position, mv = Math.min(pay, 20);
+      var pay = oi + 1; __spendCost(p, pay); var old = p.position, mv = Math.min(pay, 20);
       p.position = (p.position + mv) % 42;
       addBattleLog(user, '【设计师的直尺】支付' + pay + '音韵前进' + mv + '格，第' + old + '格→第' + p.position + '格');
       triggerTileEffect(user); checkMoveTriggers(user, mv, old); updateBattleUI();
@@ -24643,7 +24667,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
     if (!pool.length) { if (user === 'p1') showToast('【福金与穆宁】墓地与移出区都没有[侵略]卡。', 'warn'); return false; }
     function __applyHuginn(idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
-      var picked = pool[idx], z = zone[idx]; p.cost -= 3;
+      var picked = pool[idx], z = zone[idx]; __spendCost(p, 3);
       if (z === 'grave') { var i = p.grave.indexOf(picked); if (i >= 0) p.grave.splice(i, 1); }
       else { var j = p.removed.indexOf(picked); if (j >= 0) p.removed.splice(j, 1); }
       p.hand.push(picked);
@@ -24941,7 +24965,7 @@ function onlineDrawByCostP2(done) {
   var __dcLoan = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap('p2') : 0;
   if (battleState.p2.cost + __dcLoan < 3) { if (done) done(); return; }
   if (battleState.p2.deck.length === 0 && (!battleState.p2.grave || battleState.p2.grave.length === 0)) { if (done) done(); return; }
-  battleState.p2.cost -= 3;
+  __spendCost(battleState.p2, 3);
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p2');
   var card = drawCard('p2');
   if (!card) { if (done) done(); return; }
@@ -25043,7 +25067,7 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
       battleState.p1._sakuraFreeUse--;
       addBattleLog('p1', '【宫樱子被动】消耗1次免费用卡（剩余' + battleState.p1._sakuraFreeUse + '次）');
     } else {
-      battleState.p1.cost -= actualCost;
+      __spendCost(battleState.p1, actualCost);
       if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
     }
     /* 【2026-10-07 修·**额外同步值使用条件要在这里也扣**】
@@ -25957,7 +25981,7 @@ function __afterAttackHitSP(user, card, target, done) {
   var __spP = battleState[user];
   if (__spP.cost < pay) { addBattleLog(user, '【' + (card.name || '') + '·SP】音韵不足' + pay + '点，无法发动'); if (done) done(); return; }
   function __fire() {
-    __spP.cost -= pay;
+    __spendCost(__spP, pay);
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
     dealDamageWithResponse(tgt, dmg, (card.name || '') + '·SP', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, attr, user, { srcCard: card });
     addBattleLog(user, '【' + (card.name || '') + '·SP】支付' + pay + '点音韵值，对' + (tgt === user ? '自己' : '对手') + '造成' + dmg + '点' + attr + '属性伤害');
@@ -26023,7 +26047,7 @@ function settleCardExecution(card, user, target, opts, done) {
       p._sakuraFreeUse--;
       addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
     } else {
-      p.cost -= actual;
+      __spendCost(p, actual);
       if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
     }
   }
@@ -26674,7 +26698,7 @@ function settleSpecialCard(card, handIndex, user, outerDone) {
   var h = getSpecialHandler(card);
   if (!h) { if (outerDone) outerDone(); return; }
   var actual = computeActualCost(card, user);
-  p.cost -= actual;
+  __spendCost(p, actual);
   if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(user);
   if (typeof handIndex === 'number' && handIndex >= 0) p.hand.splice(handIndex, 1);
   recordSkillUse(card, user);
@@ -26820,6 +26844,7 @@ try { window.chainBlockReason = chainBlockReason; } catch (e) {}
 try { window.isDualUseChainCard = isDualUseChainCard; } catch (e) {}
 try { window.CARD_PLAY_CONDITIONS = CARD_PLAY_CONDITIONS; } catch (e) {}
 try { window.__overclockLoanCap = __overclockLoanCap; } catch (e) {}
+try { window.__spendCost = __spendCost; } catch (e) {}
 try { window.__settleOverclockLoan = __settleOverclockLoan; } catch (e) {}
 try { window.__lilithBonus = __lilithBonus; } catch (e) {}
 try { window.isDiceModifyCard = isDiceModifyCard; } catch (e) {}
