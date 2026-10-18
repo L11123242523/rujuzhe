@@ -9082,7 +9082,10 @@ var TW = {
     opts.push(__passLabel);
     var pickP1 = function (idx) {
       if (idx === null || idx === undefined || idx >= pool.length) { addBattleLog('p1', '【连锁】你PASS'); pass(); }
-      else { self._addChain(win, pool[idx]); fire(pool[idx].label); }
+      /* 【2026-10-19 作者报「遥控骰子能连锁但结算被跳过」】p1 原来不传完成回调，
+         紧接着 fire 推进；而遥控骰子的“改几点”弹窗是异步的 ⇒ 窗口先结算、选值后才写 je.val ✗。
+         必须与 activate() 同款：等 onAdd 完成（选完点数）再 fire。 */
+      else { self._addChain(win, pool[idx], function () { fire(pool[idx].label); }); }
     };
     /* 【2026-10-11 修正·按引擎自己的候选约定】候选的 mandatory 约定见 L6829：
        「`mandatory: false` 表示选发（**缺省 = 必发**）」✓
