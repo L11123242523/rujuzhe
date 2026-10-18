@@ -3745,6 +3745,35 @@ function deckAutoFill(player) {
 }
 
 
+/* 【2026-10-18 作者要求】编组界面必须能一眼看出"哪个队员的 SP 会生效"。
+   判据与 processCharacterPassives 完全同源：
+   · 队长（index 0）：被动+SP 全生效；
+   · 队员：卡面 sp_member=true 或文本「作为队员编组也生效」才生效；
+   · 编组类（文本含「冲突」）队员：只有**第一个**这样的队员生效，后面的被覆盖。 */
+function __charSpStatus(player, index) {
+  try {
+    var cfg = deckConfig && deckConfig[player]; if (!cfg) return null;
+    var chars = cfg.chars || [], c = chars[index]; if (!c) return null;
+    var sp = String(c.sp || '');
+    var isCap = (index === 0);
+    var memberWorks = (c.sp_member === true) || /作为队员编组/.test(sp);
+    var isGroup = /冲突/.test(sp);
+    if (!sp) return { short: isCap ? '队长被动' : '无SP', color: '#9fb0d0', full: isCap ? '队长：只有被动，没有 SP' : '队员：该角色没有 SP' };
+    if (isCap) return { short: '队长SP', color: '#7dffb0', full: '队长：被动 + SP 全部生效' };
+    if (!memberWorks) return { short: 'SP仅队长', color: '#ffb86b', full: '队员：该 SP 只在队长位生效' };
+    if (isGroup) {
+      var conflict = false;
+      for (var i = 1; i < index; i++) {
+        var o = chars[i]; if (!o) continue;
+        var osp = String(o.sp || '');
+        var ow = (o.sp_member === true) || /作为队员编组/.test(osp);
+        if (ow && /冲突/.test(osp)) { conflict = true; break; }
+      }
+      if (conflict) return { short: 'SP冲突', color: '#ff7a7a', full: '队员：SP 被前面队员的编组类效果覆盖，未生效' };
+    }
+    return { short: '队员SP', color: '#7dffb0', full: '队员：SP 生效' };
+  } catch (e) { return null; }
+}
 function createDeckSlot(card, player, type, index) {
   if (card) {
     /* 【2026-10-09 作者要求】卡组编组界面：**鼠标悬停在卡上即浮出原图**（通用浮层 __cardPeekShow，
@@ -3753,6 +3782,10 @@ function createDeckSlot(card, player, type, index) {
     var html = '<div class="deck-slot filled"' + __peek + ' onclick="openCardPicker(\'' + player + '\', \'' + type + '\', ' + index + ')">';
     if (card.image_url) {
       html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '">';
+    }
+    if (type === 'chars') {
+      var __spSt = (typeof __charSpStatus === 'function') ? __charSpStatus(player, index) : null;
+      if (__spSt) html += '<div class="deck-slot-sp" title="' + __spSt.full + '" style="position:absolute;top:2px;left:2px;z-index:4;font-size:8px;line-height:1.1;padding:1px 3px;border-radius:5px;background:rgba(0,0,0,.78);color:' + __spSt.color + ';border:1px solid ' + __spSt.color + ';">' + __spSt.short + '</div>';
     }
     html += '<div class="deck-slot-name">' + card.name + '</div>';
     html += '<div class="deck-slot-remove" onclick="event.stopPropagation();removeCard(\'' + player + '\', \'' + type + '\', ' + index + ')">✕</div>';
