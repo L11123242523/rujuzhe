@@ -20454,6 +20454,50 @@ function runOneOp(op, ctx, next) {
         }
         if (__tgt >= 0) { p.position = __tgt; addBattleLog(user, '瞬移至第' + __tgt + '格【' + MAP_TILES[__tgt].name + '】'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user); if (typeof updateBattleUI === 'function') updateBattleUI(); }
         else addBattleLog(user, '【移动至特定格】未找到目标格，已登记');
+      } else if (op.kind === 'any') {
+        /* 【2026-10-19 作者点名】逃脱/执勤证明的“地图任意格”原来只写“已登记”，没有交互。
+           现在用 42 格选择器真正选格：逃脱按卡面限制（当前回合玩家所在行的交互格，
+           或公交/地铁格前后1格），执勤证明全图任意格；p1 弹窗 / p2 联机问客人 / AI 取第一个合法格。 */
+        var __allTiles = [];
+        if (typeof MAP_TILES !== 'undefined' && MAP_TILES) {
+          for (var __ti2 = 0; __ti2 < MAP_TILES.length; __ti2++) __allTiles.push(__ti2);
+        }
+        var __pickable = __allTiles;
+        if (ctx && ctx.card && String(ctx.card.name || '').indexOf('逃脱') >= 0) {
+          var __cur = battleState.currentPlayer || user;
+          var __curPos = (battleState[__cur] && battleState[__cur].position) || 0;
+          var __rowStart = __curPos <= 13 ? 0 : (__curPos <= 21 ? 14 : (__curPos <= 34 ? 22 : 35));
+          var __rowEnd = __curPos <= 13 ? 13 : (__curPos <= 21 ? 21 : (__curPos <= 34 ? 34 : 41));
+          var __okSet = {};
+          var __isInteract = function (tl) { return tl && (['shop', 'bus', 'subway', 'power'].indexOf(tl.type) >= 0 || String(tl.name || '').indexOf('交互') >= 0); };
+          for (var __ri = __rowStart; __ri <= __rowEnd; __ri++) {
+            if (__isInteract(MAP_TILES[__ri])) __okSet[__ri] = 1;
+          }
+          for (var __bi = 0; __bi < MAP_TILES.length; __bi++) {
+            var __bt = MAP_TILES[__bi];
+            if (__bt && (__bt.type === 'bus' || __bt.type === 'subway')) {
+              __okSet[((__bi + 1) % MAP_TILES.length + MAP_TILES.length) % MAP_TILES.length] = 1;
+              __okSet[((__bi - 1) % MAP_TILES.length + MAP_TILES.length) % MAP_TILES.length] = 1;
+            }
+          }
+          __pickable = __allTiles.filter(function (x) { return __okSet[x]; });
+        }
+        var __applyTilePick = function (tile) {
+          if (tile == null || tile < 0 || tile >= MAP_TILES.length) return;
+          p.position = tile;
+          addBattleLog(user, '【' + ((ctx && ctx.card && ctx.card.name) || '移动') + '】移动至第' + tile + '格【' + (MAP_TILES[tile] && MAP_TILES[tile].name || '') + '】');
+          if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
+          if (typeof updateBattleUI === 'function') updateBattleUI();
+        };
+        if (!__pickable.length) { addBattleLog(user, '【移动至选定格】没有符合卡面的合法格子'); }
+        else {
+          var __tileOpts = __pickable.map(function (x) { return '第' + x + '格 ' + ((MAP_TILES[x] && MAP_TILES[x].name) || ''); });
+          var __onTilePick = function (i) { var ix = parseInt(i, 10); if (!isNaN(ix) && __pickable[ix] != null) __applyTilePick(__pickable[ix]); };
+          if (typeof isAISeat === 'function' && isAISeat(user)) { __applyTilePick(__pickable[0]); }
+          else if (user === 'p1' && typeof showChoiceModal === 'function') { showChoiceModal('选择目标格', '请选择要移动到的格子', '', __tileOpts, __onTilePick); }
+          else if (user === 'p2' && typeof Online !== 'undefined' && Online.active && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', '选择目标格（对手）', '请选择要移动到的格子', '', __tileOpts, __onTilePick); }
+          else { __applyTilePick(__pickable[0]); }
+        }
       } else addBattleLog(user, '【移动至选定格】需在地图点选目标格（已登记）');
       // 逃脱 Lv4追加：移动完成后，下一次投掷点数可以增减1点
       if (ctx && ctx.card && ctx.card.name && ctx.card.name.indexOf('逃脱') >= 0 && (p.level || 1) >= 4) { p._nextRollAdjustable = true; addBattleLog(user, '【逃脱·Lv4】移动完成：下一次投掷点数可以增减1点'); }
@@ -24159,6 +24203,9 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
 
 function isChainOnlyCard(card) {
   if (!card) return false;
+  /* 【2026-10-19 作者点名】逃脱是普通主阶段技能卡；文本含“前后1格”被 classifyChainCard 误归成 move_adjust，
+     导致“凭空不可用” ⇒ 这里排除，选格交互由 move_to_tile 负责。 */
+  if (card.name === '逃脱') return false;
   // 阶段0：连锁分类以纯引擎为单一事实源；下方旧逻辑仅在引擎缺失时兜底
   if (typeof RJEngine !== 'undefined' && RJEngine.classifyChainCard) return RJEngine.classifyChainCard(card) !== null;
   var name = card.name || '';
