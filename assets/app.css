@@ -3821,7 +3821,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 }
 #mainMenu.main-menu-v2 .mm-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 #mainMenu.main-menu-v2 .mm-copy b { font-size: 16px; letter-spacing: 1px; }
-#mainMenu.main-menu-v2 .mm-copy small { color: rgba(231,238,250,.52); font-size: 11px; font-weight: 400; letter-spacing: .2px; }
+#mainMenu.main-menu-v2 .mm-copy small { color: rgba(231,238,250,.72); font-size: 11px; font-weight: 400; letter-spacing: .2px; }
 #mainMenu.main-menu-v2 .mm-go {
   margin-left: auto;
   align-self: flex-start;
@@ -3853,7 +3853,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 }
 #mainMenu.main-menu-v2 .mm-mini span { font-size: 15px; line-height: 1; margin-bottom: 4px; }
 #mainMenu.main-menu-v2 .mm-mini b { font-size: 12px; letter-spacing: .4px; }
-#mainMenu.main-menu-v2 .mm-mini small { color: rgba(220,230,245,.42); font-size: 10px; }
+#mainMenu.main-menu-v2 .mm-mini small { color: rgba(220,230,245,.68); font-size: 10px; }
 #mainMenu.main-menu-v2 .mm-mini:hover {
   background: rgba(28,38,54,.92);
   border-color: rgba(254,202,87,.35);
@@ -3943,4 +3943,52 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 }
 @media (max-width: 620px) {
   #mainMenu.main-menu-v2 .game-title.mm-wordmark { font-size: clamp(34px, 8.6vw, 46px); }
+}
+
+
+/* 主菜单 v2.2（2026-10-19 作者点名）：选项内部完全透明，只留彩色边框 */
+#mainMenu.main-menu-v2 .mm-card {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid color-mix(in srgb, var(--mm-accent, #feca57) 62%, transparent) !important;
+  box-shadow: none !important;
+  text-shadow: 0 2px 8px rgba(0,0,0,.95), 0 0 18px rgba(0,0,0,.55);
+}
+#mainMenu.main-menu-v2 .mm-card::before {
+  background: var(--mm-accent, #feca57);
+  opacity: 1;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--mm-accent, #feca57) 55%, transparent);
+}
+#mainMenu.main-menu-v2 .mm-card:hover {
+  background: transparent !important;
+  border-color: var(--mm-accent, #feca57) !important;
+  box-shadow: 0 0 26px -8px color-mix(in srgb, var(--mm-accent, #feca57) 55%, transparent) !important;
+}
+#mainMenu.main-menu-v2 .mm-card .mm-ico {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--mm-accent, #feca57) 52%, transparent);
+}
+#mainMenu.main-menu-v2 .mm-mini {
+  --mini-accent: #e9b45c;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid color-mix(in srgb, var(--mini-accent) 52%, transparent) !important;
+  box-shadow: none !important;
+  text-shadow: 0 2px 8px rgba(0,0,0,.95), 0 0 16px rgba(0,0,0,.5);
+}
+#mainMenu.main-menu-v2 .mm-mini:nth-child(1) { --mini-accent: #e9b45c; }
+#mainMenu.main-menu-v2 .mm-mini:nth-child(2) { --mini-accent: #8fb7ff; }
+#mainMenu.main-menu-v2 .mm-mini:nth-child(3) { --mini-accent: #d3a7ff; }
+#mainMenu.main-menu-v2 .mm-mini:nth-child(4) { --mini-accent: #74d6a8; }
+#mainMenu.main-menu-v2 .mm-mini:nth-child(5) { --mini-accent: #f0a35e; }
+#mainMenu.main-menu-v2 .mm-mini:nth-child(6) { --mini-accent: #f08a9a; }
+#mainMenu.main-menu-v2 .mm-mini:hover {
+  background: transparent !important;
+  border-color: var(--mini-accent) !important;
+  box-shadow: 0 0 22px -8px color-mix(in srgb, var(--mini-accent) 50%, transparent) !important;
+}
+#mainMenu.main-menu-v2 .mm-mini span {
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.9));
 }
