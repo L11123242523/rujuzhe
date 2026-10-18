@@ -1076,6 +1076,15 @@ function renderZoneSlots(pl) {
       continue;
     }
     if (it.type === 'facedown') {
+      /* 【2026-10-19 冬马被动②】属性相同后卡主选择“留在原区正面” ⇒ 卡仍在 faceDownCards，
+         但 _faceUp=true；不能继续画成「盖伏」，否则双方看到的和实际处理不一致。 */
+      if (it.card._faceUp === true) {
+        html += '<div class="permanent-slot permanent-card face-up" title="正面留在原区：' + (it.card.name || '') + '">' +
+          __slotIdx(i + 1) +
+          (it.card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + it.card.image_url + '" class="slot-img" alt="' + it.card.name + '">' : '') +
+          '<div class="slot-name">' + (it.card.name || '') + '</div><div class="slot-type">正面</div></div>';
+        continue;
+      }
       var canAct = mine && !(it.card._faceDownTurn === battleState.turn && it.card._faceDownPlayer === pl && battleState.currentPlayer === pl);
       var fdTitle = mine ? (canAct ? '盖伏卡 - 点击发动（鼠标悬停可查看卡面）' : '盖伏卡 - 本回合无法发动（鼠标悬停可查看卡面）') : '对手的盖伏卡';
       var fdOnclick = mine ? (canAct ? ("uiActivateFaceDown(" + it.index + ")") : "showToast('盖伏当回合无法发动！', 'warn')") : '';

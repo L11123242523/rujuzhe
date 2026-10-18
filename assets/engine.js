@@ -15141,7 +15141,7 @@ function __tomaDeclare(player) {
     var pool = [];
     playerIds().forEach(function (w) {
       var q = battleState[w];
-      ((q && q.faceDownCards) || []).forEach(function (c) { if (c) pool.push({ card: c, zone: 'faceDown', owner: w }); });
+      ((q && q.faceDownCards) || []).forEach(function (c) { if (c && c._faceUp !== true) pool.push({ card: c, zone: 'faceDown', owner: w }); });
     });
     if (!pool.length) return;                                 // 场上没有暗置的卡 → 无从发动
     var ATTRS = ['无序', '热忱', '理智', '混沌'];
@@ -21863,6 +21863,15 @@ function useEventCardFor(player, index, name, done) {
   if (__EVENT_CASE_A[card.name]) __eventCasesA(card, player, p, __fin2, __evtEnv);
   else if (__EVENT_CASE_B[card.name]) __eventCasesB(card, player, p, __fin2, __evtEnv);
   }; // end __applyEventEffect
+  
+  /* 【2026-10-19 圆桌会议/特例事件卡·连锁路径】连锁逆结算里这张卡已经是外层链的 C1，
+     不能再进 beforeEffectExecution（_chainLock 会把本体挡掉，只剩送墓）⇒ 直接执行本体。 */
+  if (__fromChainEarly) {
+    try { if (typeof runTiming === 'function') runTiming(TIMING.ON_APPLY, { player: player, card: card }); } catch (e) {}
+    try { __applyEventEffect(function () {}); } catch (e) { try { console.error('事件卡连锁本体出错', e); } catch (e2) {} }
+    if (done) done();
+    return;
+  }
   
   // 效果将执行前连锁窗口（效果即将生效时点）：可被“效果无效”类连锁反制（如崩塌之乌托邦）
   runTiming(TIMING.ON_ACTIVATE, { player: player, card: card });
