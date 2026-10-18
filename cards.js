@@ -49,7 +49,7 @@ window.__CARD_DATA__ = {
             "位移"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_dongma.webp?v=8",
+         "image_url": "assets/images/ui2/card_face_dongma.webp?v=9",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
@@ -87,7 +87,7 @@ window.__CARD_DATA__ = {
             "控制"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/img_oAjMFutXGf.webp?v=8",
+         "image_url": "assets/images/ui2/img_oAjMFutXGf.webp?v=9",
          "sync": 6,
          "_category": "characters",
          "type": "术士/增幅者/位移手",
@@ -1038,7 +1038,7 @@ window.__CARD_DATA__ = {
             "增益者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_face_lixu_shuizhuo.webp?v=7",
+         "image_url": "assets/images/ui2/card_face_lixu_shuizhuo.webp?v=8",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,
