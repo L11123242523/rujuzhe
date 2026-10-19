@@ -4342,3 +4342,91 @@ body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
   .tile-info-card { top: auto; bottom: 14px; transform: translate(-50%, 12px) scale(.98); }
   .tile-info-card.show { transform: translate(-50%, 0) scale(1); }
 }
+
+
+/* ==================================================================
+   对局决策弹窗 v2（2026-10-20）：MD 式贴底、缩小、半透明
+   只作用于 choice / cardPicker / targetSelect / timing / cardModal，
+   卡组编组、公告、卡牌列表等全屏页面不动。
+   ================================================================== */
+#choiceModal.card-modal-overlay,
+#targetSelectModal.card-modal-overlay,
+#timingModal.card-modal-overlay,
+#cardModal.card-modal-overlay,
+#cardPicker.card-picker-overlay {
+  background: rgba(4,8,16,.16) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  align-items: flex-end !important;
+  justify-content: center !important;
+  padding: 0 12px 12px !important;
+  pointer-events: none !important;
+}
+#choiceModal .card-modal,
+#targetSelectModal .card-modal,
+#timingModal .card-modal,
+#cardModal .card-modal,
+#cardPicker .card-picker {
+  pointer-events: auto !important;
+  width: min(720px, 94vw) !important;
+  max-width: min(720px, 94vw) !important;
+  max-height: 46vh !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(242,207,130,.38) !important;
+  background: linear-gradient(160deg, rgba(20,28,46,.96), rgba(9,14,24,.97)) !important;
+  box-shadow: 0 -8px 36px -14px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.07) !important;
+  overflow-y: auto !important;
+}
+#cardPicker .card-picker { width: min(980px, 96vw) !important; max-width: min(980px, 96vw) !important; max-height: 50vh !important; }
+#choiceModal .card-modal h3,
+#targetSelectModal .card-modal h3,
+#timingModal .card-modal h3,
+#cardModal .card-modal h3,
+#cardPicker .card-picker h3 {
+  font-size: 16px !important; margin: 0 0 8px !important; text-align: left !important;
+  color: #f2cf82 !important; letter-spacing: .5px;
+}
+#choiceModal .modal-card-info,
+#targetSelectModal .modal-card-info,
+#timingModal .modal-card-info,
+#cardModal .modal-card-info { margin-bottom: 7px !important; }
+#choiceModal .modal-card-name,
+#targetSelectModal .modal-card-name,
+#timingModal .modal-card-name,
+#cardModal .modal-card-name { font-size: 13px !important; color: #dce9ff !important; }
+#choiceModal .modal-card-effect,
+#targetSelectModal .modal-card-effect,
+#timingModal .modal-card-effect,
+#cardModal .modal-card-effect {
+  font-size: 12px !important; line-height: 1.55 !important; color: rgba(220,232,250,.78) !important;
+  max-height: 13vh !important; overflow-y: auto !important;
+}
+#choiceButtons { gap: 6px !important; margin-bottom: 4px !important; }
+#choiceButtons .modal-btn,
+#targetSelectOptions .modal-btn,
+#timingOptions .modal-btn {
+  padding: 8px 12px !important; font-size: 13px !important; border-radius: 9px !important;
+  text-align: left !important; line-height: 1.4 !important;
+}
+#targetSelectOptions, #timingOptions { flex-direction: row !important; flex-wrap: wrap !important; gap: 6px !important; margin-bottom: 4px !important; }
+#targetSelectOptions .modal-btn, #timingOptions .modal-btn { flex: 1 1 140px !important; text-align: center !important; }
+#cardModal .modal-buttons { margin-top: 6px !important; gap: 6px !important; }
+#cardModal .modal-btn { padding: 7px 12px !important; font-size: 13px !important; }
+#cardPicker .card-picker-grid { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)) !important; gap: 6px !important; }
+#cardPicker .card-picker-item { padding: 5px !important; margin: 0 !important; min-width: 0 !important; max-width: none !important; }
+#cardPicker .card-picker-item img { height: 64px !important; }
+#cardPicker .card-picker-item-name { font-size: 10.5px !important; }
+#cardPicker .card-picker h3 { margin-bottom: 8px !important; }
+#timingModal #timingQuestion { margin: 8px 0 !important; font-size: 13px !important; }
+#cardModal .card-modal img { max-height: 18vh !important; }
+@media (max-width: 620px) {
+  #choiceModal.card-modal-overlay, #targetSelectModal.card-modal-overlay,
+  #timingModal.card-modal-overlay, #cardModal.card-modal-overlay,
+  #cardPicker.card-picker-overlay { padding: 0 6px 6px !important; }
+  #choiceModal .card-modal, #targetSelectModal .card-modal,
+  #timingModal .card-modal, #cardModal .card-modal { width: 96vw !important; max-width: 96vw !important; max-height: 56vh !important; padding: 10px 12px !important; }
+  #cardPicker .card-picker { width: 97vw !important; max-width: 97vw !important; max-height: 58vh !important; padding: 9px !important; }
+  #cardPicker .card-picker-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)) !important; }
+}
