@@ -4162,3 +4162,123 @@ body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
   body:not(.ui-classic) #battleScreen .player-status-bar { flex-wrap: wrap !important; justify-content: center !important; }
   body:not(.ui-classic) #battleScreen .player-status-bar .status-item { flex: 1 1 62px !important; min-width: 62px !important; }
 }
+
+
+/* ==================================================================
+   对局界面 v3（2026-10-19）—— 桌面端双栏主舞台
+   地图占主位；对手区/效果区/状态栏收进右侧信息栏；手牌横跨底部。
+   ================================================================== */
+@media (min-width: 1000px) {
+  body:not(.ui-classic) #battleScreen .battle-main-area {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 360px !important;
+    grid-template-areas:
+      "map opponent"
+      "map center"
+      "hand hand" !important;
+    gap: 10px !important;
+    align-items: stretch !important;
+  }
+  body:not(.ui-classic) #battleScreen .opponent-area {
+    grid-area: opponent !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    max-height: 292px !important;
+    overflow: auto !important;
+    padding: 9px 10px !important;
+  }
+  body:not(.ui-classic) #battleScreen .opponent-area .deck-zone {
+    width: 58px !important; height: 72px !important;
+    margin: 0 auto !important;
+  }
+  body:not(.ui-classic) #battleScreen .opponent-area .opp-zone-counts {
+    font-size: 10.5px !important; line-height: 1.45 !important; text-align: center !important;
+  }
+  body:not(.ui-classic) #battleScreen .opponent-area > div[style*="display:flex"] { justify-content: center !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .permanent-slots { justify-content: center !important; flex-wrap: wrap !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .buff-bar { justify-content: center !important; }
+  body:not(.ui-classic) #battleScreen .map3d-wrap {
+    grid-area: map !important;
+    height: 100% !important;
+    min-height: 520px !important;
+    max-height: none !important;
+    aspect-ratio: auto !important;
+  }
+  body:not(.ui-classic) #battleScreen .center-area {
+    grid-area: center !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+  body:not(.ui-classic) #battleScreen .center-area .permanent-area {
+    width: 100% !important;
+    min-height: 150px !important;
+  }
+  body:not(.ui-classic) #battleScreen .center-area .player-status-bar {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+  body:not(.ui-classic) #battleScreen .center-area .player-status-bar .status-item { min-width: 0 !important; }
+  body:not(.ui-classic) #battleScreen .center-area > .buff-bar,
+  body:not(.ui-classic) #battleScreen .center-area > .dice-animation-area { grid-column: auto !important; }
+  body:not(.ui-classic) #battleScreen .player-area {
+    grid-area: hand !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  body:not(.ui-classic) #battleScreen .hand-area { min-height: 230px !important; }
+}
+
+/* 对局 v3.1：右栏对手标识 + 手牌放大 */
+@media (min-width: 1000px) {
+  body:not(.ui-classic) #battleScreen .opponent-area::before {
+    content: "对手 · OPPONENT";
+    order: -1;
+    font-size: 10px;
+    letter-spacing: 1.6px;
+    color: rgba(140,220,245,.72);
+    text-align: center;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(72,219,251,.18);
+  }
+  body:not(.ui-classic) #battleScreen .hand-cards { gap: 12px !important; justify-content: center !important; }
+  body:not(.ui-classic) #battleScreen .hand-card-img { width: 124px !important; height: 150px !important; }
+}
+@media (max-width: 768px) {
+  body:not(.ui-classic) #battleScreen .hand-card-img { width: 82px !important; height: 100px !important; }
+}
+
+/* 对局 v3.2：右栏去掉重复的对手牌堆图，只留牌组张数；地图再退一点避免裁角 */
+@media (min-width: 1000px) {
+  body:not(.ui-classic) #battleScreen .opponent-area .deck-zone { display: none !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .opp-zone-counts { text-align: left !important; padding: 2px 4px !important; }
+}
+
+/* 对局 v3.3：右栏标题/计数各占一整行，避免挤成一排 */
+@media (min-width: 1000px) {
+  body:not(.ui-classic) #battleScreen .opponent-area::before { flex: 0 0 100% !important; width: 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .opp-zone-counts { flex: 0 0 100% !important; width: 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area > div[style*="display:flex"] { flex: 0 0 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .permanent-slots { flex: 0 0 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .buff-bar { flex: 0 0 100% !important; }
+}
+
+/* 对局 v3.4：右栏改成普通块级流，标题/计数/按钮/槽位各占一行 */
+@media (min-width: 1000px) {
+  body:not(.ui-classic) #battleScreen .opponent-area { display: block !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area::before { display: block !important; width: 100% !important; margin-bottom: 4px; }
+  body:not(.ui-classic) #battleScreen .opponent-area .opp-zone-counts { display: block !important; width: 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area > div { width: 100% !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .permanent-slots { display: flex !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .buff-bar { display: flex !important; }
+}
