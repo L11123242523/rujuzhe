@@ -2799,9 +2799,27 @@ var CARD_PLAY_CONDITIONS={
     if (!__has) return {ok:false, reason:'牌组、墓地和移出游戏里都没有攻击卡/技能卡，无法检索 ⇒ 不能发动【钢笔】'};
     return true;
   },
+  /* 【2026-10-19 作者报】狩猎之少女必须移动到同一行的其他玩家所在格；没有同行玩家时不能发动。 */
+  '狩猎之少女':function(card,me,bs){
+    var ok=false;
+    try { Object.keys(bs||{}).forEach(function(k){ if(k===undefined) return; var q=bs[k]; if(!q||q===me) return; if(q.position!=null&&me.position!=null&&typeof isSameRow==='function'&&isSameRow(me.position,q.position)) ok=true; }); } catch(e){}
+    if(!ok) return {ok:false, reason:'同一行没有其他玩家，无法发动【狩猎之少女】'};
+    return true;
+  },
   '典籍之残页':function(card,me,bs){
-    var __has = (me.deck||[]).some(function(c){ return c && (c._category === 'attack_cards' || c._category === 'skill_cards'); });
-    if (!__has) return {ok:false, reason:'牌组里没有角色携带卡（攻击卡/技能卡），无法检索 ⇒ 不能发动【典籍之残页】'};
+    /* 【2026-10-19】检索实现 `collectZoneCards` 会按「本队角色」过滤携带卡；
+       发动条件必须用**同一口径**，否则牌组只有别队卡时仍可发动、检索为空，AI 会白用一张。 */
+    var __team = [];
+    try {
+      var __seatDj = (typeof battleState !== 'undefined' && battleState && me === battleState.p1) ? 'p1' : ((typeof battleState !== 'undefined' && battleState && me === battleState.p2) ? 'p2' : 'p1');
+      __team = ((typeof deckConfig !== 'undefined' && deckConfig && deckConfig[__seatDj] && deckConfig[__seatDj].chars) || []).filter(Boolean).map(function(c){ return c.name; });
+    } catch(e) {}
+    var __has = (me.deck||[]).some(function(c){
+      if (!c || (c._category !== 'attack_cards' && c._category !== 'skill_cards')) return false;
+      if (__team.length && typeof cardBelongsToTeam === 'function' && !cardBelongsToTeam(c, __team)) return false;
+      return true;
+    });
+    if (!__has) return {ok:false, reason:'牌组里没有本队角色携带卡（攻击卡/技能卡），无法检索 ⇒ 不能发动【典籍之残页】'};
     return true;
   }
 };
@@ -19908,7 +19926,24 @@ function __opsMove(op, ctx, next, env) {
       applyMove(__seat, __n);
       break;
     }
-    case 'move_to_player': { var before = p.position; p.position = q.position; addBattleLog(user, '移动到目标所在第' + p.position + '格（原第' + before + '格）'); if (typeof triggerTileEffect === 'function') triggerTileEffect(user); break; }
+    case 'move_to_player': {
+      /* 【2026-10-19 作者报】狩猎之少女只能跳到同一行的其他玩家格；同行判定是硬条件（选择器/条件表之外再守一次）。
+         SP：本次移动超过6格时抽一张馈赠卡（卡面“可以”，AI/自动路径直接执行）。 */
+      var before = p.position;
+      if (typeof isSameRow === 'function' && before != null && q.position != null && !isSameRow(before, q.position)) {
+        addBattleLog(user, '【狩猎之少女】目标不在同一行，无法移动');
+        break;
+      }
+      p.position = q.position;
+      addBattleLog(user, '移动到目标所在第' + p.position + '格（原第' + before + '格）');
+      if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
+      var __dist = (typeof ringMinDist === 'function') ? ringMinDist(before, p.position) : Math.abs(p.position - before);
+      if (__dist > 6 && typeof drawGiftCard === 'function') {
+        addBattleLog(user, '【狩猎之少女·SP】本次移动' + __dist + '格（超过6格）⇒ 抽一张馈赠卡');
+        drawGiftCard(user);
+      }
+      break;
+    }
     case 'interrupt_move': { var iw = op.who === 'self' ? user : target; if (iw !== user && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, iw)) break; battleState[iw]._moveInterrupted = true; addBattleLog(user, '打断' + (iw === user ? '自己' : '目标') + '移动'); break; }
     case 'knock_off': { var h = q.hand; if (h.length) { var ri = GameRNG.int(h.length), rc = h.splice(ri, 1)[0]; q.grave.push(rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
   }
@@ -26823,7 +26858,7 @@ var SPECIAL_CARD_HANDLERS = {
             var __selArr = Array.isArray(sel) ? sel : ((sel === null || sel === undefined || sel === '') ? [] : [sel]);
             if (!__selArr.length) { __finish(); return; }
             __take(cands[__selArr[0]] || cands[0]);
-          }, 1, true);
+          }, 1, true, true);
           return;
         }
         // AI/远端座：固定取第一张可配对的卡（确定性决策，联机双方同流）
