@@ -12148,6 +12148,33 @@ function aiEstDamage(card, foe) {
     return calc ? (calc.value || 0) : base;   // 已含 攻击力÷2 / 防御 / 克制 / 最终增伤
   } catch (e) { return 0; }
 }
+/* 【2026-10-20 AI v2】多卡斩杀规划：单张不致死，但手里攻击卡的总有效伤害够杀 ⇒ 优先收头。
+   只做预算内的粗略规划（费用/伤害/护盾），不预测抽牌与随机判定。 */
+function aiHasLethalSequence(me, foe) {
+  try {
+    if (!me || !foe || !(foe.sync > 0)) return false;
+    var budget = Number(me.cost) || 0;
+    var shield = Number(foe.shield) || 0;
+    var cards = (me.hand || []).filter(function (c) { return c && c._category === 'attack_cards'; })
+      .map(function (c) {
+        var req = (typeof computeRequiredCost === 'function') ? computeRequiredCost(c, aiSeat()) : (Number(c.cost) || 0);
+        req = Number(req) || 0;
+        return { c: c, cost: req, dmg: aiEstDamage(c, foe) };
+      })
+      .filter(function (x) { return x.dmg > 0; })
+      .sort(function (a, b) { return a.cost - b.cost || b.dmg - a.dmg; });
+    var total = 0;
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].cost > budget) continue;
+      budget -= cards[i].cost;
+      var d = Math.max(0, cards[i].dmg - shield);
+      shield = Math.max(0, shield - cards[i].dmg);
+      total += d;
+      if (total >= foe.sync) return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
 // 轻量评分（供资源层挑“最差的一张”献祭；优先复用 aiPlayCards 缓存的完整评分）
 function aiScoreOf(c) {
   try {
@@ -12186,8 +12213,11 @@ function aiScoreCard(c) {
   var isPerm = c._category === 'item_permanent';
   var handN = (me.hand || []).length;
 
-  // 1. 斩杀永远最高
+  // 1. 斩杀永远最高（单卡 + 多卡合计）
   if (lethal) score += 2000;
+  var teamLethal = (typeof aiHasLethalSequence === 'function') ? aiHasLethalSequence(me, foe) : false;
+  if (teamLethal && c._category === 'attack_cards') score += 450;
+  if (teamLethal && (isSearch || isDraw || isHeal || isBuff)) score -= 100;
   // 2. 攻击/伤害
   if (c._category === 'attack_cards') score += 45;
   if (effect.indexOf('伤害') >= 0) score += 28 + dmg * 6;
