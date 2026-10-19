@@ -15293,6 +15293,7 @@ function __clearPhaseScopedBuffsImpl() {
         var amt = st._tempAttackPhase;
         st._tempAttack = Math.max(0, (st._tempAttack || 0) - amt);
         st._tempAttackPhase = 0;
+        st._zuijiahuaPhaseActive = false;
         addBattleLog(w, '【攻击力提升】阶段结束，临时攻击力 -' + amt);
       }
       if (st._atkPctPhase) st._atkPctPhase = 0;
@@ -19987,6 +19988,14 @@ function __opsBuff(op, ctx, next, env) {
     /* 【百分比形态】（作者 2026-09-28 新卡面：最佳化「直到当前阶段结束前提升自身100%的攻击力」）
        按"当时的攻击力"换算成 flat，仍归**临时**档（阶段/回合结束清零）。 */
     case 'attack_buff_temp_pct': {
+      /* 【2026-10-19 作者实测】最佳化的 +100% 不该叠加：同一阶段内第二张/第二次只提示，不再累加。
+         只给【最佳化】打阶段标记；其它未来的百分比攻击卡不受影响。 */
+      var __zjhSrc = (ctx && ctx.card && ctx.card.name) || '';
+      var __isZjh = /^最佳化/.test(__zjhSrc);
+      if (__isZjh && p._zuijiahuaPhaseActive) {
+        addBattleLog(user, '【最佳化】本阶段攻击力提升已生效，不再叠加');
+        break;
+      }
       /* 【口径（作者 2026-09-28 明确）】"+100% 攻击力" = **按当前攻击力数值加同样的量**
          （当前 2 点攻击力 ⇒ +2；3 点 ⇒ +3；以此类推），**不是**把伤害翻倍 ——
          因为攻击力在伤害公式里还要 ÷2（见 __offensiveBuffSum）。
@@ -20009,6 +20018,7 @@ function __opsBuff(op, ctx, next, env) {
       /* 【2026-10-01】卡面是"直到当前**阶段**结束前" ⇒ 单独记一份阶段档，阶段结束时只扣这一份
          （_tempAttack 统一在回合结束清零，若只依赖它，最佳化会错误地持续到回合结束）。 */
       p._tempAttackPhase = (p._tempAttackPhase || 0) + __pvAdd;
+      if (__isZjh) p._zuijiahuaPhaseActive = true;
       addBattleLog(user, '攻击力+' + (op.pct || 0) + '%（攻击力基数' + __pvBase + (window.__pvFloorHit ? '·保底' : '') + ' ⇒ 实际+' + __pvAdd + '，直到当前阶段结束）');
       window.__pvFloorHit = false;
       break;

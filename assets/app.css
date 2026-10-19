@@ -4282,3 +4282,63 @@ body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
   body:not(.ui-classic) #battleScreen .opponent-area .permanent-slots { display: flex !important; }
   body:not(.ui-classic) #battleScreen .opponent-area .buff-bar { display: flex !important; }
 }
+
+
+/* ===== 地图格信息卡（2026-10-19） ===== */
+.tile-info-card {
+  position: fixed;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -46%) scale(.97);
+  width: min(380px, calc(100vw - 32px));
+  z-index: 2600;
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(242,207,130,.42);
+  background:
+    radial-gradient(120% 90% at 12% 0%, rgba(86,200,255,.10), transparent 56%),
+    linear-gradient(160deg, rgba(24,33,54,.97), rgba(10,16,28,.98));
+  box-shadow: 0 28px 80px -24px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.07);
+  color: #eef5ff;
+  opacity: 0; pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease;
+}
+.tile-info-card.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.tile-info-card::before {
+  content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, #f2cf82, transparent);
+}
+.tile-info-close {
+  position: absolute; right: 10px; top: 10px;
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06); color: #cfe0ff;
+  font-size: 12px; cursor: pointer;
+}
+.tile-info-close:hover { border-color: rgba(242,207,130,.6); color: #f2cf82; }
+.tile-info-head { display: flex; align-items: center; gap: 12px; padding-right: 24px; }
+.tile-info-icon {
+  width: 44px; height: 44px; flex: 0 0 44px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; font-size: 24px;
+  background: rgba(255,255,255,.055);
+  border: 1px solid rgba(242,207,130,.26);
+}
+.tile-info-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile-info-title b { font-size: 20px; letter-spacing: .5px; color: #f6e4b4; }
+.tile-info-title small { font-size: 11px; color: rgba(200,215,240,.62); letter-spacing: .4px; }
+.tile-info-desc {
+  margin-top: 14px; padding: 11px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.035);
+  border: 1px solid rgba(255,255,255,.075);
+  font-size: 12.5px; line-height: 1.65; color: rgba(225,235,250,.82);
+}
+.tile-info-players { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.tile-info-players span { font-size: 11px; padding: 4px 8px; border-radius: 999px; border: 1px solid; }
+.tile-info-players .tip-me { color: #9ed8ff; border-color: rgba(92,200,255,.38); background: rgba(92,200,255,.08); }
+.tile-info-players .tip-foe { color: #ffb0a6; border-color: rgba(255,122,146,.38); background: rgba(255,122,146,.08); }
+.tile-info-players .tip-none { color: rgba(210,222,240,.6); border-color: rgba(255,255,255,.12); }
+@media (max-width: 620px) {
+  .tile-info-card { top: auto; bottom: 14px; transform: translate(-50%, 12px) scale(.98); }
+  .tile-info-card.show { transform: translate(-50%, 0) scale(1); }
+}

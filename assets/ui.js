@@ -877,7 +877,7 @@ function __updateBattleUI_impl() {
         var __handState = __handComp + '|' + battleState.turn + '|' + battleState.phase + '|' + battleState.currentPlayer + '|' + battleState.p1.cost + '|' +
           battleState.p1.hand.map(function(c, i) {
             var pv = evaluatePlayable(c, 'p1');
-            return c.name + '#' + (c.cost === undefined ? '-' : c.cost) + '#' + (pv.ok ? '1' : '0') + '#' + (pv.reason || '');
+            return c.name + '#' + (c.cost === undefined ? '-' : c.cost) + '#' + __handCostLabel(c) + '#' + (pv.ok ? '1' : '0') + '#' + (pv.reason || '');
           }).join(',') + '||' +
           (battleState.p1.eventCards || []).map(function(c) { return c.name + '#' + ((c._isMusic || c._category === 'music_cards') ? 'M' : 'E'); }).join(',');
         var __handSig = __handState;                   /* 沿用旧变量名，别处引用不受影响 ✓ */
@@ -918,7 +918,7 @@ function __updateBattleUI_impl() {
             /* 【2026-10-09 作者要求】手牌：**鼠标悬停即浮出放大的原图**（通用浮层 __cardPeekShow；卡名编码后传参） */
             var __peek1 = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
             return '<div class="hand-card' + (canClick ? ' playable' : '') + '"' + __peek1 + ' onclick="' + clickHandler + '" oncontextmenu="handCardContextMenu(' + i + ');return false;" style="' + cardStyle + '" data-block-reason="' + (canClick ? '' : __escHtml(pv.reason || '未知原因')) + '" title="左键使用，右键查看效果：' + card.name + phaseHint + '">' +
-              (card.cost !== undefined ? '<div class="hand-card-cost">' + card.cost + '</div>' : '') +
+              (card.cost !== undefined ? '<div class="hand-card-cost">' + __handCostLabel(card) + '</div>' : '') +
               (card.image_url ? '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" class="hand-card-img" alt="' + card.name + '" >' : '') +
               '<div class="hand-card-name">' + card.name + '</div>' +
               (typeBadge ? '<div class="card-type-badge">' + typeBadge + '</div>' : '') + '</div>';
@@ -1765,6 +1765,15 @@ function __peekSetImg(img, url) {
      （每张卡图解码后约 2.5MB，浏览器解码缓存有限）⇒ 少数几张空白一瞬 ✗
    行为等价性：灰化/可点性/提示本来就只由状态决定，原地更新与重建结果一致 ✓
    ⚠ 只用 `.hand-card` 定位（不碰卡图等其它元素）✓ */
+/* 手牌左上角费用：显示"当前实际需要的音韵"（不含一次性 _nextCostReduction，避免每张都显示-1） */
+function __handCostLabel(card, user) {
+  try {
+    if (!card || card.cost === undefined || card.cost === null) return '';
+    if (typeof card.cost === 'string' && /^\s*\d+\s*[-–~至到]\s*\d+\s*$/.test(card.cost)) return card.cost;
+    var ec = (typeof computeRequiredCost === 'function') ? computeRequiredCost(card, user || 'p1') : card.cost;
+    return (ec === undefined || ec === null) ? card.cost : ec;
+  } catch (e) { return card && card.cost !== undefined ? card.cost : ''; }
+}
 function __softUpdateHand(hand, isActionPhase, isPlayerTurn) {
   try {
     if (!hand || !battleState || !battleState.p1) return;
@@ -1783,6 +1792,7 @@ function __softUpdateHand(hand, isActionPhase, isPlayerTurn) {
         el.setAttribute('onclick', canClick ? ('useCard(' + i + ')') : 'showBlockedReason(this)');
         el.setAttribute('data-block-reason', canClick ? '' : String((pv && pv.reason) || '未知原因'));
         el.setAttribute('title', '左键使用，右键查看效果：' + (card.name || '') + (canClick ? '' : ('（不可用：' + ((pv && pv.reason) || '') + '）')));
+        try { var __cb = el.querySelector('.hand-card-cost'); if (__cb && card.cost !== undefined) __cb.textContent = String(__handCostLabel(card)); } catch (e) {}
       } catch (e) {}
     }
     for (i = 0; i < evCards.length; i++) {
