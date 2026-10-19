@@ -2893,7 +2893,7 @@ window.__CARD_DATA__ = {
             "宁雨清"
          ],
          "combo_notes": "7费落地先检索一张攻击卡或技能卡，顺手丢1抽1，此后攻击卡技能卡永久-1费、判定伤害+1。检索首选人格修正拳！或破损电子设备这类判定卡，配小沙香琉璃判定回1音韵、累计3次给全队判定+1，段数越多回费越多，费用压力自己就抹平。宁雨清让检索进手的卡再-1费，还扣对手3同步值。",
-         "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=7",
+         "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=8",
          "_category": "item_permanent",
          "dims": {
             "cost": 8.5,
