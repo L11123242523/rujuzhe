@@ -448,6 +448,7 @@ body{font-family:-apple-system,"Microsoft YaHei",sans-serif;background:#1a1a2e;c
     border: 1.5px solid #636e72;
 }
 .grade-A\+{background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 50%, #6c3483 100%);box-shadow:0 0 10px rgba(155,89,182,.6);border:1px solid #d2b4de}
+.grade-S\+{background:linear-gradient(135deg,#ffd166,#ff6b6b 55%,#c0392b);box-shadow:0 0 14px rgba(255,107,107,.7);border:1px solid #ffd166;color:#2b1605!important}
 .score-bar{height:8px;background:#0f3460;border-radius:4px;margin:4px 0;overflow:hidden}
 .score-bar-fill{height:100%;border-radius:4px;transition:width .3s}
 .score-row{display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0}
@@ -1346,7 +1347,7 @@ img,video,canvas,svg{max-width:100%}
      **以后每次改 cards.js，都要把这个 v= 换成新值**，否则玩家仍会拿到旧数据。 -->
 <!-- ⚠ 【2026-10-14】cards.js 本次有改动（新增 7 张道具卡：典籍之残页/荷鲁斯之眼/金刚镯/无首刺虫/永眠之棺/死灵令牌/雷閃）
      ⇒ 按上面约定把 v= 换成新值 ✓（旧值 20261010b 是上一次改卡的日期） -->
-<script src="./cards.js?v=20261020b"></script>
+<script src="./cards.js?v=20261020c"></script>
 </head>
 <body>
 
@@ -1810,24 +1811,25 @@ img,video,canvas,svg{max-width:100%}
 //   作者原话：「评级按照费用效率（伤害牌、辅助牌）、泛用性、协同性（与其他卡的配合）、稳定性来」
 //             「角色卡上的不应该用费用效率…角色卡右上角框内的值为该角色为队伍提供的同步值；队伍总同步值＝三名角色同步值之和的 2.5 倍」
 //   总分 = 四维等权平均（保留一位小数）+ 等级成长加分；档位线 S≥8.0／A+≥7.5／A≥7.0／B≥5.5／C≥4.0／D<4.0。
-const DIM_CN = {'sync':'同步值提供量','cost':'费用效率','flex':'泛用性','synergy':'协同性','stable':'稳定性'};
+const DIM_CN = {'tempo':'节奏/资源','impact':'影响力','sync':'同步值提供量','cost':'费用效率','flex':'泛用性','synergy':'协同性','stable':'稳定性'};
 const DIM_DESC = {
-  'sync':'同步值提供量：角色卡右上角框内的数值，就是这名角色为队伍提供的同步值 —— 队伍初始总同步值＝三名角色同步值之和 × 2.5（向上取整）。数值越高，全队越耐打；本页面按 4→6.0 / 5→7.5 / 6→9.0 折算成 0~10 分。',
-  'cost':'费用效率：每一分音韵值换来的结算价值。伤害牌按「期望伤害 ÷ 费用」并计入附加收益（破坏/降防/抽卡/回费/多段/无视防御…）；辅助牌按「同等费用下拿到的资源量或节奏优势」。0 费卡按免费收益给高档，但附带代价（如判定失败要扣同步）要扣。',
+  'tempo':'节奏/资源：角色看右上角同步值（4→6.0 / 5→7.5 / 6→9.0）；其余卡看费用效率，即每点音韵换来的结算价值。',
+  'impact':'影响力：这张卡把局面往前推的能力 —— 伤害、破坏/移出、抽卡/检索、增益与 SP 的综合上限。',
+  'sync':'同步值提供量：角色卡右上角框内的数值，就是这名角色为队伍提供的同步值 —— 队伍初始总同步值＝三名角色同步值之和 × 2.5（向上取整）。',
+  'cost':'费用效率：每一分音韵值换来的结算价值。伤害牌按「期望伤害 ÷ 费用」并计入附加收益；辅助牌按「同等费用下拿到的资源量或节奏优势」。',
   'flex':'泛用性：能在多少构筑、局面、时机下使用；是否挑属性、目标、位置、时机。',
   'synergy':'协同性：与特定角色、标签、流派、其他卡牌的联动放大空间与 combo 上限。',
   'stable':'稳定性：兑现效果的确定性；是否依赖骰子/判定/概率或对手配合，是否容易被响应打断、落空。'
 };
-const DIM_ORDER_CHAR = ['sync','flex','synergy','stable'];
-const DIM_ORDER_ITEM = ['cost','flex','synergy','stable'];
-const W_DIM_CHAR = {'sync':.25,'flex':.25,'synergy':.25,'stable':.25};
-const W_DIM_ITEM = {'cost':.25,'flex':.25,'synergy':.25,'stable':.25};
-const DIM_COLOR = {'sync':'#38bdf8','cost':'#f59e0b','flex':'#22c55e','synergy':'#a855f7','stable':'#06b6d4'};
-// 统一6档（仅 S/A+/A/B/C/D，不存在 B+/S+/C+/A-）
-function gradeOf(x){ if(x>=8.0)return 'S'; if(x>=7.5)return 'A+'; if(x>=7.0)return 'A'; if(x>=5.5)return 'B'; if(x>=4.0)return 'C'; return 'D'; }
-// 由维度+成长加分自动推导总分（保留一位小数）
-function scoreOfDims(dims, growth=0){ if(!dims) return 0; let s=0,n=0; for(const k in dims){ s += (dims[k]||0); n++; } if(!n) return 0; return Math.round((s/n+growth)*10)/10; }   // 四维等权
-function dimOrderOf(c){ return (c && c.dims && 'sync' in c.dims) ? DIM_ORDER_CHAR : DIM_ORDER_ITEM; }
+const DIM_ORDER_CHAR = ['tempo','impact','flex','synergy','stable'];
+const DIM_ORDER_ITEM = ['tempo','impact','flex','synergy','stable'];
+const W_DIM_CHAR = {'tempo':.20,'impact':.25,'flex':.15,'synergy':.25,'stable':.15};
+const W_DIM_ITEM = {'tempo':.25,'impact':.30,'flex':.15,'synergy':.20,'stable':.10};
+const DIM_COLOR = {'tempo':'#38bdf8','impact':'#f97316','cost':'#f59e0b','flex':'#22c55e','synergy':'#a855f7','stable':'#06b6d4'};
+// 评级 v3：五维加权；S+ / S / A+ / A / B+ / B / C / D
+function gradeOf(x){ if(x>=8.8)return 'S+'; if(x>=8.4)return 'S'; if(x>=7.9)return 'A+'; if(x>=7.4)return 'A'; if(x>=6.9)return 'B+'; if(x>=6.4)return 'B'; if(x>=5.6)return 'C'; return 'D'; }
+function scoreOfDims(dims, growth=0){ if(!dims) return 0; const w = ('sync' in dims || ('tempo' in dims && !('cost' in dims))) ? W_DIM_CHAR : W_DIM_ITEM; let s=0; for(const k in w){ s += (dims[k]||0)*w[k]; } return Math.round((s+growth)*10)/10; }
+function dimOrderOf(c){ return (c && c.dims && ('sync' in c.dims || ('tempo' in c.dims && !('cost' in c.dims)))) ? DIM_ORDER_CHAR : DIM_ORDER_ITEM; }
 const DB = window.__CARD_DATA__;
 // 数据层已保证 score/grade 自洽，启动不再重算；新增/改卡时用 scoreOfDims+gradeOf 实时推导。
 
@@ -2055,17 +2057,17 @@ function showDetail(c){
   
   // 评级展示区域
   if(c.grade){
-    const gradeColors = {'S':'linear-gradient(135deg,#ff6b6b,#c0392b)','A+':'linear-gradient(135deg,#9b59b6,#6c3483)','A':'#ffd700','B':'#22c55e','C':'#00d2d3','D':'#636e72'};
+    const gradeColors = {'S+':'linear-gradient(135deg,#ffd166,#ff6b6b,#c0392b)','S':'linear-gradient(135deg,#ff6b6b,#c0392b)','A+':'linear-gradient(135deg,#9b59b6,#6c3483)','A':'#ffd700','B+':'#84cc16','B':'#22c55e','C':'#00d2d3','D':'#636e72'};
     const gradeTextColor = (c.grade==='A'||c.grade==='C'||c.grade==='D')?'#1a1a2e':'#fff';
     html += `<div class="card-grade-v2">`;
-    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">综合评级</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c.score||0).toFixed(1)}分</span></div>`;
+    html += `<div class="card-grade-display-v2"><span class="card-grade-label-v2">综合评级 v3</span><span class="card-grade-badge-v2" style="background:${gradeColors[c.grade]||gradeColors['D']};color:${gradeTextColor}">${c.grade}级 · ${(c.score||0).toFixed(1)}分</span></div>`;
     
     // 新维度评分（角色/战斗/公共=4维，道具=5维，按类型加权；成长为额外加分）
     if(c.dims){
       const dOrder = dimOrderOf(c);
       const dimColor = (typeof DIM_COLOR !== 'undefined') ? DIM_COLOR : {'cost':'#f59e0b','flex':'#22c55e','synergy':'#a855f7','stable':'#06b6d4'};
       const w = ('cost' in c.dims)?W_DIM_ITEM:W_DIM_CHAR;
-      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">四维构成</b>${c.growth?` <span style="color:#f59e0b;font-size:11px">等级成长加分 +${c.growth.toFixed(1)}</span>`:''} <span style="color:#666;font-size:11px">（加权合计+成长=总分）</span></div>`;
+      html += `<div style="margin-top:12px;margin-bottom:4px"><b style="color:#e0e0e0">五维构成</b>${c.growth?` <span style="color:#f59e0b;font-size:11px">等级成长加分 +${c.growth.toFixed(1)}</span>`:''} <span style="color:#666;font-size:11px">（加权合计+成长=总分）</span></div>`;
       dOrder.forEach(k=>{
         const v=c.dims[k]; if(v===undefined) return;
         const pct=Math.round((w[k]||0)*100);
@@ -3230,7 +3232,7 @@ function autoFillCarries(){
   });
   if(available.length<4){ alert('可用携带卡不足4张（当前'+available.length+'张），无法自动补全'); return; }
   // 评分排序：评级权重高，费用适中（2-4费）加分，攻击/技能平衡
-  const gradeScore = {S:10,'A+':9,A:8,B:6,C:4,D:2};
+  const gradeScore = {'S+':11,S:10,'A+':9,A:8,'B+':7,B:6,C:4,D:2};
   available.forEach(item=>{
     const c = item.card;
     let score = gradeScore[c.grade]||5;
@@ -3294,7 +3296,7 @@ function randomByArchetype(){
   const archetype = document.getElementById('archetypeSelect').value;
   if(!archetype) return;
   
-  const gradeVal = {S:10,'A+':9,A:8,B:6,C:4,D:2};
+  const gradeVal = {'S+':11,S:10,'A+':9,A:8,'B+':7,B:6,C:4,D:2};
   const attrTeams = ['热忱队','理智队','混沌队','无序队'];
   const isAttrTeam = attrTeams.includes(archetype);
   
@@ -5499,7 +5501,7 @@ function smartRandomDeck(){
  *  4) 扫描全部流派自动产出推荐卡组
  * ============================================================ */
 function createBuildEngine(DB, CHAR_TO_CARRY){
-  const gradeVal = {S:10,'A+':9,A:8,B:6,C:4,D:2};
+  const gradeVal = {'S+':11,S:10,'A+':9,A:8,'B+':7,B:6,C:4,D:2};
   const gv = g => (g===undefined||g===null)?5.5:(gradeVal[g]!==undefined?gradeVal[g]:5.5);
 
   /* ---------- 流派归一化 ---------- */
