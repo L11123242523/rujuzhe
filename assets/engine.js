@@ -12203,16 +12203,21 @@ function aiScoreCard(c) {
     else if (me.sync < 24) score += 25;
     else score -= 18;
   }
-  // 5. 纯增益必须有后续攻击可接，否则先留手
+  // 5. 纯增益：有后续攻击才是“组合技”，要排在攻击前开；没有则不浪费
   if (isBuff) {
     var atkFollow = (me.hand || []).some(function (x) { return x && x !== c && (x._category === 'attack_cards' || /造成[^。；]{0,6}伤害/.test((x.effect || '') + (x.text || ''))); });
-    if (!atkFollow) score -= 40;
+    if (atkFollow) {
+      score += 55;
+      if (me.cost >= cost + 2) score += 12;
+    } else {
+      score -= 40;
+    }
     if (me.cost < cost + 2) score -= 15;
   }
   // 6. 永续：前两张值得早下，之后不再抢节奏
   if (isPerm) score += (me.permanent.length < 2 ? 24 : -35);
-  // 7. 攻击卡打不出有效伤害时降权（纯功能攻击卡除外）
-  if (c._category === 'attack_cards' && dmg <= 0 && !/回复|抽|移动|检索|护盾/.test(effect)) score -= 35;
+  // 7. 攻击卡打不出有效伤害时降权（纯功能/纯增益攻击卡除外）
+  if (c._category === 'attack_cards' && dmg <= 0 && !isBuff && !/回复|抽|移动|检索|护盾/.test(effect)) score -= 35;
   // 8. 费用效率与可支付性（用真实费用）
   if (cost <= 2) score += 10;
   if (cost > me.cost) score -= 200;
@@ -20254,6 +20259,12 @@ function __opsCards(op, ctx, next, env) {
       }
       /* 【魔法清点名单】费用上限：卡面"选一张费用不大于**2**的卡"（2026-10-09 平衡性改动 3→2）⇒ search 支持 maxCost 过滤 */
       if (op.maxCost != null) list = list.filter(function (x) { return (Number(x.card && x.card.cost) || 0) <= Number(op.maxCost); });
+      /* 【2026-10-20 AI v2】AI 检索不再拿“第一张”：按 aiScoreOf 选最合适的一张；玩家侧保持原顺序。 */
+      try {
+        if (typeof isAISeat === 'function' && isAISeat(user) && list.length > 1 && typeof aiScoreOf === 'function') {
+          list = list.slice().sort(function (a, b) { return (aiScoreOf(b.card) || 0) - (aiScoreOf(a.card) || 0); });
+        }
+      } catch (e) {}
       var __doSearchPick = function () {
       pickFromList(user, list, '选择' + op.need + '张卡' + (op.to === 'deck' ? '放回牌组' : '加入手卡'), op.need, function (picks) {
         picks.forEach(function (pk) { var arr = battleState[sw][pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); if (op.to === 'hand') { pk.card._addedByEffect = true; battleState[sw].hand.push(pk.card); __emitAddHand(sw, pk.card, pk.zone); } else battleState[sw].deck.push(pk.card); if (sw === user) p._lastSearchCard = pk.card; addBattleLog(user, (op.to === 'hand' ? '加入手卡：' : '放回牌组：') + pk.card.name); });
