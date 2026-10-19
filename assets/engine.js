@@ -23139,7 +23139,7 @@ function __yongzouGraveHit() {
        日志与弹窗文本（下面两处 `'第' + __yzTimes + '次触发'` ✗）⇒ 显示成一长串 3 ✓
        修法：**触发次数取整** ✓（`Math.floor(n / 3)` ✓）；
        伤害阈值不变 ✓（`__yzTimes >= 6 / >= 3` 与 `n >= 18 / >= 9` 完全等价 ✓ ⇒ 只修文字、不动数值 ✓） */
-    var __yzTimes = Math.floor(n / 3), dmg = __yzTimes >= 6 ? 6 : (__yzTimes >= 3 ? 5 : 4);
+    var __yzTimes = Math.floor(n / 3), dmg = 3;   /* 2026-10-20 第四次平衡：每3张进墓固定3点，不再升阶 */
     function __hit(t) {
       dealDamageWithResponse(t, dmg, '永奏进行曲·卡进墓', null, '无序', tp);
       addBattleLog(tp, '【永奏进行曲】自己回合第' + n + '张卡进墓（第' + __yzTimes + '次触发），对' + (t === tp ? '自己' : '对手') + '造成' + dmg + '点无序伤害');
