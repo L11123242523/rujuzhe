@@ -3992,3 +3992,173 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 #mainMenu.main-menu-v2 .mm-mini span {
   filter: drop-shadow(0 2px 6px rgba(0,0,0,.9));
 }
+
+
+/* ==================================================================
+   对局界面 v2（2026-10-19）—— 收紧空带、明确层级、桌面质感
+   只作用于非 classic 主题的 #battleScreen；不改 DOM/战斗逻辑。
+   ================================================================== */
+body:not(.ui-classic) #battleScreen {
+  padding: 10px 14px 6px !important;
+}
+body:not(.ui-classic) #battleScreen .battle-top-bar {
+  margin: 0 0 8px !important;
+  padding: 8px 12px !important;
+  gap: 10px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(242,207,130,.22) !important;
+  border-bottom: 1px solid rgba(242,207,130,.28) !important;
+  background: linear-gradient(180deg, rgba(28,36,62,.88), rgba(15,21,38,.9)) !important;
+  box-shadow: 0 14px 34px -22px rgba(0,0,0,.95) !important;
+}
+body:not(.ui-classic) #battleScreen .duel-panel {
+  padding: 7px 10px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(170,205,255,.16) !important;
+  background: linear-gradient(150deg, rgba(42,54,84,.72), rgba(20,28,48,.66)) !important;
+}
+body:not(.ui-classic) #battleScreen .duel-portrait {
+  width: 62px !important; height: 62px !important; border-radius: 11px !important;
+}
+body:not(.ui-classic) #battleScreen .duel-hp-track { height: 14px !important; max-width: none !important; }
+body:not(.ui-classic) #battleScreen .duel-hp-text { line-height: 14px !important; }
+body:not(.ui-classic) #battleScreen .duel-name { font-size: 15px !important; }
+body:not(.ui-classic) #battleScreen .duel-sub { font-size: 11px !important; }
+body:not(.ui-classic) #battleScreen .duel-center { min-width: 104px !important; }
+body:not(.ui-classic) #battleScreen .duel-center .turn-display { font-size: 17px !important; }
+
+/* 对手区：从“大空带”收成一条紧凑横栏 */
+body:not(.ui-classic) #battleScreen .opponent-area {
+  min-height: 0 !important;
+  padding: 6px 12px !important;
+  margin-bottom: 0 !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  border-radius: 12px !important;
+  background: linear-gradient(165deg, rgba(72,219,251,.10), rgba(20,32,52,.32)) !important;
+  border: 1px solid rgba(72,219,251,.24) !important;
+}
+body:not(.ui-classic) #battleScreen .opponent-area .deck-zone {
+  width: 52px !important; height: 64px !important; min-height: 0 !important;
+}
+body:not(.ui-classic) #battleScreen .opponent-area .deck-zone .zone-name { font-size: 10px !important; }
+body:not(.ui-classic) #battleScreen .opponent-area .zone-count { font-size: 17px !important; }
+body:not(.ui-classic) #battleScreen .opponent-area .permanent-slots { margin: 0 !important; }
+body:not(.ui-classic) #battleScreen .battle-main-area { gap: 8px !important; }
+body:not(.ui-classic) #battleScreen .map3d-wrap {
+  aspect-ratio: 2.3 / 1 !important;
+  max-height: 50vh !important;
+  min-height: 280px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(242,207,130,.22) !important;
+  background: radial-gradient(90% 80% at 50% 20%, #111c30 0%, #070c15 72%) !important;
+}
+
+/* 效果区 + 状态栏：明确两栏，不再各自漂 */
+body:not(.ui-classic) #battleScreen .center-area {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr) !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+  width: 100% !important;
+  max-width: 1320px !important;
+  margin: 0 auto !important;
+}
+body:not(.ui-classic) #battleScreen .permanent-area {
+  max-width: none !important;
+  min-height: 118px !important;
+  padding: 9px 12px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(162,155,254,.30) !important;
+  background: linear-gradient(150deg, rgba(108,92,231,.13), rgba(22,28,48,.38)) !important;
+}
+body:not(.ui-classic) #battleScreen .player-status-bar {
+  margin: 0 !important;
+  max-width: none !important;
+  padding: 9px 12px !important;
+  gap: 7px !important;
+  align-content: center !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(254,202,87,.28) !important;
+  background: linear-gradient(150deg, rgba(254,202,87,.08), rgba(16,22,38,.5)) !important;
+}
+body:not(.ui-classic) #battleScreen .player-status-bar .status-item {
+  min-width: 66px !important;
+  padding: 5px 7px !important;
+  border-radius: 8px !important;
+  background: rgba(255,255,255,.035) !important;
+}
+body:not(.ui-classic) #battleScreen .player-status-bar .status-value { font-size: 16px !important; }
+body:not(.ui-classic) #battleScreen .center-area > .buff-bar,
+body:not(.ui-classic) #battleScreen .center-area > .dice-animation-area { grid-column: 1 / -1 !important; }
+
+/* 底部：牌组/墓地区收窄，手牌区做成桌面 */
+body:not(.ui-classic) #battleScreen .player-area { gap: 10px !important; align-items: stretch !important; }
+body:not(.ui-classic) #battleScreen .side-zones { gap: 7px !important; justify-content: flex-end !important; }
+body:not(.ui-classic) #battleScreen .side-zones .deck-zone,
+body:not(.ui-classic) #battleScreen .side-zones .grave-zone {
+  width: 72px !important; height: 86px !important;
+  border-width: 1px !important;
+  border-radius: 10px !important;
+  background: linear-gradient(160deg, rgba(255,255,255,.055), rgba(10,14,24,.5)) !important;
+}
+body:not(.ui-classic) #battleScreen .hand-area {
+  min-height: 176px !important;
+  padding: 10px 12px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(242,207,130,.26) !important;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(72,110,92,.28), transparent 70%),
+    linear-gradient(160deg, rgba(24,38,34,.78), rgba(10,16,20,.72)) !important;
+  box-shadow: inset 0 0 38px rgba(0,0,0,.5) !important;
+}
+body:not(.ui-classic) #battleScreen .hand-label { color: #e7d8a8 !important; letter-spacing: .5px; }
+body:not(.ui-classic) #battleScreen .battle-bottom-bar {
+  position: static !important;
+  margin: 8px 0 0 !important;
+  padding: 7px 10px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(180deg, rgba(26,34,58,.9), rgba(13,18,32,.92)) !important;
+}
+
+@media (max-width: 900px) {
+  body:not(.ui-classic) #battleScreen { padding: 6px 8px 4px !important; }
+  body:not(.ui-classic) #battleScreen .center-area { grid-template-columns: 1fr !important; }
+  body:not(.ui-classic) #battleScreen .map3d-wrap { aspect-ratio: 1.8 / 1 !important; max-height: 44vh !important; }
+  body:not(.ui-classic) #battleScreen .duel-portrait { width: 42px !important; height: 42px !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .deck-zone { width: 44px !important; height: 54px !important; }
+}
+
+/* 对局 v2.1：给固定底栏留空间，手牌不再被压住 */
+body:not(.ui-classic) #battleScreen { padding-bottom: 10px !important; }
+body:not(.ui-classic) #battleScreen .hand-area { min-height: 240px !important; }
+body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
+
+/* 对局 v2.2：窄屏防横向溢出 */
+@media (max-width: 768px) {
+  body:not(.ui-classic) #battleScreen { overflow-x: hidden !important; }
+  body:not(.ui-classic) #battleScreen .battle-top-bar {
+    position: relative !important;
+    flex-wrap: wrap !important;
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+  body:not(.ui-classic) #battleScreen .battle-exit-btn {
+    position: absolute !important;
+    right: 7px !important;
+    top: 7px !important;
+    z-index: 6 !important;
+  }
+  body:not(.ui-classic) #battleScreen .duel-panel { flex: 1 1 100% !important; min-width: 0 !important; }
+  body:not(.ui-classic) #battleScreen .duel-body { min-width: 0 !important; }
+  body:not(.ui-classic) #battleScreen .duel-hp-track { min-width: 0 !important; max-width: none !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area { max-width: 100% !important; overflow: hidden !important; gap: 6px !important; }
+  body:not(.ui-classic) #battleScreen .opp-zone-counts { flex: 1 1 calc(100% - 58px) !important; font-size: 10px !important; white-space: normal !important; }
+  body:not(.ui-classic) #battleScreen .opponent-area .buff-bar { flex: 1 1 100% !important; max-width: 100% !important; overflow: hidden !important; }
+  body:not(.ui-classic) #battleScreen .map3d-topbar { flex-wrap: wrap !important; right: 8px !important; }
+  body:not(.ui-classic) #battleScreen .map3d-hint { white-space: normal !important; right: 8px !important; font-size: 10px !important; }
+  body:not(.ui-classic) #battleScreen .player-status-bar { flex-wrap: wrap !important; justify-content: center !important; }
+  body:not(.ui-classic) #battleScreen .player-status-bar .status-item { flex: 1 1 62px !important; min-width: 62px !important; }
+}
