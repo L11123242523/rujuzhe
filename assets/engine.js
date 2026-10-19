@@ -12152,7 +12152,7 @@ function aiEstDamage(card, foe) {
 function aiScoreOf(c) {
   try {
     if (!c) return 0;
-    if (typeof c._aiScore === 'number') return c._aiScore;
+    /* 【2026-10-20 AI v2】不再读跨阶段缓存的 _aiScore：手里费用/资源变了后旧分会误导献祭/弃牌。 */
     if (typeof aiScoreCard === 'function') return aiScoreCard(c);
     var eff = c.effect || c.text || '';
     var s = (c.cost || 0);
@@ -12170,36 +12170,56 @@ function aiScoreCard(c) {
   var score = 0;
   var effect = c.effect || c.text || '';
   var me = aiMe(), foe = aiFoe();
-  var cost = c.cost || 0;
-  // 真实伤害估值：走统一伤害公式（攻击力÷2/防御/克制/最终增伤），再用“剥盾后的有效伤害”判斩杀
+  if (!me || !foe) return 0;
+  var seat = (typeof aiSeat === 'function') ? aiSeat() : 'p2';
+  /* 【2026-10-20 AI v2】用真实所需费用：减费/钢笔/等级缩放后的牌，AI 不能再按卡面原费误判“用不起”。 */
+  var cost = (typeof computeRequiredCost === 'function') ? computeRequiredCost(c, seat) : (c.cost || 0);
+  cost = Number(cost); if (!isFinite(cost)) cost = Number(c.cost) || 0;
   var dmg = aiEstDamage(c, foe);
   var effDmg = Math.max(0, dmg - (foe.shield || 0));
-  // 1. 斩杀线：剥盾后仍足以打掉对手剩余同步，最高优先
-  if (effDmg > 0 && foe.sync > 0 && effDmg >= foe.sync) score += 1000;
-  // 2. 攻击卡 / 伤害
+  var lethal = effDmg > 0 && foe.sync > 0 && effDmg >= foe.sync;
+  var isSearch = !/伤害|造成/.test(effect) && /检索|加入手卡|加入手牌|从牌组/.test(effect);
+  var isDraw = /抽[^。；]{0,8}张|抽取/.test(effect);
+  var isCost = /(?:回复|获得|恢复)[^。；]{0,8}音韵|音韵值[^。；]{0,6}(?:回复|获得|恢复)/.test(effect);
+  var isHeal = /回复[^。；]{0,8}同步|护盾/.test(effect);
+  var isBuff = /攻击力|判定伤害|暴击|增伤|最终伤害/.test(effect) && !/造成|给予/.test(effect);
+  var isPerm = c._category === 'item_permanent';
+  var handN = (me.hand || []).length;
+
+  // 1. 斩杀永远最高
+  if (lethal) score += 2000;
+  // 2. 攻击/伤害
   if (c._category === 'attack_cards') score += 45;
   if (effect.indexOf('伤害') >= 0) score += 28 + dmg * 6;
   if (effect.indexOf('判定伤害') >= 0) score += 18;
-  // 3. 生存：自身同步越低，回复/护盾权重越高
-  if (effect.indexOf('回复') >= 0 || effect.indexOf('护盾') >= 0) {
+  // 3. 铺垫：检索/抽卡/回费在前期优先，先把手牌与资源做起来
+  if (isSearch) score += (handN <= 4 ? 38 : 12) + (me.cost >= cost + 1 ? 8 : 0);
+  if (isDraw) score += (handN <= 4 ? 24 : 6);
+  if (isCost) score += (me.cost <= 3 ? 30 : 8);
+  if (!lethal && handN <= 4 && (isSearch || isDraw) && me.cost >= cost + 1) score += 35;
+  // 4. 生存：满血不再浪费回复/护盾
+  if (isHeal) {
     if (me.sync <= 14) score += 80;
-    else if (me.sync < 24) score += 30;
-    else score += 8;
+    else if (me.sync < 24) score += 25;
+    else score -= 18;
   }
-  // 4. 资源：手牌少补牌；音韵紧张时偏好回费
-  if (effect.indexOf('抽') >= 0 && me.hand.length <= 4) score += 22;
-  if (effect.indexOf('音韵') >= 0 && (effect.indexOf('回复') >= 0 || effect.indexOf('获得') >= 0)) score += (me.cost <= 3 ? 30 : 8);
-  // 5. 位移
-  if (effect.indexOf('移动') >= 0 || effect.indexOf('前进') >= 0) score += 12;
-  // 6. 永续尽早登场（最多2个）
-  if (c._category === 'item_permanent' && me.permanent.length < 2) score += 24;
-  // 7. 费用效率：低费更顺滑；费用不够重罚（双保险）
+  // 5. 纯增益必须有后续攻击可接，否则先留手
+  if (isBuff) {
+    var atkFollow = (me.hand || []).some(function (x) { return x && x !== c && (x._category === 'attack_cards' || /造成[^。；]{0,6}伤害/.test((x.effect || '') + (x.text || ''))); });
+    if (!atkFollow) score -= 40;
+    if (me.cost < cost + 2) score -= 15;
+  }
+  // 6. 永续：前两张值得早下，之后不再抢节奏
+  if (isPerm) score += (me.permanent.length < 2 ? 24 : -35);
+  // 7. 攻击卡打不出有效伤害时降权（纯功能攻击卡除外）
+  if (c._category === 'attack_cards' && dmg <= 0 && !/回复|抽|移动|检索|护盾/.test(effect)) score -= 35;
+  // 8. 费用效率与可支付性（用真实费用）
   if (cost <= 2) score += 10;
   if (cost > me.cost) score -= 200;
-  // 8. 对手护盾：先剥盾再算收益——被盾全吃明显降权，破盾也算收益
+  // 9. 对手护盾
   if (dmg > 0 && (foe.shield || 0) >= dmg) score -= 60;
   if (dmg > 0 && (foe.shield || 0) > 0 && (foe.shield || 0) < dmg) score += 20;
-  // 9. 微小扰动，避免每局打法固化
+  // 10. 微小扰动，避免每局打法固化
   score += GameRNG.next() * 6;
   return score;
 }
