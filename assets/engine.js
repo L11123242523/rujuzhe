@@ -9808,7 +9808,10 @@ function __collectChainTarget(user, card, cb) {
     if (timing !== 'activation') { fin(self); return; }                 /* 结算时选对象 ⇒ 发动时不问 ✓ */
     var isAI = (typeof isAISeat === 'function') ? !!isAISeat(user) : (user === 'p2');
     var online = (typeof Online !== 'undefined' && Online.active);
-    if (isAI || (online && user === 'p2')) { fin(self); return; }        /* 无法询问 ⇒ 取自己 ✓（绝不对手 ✗） */
+    /* 【2026-10-21 AI v3·目标选择】本地 AI 不再一律取自己：按卡面语义决定给谁（削弱卡打给自己是错的 ✗）。
+       联机远端位保持原样（那是客人的决定，不能由本机替猜 ⇒ 仍取自己兜底）。 */
+    if (isAI) { fin((typeof aiTargetForCard === 'function') ? aiTargetForCard(card, self) : self); return; }
+    if (online && user === 'p2') { fin(self); return; }
     if (typeof showChoiceModal !== 'function') { fin(self); return; }
     var myName = (typeof playerDisplayName === 'function') ? playerDisplayName('p1') : '自己';
     var foeName = (typeof playerDisplayName === 'function') ? playerDisplayName('p2') : '对手';
@@ -10532,7 +10535,7 @@ function beforeEffectExecution(effect, callback) {
 }
 
 // 执行移动效果
-// ===== 现实间里绪队长被动：单回合每累计移动8格，可付1音韵四面骰判定造伤、或付2音韵改为六面骰判定造伤 =====
+// ===== 现实间里绪队长被动：单回合每累计移动7格，可付1音韵四面骰判定造伤、或付2音韵改为六面骰判定造伤 =====
 // _rioPassive 仅在队长为“现实间里绪”时由 processCharacterPassives 设置；里绪(水着)/队员位都不会进入。
 function rioAccumulateMove(player, delta) {
   var p = battleState[player];
@@ -10709,7 +10712,7 @@ function executeMoveEffect(effect) {
       if (!p.gold) p.gold = 0; p.gold += 400; recoverCost(player, 1, '经过起点');
       addBattleLog(player, '经过起点：获得400金币、1点音韵值');
     }
-    // 里绪被动：单回合内每累计移动8格后对一名玩家造成4面骰判定伤害
+    // 里绪被动：单回合内每累计移动7格后对一名玩家造成4面骰判定伤害
     rioAccumulateMove(player, Math.abs(__realDist));
     // 直尺SP / 小春被动：统一累计（掷骰主移动，按实际距离）
     accumulateMovePassives(player, __realDist, oldPos);
@@ -11433,7 +11436,7 @@ function checkMoveTriggers(player, steps, oldPos) {
   var p = battleState[player];
   if (!p) return;
   
-  // 现实间里绪队长被动：累计移动→每8格可支付1音韵发动四面骰判定造伤（水着里绪/队员不触发，统一函数内判定）
+  // 现实间里绪队长被动：累计移动→每7格可支付1音韵发动四面骰判定造伤（水着里绪/队员不触发，统一函数内判定）
   rioAccumulateMove(player, steps);
   // 直尺SP / 小春先机：同样按本次位移量累计（oldPos=移动前位置，修复“经过玩家”判定起点错误）
   accumulateMovePassives(player, steps, (oldPos !== undefined && oldPos !== null) ? oldPos : p.position);
@@ -11673,7 +11676,7 @@ function aiUseCardComplete(handIndex, callback) {
   }
   
   // 默认目标由统一目标器推导（与玩家同一套规则，不再用另一套关键词猜测）
-  var target = decideDefaultTarget(card, aiSeat());
+  var target = (typeof aiTargetForCard === 'function') ? aiTargetForCard(card, aiSeat()) : decideDefaultTarget(card, aiSeat());
   var isPermanent = card._category === 'item_permanent';
   // 手牌先移除；付费/技能记录/执行/去向/角色被动钩子全部走统一管线（与玩家同一入口）
   aiMe().hand.splice(handIndex, 1);
@@ -12208,6 +12211,79 @@ function aiRetentionScore(c, hand) {
     return s;
   } catch (e) { return 0; }
 }
+/* 【2026-10-21 AI v3·目标选择】"选一名玩家"的卡，AI 以前按 decideDefaultTarget 的启发式猜，
+   逐张核对后发现 9 张判反（给目标好处的被判成对手 / 打断对手的判成自己）。
+   这里按卡面语义**显式列明**（本项目口径：映射显式写死，不靠模糊匹配），其余仍走 decideDefaultTarget。 */
+var AI_TARGET_SELF_CARDS = {
+  '小恶魔的投喂': '给目标回同步+增伤', '弱点分析': '给目标暴击', '鼓舞': '给目标控骰/位移',
+  '超频': '给目标暴击（扣1同步是代价）', '掌握': '让目标抽2', '20面骰': '位移收益（判定-8是副作用）',
+  '小试身手！堆沙堡': '自己前进/配对', '绿宝之杖·择': '三选一：抽卡/前进/换牌'
+};
+var AI_TARGET_FOE_CARDS = { '猎手爪链': '打断对手移动' };
+function aiTargetForCard(card, user) {
+  try {
+    var nm = (card && card.name) || '';
+    if (AI_TARGET_SELF_CARDS[nm]) return user;
+    if (AI_TARGET_FOE_CARDS[nm]) return foeOf(user);
+    if (typeof decideDefaultTarget === 'function') return decideDefaultTarget(card, user);
+  } catch (e) {}
+  return user;
+}
+
+/* 【2026-10-21 AI v3·跨回合规划】
+   以前每张牌只按"这一回合的收益"打分 ⇒ ①能两回合斩杀时还在铺垫；②把只在对手回合有价值的
+   防御响应牌在自己回合打掉。这里把"本回合/下回合"收成两个判定，由 aiPlayCards 统一过滤。 */
+function aiHasTwoTurnKill(me, foe) {
+  try {
+    if (!me || !foe || !(foe.sync > 0)) return false;
+    var shield = Number(foe.shield) || 0, total = 0;
+    var dmg = (me.hand || []).filter(function (c) { return c && c._category === 'attack_cards'; })
+      .map(function (c) { return aiEstDamage(c, foe); })
+      .filter(function (d) { return d > 0; })
+      .sort(function (a, b) { return b - a; });
+    for (var i = 0; i < dmg.length; i++) {
+      var eff = Math.max(0, dmg[i] - shield);
+      shield = Math.max(0, shield - dmg[i]);
+      total += eff;
+      if (total >= foe.sync) return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+function aiPlanState() {
+  var me = aiMe(), foe = aiFoe();
+  var killNow = (typeof aiHasLethalSequence === 'function') ? !!aiHasLethalSequence(me, foe) : false;
+  return { me: me, foe: foe, killNow: killNow, twoTurn: !killNow && aiHasTwoTurnKill(me, foe) };
+}
+/* 返回非空串 = 这张牌现在该留在手里（跨回合资源），由 aiPlayCards 统一过滤。 */
+function aiHoldReason(c, plan) {
+  try {
+    if (!c || !plan || plan.killNow) return '';
+    var me = plan.me || {};
+    var eff = String(c.effect || c.text || '') + ' ' + String(c.sp || '');
+    /* ① 防御型响应牌：只在对手回合有收益（抵消/改点/打断/回复），自己回合不打掉 */
+    var isTrap = /其他玩家回合|盖伏在其他玩家回合|也能从手卡发动/.test(eff);
+    var isDef = /抵消|防止|打断|改点|重新判定|无效|回复[^。；]{0,8}(同步|音韵)|护盾/.test(eff);
+    var isBoost = /最终伤害\s*\+|伤害\s*\+|增伤|暴击伤害/.test(eff);
+    if (isTrap && isDef && !isBoost && (me.sync || 0) > 14) return '响应牌留手';
+    /* ② 两回合内可斩杀：不铺垫，专注伤害线（检索/抽卡/回费仍可用，用来找伤害） */
+    if (plan.twoTurn) {
+      var isAtk = c._category === 'attack_cards';
+      if (!isAtk && c._category === 'item_single') {
+        /* 用文本编译出的细指令判断“真伤害”，避免把「判定伤害-8」这类副作用当成伤害牌 */
+        try {
+          var __ops = (typeof compileStepOps === 'function') ? compileStepOps(String(c.effect || '')) : null;
+          isAtk = Array.isArray(__ops) && __ops.some(function (o) { return o && (o.op === 'damage' || o.op === 'damage_by_removed'); });
+        } catch (e) {}
+      }
+      var isDev = /检索|加入手卡|加入手牌|抽[^。；]{0,6}张|回复[^。；]{0,6}音韵|获得[^。；]{0,6}音韵/.test(eff);
+      var cost = (typeof computeRequiredCost === 'function') ? Number(computeRequiredCost(c, aiSeat())) : Number(c.cost || 0);
+      if (!isAtk && !isDev && cost > 0) return '斩杀专注';
+    }
+    return '';
+  } catch (e) { return ''; }
+}
+
 function aiScoreCard(c) {
   var score = 0;
   var effect = c.effect || c.text || '';
@@ -12233,6 +12309,12 @@ function aiScoreCard(c) {
   var teamLethal = (typeof aiHasLethalSequence === 'function') ? aiHasLethalSequence(me, foe) : false;
   if (teamLethal && c._category === 'attack_cards') score += 450;
   if (teamLethal && (isSearch || isDraw || isHeal || isBuff)) score -= 100;
+  /* 【2026-10-21 AI v3·跨回合】两回合斩杀：本回合杀不掉、但手里攻击合计够打空 ⇒ 优先伤害牌。 */
+  var __plan2 = (typeof aiPlanState === 'function') ? aiPlanState() : null;
+  if (__plan2 && __plan2.twoTurn) {
+    if (c._category === 'attack_cards') score += 90;
+    else if (isSearch || isDraw) score += 10;
+  }
   // 2. 攻击/伤害
   if (c._category === 'attack_cards') score += 45;
   if (effect.indexOf('伤害') >= 0) score += 28 + dmg * 6;
@@ -12276,7 +12358,7 @@ function aiScoreCard(c) {
   return score;
 }
 // AI出牌辅助函数（递归使用卡牌，走完整效果处理流程）
-function aiPlayCards(maxActions, callback) {
+function aiPlayCards(maxActions, callback, _plan) {
   if (battleState._over) { if (callback) callback(); return; }
   /* 同上：等待玩家对"是否发动/是否连锁"作答期间，AI 每一步都要**停下等**，不能抢在对手思考时操作。 */
   if (typeof __decideWaitGate === 'function' ? __decideWaitGate('aiPlayCards', null) : battleState._awaitingDecision) {
@@ -12293,9 +12375,12 @@ function aiPlayCards(maxActions, callback) {
   var playable = aiMe().hand.filter(function(c) {
     return evaluatePlayable(c, aiSeat()).ok;
   });
-  if (playable.length === 0) {
-    if (callback) callback();
-    return;
+  /* 【2026-10-21 AI v3·跨回合规划】同一轮出牌共用一个计划（不在每张牌后重算）：
+     · 防御型手牌陷阱留给对手回合；· 两回合可斩杀时不再铺垫，只走伤害线。 */
+  var __plan = _plan || ((typeof aiPlanState === 'function') ? aiPlanState() : null);
+  if (__plan && typeof aiHoldReason === 'function') {
+    playable = playable.filter(function (c) { return !aiHoldReason(c, __plan); });
+    if (playable.length === 0) { if (callback) callback(); return; }
   }
   
   // 缓存评分避免排序比较器重复随机
@@ -12306,7 +12391,7 @@ function aiPlayCards(maxActions, callback) {
   var idx = aiMe().hand.indexOf(card);
   
   aiUseCardComplete(idx, function() {
-    aiPlayCards(maxActions - 1, callback);
+    aiPlayCards(maxActions - 1, callback, __plan);
   });
 }
 
@@ -12392,7 +12477,7 @@ function aiExecuteMove(dice, callback) {
         if (!p.gold) p.gold = 0; p.gold += 400; recoverCost(player, 1, '经过起点');
         addBattleLog(player, '经过起点：获得400金币、1点音韵值');
       }
-      // 里绪被动：单回合内每累计移动8格造成4面骰判定伤害
+      // 里绪被动：单回合内每累计移动7格造成4面骰判定伤害
       rioAccumulateMove(player, Math.abs(__realD2));
       // 直尺SP / 小春被动：AI 掷骰主移动同样累计（修复 AI 漏触发）
       accumulateMovePassives(player, __realD2, oldPos);
@@ -26532,7 +26617,7 @@ function chooseTargetPlayer(user, card, cb) {
     return;
   }
   if (user === 'p1') { showTargetSelect(card, card.effect || card.text || '', cb); }
-  else { cb(foeOf(user)); }
+  else { cb((typeof aiTargetForCard === 'function') ? aiTargetForCard(card, user) : foeOf(user)); }
 }
 
 function chooseZoneCard(user, who, zone, title, cb) {
