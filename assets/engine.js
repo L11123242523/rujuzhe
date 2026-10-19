@@ -12193,6 +12193,21 @@ function aiScoreOf(c) {
 }
 // AI卡牌评分系统（情境感知）：综合斩杀线/生存/资源/费用效率/攻击可达性
 // 提为顶层函数：aiPlayCards 排序与资源层（挑最差手牌献祭）共用同一套评分口径
+/* 【2026-10-20 AI v2】手牌保留分：用于结束回合弃牌，不等同于“打出分”。
+   目的：低同步时不能把唯一攻击/防御/永续弃掉，也不能留 5 张重复治疗。 */
+function aiRetentionScore(c, hand) {
+  try {
+    var s = aiScoreOf(c);
+    var eff = (c && (c.effect || c.text)) || '';
+    var count = (hand || []).filter(function (x) { return x && x.name === c.name; }).length;
+    if (c._category === 'attack_cards') s += 60;
+    if (c._category === 'item_permanent') s += 30;
+    if (/抵消[^。；]{0,8}伤害|防止[^。；]{0,8}伤害|打断|改点|重新判定|无效/.test(eff)) s += 50;
+    if (c._category === 'skill_cards') s += 18;
+    if (count > 1) s -= 18 * (count - 1);
+    return s;
+  } catch (e) { return 0; }
+}
 function aiScoreCard(c) {
   var score = 0;
   var effect = c.effect || c.text || '';
@@ -12227,7 +12242,9 @@ function aiScoreCard(c) {
   if (isDraw) score += (handN <= 4 ? 24 : 6);
   if (isCost) score += (me.cost <= 3 ? 30 : 8);
   if (!lethal && handN <= 4 && (isSearch || isDraw) && me.cost >= cost + 1) score += 35;
-  // 4. 生存：满血不再浪费回复/护盾
+  // 4. 生存：满血不再浪费回复/护盾；低同步时防御/响应牌也加分，避免结束回合被弃掉
+  var isDefensive = /抵消[^。；]{0,8}伤害|防止[^。；]{0,8}伤害|打断|改点|重新判定|无效/.test(effect);
+  if (isDefensive) score += (me.sync <= 14 ? 70 : (me.sync < 24 ? 24 : -4));
   if (isHeal) {
     if (me.sync <= 14) score += 80;
     else if (me.sync < 24) score += 25;
@@ -12457,9 +12474,15 @@ function aiEndTurn(seat) {
     }
   } catch (e) { try { console.error('[catch] assets/engine.js aiEndTurn 弃牌分流', e); } catch (e2) {} }
   while (aiMe().hand.length > 5) {
-    var discarded2 = aiMe().hand.pop();
+    /* 【2026-10-20 AI v2】不再固定弃尾张：按当前评分弃最低的一张，保留攻击/增益/低同步防御牌。 */
+    var __keepHand = aiMe().hand.slice();
+    __keepHand.sort(function (a, b) { return (aiRetentionScore(a, aiMe().hand) || 0) - (aiRetentionScore(b, aiMe().hand) || 0); });
+    var discarded2 = __keepHand[0];
+    var __di = aiMe().hand.indexOf(discarded2);
+    if (__di < 0) break;
+    aiMe().hand.splice(__di, 1);
     moveCardToGrave(aiSeat(), discarded2, 'discard');
-    addBattleLog(aiSeat(), '手牌超限，弃掉【' + discarded2.name + '】');
+    addBattleLog(aiSeat(), '手牌超限，弃掉评分最低的【' + discarded2.name + '】');
   }
   
   for (var i = 0; i < aiMe().permanent.length; i++) {
