@@ -23214,8 +23214,9 @@ function __yongzouGraveHit() {
     var tpp = battleState[tp]; if (!tpp) return false;
     var has = (tpp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; });
     if (!has) return false;
-    tpp._yongzouCount = (tpp._yongzouCount || 0) + 1;
-    var n = tpp._yongzouCount;
+    /* 【2026-10-20 修·计数只由 checkGraveTrigger 累加】这里以前又 +1 了一次 ⇒ 第3张后计数变4，
+       实际触发节奏变成 3/5/7/9 张（每 2 张一次），日志还把第 3 张写成"第 4 张" ✗。 */
+    var n = tpp._yongzouCount || 0;
     /* 【2026-10-12 作者口径修正】改为在**候选生成处**就卡住：
        只有"每 3 张卡进墓"这一张才产生候选 ⇒ 第 1、2 张**不开连锁窗** ✓（原来每张都开窗、只有第 3 张造伤 ✗）
        ⚠ 计数已在 `checkGraveTrigger` 的收口处累加 ✓ ⇒ 这里**不再自增** ✗（否则会重复计数 ✓ 已删） */
@@ -23421,9 +23422,11 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
      ③候选生成处 `__yongzouGraveApplies` 只在"计数为 3 的倍数"时放行 ⇒ 第 1、2 张**根本不产生候选、不开窗** ✓ */
   if (!skipYongzou) {
     try {
-      var __yp = battleState && battleState[player];
-      if (__yp && (__yp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; })) {
-        __yp._yongzouCount = (__yp._yongzouCount || 0) + 1;
+      /* 【2026-10-20 作者口径】「每有 3 张卡进入墓地」= **自己与对手的卡都算**；
+         但只累计**当前回合方**的永奏计数（卡面写「自己的回合内」✓）。 */
+      var __yzp = battleState && battleState[battleState.currentPlayer];
+      if (__yzp && (__yzp.permanent || []).some(function (c) { return c.name && c.name.indexOf('永奏') >= 0; })) {
+        __yzp._yongzouCount = (__yzp._yongzouCount || 0) + 1;
       }
     } catch (e) { try { console.error('[catch] assets/engine.js:20019', e); } catch (e2) {} }
   }
