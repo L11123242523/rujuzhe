@@ -10560,11 +10560,11 @@ function rioTriggerOnce(player) {
     });
   }
   if (player === 'p1') {
-    showChoiceModal('现实间里绪被动', '本回合已累计移动8格',
+    showChoiceModal('现实间里绪被动', '本回合已累计移动7格',
       '支付1音韵造成四面骰判定伤害，或改为支付2音韵造成六面骰判定伤害（对一名其他玩家）',
       ['支付1音韵·四面骰判定', '支付2音韵·六面骰判定', '不发动'], function (i) { if (i === 0) __fire(4, 1); else if (i === 1) __fire(6, 2); });
   } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && player === 'p2') {
-    onlineDecideModal('p2', '现实间里绪被动（对手）', '本回合已累计移动8格',
+    onlineDecideModal('p2', '现实间里绪被动（对手）', '本回合已累计移动7格',
       '支付1音韵造成四面骰判定伤害，或改为支付2音韵造成六面骰判定伤害（对一名其他玩家）',
       ['支付1音韵·四面骰判定', '支付2音韵·六面骰判定', '不发动'], function (i) { if (i === 0) __fire(4, 1); else if (i === 1) __fire(6, 2); });
   } else { __fire((p.cost || 0) >= 2 ? 6 : 4, (p.cost || 0) >= 2 ? 2 : 1); } // AI：音韵充足用六面，否则四面
@@ -15194,7 +15194,7 @@ function getActiveBuffs(user) {
   }
   var __capIsRio = p.captain && (p.captain.name||'') === '现实间里绪';
   PROG('_rioMoveCount', 7, '📈', '里绪累计', !!p._rioPassive);   // 【2026-10-11】新卡面：7 格触发（旧 8 ✗）
-  PROG('_zhichiMoveCount', 8, '📏', '直尺累计', (p.permanent||[]).some(function(c){return c.name&&c.name.indexOf('直尺')>=0;}));
+  PROG('_zhichiMoveCount', 6, '📏', '直尺累计', (p.permanent||[]).some(function(c){return c.name&&c.name.indexOf('直尺')>=0;}));
   PROG('_koharuMoveCount', 4, '🌀', '小春累计', !!p._koharuSP);
   return out;
 }
