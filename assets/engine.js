@@ -2380,6 +2380,12 @@ function onlineApplyIntent(a, done) {
     case 'perm':
       onlineActivatePermanentP2(a.idx, a.name, __fin);
       return;
+    case 'graveSP':
+      /* 【2026-10-21 座位一致】客人的墓地SP：房主按 p2 执行（客人自己在另一侧点 ⚡ 时发来） */
+      if (typeof activateGraveSPFor === 'function') activateGraveSPFor('p2', a.zone || 'grave', a.idx | 0);
+      else addBattleLog('system', '【联机】本机没有墓地SP执行器（双方版本不一致？）');
+      __fin();
+      return;
     case 'drawCost':
       onlineDrawByCostP2(__fin);
       return;
@@ -9808,10 +9814,17 @@ function __collectChainTarget(user, card, cb) {
     if (timing !== 'activation') { fin(self); return; }                 /* 结算时选对象 ⇒ 发动时不问 ✓ */
     var isAI = (typeof isAISeat === 'function') ? !!isAISeat(user) : (user === 'p2');
     var online = (typeof Online !== 'undefined' && Online.active);
-    /* 【2026-10-21 AI v3·目标选择】本地 AI 不再一律取自己：按卡面语义决定给谁（削弱卡打给自己是错的 ✗）。
-       联机远端位保持原样（那是客人的决定，不能由本机替猜 ⇒ 仍取自己兜底）。 */
+    /* 【2026-10-21 座位一致】本地 AI 按卡面语义；联机客人**像房主一样弹窗自己选**（不再硬编码取自己）。 */
     if (isAI) { fin((typeof aiTargetForCard === 'function') ? aiTargetForCard(card, self) : self); return; }
-    if (online && user === 'p2') { fin(self); return; }
+    if (online && user === 'p2') {
+      if (typeof Online.awaitAnswer === 'function') {
+        Online.awaitAnswer({ label: '选择目标玩家（对手）', choices: ['自己', '对手'] }, function (v) {
+          if (v === null || v === undefined) { fin(null); return; }
+          fin(v === 0 ? self : ((typeof foeOf === 'function') ? foeOf(self) : (self === 'p1' ? 'p2' : 'p1')));
+        });
+      } else fin(self);
+      return;
+    }
     if (typeof showChoiceModal !== 'function') { fin(self); return; }
     var myName = (typeof playerDisplayName === 'function') ? playerDisplayName('p1') : '自己';
     var foeName = (typeof playerDisplayName === 'function') ? playerDisplayName('p2') : '对手';
@@ -11780,7 +11793,32 @@ function aiMaybeUseEvent(done) {
 }
 
 // AI 资源层：音韵紧张时献祭最差手牌，手牌偏少且音韵富余时音韵抽卡（与玩家同一套规则入口）
+/* 【2026-10-21 座位一致】AI 也会用墓地SP（与玩家同一张表、同一个执行体 activateGraveSPFor）。
+   以前只有「最佳化」有 AI 入口，其余 6 张 AI 永远不会发动。 */
+function aiUseGraveSPOnce() {
+  try {
+    var p = aiMe(), seat = aiSeat();
+    if (!p || !battleState || battleState._over) return false;
+    if (battleState.currentPlayer !== seat) return false;
+    if (battleState.phase !== 'main1' && battleState.phase !== 'main2') return false;
+    if (typeof __graveSPDef !== 'function' || typeof activateGraveSPFor !== 'function') return false;
+    for (var i = 0; i < (p.grave || []).length; i++) {
+      var c = p.grave[i]; if (!c) continue;
+      var def = __graveSPDef(c); if (!def) continue;
+      if (String(c.name || '') === '最佳化') continue;   /* 已有专用 AI 入口（攻击没满时自动用） */
+      if (def.ok && !def.ok(p)) continue;
+      if (/永奏/.test(String(c.name || '')) && (p.sync || 0) <= 6) continue;   /* 付4换1张，低同步不划算 */
+      try { activateGraveSPFor(seat, 'grave', i); } catch (e) { console.error('[catch] AI 墓地SP', e); }
+      return true;
+    }
+  } catch (e) { console.error('[catch] aiUseGraveSPOnce', e); }
+  return false;
+}
 function aiResourceStep(done) {
+  if (aiUseGraveSPOnce()) { __aiPace(function () { aiResourceStep(done); }, 900); return; }
+  aiResourceStepBody(done);
+}
+function aiResourceStepBody(done) {
   if (typeof battleState === 'undefined' || !battleState) { if (done) done(); return; }
   var p = aiMe();
   if (!p) { if (done) done(); return; }
@@ -12050,7 +12088,7 @@ function aiTurn(seat) {
   aiMaybeUseMusic(function() {
   aiUseActiveSP(aiSeat(), function() {
     aiResourceStep(function() {          // ← 新增资源层：献祭/音韵抽卡
-    aiPlayCards(3, function() {
+    aiPlayCards(99, function() {   /* 【2026-10-21 座位一致】不再固定 3 张上限（玩家/客人只要费用够就能继续出） */
     if (checkBattleEnd()) return;
     updateBattleUI();
     
@@ -12095,7 +12133,7 @@ function aiTurn(seat) {
             aiMaybeUseMusic(function() {
             aiUseActiveSP(aiSeat(), function() {
               aiResourceStep(function() {          // ← 主要阶段2 再次整理资源
-              aiPlayCards(2, function() {
+              aiPlayCards(99, function() {   /* 【2026-10-21 座位一致】主2 同样不再固定 2 张上限 */
               if (checkBattleEnd()) return;
               updateBattleUI();
               
@@ -13984,6 +14022,23 @@ function aiUsePermanentActive(player, done) {
         return;
       }
       syncNext(card, act); return;
+    }
+    if (h === 'lanzhangCoin') { // 蓝宝之杖·命：每回合一次的硬币判定伤害（正面2点、背面0）
+      if (typeof judgePerform !== 'function') { next(); return; }
+      judgePerform(player, { kind: 'coin', label: '蓝宝之杖·命·硬币' }, function (face) {
+        setFlag(card, act);
+        try {
+          if (face === '正面') {
+            L('对手【蓝宝之杖·命】硬币判定：正面，对对手造成2点判定伤害');
+            if (typeof dealDamageWithResponse === 'function') dealDamageWithResponse(foe, 2, '蓝宝之杖·命·硬币判定', null, null, player, { judge: true, segment: true });
+          } else {
+            L('对手【蓝宝之杖·命】硬币判定：反面，不造成伤害');
+          }
+        } catch (e) { try { console.error('[catch] AI 蓝宝硬币', e); } catch (e2) {} }
+        if (typeof updateBattleUI === 'function') updateBattleUI();
+        setTimeout(next, 150);
+      });
+      return;
     }
     if (h === 'supplier') { // 核心的供给者主动：获得3点激励（与玩家侧一致；发动时的引导核心在 onPlay）
       p.motivation = (p.motivation || 0) + 3;
@@ -26561,8 +26616,11 @@ function settleCardExecution(card, user, target, opts, done) {
   // 【避免双扣】调用方若已完成付费（含宫樱子免费用卡的玩家选择），必须传 alreadyPaid:true。
   // 否则这里会再扣一次 opts.actualCost，导致费用 4 的牌扣掉 8（联机远端位曾因此与对面分叉）。
   if (!opts.alreadyPaid) {
-    // 宫樱子被动：AI 在高费卡(≥3)时自动消耗免费用卡次数
-    var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual >= 3;
+    // 宫樱子被动：AI 自动消耗免费用卡次数（2026-10-21 座位一致：不再固定只在 ≥3 费用时用，
+    //   改为"本回合手里最贵的那张"——既与玩家一样能省任意费用，又不把次数浪费在 1 费小牌上）
+    var __sfMax = 0;
+    try { (p.hand || []).forEach(function (hc) { var rc = (typeof computeRequiredCost === 'function') ? Number(computeRequiredCost(hc, user)) : Number(hc.cost || 0); if (rc > __sfMax) __sfMax = rc; }); } catch (e) {}
+    var __sfAi = p._sakuraPassive && (p._sakuraFreeUse || 0) > 0 && actual > 0 && (actual >= 3 || actual >= __sfMax);
     if (__sfAi) {
       p._sakuraFreeUse--;
       addBattleLog(user, '【宫樱子被动】消耗1次免费用卡（剩余' + p._sakuraFreeUse + '次）');
@@ -26644,7 +26702,20 @@ function chooseZoneCard(user, who, zone, title, cb) {
     return;
   }
   if (user === 'p1') { showTargetCards(who, zone, title, true, function (c, i) { cb(c, i); }); }
-  else { cb(arr.length ? arr[0] : null, arr.length ? 0 : -1); }
+  else {
+    /* 【2026-10-21 座位一致】AI 不再固定取第 0 张：
+       · 弃自己的手卡/永续卡 ⇒ 取**评分最低**（损失最小）
+       · 从牌组/墓地/移出区取卡、或动对手的卡 ⇒ 取**评分最高**（收益最大） */
+    var __ord = arr.map(function (c, i) { return { c: c, i: i }; });
+    var __takeHigh = !(who === user && (zone === 'hand' || zone === 'permanent'));
+    __ord.sort(function (a, b) {
+      var sa = (typeof aiScoreOf === 'function') ? aiScoreOf(a.c) : 0;
+      var sb = (typeof aiScoreOf === 'function') ? aiScoreOf(b.c) : 0;
+      return __takeHigh ? (sb - sa) : (sa - sb);
+    });
+    if (!__ord.length) { cb(null, -1); return; }
+    cb(__ord[0].c, __ord[0].i);
+  }
 }
 
 
