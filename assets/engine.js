@@ -8717,6 +8717,31 @@ var TW = {
   open: function (opts) {
     opts = opts || {};
     var self = this;
+    /* 【2026-10-21 作者报·第9项】同一次送墓先弹【永奏进行曲】再弹【钢笔】时，
+       第二个 resolveSimultaneous 走 TW.open **覆盖**了第一个窗口 ⇒ 永奏的"是否发动"弹窗被钢笔盖掉 ✗。
+       结构修：同类型 simultaneous 窗口仍在 collect/priority 时，把新候选**并入当前窗口**，
+       不新建、不覆盖；玩家先答完当前这一问，priorityStep 重扫时自然会看到新候选 ✓ */
+    var __prevWin = this.active;
+    if (__prevWin && __prevWin.type === 'simultaneous' && (__prevWin.state === 'priority' || __prevWin.state === 'collect')) {
+      var __newCands = (opts.candidates || []).filter(Boolean);
+      var __keyOf = function (c) { return String((c && c.owner) || '') + '|' + String((c && c.label) || '') + '|' + String((c && c.card && c.card.name) || ''); };
+      var __have = {};
+      (__prevWin.candidates || []).forEach(function (c) { __have[__keyOf(c)] = 1; });
+      var __added = 0;
+      __newCands.forEach(function (c) { var k = __keyOf(c); if (__have[k]) return; __have[k] = 1; __prevWin.candidates.push(c); __added++; });
+      if (typeof opts.scan === 'function') {
+        var __oldScan = __prevWin.scan;
+        __prevWin.scan = function () {
+          var a = __oldScan ? (__oldScan() || []) : [];
+          var b = opts.scan() || [];
+          var seen = {}, out = [];
+          a.concat(b).forEach(function (c) { var k = __keyOf(c); if (seen[k]) return; seen[k] = 1; out.push(c); });
+          return out;
+        };
+      }
+      if (__added) addBattleLog('system', '【时点窗口】新触发并入当前窗口（不覆盖）＋' + __added + ' 条；当前窗口 #' + __prevWin.id);
+      return __prevWin;
+    }
     var tp = opts.tp || (battleState && battleState.currentPlayer) || 'p1';
     /* 【标记"正在等谁决断"】（原来由已删的 __offerOptionalEffect 维护；迁到窗口后**没人再写它** ⇒
        aiTurn / aiPlayCards 的停等闸门失效 ⇒ AI 会在你还没答完窗口时继续出牌、效果跑到下一回合才结算）。
