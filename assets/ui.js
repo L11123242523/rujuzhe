@@ -1250,12 +1250,18 @@ function renderBattleMap() {
       var classes = 'compact-tile tile-' + tile.type;
       if (battleState.p1.position === tile.id) classes += ' current-p1';
       if (battleState.p2.position === tile.id) classes += ' current-p2';
+      /* 【2026-10-21】配电室关闭的格子（全局）加醒目标记 + 悬浮提示 */
+      var __closedNames = [];
+      try { playerIds().forEach(function(w){ var q=battleState[w]; if(q && q.closedTile===tile.id) __closedNames.push(playerDisplayName(w)); }); } catch(e){}
+      var __closed = __closedNames.length > 0;
+      if (__closed) classes += ' tile-closed';
       
       var dots = '';
       if (battleState.p1.position === tile.id) dots += '<div class="player-dot dot-p1">1</div>';
       if (battleState.p2.position === tile.id) dots += '<div class="player-dot dot-p2">2</div>';
+      if (__closed) dots += '<div class="tile-closed-badge">⛔ 关闭</div>';
       
-      html += '<div class="' + classes + '" title="第' + tile.id + '格 - ' + tile.name + '">' +
+      html += '<div class="' + classes + '" title="第' + tile.id + '格 - ' + tile.name + (__closed ? ('（已被配电室关闭；关闭者：' + __closedNames.join('、') + '）') : '') + '">' +
         dots +
         '<span class="tile-icon">' + icon + '</span>' +
         '<span class="tile-num">#' + tile.id + '</span>' +

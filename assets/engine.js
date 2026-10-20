@@ -2805,6 +2805,16 @@ var CARD_PLAY_CONDITIONS={
     if (!__has) return {ok:false, reason:'牌组、墓地和移出游戏里都没有攻击卡/技能卡，无法检索 ⇒ 不能发动【钢笔】'};
     return true;
   },
+  /* 【2026-10-21 作者口径】镌刻的艺术：支付7同步是前提；牌组里没有混沌属性的卡（无可检索对象）也不能使用 ✓ */
+  '镌刻的艺术':function(card,me,bs){
+    var __hasChaos = (me.deck||[]).some(function(c){
+      if (!c) return false;
+      var a = (typeof __ruleAttrOf === 'function') ? __ruleAttrOf(c) : (c.attribute || '');
+      return a === '混沌';
+    });
+    if (!__hasChaos) return {ok:false, reason:'牌组中没有混沌属性的卡，无法检索 ⇒ 不能使用【镌刻的艺术】'};
+    return true;
+  },
   /* 【2026-10-19 作者报】狩猎之少女必须移动到同一行的其他玩家所在格；没有同行玩家时不能发动。 */
   '狩猎之少女':function(card,me,bs){
     var ok=false;
@@ -3877,11 +3887,17 @@ function openCardPicker(player, type, index) {
     var __info = computeAttrRequirement((deckConfig[player].chars||[]).filter(Boolean));
     var __have = {};
     deckConfig[player].items.forEach(function(c){ if(c&&c.attribute) __have[c.attribute]=(__have[c.attribute]||0)+1; });
+    /* 【2026-10-21 作者口径】神圣卡携带限制要在**选卡时**就挡住（不能等开局才报错）：
+       三同属性队伍才能带；且最多 1 张 ✓ */
+    var __holyInfo2 = (typeof __holySlotInfo === 'function') ? __holySlotInfo((deckConfig[player].chars||[]).filter(Boolean)) : { allowed: false };
+    var __holyN2 = (typeof __countHolyItems === 'function') ? __countHolyItems(deckConfig[player].items) : 0;
     pickerState.disabled = {}; // 完整列出全部道具，不可选项只置灰标注、不再直接隐藏（此前已选/永续满会从列表消失，导致列表不全）
     availableCards = allCards.filter(function(c) {
       if (c._category !== 'item_permanent' && c._category !== 'item_single') return false;
       if (usedItemNames.indexOf(c.name) >= 0) { pickerState.disabled[c.name] = '已在卡组中（同名不重复）'; }
       else if (c._category === 'item_permanent' && __permN >= 2) { pickerState.disabled[c.name] = '永续卡最多2张'; }
+      else if (typeof __isHolyItem === 'function' && __isHolyItem(c) && !__holyInfo2.allowed) { pickerState.disabled[c.name] = '神圣属性道具：需队伍3名角色属性完全相同'; }
+      else if (typeof __isHolyItem === 'function' && __isHolyItem(c) && __holyN2 >= 1) { pickerState.disabled[c.name] = '神圣属性道具最多携带1张'; }
       return true;
     });
     availableCards.sort(function(a,b){ // 缺额属性最前，灵活位次之，已满足/特殊属性垫底
@@ -6340,7 +6356,7 @@ function startTurn() {
   battleState[player]._kasumiUsedThisTurn = false;
   battleState[player]._edwardLastCost = undefined;
   battleState[player]._edwardTriggerCount = 0;
-  battleState[player]._megumiCostSeq = [];
+  battleState[player]._megumiCostSeq = []; battleState[player]._megumiSeen = [];
   
   // 准备阶段
   battleState.phase = 'prepare';
@@ -7932,7 +7948,7 @@ registerTrigger({
   },
   cond: function (ctx, owner) {
     if (!ctx || !ctx.card) return false;
-    if (ctx.reason === 'use') return false;                       // 卡面"被送入墓地"⇒ 玩家"使用"送墓不算（口径第 4 条）
+    /* 【2026-10-21 作者口径】使用（use）送墓也算"被送入墓地" ⇒ 不再排除 use ✓ */
     if (__missTiming('gangbi-sp-grave', ctx)) return false;
     var cat = ctx.card._category;
     if (cat !== 'skill_cards' && cat !== 'attack_cards') return false;   // 只认技能卡 / 攻击卡
@@ -10682,6 +10698,17 @@ function executeMoveEffect(effect) {
   try {
   runTiming(TIMING.ON_MOVE_PENDING, { effect: effect, player: effect && effect.user });
   if (!effect) { __relM(); return; }
+  /* 【2026-10-21】圆桌会议：连锁中登记 ⇒ 链后终止本次移动（不再走剩余步数） */
+  if (battleState && battleState._roundtableStopMove) {
+    battleState._roundtableStopMove = false;
+    addBattleLog(effect.player || 'p1', '圆桌会议：本次移动被中断，不再继续移动');
+    battleState._diceRolledThisPhase = true; battleState._moveResolved = true;
+    try { rwClose('move'); rwClose('dice'); } catch (e) {}
+    var __acRT = document.getElementById('diceAnimationArea'); if (__acRT) __acRT.style.display = 'none';
+    if (typeof updateBattleUI === 'function') updateBattleUI();
+    if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent();
+    __relM(); return;
+  }
   if (effect.cancelled) { addBattleLog(effect.player || 'p1', '本次移动已被连锁打断，不执行移动'); battleState._diceRolledThisPhase = true; battleState._moveResolved = true; rwClose('move'); rwClose('dice'); var __ac3 = document.getElementById('diceAnimationArea'); if (__ac3) __ac3.style.display = 'none'; if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent(); __relM(); return; }
   var moveAmount = effect.moveAmount;
   var player = effect.player || 'p1';
@@ -13155,9 +13182,10 @@ function triggerTileEffect(player) {
   var tile = MAP_TILES[p.position];
   if (!tile) return;
   
-  // 检查该格子是否被关闭
-  if (p.closedTile === tile.id) {
-    addBattleLog(player, '第' + tile.id + '格【' + tile.name + '】已被配电室关闭，无效果');
+  // 检查该格子是否被关闭（【2026-10-21】关闭是**全局**的：任一方用配电室关掉的格子，任何人停留都无效果）
+  var __closedBy = playerIds().filter(function (w) { return battleState[w] && battleState[w].closedTile === tile.id; });
+  if (__closedBy.length) {
+    addBattleLog(player, '第' + tile.id + '格【' + tile.name + '】已被配电室关闭（关闭者：' + __closedBy.map(playerDisplayName).join('、') + '），无效果');
     return;
   }
   
@@ -13198,7 +13226,7 @@ function triggerTileEffect(player) {
         addBattleLog(player, '【GAME格】' + playerDisplayName(player) + '金币不足500（当前' + p.gold + '），跳过本次猜硬币');
         break;
       }
-      p.gold -= (p, 500);
+      p.gold -= 500;
       addBattleLog(player, '【GAME格】轮到' + playerDisplayName(player) + '猜硬币：支付500金币（剩余' + p.gold + '金币）');
       var __gamePlay = function (guess) {
         judgePerform(player, { kind: 'coin', label: 'GAME 猜硬币' }, function (coin, __cancelled) {
@@ -13377,7 +13405,7 @@ function triggerTileEffect(player) {
           if (o === 2 || o == null) { addBattleLog(player, '易物：选择不执行'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
           if (o === 1) {
             if ((p.gold || 0) < 500) { addBattleLog(player, '易物：金币不足500'); if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
-            p.gold -= (p, 500); var d = drawCard(player); addBattleLog(player, '易物：花费500金币抽到【' + (d ? d.name : '无') + '】'); if (typeof updateBattleUI === 'function') updateBattleUI(); return;
+            p.gold -= 500; var d = drawCard(player); addBattleLog(player, '易物：花费500金币抽到【' + (d ? d.name : '无') + '】'); if (typeof updateBattleUI === 'function') updateBattleUI(); return;
           }
           Online.awaitAnswer({ label: '易物·选择手牌送墓（对手）', cards: p.hand.map(function(c){ return c.name; }) }, function (v) {
             var ix = Array.isArray(v) ? v[0] : v;
@@ -13399,7 +13427,7 @@ function triggerTileEffect(player) {
       // 机场（权威）：支付500金币，下个主要阶段开始时可前进到地图任意1格
       if (!p.gold) p.gold = 0;
       if (p.gold < 500) { addBattleLog(player, '【机场】金币不足500，无法购票（当前' + p.gold + '）'); break; }
-      p.gold -= (p, 500); p._airportFreeMoveNext = true;
+      p.gold -= 500; p._airportFreeMoveNext = true;
       addBattleLog(player, '【机场】支付500金币，下个主要阶段开始时可前进到任意1格');
       break; }
     case 'start':
@@ -14013,8 +14041,8 @@ function aiUsePermanentActive(player, done) {
       if ((p.gold || 0) < 700) { next(); return; }
       var wantKill = foe && (battleState[foe] ? battleState[foe].sync <= 4 : false) && (p.hand && p.hand.length);
       var doExtra = (p.gold || 0) >= 1500 && !card._phoneUsedThisTurn; // 追加一次
-      p.gold -= (p, 700); card._phoneUsedThisTurn = true;
-      if (doExtra) { p.gold -= (p, 500); card._phoneExtraThisTurn = true; L('对手【智能手机】追加发动一次（-500金币）'); }
+      p.gold -= 700; card._phoneUsedThisTurn = true;
+      if (doExtra) { p.gold -= 500; card._phoneExtraThisTurn = true; L('对手【智能手机】追加发动一次（-500金币）'); }
       if (!wantKill) {
         p.attackBuff = (p.attackBuff || 0) + 1; L('对手【智能手机】①攻击力+1（当前+' + p.attackBuff + '），余' + p.gold + '金币');
         syncNext(card, act); return;
@@ -20721,7 +20749,8 @@ function runOneOp(op, ctx, next) {
     case 'pre_next_damage_loss': p._preNextDamageLoss = { amount: op.amount }; addBattleLog(user, '下次造成伤害前先扣目标' + op.amount + '同步'); break;
     case 'gain_cost_if_last_match': {
       var a = p._lastSearchCard, b = p._lastDiscardCard;
-      if (a && b && (a.attribute === b.attribute || (a.cost != null && b.cost != null && a.cost === b.cost))) { recoverCost(user, op.amount, '同色同费'); addBattleLog(user, '两卡同色/同费，回' + op.amount + '音韵'); }
+      /* 【2026-10-21】必须两张都是不同的实体卡、且有明确属性/费用才判；避免 undefined===undefined 误回 ✓ */
+      if (a && b && a !== b && (a.attribute && b.attribute && a.attribute === b.attribute || (a.cost != null && b.cost != null && a.cost === b.cost))) { recoverCost(user, op.amount, '同色同费'); addBattleLog(user, '两卡同色/同费，回' + op.amount + '音韵'); }
       break;
     }
     case 'move_to_tile': {
@@ -21916,6 +21945,15 @@ function __eventCasesA(card, player, p, done, env) {
           if (typeof triggerTileEffect === 'function') triggerTileEffect(__ecFoe);
         }
       }
+      /* 【2026-10-21 作者口径】圆桌会议有"中断移动"的隐藏效果：
+         连锁对手的移动发动时，结算后**本次移动立即终止**（对手不会到达 Game 后继续走完剩余步数）。
+         记在 battleState 上，由 executeMoveEffect 在链后统一消费 ✓ */
+      try {
+        if ((typeof rwHas === 'function' && rwHas('move')) || battleState._moveInProgress || battleState._pendingMove !== undefined) {
+          battleState._roundtableStopMove = true;
+          addBattleLog(player, '圆桌会议：中断本次移动');
+        }
+      } catch (e) {}
       break;
       
   }
@@ -22269,6 +22307,7 @@ function useEventCardFor(player, index, name, done) {
     battleState[player].hand.splice(index, 1);
   }
   
+  if (typeof __megumiRecordCost === 'function') __megumiRecordCost(player, card);
   addBattleLog(player, '使用事件卡【' + card.name + '】');
   
   var p = battleState[player];
@@ -24390,7 +24429,11 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
     var __shieldNow = p.shield || 0, __ignore = Math.min(__pierceN, __shieldNow), __effShield = __shieldNow - __ignore;
     if (__ignore > 0) addBattleLog(target, '本次攻击无视' + __ignore + '点护盾');
     if (__effShield > 0) {
-      if (__effShield >= actualDamage) { __effShield -= actualDamage; addBattleLog(target, '护盾抵消全部伤害'); actualDamage = 0; }
+      if (__effShield >= actualDamage) {
+        /* 【2026-10-21 作者报】挡伤害时应说清"来自什么卡"的多少点，而不是只说抵消 */
+        addBattleLog(target, '护盾抵消全部伤害（来自' + (source ? ('【' + source + '】的') : '') + damage + '点伤害；剩余护盾' + (__effShield - actualDamage) + '）');
+        __effShield -= actualDamage; actualDamage = 0;
+      }
       else { actualDamage -= __effShield; __effShield = 0; addBattleLog('damage', (target === 'p1' ? '你' : '对手') + '的有效护盾被击穿', target); }
     }
     p.shield = __ignore + __effShield; // 被无视的护盾保留 + 生效护盾抵消后的余量
@@ -25007,7 +25050,14 @@ var PERMANENT_ONPLAY_HANDLERS = {
     if (user === 'p1') {
       var attackCards = p.hand.filter(function (c) { return c._category === 'attack_cards'; });
       if (!attackCards.length) { addBattleLog('p1', '【善意面具】手中没有攻击卡'); cb && cb(); return; }
-      showTargetCards('p1', 'hand', '善意面具：选择一张攻击卡打出（不耗音韵，无视距离，最终伤害+1）', true, __kindPlay);
+      /* 【2026-10-21 作者报】候选必须只有攻击卡（原来 showTargetCards 列整手，连钢笔都能选）✗ */
+      if (typeof showCardPickerMulti === 'function') {
+        var __atkList = attackCards.slice();
+        showCardPickerMulti(__atkList, '善意面具：选择一张攻击卡打出（不耗音韵，无视距离，最终伤害+1）', function (sel) {
+          var __i = Array.isArray(sel) ? sel[0] : sel;
+          __kindPlay((__i != null && __i >= 0 && __i < __atkList.length) ? __atkList[__i] : null);
+        }, 1);
+      } else __kindPlay(attackCards[0]);
       return;
     }
     if (__ol) {
@@ -25246,12 +25296,12 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var OL2 = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2');
     if (card._phoneUsedThisTurn && !card._phoneExtraThisTurn) {
       if (p.gold < 500) { if (user === 'p1') showToast('【智能手机】本回合已发动，金币不足500，无法追加。', 'warn'); return false; }
-      p.gold -= (p, 500); card._phoneExtraThisTurn = true;
+      p.gold -= 500; card._phoneExtraThisTurn = true;
       addBattleLog(user, '【智能手机】扣500金币追加一次发动次数，剩余' + p.gold);
     } else if (card._phoneUsedThisTurn) { if (user === 'p1') showToast('【智能手机】本回合已追加过一次。', 'warn'); return false; }
     if (p.gold < 700) { if (user === 'p1') showToast('【智能手机】金币不足700。', 'warn'); return false; }
     function __phonePick(ci) {
-      p.gold -= (p, 700); card._phoneUsedThisTurn = true;
+      p.gold -= 700; card._phoneUsedThisTurn = true;
       if (ci === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog(user, '【智能手机】①攻击力+1（+' + p.attackBuff + '），余' + p.gold); updateBattleUI(); }
       else {
         if (!p.hand.length) { addBattleLog(user, '【智能手机】②无手卡可送，效果不适用'); updateBattleUI(); return; }
@@ -25374,7 +25424,8 @@ var PERMANENT_ACTIVE_HANDLERS = {
             if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
             var hri = p.hand.indexOf(h3[hi]); if (hri < 0) { updateBattleUI(); return; }
             var dc = p.hand.splice(hri, 1)[0]; moveCardToGrave(user, dc, 'effect'); addBattleLog(user, '【绿宝之杖·择】③手牌【' + dc.name + '】送墓');
-            if (gc.attribute === dc.attribute || gc.cost === dc.cost) { recoverCost(user, 1, '绿宝之杖·择'); addBattleLog(user, '【绿宝之杖·择】同色/同费回1音韵，当前' + p.cost); }
+            /* 【2026-10-21】同色看**卡面属性**（镌刻=混沌，不按"规则上也可当无序"的检索别名），同费看卡面费用；两张必须是不同实体 ✓ */
+            if (gc && dc && gc !== dc && (gc.attribute && dc.attribute && gc.attribute === dc.attribute || (gc.cost != null && dc.cost != null && gc.cost === dc.cost))) { recoverCost(user, 1, '绿宝之杖·择'); addBattleLog(user, '【绿宝之杖·择】同色/同费回1音韵，当前' + p.cost); }
             updateBattleUI();
           }
           if (OL2) Online.awaitAnswer({ label: '绿宝之杖·择③·选手牌送墓（对手）', cards: h3.map(function(c){ return c.name; }) }, __lvHand);
@@ -25486,7 +25537,8 @@ function __resetPermanentActiveFlags(player) {
       if (!card) return;
       try {
         Object.keys(card).forEach(function (k) {
-          if (!/UsedThisTurn$|PaidThisTurn$|ActiveUsed$|_activeUsed$/i.test(k)) return;
+          /* 【2026-10-21】ExtraThisTurn（智能手机追加次数）也必须每回合清 ✓ */
+          if (!/UsedThisTurn$|PaidThisTurn$|ActiveUsed$|_activeUsed$|ExtraThisTurn$/i.test(k)) return;
           if (card[k]) { card[k] = false; n++; }
         });
       } catch (e) { try { console.error('[catch] assets/engine.js:21576', e); } catch (e2) {} }
@@ -25621,6 +25673,7 @@ function proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionTy
       addBattleLog('p1', '【宫樱子被动】消耗1次免费用卡（剩余' + battleState.p1._sakuraFreeUse + '次）');
     } else {
       __spendCost(battleState.p1, actualCost);
+      if (typeof __megumiRecordCost === 'function') __megumiRecordCost('p1', card);
       if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan('p1');
     }
     /* 【2026-10-07 修·**额外同步值使用条件要在这里也扣**】
@@ -26219,6 +26272,25 @@ function __cardBelongsForUse(user, card) {
   } catch (e) { return true; }   /* 守卫自身异常时不误伤正常流程 */
 }
 
+/* 【2026-10-21】松山惠费用序列：**使用卡时同步记录**（不能等 postUsePassiveHooks —— 并行/连锁下会晚到，
+   测试与实战都可能在"第3张已打出"时仍看到 _megumiCostSeq=[1,2]）。凑满3张只入 ready 队列，
+   由 postUsePassiveHooks 按原顺序取出发动（效果本身仍在链上结算 ✓）。 */
+function __megumiRecordCost(user, card) {
+  try {
+    var p = battleState && battleState[user];
+    if (!p || !p._megumiPassive || !card || card.cost === undefined) return;
+    if (!p._megumiSeen) p._megumiSeen = [];
+    if (p._megumiSeen.indexOf(card) >= 0) return;   // 同一次使用的重复回调只记一次
+    p._megumiSeen.push(card);
+    if (!p._megumiCostSeq) p._megumiCostSeq = [];
+    p._megumiCostSeq.push((typeof __effCost === 'function') ? __effCost(card) : card.cost);
+    if (p._megumiCostSeq.length >= 3) {
+      if (!p._megumiReadySeqs) p._megumiReadySeqs = [];
+      p._megumiReadySeqs.push(p._megumiCostSeq.slice(-3));
+      p._megumiCostSeq = [];
+    }
+  } catch (e) {}
+}
 function postUsePassiveHooks(user, card, done) {
   /* 【归属守卫】卡必须属于该使用者，否则不结算任何"用卡后被动"，并留下一行可查的日志 */
   if (!__cardBelongsForUse(user, card)) {
@@ -26258,13 +26330,9 @@ function postUsePassiveHooks(user, card, done) {
     });
   }
 
-  // 惠：3 张牌费用序列（必发；序列状态在登记时锁定并清空）——费用按实际支付额计（区间费卡付N记N）
-  if (p._megumiPassive && card.cost !== undefined) {
-    if (!p._megumiCostSeq) p._megumiCostSeq = [];
-    p._megumiCostSeq.push((typeof __effCost === 'function') ? __effCost(card) : card.cost);
-    if (p._megumiCostSeq.length >= 3) {
-      var seq = p._megumiCostSeq.slice(-3);
-      p._megumiCostSeq = [];
+  // 惠：3 张牌费用序列 —— 费用在**使用时同步记录**（见 __megumiRecordCost），这里只消费已凑齐的序列 ✓
+  if (p._megumiReadySeqs && p._megumiReadySeqs.length) {
+      var seq = p._megumiReadySeqs.shift();
       var __inc = (seq[0] < seq[1] && seq[1] < seq[2]);
       var __dec = (seq[0] > seq[1] && seq[1] > seq[2]);
       var __spc = (seq[0] === 3 && seq[1] === 2 && seq[2] === 5);
@@ -26302,7 +26370,6 @@ function postUsePassiveHooks(user, card, done) {
           next();
         });
       })(__spc, __inc, __dec, __same);
-    }
   }
 
   // 爱德华【别眨眼！】（削弱版口径）：与上一张同费 → 攻击力+1（直到本回合结束）并回复1音韵（必发）；
@@ -26638,6 +26705,7 @@ function settleCardExecution(card, user, target, opts, done) {
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     card._escalateCount = (card._escalateCount || 0) + 1;
   }
+  if (typeof __megumiRecordCost === 'function') __megumiRecordCost(user, card);
   recordSkillUse(card, user);
   function finalize() {
     placeAfterUse(user, card, isPerm);
