@@ -9343,10 +9343,13 @@ var TW = {
        原来只排空了格子效果那条 ⇒ 待处理触发要等下一个连锁才被带出来 ✗ */
     /* 【2026-10-05 修回归】这里**不能同步排空** —— 收尾中途拉队列会把送墓触发（如盒子SP）吞掉
        （作者实测"盒子的SP效果又被吞了"）⇒ 延后一拍，等本次收尾彻底跑完再排空。 */
-    try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('TW.close'); } catch (e) { try { console.error('[catch] assets/engine.js:8199', e); } catch (e2) {} }
+    /* 【2026-10-21 结构修】原先把 __drainAllWhenIdle 放在 active=null **之前** ⇒ __idle() 读到 TW.active 仍为真，
+       40×200ms 重试全部落空，最后"排队的格子效果放弃处理"。改到 active 置空之后再排空。 */
     /* 【2026-10-03 作者口径】当前连锁**全部结算完成** ⇒ 才处理排队中的格子效果（新流程 = 新连锁） */
     /* （格子效果已由上面的 __drainAllWhenIdle 统一排空，这里不再单独调，避免两套时机） */
     if (this.active === win) this.active = null;
+    /* 关窗后再排空：此刻 __idle() 才真的为真，格子效果不会空转 40 次后放弃 ✓ */
+    try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('TW.close'); } catch (e) { try { console.error('[catch] assets/engine.js:8199', e); } catch (e2) {} }
     // S5：关窗 = 没有窗口在跑 —— **顺序很重要**：必须先把 active 置空，
     // 否则清理器会以为"还有窗口在结算"而拒绝清锁（我第一版就插错了位置，被用例8 抓出来）
     try { if (typeof __twClearStaleChainLock === 'function') __twClearStaleChainLock('TW.close'); } catch (e) { try { console.error('[catch] assets/engine.js:8205', e); } catch (e2) {} }
