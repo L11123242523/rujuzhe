@@ -14827,19 +14827,44 @@ function __decideWrapped(cb, why) {
 var DecisionHub = {
   seq: 0, active: null, queue: [],
   submit: function (kind, spec, cb) {
-    var req = { id: ++this.seq, kind: kind, spec: spec || {}, cb: cb };
-    if (this.active) { this.queue.push(req); return req.id; }
-    this.show(req); return req.id;
+    var req = { id: ++this.seq, kind: kind, spec: spec || {}, cb: cb, step: 'choice' };
+    this.queue.push(req);
+    this.next();
+    return req.id;
   },
   show: function (req) {
-    this.active = req; var self=this;
-    var done=function(v){ self.finish(req.id,v); };
-    try { _showChoiceModalNow(req.spec.title,req.spec.cardName,req.spec.effect,req.spec.choices,done); }
-    catch(e){ this.active=null; try{req.cb(null);}catch(e2){} this.next(); }
+    this.active = req;
+    var self = this;
+    var done = function (v) { self.finish(req.id, v); };
+    try {
+      if (req.kind === 'chainChoice') __showChainChoiceNow(req.spec.title, req.spec.cardName, req.spec.effect, req.spec.choices, done, req);
+      else _showChoiceModalNow(req.spec.title, req.spec.cardName, req.spec.effect, req.spec.choices, done);
+    } catch (e) {
+      console.error('决策弹窗渲染失败，取消本次请求', e);
+      closeChoiceModal();
+    }
   },
-  finish: function(id,payload){ if(!this.active||this.active.id!==id)return; var r=this.active; this.active=null; try{r.cb(payload);}catch(e){} this.next(); },
-  cancel: function(id){ if(!this.active||this.active.id!==id)return; this.active=null; this.next(); },
-  next: function(){ if(this.active)return; var r=this.queue.shift(); if(r)this.show(r); }
+  finish: function (id, payload) {
+    if (!this.active || this.active.id !== id || this.active.ending) return;
+    var req = this.active;
+    req.ending = true;
+    /* 回调内产生的新请求也先入队，不能越过已经等待的请求。 */
+    try { if (typeof req.cb === 'function') req.cb(payload); }
+    catch (e) { console.error('决策应答回调异常', e); }
+    finally { this.active = null; this.next(); }
+  },
+  cancel: function (id) {
+    if (!this.active || this.active.id !== id || this.active.ending) return;
+    var req = this.active;
+    req.ending = true;
+    try { if (req.cleanup) req.cleanup(); }
+    finally { this.active = null; this.next(); }
+  },
+  next: function () {
+    if (this.active) return;
+    var req = this.queue.shift();
+    if (req) this.show(req);
+  }
 };
 try{if(typeof window!=='undefined')window.DecisionHub=DecisionHub;}catch(e){}
 
@@ -14943,6 +14968,8 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
       try { addBattleLog('system', '【询问】上一个弹窗被新的取代（它的应答已不可能到达）⇒ 已收掉它那本"正在决策"的账'); } catch (e) { try { console.error('[catch] assets/engine.js:12734', e); } catch (e2) {} }
     }
   } catch (e) { try { console.error('[catch] assets/engine.js:12736', e); } catch (e2) {} }
+  /* 在真正显示时开账；排队的 choice 不提前占用决策句柄。 */
+  callback = __decideWrapped(callback, 'choiceModal');
   pendingChoiceCallback = callback;
   __choiceModalOwner = callback;
   
@@ -14978,7 +15005,8 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
       btn.textContent = choice;
     }
     btn.onclick = function() {
-      var cb = pendingChoiceCallback;   // 先捕获：closeChoiceModal 会清空全局回调
+      if (pendingChoiceCallback !== callback) return; // 旧按钮不能回答下一请求
+      var cb = callback;
       closeChoiceModal(true);
       if (cb) cb(index);
       __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
@@ -15074,7 +15102,8 @@ try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 7
 try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) { try { console.error('[catch] assets/engine.js:12864', e); } catch (e2) {} }
 
 function closeChoiceModal(__skipHub) {
-  try { if (!__skipHub && typeof DecisionHub !== 'undefined' && DecisionHub.active && DecisionHub.active.kind === 'choice') DecisionHub.cancel(DecisionHub.active.id); } catch (e) {}
+  var req = !__skipHub && typeof DecisionHub !== 'undefined' ? DecisionHub.active : null;
+  if (req && req.kind !== 'choice' && req.kind !== 'chainChoice') req = null;
   try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('choiceModal'); } catch (e) { try { console.error('[catch] assets/engine.js:12869', e); } catch (e2) {} }
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
@@ -15083,6 +15112,8 @@ function closeChoiceModal(__skipHub) {
      把别的待答句柄一起抹掉 ⇒ AI 判“只剩空账”⇒ 抢跑。 */
   if (pendingChoiceCallback === __choiceModalOwner) pendingChoiceCallback = null;
   __choiceModalOwner = null;
+  /* 必须先清旧 DOM 和句柄，再取消并放出下一项；取消绝不补答。 */
+  if (req) DecisionHub.cancel(req.id);
   /* 【2026-10-01 修】关窗后必须把队列里排着的询问放出来（原来只清句柄 ⇒ 效果中产生的询问永久卡住） */
   try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('closeChoiceModal'); }, 0); } catch (e) { try { console.error('[catch] assets/engine.js:12874', e); } catch (e2) {} }
 }
@@ -15146,7 +15177,7 @@ function __drainChoiceQueueWhenIdle(tag) {
     if (!q) return false;
     try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) { try { console.error('[catch] assets/engine.js:12909', e); } catch (e2) {} }
     if (q.__chain && typeof showChainChoice === 'function') showChainChoice(q.title, q.cardName, q.effect, q.choices, q.callback);
-    else _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+    else DecisionHub.submit('choice', q, q.callback);
     return true;
   } catch (e) { try { console.error('补弹队列出错（忽略）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:12912', e2); } catch (e2) {} } return false; }
 }
@@ -15155,7 +15186,7 @@ function __dequeueChoice() {
   var q = _choiceQueue.shift();
   if (q) {
     if (q.__chain && typeof showChainChoice === 'function') showChainChoice(q.title, q.cardName, q.effect, q.choices, q.callback);
-    else _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+    else DecisionHub.submit('choice', q, q.callback);
   }
 }
 
@@ -24921,7 +24952,8 @@ var PERMANENT_STRUCT = [
        而编译层/执行层本来就支持 d4 判定伤害（13839 / 16232-16233，含控骰与琉璃SP钩子）。 */
     onPlay: ['对一名玩家造成一次四面骰判定伤害'],
     active: null },
-  { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } },
+  { match: ['绿宝'], onPlay: [], active: { once: null, flag: null, handler: 'lvbao' } }
+,
   /* 2026-10-14 第三次平衡性改动·死灵令牌（5费）：发动时效果改走具名处理器 siling（抽一张再公开一张手卡）。
      为什么必须具名：指令层把那句拆成两个 draw ⇒「选一张手卡公开」整段丢失。 */
   { match: ['死灵令牌'], onPlay: ['发动时作为效果处理：抽一张卡然后选一张手卡公开'], onPlayHandler: 'siling', active: null }

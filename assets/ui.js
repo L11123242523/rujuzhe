@@ -435,19 +435,15 @@ function __renderDeckPile() {
   } catch (e) { try { console.error('[catch] assets/ui.js:415', e); } catch (e2) {} }
 }
 
-/* 【2026-10-13 S4 ✓】"正在问发动前选目标"的**全局决策阶段标记**（与连锁窗同生同灭 ✓）
-   active=true ⇒ 问目标期间**不渲染任何新连锁窗**（请求进 pending 排队，目标定完按原顺序放行 ✓）；
-   为什么需要：pendingChoiceCallback 是全局单槽、而连锁窗每次选择后会重新渲染 ⇒ 不挡住就会出现
-   "新窗把选目标的两步挤掉"（实测调用栈：showChainChoice 覆盖选目标框 ✗）。 */
+/* 发动前选目标的兼容标记；显示权和排队只由 DecisionHub 决定。 */
 var __chainTargetPhase = { active: false, pending: [] };
 
 function showChainChoice(title, cardName, effectText, choices, onPick) {
   try { if (typeof __modalShadowNote === 'function') __modalShadowNote('chainChoice', title); } catch (e) {}
-  if (__chainTargetPhase.active) {
-    try { addBattleLog('system', '【连锁】正在选目标 ⇒「' + (title || '') + '」延后到目标选定之后再问'); } catch (e) {}
-    __chainTargetPhase.pending.push({ title: title, cardName: cardName, effectText: effectText, choices: choices, onPick: onPick });
-    return;
-  }
+  return DecisionHub.submit('chainChoice', { title: title, cardName: cardName, effect: effectText, choices: choices }, onPick);
+}
+
+function __showChainChoiceNow(title, cardName, effectText, choices, onPick, req) {
   /* 【2026-10-05】连锁窗本来就会设置 _awaitingDecision；这里再包一层保证"应答即清" */
   try { onPick = __decideWrapped(onPick, 'chainChoice'); } catch (e) { try { console.error('[catch] assets/ui.js:420', e); } catch (e2) {} }
   if (__chainNeverAsk) {
@@ -470,14 +466,24 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
      就不启动自动放弃 —— 否则倒计时到点会静默替你把这张卡的触发丢掉（盒子SP 这类就是这样丢的）。 */
   var __hasOwnTriggerInWindow = (choices || []).some(function (c) { return /连锁发动|发动【|置于效果处理区/.test(String(c)); });
   if (__hasOwnTriggerInWindow) left = 0;   // 0 = 不自动放弃
+  var targetCallback = null;
+  req.cleanup = function () {
+    settled = true;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (pendingChoiceCallback === finish || pendingChoiceCallback === targetCallback) pendingChoiceCallback = null;
+    __chainTargetPhase.active = false;
+    __decideLeaveKind('chainChoice');
+  };
   function finish(idx) {
-    if (settled) return; settled = true;
-    if (timer) clearInterval(timer);
+    if (settled || DecisionHub.active !== req) return;
+    settled = true;
+    if (timer) { clearInterval(timer); timer = null; }
     pendingChoiceCallback = null;
-    try { closeChoiceModal(true); } catch (e) { try { console.error('[catch] assets/ui.js:445', e); } catch (e2) {} }
-    try { __dequeueChoice(); } catch (e) { try { console.error('[catch] assets/ui.js:446', e); } catch (e2) {} }
+    __chainTargetPhase.active = false;
+    closeChoiceModal(true);
     onPick(idx);
   }
+  finish.__decideTag = onPick.__decideTag;
   pendingChoiceCallback = finish; // 保持与全局单槽回调一致（其他入口不会覆盖）
   /* 【2026-10-13 S4 ✓】"发动前收目标"并入**本窗自己的决策序列**（不另开第二个框 ✗）
      —— 另开框会被"下一个连锁窗"顶掉（单槽冲突），实测回调永不回 ⇒ 卡不上链 ✗。 */
@@ -491,26 +497,24 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     var other = (typeof foeOf === 'function') ? foeOf(mine) : ((mine === 'p1') ? 'p2' : 'p1');
     var __nm = (typeof playerDisplayName === 'function') ? playerDisplayName(mine) : '自己';
     var __fn = (typeof playerDisplayName === 'function') ? playerDisplayName(other) : '对手';
-    __chainTargetPhase.active = true;                 /* ① 关闸：期间不开新窗 ✓ */
-    __chainTargetPhase.pending = __chainTargetPhase.pending || [];
-    pendingChoiceCallback = function (i) {            /* ② 第二步复用同一个槽 ✓ */
+    __chainTargetPhase.active = true;
+    req.step = 'target';
+    /* 目标是同一请求的第二步，不向 Hub 队尾另交请求。 */
+    if (timer) { clearInterval(timer); timer = null; }
+    targetCallback = function (i) {
+      if (settled || DecisionHub.active !== req || req.step !== 'target') return;
       if (pick) pick.target = (i === null || i === undefined || i < 0) ? null : ((i === 0) ? mine : other);
-      settled = false;
-      finish(idx);                                    /* ③ 走同一个收尾（本环这才入链 ✓） */
-      __chainTargetPhase.active = false;              /* ④ 收尾**走完**再放行排队的窗 ✓（顺序不变 ✓） */
-      var __q = __chainTargetPhase.pending; __chainTargetPhase.pending = [];
-      __q.forEach(function (r) {
-        try { showChainChoice(r.title, r.cardName, r.effectText, r.choices, r.onPick); }
-        catch (e) { try { console.error('[catch] assets/ui.js 放行排队连锁窗', e); } catch (e2) {} }
-      });
+      finish(idx);
     };
+    targetCallback.__decideTag = onPick.__decideTag;
+    pendingChoiceCallback = targetCallback;
     buttonsDiv.innerHTML = '';
     [__nm, __fn].forEach(function (label, i) {
       var btn = document.createElement('button');
       btn.className = 'modal-btn modal-btn-confirm';
       btn.style.width = '100%';
       btn.textContent = (i === 0) ? ('给自己（' + label + '）') : ('给对手（' + label + '）');
-      btn.onclick = function () { pendingChoiceCallback(i); };
+      btn.onclick = function () { targetCallback(i); };
       buttonsDiv.appendChild(btn);
     });
     try { addBattleLog(mine, '【连锁】「' + ((pick && pick.card && pick.card.name) || '?') + '」发动前先选目标（选完再进连锁）'); } catch (e) {}
@@ -522,7 +526,7 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     if (choice && typeof choice === 'object') {
       btn.textContent = choice.label || (choice.card && choice.card.name) || '连锁';
       btn.onclick = (choice.needTarget === true)
-        ? function () { if (settled) return; __pickTargetThenFinish(index); }
+        ? function () { if (settled || DecisionHub.active !== req || req.step !== 'choice') return; __pickTargetThenFinish(index); }
         : function () { finish(index); };
     } else {
       btn.textContent = choice;
@@ -676,8 +680,7 @@ function showCardModal(card, inputType, label, min, max, canFaceDown) {
 }
 
 function showChoiceModal(title, cardName, effect, choices, callback) {
-  /* 【2026-10-05】选项弹窗 = 玩家决策 ⇒ 必须让闸门看见 */
-  try { callback = __decideWrapped(callback, 'choiceModal'); } catch (e) { try { console.error('[catch] assets/ui.js:605', e); } catch (e2) {} }
+  /* 决策账在真正渲染时建立，排队期间由 Hub 保管请求。 */
   return ENV.ask('p1', { kind: 'choice', label: title, cardName: cardName, effect: effect, choices: choices }, callback);
 }
 
