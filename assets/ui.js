@@ -1,6 +1,16 @@
 /* assets/ui.js —— 由 game.html 的 UI 类顶层函数**原样外移**而成（只搬位置、不改函数体/函数名）
    导出：文件末尾用 window.<name> 挂回全局，供 game.html 内联代码继续直接调用。 */
+/* 【2026-10-20 作者要求】主界面背景在 插画2 / 插画3 之间**每次刷新随机**（同一页面内保持不变）。 */
+var __mmBgPicked = false;
+function __mmPickBg() {
+  if (__mmBgPicked) return; __mmBgPicked = true;
+  try {
+    var n = Math.random() < 0.5 ? 2 : 3;
+    document.documentElement.style.setProperty('--mm-bg', "url('assets/images/mainmenu-bg-" + n + ".webp?v=1')");
+  } catch (e) {}
+}
 function showScreen(id) {
+  try { __mmPickBg(); } catch (e) {}
   /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
   try { if (typeof window !== 'undefined') window.__screenId = id; } catch (e) { try { console.error('[catch] assets/ui.js:5', e); } catch (e2) {} }
   var screens = document.querySelectorAll('.screen');

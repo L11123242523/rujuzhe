@@ -2995,12 +2995,16 @@ function evaluatePlayable(card,player,opts){
      （实测：【钢笔】牌组空/墓地空/移出区有 ⇒ 仍被通用判据拦下，我为它加的三区条件没被执行。）
      现在：先查一次特例表——命中即以其为**权威**（不通过就返回；通过则**跳过**通用判据，避免又被拦 ✗）；
      未命中 ⇒ 照常走原有通用判据（其它卡一字不变 ✓）。末尾那次查表保留作兜底 ✓ */
+  /* 【2026-10-20 修·"钢笔 4 费也能用"的真因】卡专属条件一旦返回 ok:true 就在这里**直接 return** ✗
+     ⇒ 把后面的**费用/时点/结算中/技能编组**等通用闸全部跳过（钢笔因此只要够 4 费就能出 ✗）。
+     现在改成：ok:true 只记一个标记（用于跳过"通用资源条件"），**通用闸照常往下走** ✓ */
   var __condEarly = CARD_PLAY_CONDITIONS[name];
+  var __condEarlyOk = false;
   if (typeof __condEarly === 'function') {
     var __rEarly = null;
     try { __rEarly = __condEarly(card, me, battleState); } catch (e) { __rEarly = null; }
     if (__rEarly && __rEarly.ok === false) return __rEarly;
-    if (__rEarly === true || (__rEarly && __rEarly.ok === true)) return {ok:true, reason:''};
+    if (__rEarly === true || (__rEarly && __rEarly.ok === true)) __condEarlyOk = true;
   }
   var fromFaceDown=(opts.fromFaceDown===true)||(card._activatedFromFaceDown===true);
   var isSkill=card._category==='skill_cards';
@@ -3108,7 +3112,8 @@ function evaluatePlayable(card,player,opts){
   if(card._category==='attack_cards' && attackNeedsEnemy(card) && !hasEnemyInAttackRange(card,player))
     return {ok:false,reason:'攻击范围内没有可攻击的目标，无法发动【'+name+'】'};
   // 6) 通用资源条件（检索/回收/看手牌/破坏区域 需对应区域非空）
-  var __res=checkCardResource(card,me,battleState); if(__res&&__res.ok===false) return __res;
+  /* 卡专属条件已判过资源（如钢笔的三区检索）⇒ 跳过通用资源条件；其余通用闸已在上面全部执行 ✓ */
+  if (!__condEarlyOk) { var __res=checkCardResource(card,me,battleState); if(__res&&__res.ok===false) return __res; }
   /* 【2026-10-12 作者确认"按你说的改"】"没有合法对象也能用"的通用门控（第一张 ✓）：
      **遥控骰子**（单次 ✓）的唯一用途就是"修改一次投掷动作中的所有点数" ✓
      ⇒ **没有待定掷骰结果时整卡不可用** ✓；唯一真相 = `battleState._openRollWindow`
@@ -3122,7 +3127,7 @@ function evaluatePlayable(card,player,opts){
   }
   // 7) 特例卡条件
   var cond=CARD_PLAY_CONDITIONS[name];
-  if(cond){ var r=cond(card,me,battleState); if(r&&r.ok===false) return r; }
+  if(!__condEarlyOk && cond){ var r=cond(card,me,battleState); if(r&&r.ok===false) return r; }
   return {ok:true,reason:''};
 }
 
@@ -11488,21 +11493,21 @@ function drawByCost() {
   checkHandLimit();
 }
 
-// 手牌上限检查：回合内可临时超过，结束阶段修剪到5张（结束阶段的正式修剪另见 endTurn）
+// 手牌上限检查：回合内可临时超过，结束阶段修剪到6张（结束阶段的正式修剪另见 endTurn）
 function checkHandLimit(player) {
   if (!battleState) return;
   var list = player ? [player] : playerIds();
   list.forEach(function(p) {
     if (!battleState[p]) return;
     var hand = battleState[p].hand || [];
-    if (hand.length > 5 && battleState.phase === 'end') {
+    if (hand.length > 6 && battleState.phase === 'end') {
       // 玩家自选弃牌：p1 是本机玩家；联机时 p2 也是活人（客人），同样要问他
       // （以前这里对 p2 无条件自动弃尾张 —— 单机时那是对 AI 的处理，联机时会变成"房主替客人弃牌"）
       if (p === 'p1' || (typeof Online !== 'undefined' && Online.active && !Online.isGuest)) { promptDiscardToLimit(p); return; }
-      while (hand.length > 5) {
+      while (hand.length > 6) {
         var d = hand.pop();
         moveCardToGrave(p, d, 'discard');
-        addBattleLog(p, '手牌超过上限5张，弃置【' + (d.name || '未知') + '】');
+        addBattleLog(p, '手牌超过上限6张，弃置【' + (d.name || '未知') + '】');
       }
     }
   });
@@ -11514,20 +11519,20 @@ function checkHandLimit(player) {
 function promptDiscardToLimit(player, done) {
   var p = battleState && battleState[player];
   if (!p) { if (done) done(); return; }
-  if ((p.hand || []).length <= 5) { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); return; }
+  if ((p.hand || []).length <= 6) { if (typeof updateBattleUI === 'function') updateBattleUI(); if (done) done(); return; }
   if (p._discardingHand) return; // 防止重复弹窗
   p._discardingHand = true;
-  var over = p.hand.length - 5;
+  var over = p.hand.length - 6;
   function step() {
     var hand = p.hand || [];
-    if (hand.length <= 5) {
+    if (hand.length <= 6) {
       p._discardingHand = false;
-      addBattleLog(player, '手牌已降至上限内（' + hand.length + '/5）');
+      addBattleLog(player, '手牌已降至上限内（' + hand.length + '/6）');
       if (typeof updateBattleUI === 'function') updateBattleUI();
       if (done) done();
       return;
     }
-    var overNow = hand.length - 5;
+    var overNow = hand.length - 6;
     // 把"弃哪张"的结算收成一个函数：本机弹窗与联机问客人两条路径共用，保证语义完全一致
     function __take(sel) {
       var idx = Array.isArray(sel) ? sel[0] : sel;
@@ -11566,7 +11571,7 @@ function promptDiscardToLimit(player, done) {
     }
     showCardPickerMulti(hand.slice(), '手牌超过上限：请选择要弃掉的卡（还需弃' + overNow + '张）', __take, 1);
   }
-  addBattleLog(player, '手牌超过上限5张（当前' + p.hand.length + '张），请选择弃掉' + over + '张');
+  addBattleLog(player, '手牌超过上限6张（当前' + p.hand.length + '张），请选择弃掉' + over + '张');
   step();
 }
 
@@ -11616,7 +11621,7 @@ function endTurn() {
   if (battleState.p1._atkPctPhase) { battleState.p1._atkPctPhase = 0; addBattleLog('p1', '攻击力加成（本阶段）已结束'); }
   if (battleState.p2 && battleState.p2._atkPctPhase) { battleState.p2._atkPctPhase = 0; }
   
-  // 结束阶段：手牌上限5张（玩家自选弃牌；AI 自动弃尾张）
+  // 结束阶段：手牌上限6张（玩家自选弃牌；AI 自动弃尾张）
   function __afterDiscard() {
   /* 【2026-10-17 修·王车易位的"持续两轮"按**轮**计（作者 2026-10-17 口径：
      "轮 = 当前轮次最后一名行动的玩家结束回合 ⇒ 一轮结束"）
@@ -12590,13 +12595,13 @@ function aiEndTurn(seat) {
     var __seatNow2 = aiSeat();
     var __isRemoteHumanSeat = (typeof Online !== 'undefined' && Online && Online.active === true && Online.isGuest !== true
       && typeof promptDiscardToLimit === 'function' && __seatNow2 && __seatNow2 !== 'p1');
-    if (__isRemoteHumanSeat && aiMe() && (aiMe().hand || []).length > 5) {
+    if (__isRemoteHumanSeat && aiMe() && (aiMe().hand || []).length > 6) {
       var __seatKeep2 = __seatNow2;
       promptDiscardToLimit(__seatKeep2, function () { __setAiSeat(__seatKeep2); aiEndTurn(__seatKeep2); });
       return;
     }
   } catch (e) { try { console.error('[catch] assets/engine.js aiEndTurn 弃牌分流', e); } catch (e2) {} }
-  while (aiMe().hand.length > 5) {
+  while (aiMe().hand.length > 6) {
     /* 【2026-10-20 AI v2】不再固定弃尾张：按当前评分弃最低的一张，保留攻击/增益/低同步防御牌。 */
     var __keepHand = aiMe().hand.slice();
     __keepHand.sort(function (a, b) { return (aiRetentionScore(a, aiMe().hand) || 0) - (aiRetentionScore(b, aiMe().hand) || 0); });
@@ -16138,7 +16143,7 @@ function initRules() {
   html += '<p>2. 主要阶段1：使用手牌</p>';
   html += '<p>3. 投骰阶段：投掷骰子移动</p>';
   html += '<p>4. 主要阶段2：继续使用手牌</p>';
-  html += '<p>5. 结束阶段：手牌上限5张</p>';
+  html += '<p>5. 结束阶段：手牌上限6张</p>';
   html += '</div>';
   
   html += '<div class="rules-section"><h3>💎 同步值与费用</h3>';
@@ -16330,7 +16335,7 @@ var TUTORIAL_STEPS = [
       '3️⃣ **投骰阶段** — 投骰子，决定这回合走几步',
       '4️⃣ **移动** — 棋子按点数移动，**落到的格子会触发效果**',
       '5️⃣ **主要阶段 2** — 还能继续出牌',
-      '6️⃣ **结束阶段** — 手牌上限 5 张，多的要弃掉'
+      '6️⃣ **结束阶段** — 手牌上限 6 张，多的要弃掉'
     ]
   },
   {

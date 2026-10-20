@@ -3700,7 +3700,7 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
   background:
     radial-gradient(900px 600px at 12% 18%, rgba(254,202,87,.12), transparent 62%),
     radial-gradient(700px 500px at 86% 78%, rgba(72,219,251,.10), transparent 64%),
-    url('images/mainmenu-bg.webp') 78% 34% / cover no-repeat;
+    var(--mm-bg, url('images/mainmenu-bg.webp')) 78% 34% / cover no-repeat;
   filter: blur(.5px) saturate(.86) brightness(.58);
   transform: scale(1.06);
 }
