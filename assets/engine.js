@@ -14824,6 +14824,25 @@ function __decideWrapped(cb, why) {
   return fn;
 }
 
+var DecisionHub = {
+  seq: 0, active: null, queue: [],
+  submit: function (kind, spec, cb) {
+    var req = { id: ++this.seq, kind: kind, spec: spec || {}, cb: cb };
+    if (this.active) { this.queue.push(req); return req.id; }
+    this.show(req); return req.id;
+  },
+  show: function (req) {
+    this.active = req; var self=this;
+    var done=function(v){ self.finish(req.id,v); };
+    try { _showChoiceModalNow(req.spec.title,req.spec.cardName,req.spec.effect,req.spec.choices,done); }
+    catch(e){ this.active=null; try{req.cb(null);}catch(e2){} this.next(); }
+  },
+  finish: function(id,payload){ if(!this.active||this.active.id!==id)return; var r=this.active; this.active=null; try{r.cb(payload);}catch(e){} this.next(); },
+  cancel: function(id){ if(!this.active||this.active.id!==id)return; this.active=null; this.next(); },
+  next: function(){ if(this.active)return; var r=this.queue.shift(); if(r)this.show(r); }
+};
+try{if(typeof window!=='undefined')window.DecisionHub=DecisionHub;}catch(e){}
+
 function __askChoiceLocal(spec, callback) {
   var title = (spec && spec.label) || '请选择';
   var cardName = (spec && spec.cardName) || '';
@@ -14838,14 +14857,7 @@ function __askChoiceLocal(spec, callback) {
       if (__olOrig) __olOrig(i);
     };
   }
-  // 已有弹窗在等待回答：新询问入队，当前弹窗回答后再依次弹出，避免全局单槽回调被覆盖
-  if (pendingChoiceCallback) {
-    _choiceQueue.push({ title: title, cardName: cardName, effect: effect, choices: choices, callback: callback });
-    /* 【2026-10-01 兜底】句柄可能已经"名存实亡"（弹窗其实已关）⇒ 延后一拍检查，空闲就把队列放出来 */
-    try { setTimeout(function () { if (typeof __drainChoiceQueueWhenIdle === 'function') __drainChoiceQueueWhenIdle('入队兜底'); }, 0); } catch (e) { try { console.error('[catch] assets/engine.js:12649', e); } catch (e2) {} }
-    addBattleLog('system', '【弹窗排队】“' + title + '”等待当前询问结束后弹出');
-    return;
-  }
+  if (typeof DecisionHub !== 'undefined') { DecisionHub.submit('choice',{title:title,cardName:cardName,effect:effect,choices:choices},callback); return; }
   _showChoiceModalNow(title, cardName, effect, choices, callback);
 }
 // 联机·显式归属决策弹窗：side='p1' 本机弹窗（showChoiceModal 包装器负责登记+广播）；side='p2' 等待远端答案
@@ -14967,7 +14979,7 @@ function _showChoiceModalNow(title, cardName, effect, choices, callback) {
     }
     btn.onclick = function() {
       var cb = pendingChoiceCallback;   // 先捕获：closeChoiceModal 会清空全局回调
-      closeChoiceModal();
+      closeChoiceModal(true);
       if (cb) cb(index);
       __dequeueChoice(); // 回答完成后弹出队列中的下一个询问
     };
@@ -15061,7 +15073,8 @@ function __pendingAsksToggle() {
 try { if (typeof setInterval === 'function') setInterval(__pendingAsksRefresh, 700); } catch (e) { try { console.error('[catch] assets/engine.js:12863', e); } catch (e2) {} }
 try { if (typeof __sfx !== 'undefined' && __sfx.refresh) __sfx.refresh(); } catch (e) { try { console.error('[catch] assets/engine.js:12864', e); } catch (e2) {} }
 
-function closeChoiceModal() {
+function closeChoiceModal(__skipHub) {
+  try { if (!__skipHub && typeof DecisionHub !== 'undefined' && DecisionHub.active && DecisionHub.active.kind === 'choice') DecisionHub.cancel(DecisionHub.active.id); } catch (e) {}
   try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('choiceModal'); } catch (e) { try { console.error('[catch] assets/engine.js:12869', e); } catch (e2) {} }
   var modal = document.getElementById('choiceModal');
   if (modal) modal.classList.remove('active');
@@ -21283,14 +21296,15 @@ function executeEffectSteps(steps, context, finalCallback, showLog) {
     try {
       dispatchStep(step.text, context, function() {
         currentStep++;
-        // 模拟分步执行的延迟感
-        setTimeout(executeNextStep, 300);
+        /* 【2026-10-21】300ms 只是“分步延迟感”，却让结算深度等它 ⇒ 多步卡滞留 600~900ms。
+           改为 0：只让出当前栈，不靠计时器拖住规则收尾（演出由 ShowQueue 自己按序播）。 */
+        setTimeout(executeNextStep, 0);
       });
     } catch (e) {
       console.error('dispatchStep error:', e);
       addBattleLog('system', '效果步骤分发异常（已跳过该步骤继续）：' + ((e && e.message) || e));
       currentStep++;
-      setTimeout(executeNextStep, 300);
+      setTimeout(executeNextStep, 0);
     }
   }
   

@@ -474,7 +474,7 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     if (settled) return; settled = true;
     if (timer) clearInterval(timer);
     pendingChoiceCallback = null;
-    try { closeChoiceModal(); } catch (e) { try { console.error('[catch] assets/ui.js:445', e); } catch (e2) {} }
+    try { closeChoiceModal(true); } catch (e) { try { console.error('[catch] assets/ui.js:445', e); } catch (e2) {} }
     try { __dequeueChoice(); } catch (e) { try { console.error('[catch] assets/ui.js:446', e); } catch (e2) {} }
     onPick(idx);
   }
