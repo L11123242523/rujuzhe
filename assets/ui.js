@@ -9,6 +9,14 @@ function __mmPickBg() {
     document.documentElement.style.setProperty('--mm-bg', "url('assets/images/mainmenu-bg-" + n + ".webp?v=1')");
   } catch (e) {}
 }
+/* 【2026-10-20 修】主界面是 HTML 里默认 active 的（首屏并不经过 showScreen）⇒ 必须**加载即选一次**，
+   否则变量永远为空、CSS 回落旧图（打包版实测 picked=false）。 */
+try {
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { try { __mmPickBg(); } catch (e) {} }, { once: true });
+    else __mmPickBg();
+  }
+} catch (e) {}
 function showScreen(id) {
   try { __mmPickBg(); } catch (e) {}
   /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
