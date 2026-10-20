@@ -7962,6 +7962,7 @@ registerTrigger({
   label: function (ctx) { return '【钢笔·SP】有' + ((ctx && ctx.card && ctx.card._category === 'attack_cards') ? '攻击卡' : '技能卡') + '被送入墓地·自己抽1张'; },
   fire: function (ctx, owner) {
     var q = battleState[owner]; if (!q) return;
+    if (q._gangbiSPTurn === battleState.turn) { try { addBattleLog(owner, '【钢笔·SP】本回合已发动过 ⇒ 忽略这次重复触发'); } catch (e) {} return; }
     q._gangbiQueuedFor = ctx.card;
     q._gangbiSPTurn = battleState.turn;                            // 标记本回合已发动（一回合一次）
     addBattleLog(owner, '【钢笔·SP】有【' + ((ctx.card && ctx.card.name) || '') + '】被送入墓地，自己抽1张');
@@ -15111,6 +15112,8 @@ function __modalShadowNote(kind, label) {
       else if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) busy = 'choiceModal(句柄)';
     }
     if (!busy) return;
+    /* TW 窗口不是 DOM 弹窗；它自己的 chainChoice/连锁中的 choice 属正常流程，不算"覆盖" ⇒ 不记，避免刷屏 */
+    if (busy.indexOf('TW#') === 0) return;
     var item = { t: Date.now(), kind: kind, label: label || '', busy: busy };
     __modalTraceBuf.push(item);
     if (__modalTraceBuf.length > 300) __modalTraceBuf.shift();
@@ -23467,7 +23470,8 @@ function __dedupeLeaveCands(cands) {
     var seen = battleState._leaveSeenByOwner || (battleState._leaveSeenByOwner = {});
     return (cands || []).filter(function (c) {
       if (!c) return true;
-      if (c.id !== 'liuli-hw-sp-leave' && c.id !== 'toma-sp-leave') return true;   /* 只对"一回合一次"的两条去重 ✓ */
+      /* 【2026-10-21】钢笔 SP 也是一回合一次；同一结算里两张卡先后送墓会各产一条候选 ⇒ 只留一条 ✓ */
+      if (c.id !== 'liuli-hw-sp-leave' && c.id !== 'toma-sp-leave' && c.id !== 'gangbi-sp-grave') return true;
       var k = c.id + '@' + (c.owner || '');
       if (seen[k]) return false;
       seen[k] = true;
