@@ -442,27 +442,10 @@ function __renderDeckPile() {
 var __chainTargetPhase = { active: false, pending: [] };
 
 function showChainChoice(title, cardName, effectText, choices, onPick) {
+  try { if (typeof __modalShadowNote === 'function') __modalShadowNote('chainChoice', title); } catch (e) {}
   if (__chainTargetPhase.active) {
     try { addBattleLog('system', '【连锁】正在选目标 ⇒「' + (title || '') + '」延后到目标选定之后再问'); } catch (e) {}
     __chainTargetPhase.pending.push({ title: title, cardName: cardName, effectText: effectText, choices: choices, onPick: onPick });
-    return;
-  }
-  /* 【2026-10-21 作者报"也是顶窗口"】连锁选择弹窗以前直接改 choiceModal DOM + 覆盖全局单槽回调
-     ⇒ 已有询问（普通选择/另一条连锁窗）会被它顶掉。现在并入统一弹窗队列；旧的答完后由
-     __dequeueChoice 按 __chain 标记回调本函数 ✓ */
-  /* 只有**弹窗真的在屏**才排队；pendingChoiceCallback 可能是陈旧句柄（弹窗已关）——
-     那时排队会永远没人放行（实测：套件收尾残留"弹窗排队中(1)"）✗ */
-  var __choiceOnScreen = false;
-  try { var __cm = document.getElementById('choiceModal'); __choiceOnScreen = !!(__cm && __cm.classList && __cm.classList.contains('active')); } catch (e) {}
-  if (!__choiceOnScreen && typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) {
-    try { pendingChoiceCallback = null; } catch (e) {}
-  }
-  if (__choiceOnScreen) {
-    try {
-      _choiceQueue = _choiceQueue || [];
-      _choiceQueue.push({ __chain: true, title: title, cardName: cardName, effect: effectText, choices: choices, callback: onPick });
-      addBattleLog('system', '【弹窗队列】连锁选择延后（前一个询问未答完）：' + (title || ''));
-    } catch (e) {}
     return;
   }
   /* 【2026-10-05】连锁窗本来就会设置 _awaitingDecision；这里再包一层保证"应答即清" */

@@ -8716,6 +8716,7 @@ var TW = {
   /** 打开一个窗口。opts = { type, tp, candidates, scan, effect, done, meta } */
   open: function (opts) {
     opts = opts || {};
+    try { if (typeof __modalShadowNote === 'function') __modalShadowNote('TW.open', opts.type || 'simultaneous'); } catch (e) {}
     var self = this;
     /* 【2026-10-21 作者报·第9项】同一次送墓先弹【永奏进行曲】再弹【钢笔】时，
        第二个 resolveSimultaneous 走 TW.open **覆盖**了第一个窗口 ⇒ 永奏的"是否发动"弹窗被钢笔盖掉 ✗。
@@ -9193,6 +9194,7 @@ var TW = {
    *  S1d 用它让"逆结算"也只有一条路径：逆序、逐环异常隔离、动画收尾统一由 TW.settle 负责。 */
   settlePrebuilt: function (nodes, opts) {
     opts = opts || {};
+    try { if (typeof __modalShadowNote === 'function') __modalShadowNote('TW.settlePrebuilt', (opts && opts.type) || 'prebuilt'); } catch (e) {}
     var win = {
       id: ++this.seq, type: opts.type || 'prebuilt', state: 'settling',
       tp: opts.tp || ((typeof battleState !== 'undefined' && battleState && battleState.currentPlayer) || 'p1'),
@@ -14875,6 +14877,7 @@ function onlineDecideModal(side, title, cardName, effect, choices, callback, opt
 }
 var __choiceModalOwner = null;
 function _showChoiceModalNow(title, cardName, effect, choices, callback) {
+  try { if (typeof __modalShadowNote === 'function') __modalShadowNote('choice', title); } catch (e) {}
   /* 【2026-10-07 结构修·**排队而不是覆盖**】实测（probe-depth-hunt）：同一张卡【绿宝之杖·择】的结算被跑 4 次，
      其中两处**永远没回调**（op 序列 choice#1✗ → choice#2✓ → draw#3✗ → draw#4✓ → move✓），
      深度因此净欠 3 笔、锁滞留约 3.9 秒 —— 根因就是这里：新弹窗把旧按钮清空（buttonsDiv.innerHTML=''）
@@ -15092,6 +15095,29 @@ function __anyDecisionModalOpen() {
     return false;
   } catch (e) { return false; }
 }
+/* 【2026-10-21 阶段0·影子记录】只观察"谁在谁未关时打开"，不改变任何显示/排队行为。
+   目的：拿到真实覆盖对再迁移 DecisionHub，避免上次"入队做一半"的回归。
+   查看：控制台 window.__modalTrace()（最多 300 条）。 */
+var __modalTraceBuf = [];
+function __modalShadowNote(kind, label) {
+  try {
+    var busy = '';
+    if (typeof TW !== 'undefined' && TW && TW.active) busy = 'TW#' + TW.active.id + '(' + TW.active.type + ')';
+    else {
+      var cm = (typeof document !== 'undefined') ? document.getElementById('choiceModal') : null;
+      if (cm && cm.classList && cm.classList.contains('active')) busy = 'choiceModal';
+      else if (typeof _cardPickerStack !== 'undefined' && _cardPickerStack && _cardPickerStack.length) busy = 'cardPicker(' + _cardPickerStack.length + ')';
+      else if (typeof _targetSelectOpen !== 'undefined' && _targetSelectOpen) busy = 'targetSelect';
+      else if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) busy = 'choiceModal(句柄)';
+    }
+    if (!busy) return;
+    var item = { t: Date.now(), kind: kind, label: label || '', busy: busy };
+    __modalTraceBuf.push(item);
+    if (__modalTraceBuf.length > 300) __modalTraceBuf.shift();
+    try { addBattleLog('system', '【弹窗影子】' + kind + '「' + (label || '') + '」在 ' + busy + ' 未关时打开'); } catch (e) {}
+  } catch (e) {}
+}
+try { if (typeof window !== 'undefined') window.__modalTrace = function () { return __modalTraceBuf.slice(); }; } catch (e) {}
 function __drainChoiceQueueWhenIdle(tag) {
   try {
     if (typeof _choiceQueue === 'undefined' || !_choiceQueue || !_choiceQueue.length) return false;
@@ -16030,6 +16056,7 @@ __defEngineState('_cardPickerStack', function () { return []; });      // 待应
 // C 阶段·第 2 步：同 showChoiceModal —— 调用点不改，只把"身体"搬到环境层（浏览器=弹窗，服务器=问座位）
 
 function __askPickCardsLocal(spec, callback) {
+  try { if (typeof __modalShadowNote === 'function') __modalShadowNote('pickCards', (spec && spec.label) || ''); } catch (e) {}
   var cards = (spec && spec.cards) || [];
   var title = (spec && spec.label) || '选择卡牌';
   var needCount = (spec && spec.need) || 1;
@@ -17157,6 +17184,7 @@ function __askTargetPlayerLocal(card, effectText, callback) {
   __showTargetSelectNow(card, effectText, callback, pre);
 }
 function __showTargetSelectNow(card, effectText, callback, pre) {
+  try { if (typeof __modalShadowNote === 'function') __modalShadowNote('targetPlayer', (card && card.name) || ''); } catch (e) {}
   _targetSelectOpen = true;
   var modal = document.getElementById('targetSelectModal');
   document.getElementById('targetSelectTitle').textContent = '选择使用目标';
