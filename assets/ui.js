@@ -447,6 +447,17 @@ function showChainChoice(title, cardName, effectText, choices, onPick) {
     __chainTargetPhase.pending.push({ title: title, cardName: cardName, effectText: effectText, choices: choices, onPick: onPick });
     return;
   }
+  /* 【2026-10-21 作者报"也是顶窗口"】连锁选择弹窗以前直接改 choiceModal DOM + 覆盖全局单槽回调
+     ⇒ 已有询问（普通选择/另一条连锁窗）会被它顶掉。现在并入统一弹窗队列；旧的答完后由
+     __dequeueChoice 按 __chain 标记回调本函数 ✓ */
+  if (typeof pendingChoiceCallback !== 'undefined' && pendingChoiceCallback) {
+    try {
+      _choiceQueue = _choiceQueue || [];
+      _choiceQueue.push({ __chain: true, title: title, cardName: cardName, effect: effectText, choices: choices, callback: onPick });
+      addBattleLog('system', '【弹窗队列】连锁选择延后（前一个询问未答完）：' + (title || ''));
+    } catch (e) {}
+    return;
+  }
   /* 【2026-10-05】连锁窗本来就会设置 _awaitingDecision；这里再包一层保证"应答即清" */
   try { onPick = __decideWrapped(onPick, 'chainChoice'); } catch (e) { try { console.error('[catch] assets/ui.js:420', e); } catch (e2) {} }
   if (__chainNeverAsk) {

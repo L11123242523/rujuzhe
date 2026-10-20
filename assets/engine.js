@@ -15100,14 +15100,18 @@ function __drainChoiceQueueWhenIdle(tag) {
     var q = _choiceQueue.shift();
     if (!q) return false;
     try { addBattleLog('system', '【弹窗队列】补弹（' + (tag || '') + '）：' + (q.title || '')); } catch (e) { try { console.error('[catch] assets/engine.js:12909', e); } catch (e2) {} }
-    _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+    if (q.__chain && typeof showChainChoice === 'function') showChainChoice(q.title, q.cardName, q.effect, q.choices, q.callback);
+    else _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
     return true;
   } catch (e) { try { console.error('补弹队列出错（忽略）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:12912', e2); } catch (e2) {} } return false; }
 }
 function __dequeueChoice() {
   if (battleState && battleState._over) { _choiceQueue = []; return; } // 对局结束：丢弃剩余询问
   var q = _choiceQueue.shift();
-  if (q) _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+  if (q) {
+    if (q.__chain && typeof showChainChoice === 'function') showChainChoice(q.title, q.cardName, q.effect, q.choices, q.callback);
+    else _showChoiceModalNow(q.title, q.cardName, q.effect, q.choices, q.callback);
+  }
 }
 
 // 执行校准
