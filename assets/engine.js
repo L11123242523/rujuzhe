@@ -6356,7 +6356,7 @@ function startTurn() {
   battleState[player]._kasumiUsedThisTurn = false;
   battleState[player]._edwardLastCost = undefined;
   battleState[player]._edwardTriggerCount = 0;
-  battleState[player]._megumiCostSeq = []; battleState[player]._megumiSeen = [];
+  battleState[player]._megumiCostSeq = []; battleState[player]._megumiSeen = []; battleState._roundtableStopMove = false;
   
   // 准备阶段
   battleState.phase = 'prepare';
@@ -8722,7 +8722,7 @@ var TW = {
        结构修：同类型 simultaneous 窗口仍在 collect/priority 时，把新候选**并入当前窗口**，
        不新建、不覆盖；玩家先答完当前这一问，priorityStep 重扫时自然会看到新候选 ✓ */
     var __prevWin = this.active;
-    if (__prevWin && __prevWin.type === 'simultaneous' && (__prevWin.state === 'priority' || __prevWin.state === 'collect')) {
+    if (__prevWin && __prevWin.type === 'simultaneous' && (opts.type == null || opts.type === 'simultaneous') && (__prevWin.state === 'priority' || __prevWin.state === 'collect')) {
       var __newCands = (opts.candidates || []).filter(Boolean);
       var __keyOf = function (c) { return String((c && c.owner) || '') + '|' + String((c && c.label) || '') + '|' + String((c && c.card && c.card.name) || ''); };
       var __have = {};
