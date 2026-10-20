@@ -6,7 +6,9 @@ function __mmPickBg() {
   if (__mmBgPicked) return; __mmBgPicked = true;
   try {
     var n = Math.random() < 0.5 ? 2 : 3;
-    document.documentElement.style.setProperty('--mm-bg', "url('assets/images/mainmenu-bg-" + n + ".webp?v=1')");
+    /* 绝对路径（以 / 开头）：自定义属性里的相对 url 会按**引用它的样式表**（/assets/app.css）解析，
+       写 assets/images/... 会变成 /assets/assets/images/...（实测 404、背景整层消失）✗ */
+    document.documentElement.style.setProperty('--mm-bg', "url('/assets/images/mainmenu-bg-" + n + ".webp?v=1')");
   } catch (e) {}
 }
 /* 【2026-10-20 修】主界面是 HTML 里默认 active 的（首屏并不经过 showScreen）⇒ 必须**加载即选一次**，
