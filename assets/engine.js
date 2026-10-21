@@ -2810,7 +2810,7 @@ var CARD_PLAY_CONDITIONS={
     var __hasChaos = (me.deck||[]).some(function(c){
       if (!c) return false;
       var a = (typeof __ruleAttrOf === 'function') ? __ruleAttrOf(c) : (c.attribute || '');
-      return a === '混沌';
+      return c.attribute === '混沌' || a === '混沌';
     });
     if (!__hasChaos) return {ok:false, reason:'牌组中没有混沌属性的卡，无法检索 ⇒ 不能使用【镌刻的艺术】'};
     return true;
@@ -3424,6 +3424,8 @@ var __BATTLE_OVERLAY_IDS = ['choiceModal', 'cardModal', 'targetSelectModal', 'ca
   'effectLogModal', 'cardListModal', 'cardPicker', 'chainBar', 'resolveTimeline',
   'turnBanner', 'emotePanel', 'handCardMenu'];
 function __clearBattleOverlays(reason) {
+  if (typeof DecisionHub !== 'undefined') DecisionHub.reset();
+  if (typeof TW !== 'undefined') TW.cancelAll();
   var cleared = [];
   try {
     __BATTLE_OVERLAY_IDS.forEach(function (id) {
@@ -6913,7 +6915,12 @@ function applyChainCard(player,pick,effect,done,target){
   }
   function afterUse(){ addBattleLog(player,'连锁发动【'+name+'】（已上链，待逆结算）'); if(typeof ChainAnim!=='undefined')ChainAnim.flash('连锁发动 · '+name,'flash-activate'); if(typeof renderChainBar==='function')renderChainBar(effect); updateBattleUI();
     // 用卡后角色被动钩子（惠/爱德华/小春/予水着SP等）统一走标准管线，投掷阶段用卡不再漏计
-    if (typeof postUsePassiveHooks === 'function') { postUsePassiveHooks(player, c, function(){ setTimeout(done,250); }); }
+    if (typeof postUsePassiveHooks === 'function') {
+      // 当前窗口只等本卡入链完成；用卡后触发另排窗口，不能反过来阻塞父窗口关闭。
+      var parent = (typeof TW !== 'undefined') && TW.active;
+      if (parent && parent.effect === effect) { postUsePassiveHooks(player, c, function () {}); setTimeout(done,250); }
+      else postUsePassiveHooks(player, c, function(){ setTimeout(done,250); });
+    }
     else setTimeout(done,250);
   }
   function __orig(){ return (effect.moveAmount!==undefined&&effect.moveAmount!==null)?effect.moveAmount:null; } // 锁定时的原始值（结算前不被改动）
@@ -8350,7 +8357,7 @@ function __runTimingTriggers(timing, ctx, next) {
               fire: function (nx) {
                 var fin = (typeof nx === 'function') ? nx : function () {};
                 try {
-                  var stub = { _chain: [], _stage: timing, player: side, description: '阶段时点发动：' + (c.name || ''), card: c };
+                  var stub = { _chain: [], _parentWindow: TW.active, _stage: timing, player: side, description: '阶段时点发动：' + (c.name || ''), card: c };
                   /* 【2026-10-13 S3 ✓】与连锁窗同款：**入链之前先收目标** ✓
                      （原来这里不传目标 ✗ ⇒ 结算层还得兜底、甚至可能弹窗 ✗；现在目标在"发动那一刻"定好 ✓） */
                   function __pcGo(__tg) {
@@ -8713,6 +8720,57 @@ function __restoreOncePerTurn(player, snap, label) {
 var TW = {
   active: null,
   seq: 0,
+  queue: [], _closing: false, _pumping: false, _canceling: false,
+  _enqueue: function (kind, opts, nodes) {
+    var entry = {kind:kind, opts:Object.assign({}, opts), nodes:nodes, finished:false};
+    entry.done = function () {
+      if (entry.finished) return;
+      entry.finished = true;
+      if (typeof opts.done === 'function') opts.done();
+    };
+    entry.opts.done = entry.done;
+    if (this._canceling || (battleState && battleState._over)) { entry.done(); return entry; }
+    this.queue.push(entry);
+    this._pump();
+    return entry.win || entry;
+  },
+  _pump: function () {
+    if (this._closing || this._canceling) return;
+    if (this.active) {
+      var parent = this.active;
+      if (parent._stepEntry) return;
+      // 显式归属于当前链环的子结算是本窗步骤，不能排到父窗关闭之后。
+      var index = this.queue.findIndex(function (entry) { return entry.kind === 'prebuilt' && entry.opts.parentWindow === parent; });
+      if (index >= 0) {
+        var child = this.queue.splice(index, 1)[0];
+        parent._stepEntry = child;
+        child.win = this._startPrebuilt(child.nodes, child.opts);
+      }
+      return;
+    }
+    if (this._pumping) return;
+    this._pumping = true;
+    try {
+      while (!this.active && this.queue.length) {
+        var entry = this.queue.shift();
+        if (battleState && battleState._over) { entry.done(); continue; }
+        if (entry.kind === 'prebuilt') entry.win = this._startPrebuilt(entry.nodes, entry.opts);
+        else entry.win = this._openNow(entry.opts);
+      }
+    } finally { this._pumping = false; }
+    if (this.active) this._pump();
+  },
+  cancelAll: function () {
+    if (this._canceling) return;
+    this._canceling = true;
+    try {
+      if (this.active) this.close(this.active);
+      while (this.queue.length) {
+        var entry = this.queue.shift();
+        try { entry.done(); } catch (e) { console.error('取消排队窗口回调异常', e); }
+      }
+    } finally { this._canceling = false; }
+  },
   _whoName: function (w) { return w === 'p1' ? '你' : '对手'; },
   /** 打开一个窗口。opts = { type, tp, candidates, scan, effect, done, meta } */
   open: function (opts) {
@@ -8742,8 +8800,16 @@ var TW = {
         };
       }
       if (__added) addBattleLog('system', '【时点窗口】新触发并入当前窗口（不覆盖）＋' + __added + ' 条；当前窗口 #' + __prevWin.id);
+      if (typeof opts.done === 'function') {
+        var previousDone = __prevWin.done;
+        __prevWin.done = function () { try { previousDone(); } finally { opts.done(); } };
+      }
       return __prevWin;
     }
+    return this._enqueue('open', opts);
+  },
+  _openNow: function (opts) {
+    var self = this;
     var tp = opts.tp || (battleState && battleState.currentPlayer) || 'p1';
     /* 【标记"正在等谁决断"】（原来由已删的 __offerOptionalEffect 维护；迁到窗口后**没人再写它** ⇒
        aiTurn / aiPlayCards 的停等闸门失效 ⇒ AI 会在你还没答完窗口时继续出牌、效果跑到下一回合才结算）。
@@ -8809,26 +8875,16 @@ var TW = {
       labelOf: (typeof opts.labelOf === 'function') ? opts.labelOf : null,
       passLabelOf: (typeof opts.passLabelOf === 'function') ? opts.passLabelOf : null
     };
-    /* 【2026-10-07 结构修·不许"覆盖式"丢窗口】实测（浏览器 E2E 冒烟的真实日志）：
-       这里直接 `this.active = win` 覆盖掉上一个窗口 ⇒ **旧窗口永远不会关**
-       ⇒ 它那本账（tw<id>）永久挂着（日志里 tw1/tw2 存活超过 30 秒）。
-       修法：覆盖之前先把旧窗口的账收掉（**只收账、不替它推进** —— 改流程会动到对局结果，属另一件事），
-       并把这次覆盖**明确写进日志**，不再静默。 */
-    try {
-      var __oldWin = this.active;
-      if (__oldWin && __oldWin !== win && __oldWin.id) {
-        try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + __oldWin.id); } catch (e) { try { console.error('[catch] assets/engine.js:7741', e); } catch (e2) {} }
-        try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) { try { console.error('[catch] assets/engine.js:7742', e); } catch (e2) {} }
-        addBattleLog('system', '【时点窗口】上一个窗口（#' + __oldWin.id + '）还没关就被新窗口取代 ⇒ 已收掉它那本"正在决策"的账');
-      }
-    } catch (e) { try { console.error('[catch] assets/engine.js:7745', e); } catch (e2) {} }
+    /* 只有队列调度器在无活窗时调用本入口，禁止覆盖。 */
     this.active = win;
     if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
     addBattleLog('system', '【时点窗口】打开（' + win.type + '，回合方=' + this._whoName(tp) + '，初始候选 ' + win.candidates.length + '）');
     this.collect(win, function () { self.arrange(win, function () { self.priorityStep(win); }); });
+    return win;
   },
   /** collect：重扫候选（有 scan 就用 scan，否则用初始候选） */
   collect: function (win, cb) {
+    if (win._closed) return;
     win.state = 'collect';
     if (win.scan) {
       try {
@@ -8986,6 +9042,7 @@ var TW = {
   },
   /** arrange：必发按「回合方 → 对方」入链；同一方多个必发由该方点选，顺序即链序 */
   arrange: function (win, after) {
+    if (win._closed) return;
     win.state = 'arrange';
     var self = this;
     function side(who, then) {
@@ -9028,6 +9085,7 @@ var TW = {
   },
   /** resolve：关窗后的收尾。默认＝逆结算本窗口的链；`onClose` 存在时交给域内逻辑（收尾完再调 finishWindow） */
   resolve: function (win) {
+    if (win._closed) return;
     if (typeof win.onClose === 'function') {
       win.state = 'closed';
       var self = this;
@@ -9043,6 +9101,7 @@ var TW = {
   },
   /** priority：优先权轮转；每次发动后重扫候选（新必发必须补入），双方连续 PASS 才关窗 */
   priorityStep: function (win) {
+    if (win._closed) return;
     var self = this;
     win.state = 'priority';
     if (win.passStreak >= 2) { this.resolve(win); return; }
@@ -9194,36 +9253,27 @@ var TW = {
    *  顺序在发动那一刻就定死了，不需要再组链/轮优先权）。
    *  S1d 用它让"逆结算"也只有一条路径：逆序、逐环异常隔离、动画收尾统一由 TW.settle 负责。 */
   settlePrebuilt: function (nodes, opts) {
-    opts = opts || {};
+    return this._enqueue('prebuilt', opts || {}, (nodes || []).slice());
+  },
+  _startPrebuilt: function (nodes, opts) {
     try { if (typeof __modalShadowNote === 'function') __modalShadowNote('TW.settlePrebuilt', (opts && opts.type) || 'prebuilt'); } catch (e) {}
     var win = {
       id: ++this.seq, type: opts.type || 'prebuilt', state: 'settling',
       tp: opts.tp || ((typeof battleState !== 'undefined' && battleState && battleState.currentPlayer) || 'p1'),
-      foe: null, chain: (nodes || []).slice(), priority: null, passStreak: 0, parent: null,
+      foe: null, chain: (nodes || []).slice(), priority: null, passStreak: 0, parent: opts.parentWindow || null,
       scan: null, candidates: [], effect: opts.effect || null, meta: opts.meta || null,
       done: (typeof opts.done === 'function') ? opts.done : function () {},
       titleOf: null, bodyOf: null, labelOf: null, passLabelOf: null, onClose: null
     };
-    /* 【2026-10-07 结构修·不许"覆盖式"丢窗口】实测（浏览器 E2E 冒烟的真实日志）：
-       这里直接 `this.active = win` 覆盖掉上一个窗口 ⇒ **旧窗口永远不会关**
-       ⇒ 它那本账（tw<id>）永久挂着（日志里 tw1/tw2 存活超过 30 秒）。
-       修法：覆盖之前先把旧窗口的账收掉（**只收账、不替它推进** —— 改流程会动到对局结果，属另一件事），
-       并把这次覆盖**明确写进日志**，不再静默。 */
-    try {
-      var __oldWin = this.active;
-      if (__oldWin && __oldWin !== win && __oldWin.id) {
-        try { if (typeof Decision !== 'undefined' && Decision && Decision.leave) Decision.leave('tw' + __oldWin.id); } catch (e) { try { console.error('[catch] assets/engine.js:8073', e); } catch (e2) {} }
-        try { if (typeof __decideLeaveKind === 'function') __decideLeaveKind('chainChoice'); } catch (e) { try { console.error('[catch] assets/engine.js:8074', e); } catch (e2) {} }
-        addBattleLog('system', '【时点窗口】上一个窗口（#' + __oldWin.id + '）还没关就被新窗口取代 ⇒ 已收掉它那本"正在决策"的账');
-      }
-    } catch (e) { try { console.error('[catch] assets/engine.js:8077', e); } catch (e2) {} }
-    this.active = win;
+    /* 子结算保留父窗口唯一 active；独立 prebuilt 在队列轮到时取得 active。 */
+    if (!win.parent) this.active = win;
     if (typeof ChainAnim !== 'undefined' && ChainAnim.begin) ChainAnim.begin();
     this.settle(win);
     return win;
   },
   /** settle：从最大 C 逆序结算；每节点做 alive 校验；异常只跳当前节点 */
   settle: function (win) {
+    if (win._closed) return;
     var self = this;
     win.state = 'settling';
     /* 【S-a/S-c 修 2026-10-06·**根因**】进入逆结算 ⇒ **收口"人类正在决策"标记**。
@@ -9244,6 +9294,7 @@ var TW = {
     addBattleLog('system', '═══ 连锁逆结算（共' + win.chain.length + '个效果）═══');
     var i = win.chain.length - 1;
     function step() {
+      if (win._closed) return;
       if (i < 0) {        addBattleLog('system', '═══ 连锁全部结算完成 ═══');
   /* 【收尾：把两个覆盖层收干净（作者 2026-09-27 反馈："连锁处理完成后还有一个连锁结算框挡在对手状态栏那里"）】
      原因：结算时间线只会"折叠"（表头与按钮仍压着状态栏），连锁栏的 hideChainBar() 定义了却没人调用。
@@ -9314,6 +9365,17 @@ var TW = {
   },
   /** close：关窗并回调调用方（每个状态唯一出口，异常不破坏状态机） */
   close: function (win) {
+    if (!win || win._closed) return;
+    win._closed = true;
+    if (win.parent) {
+      win.state = 'done';
+      win.parent._stepEntry = null;
+      try { win.done(); } catch (e) { console.error('窗口子步骤收尾异常', e); }
+      finally { this._pump(); }
+      return;
+    }
+    if (win._stepEntry && win._stepEntry.win) this.close(win._stepEntry.win);
+    this._closing = true;
     win.state = 'done';
     /* P1（MD：同一连锁一次）：连锁结束 ⇒ 清空"本连锁已排过"的集合（下一条连锁重新计） */
     try { if (typeof __chainOnceReset === 'function') __chainOnceReset(); } catch (e) { console.error('清空"同链一次"集合失败（不影响收尾）', e); }
@@ -9360,6 +9422,7 @@ var TW = {
     try { if (typeof checkBattleEnd === 'function' && battleState && !battleState._over) checkBattleEnd(); }
     catch (e) { try { console.error('关窗补判出错（不影响收尾）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:8211', e2); } catch (e2) {} } }
     try { win.done(); } catch (e) { console.error('TimingWindow done 回调异常', e); }
+    finally { this._closing = false; this._pump(); }
   }
 };
 
@@ -9698,6 +9761,7 @@ function resolveChainStack(effect, onDone) {
       fire: function (next) { __applyNode(i, e, next); }
     };
   }), {
+    parentWindow: effect._parentWindow || null,
     type: 'cardActivationSettle', effect: effect, tp: effect.player || (battleState && battleState.currentPlayer) || 'p1',
     done: function () {
       /* 动画/日志抛错绝不能挡住 __endChain（它负责送墓 + 释放 _chainLock + 回调调用方）——
@@ -10985,7 +11049,7 @@ function rollPlayerDice(player) {
           var __gRun = function () {
             __g[__gKey] = true;   // 一轮内每名玩家限一次（发动时才占用）
             var __gPool = (p.grave || []).map(function (c) { return { card: c, zone: 'grave' }; })
-              .filter(function (x) { return x.card && /item_single/.test(String(x.card._category || '')); });
+              .filter(function (x) { return x.card && ['item_single','attack_cards','skill_cards'].indexOf(x.card._category) >= 0; });
             var __gTake = function (pick) {
               if (pick) {
                 var ix = p.grave.indexOf(pick);
@@ -13703,7 +13767,8 @@ function __lilyApply(seat, done) {
   var c = p.grave.shift(); p.deck.push(c); // 墓地最下方(grave[0]最早进墓) -> 牌组最下方(末位)
   addBattleLog(seat, '【莉莉SP】墓地最下方【' + c.name + '】放回牌组最下方');
   var __nb = p.grave.length ? p.grave[0] : null; // 取走后新的墓地最下方
-  var __ok = c._category === 'item_single' && (!__nb || __nb._category !== 'item_single');
+  var __singleCats = ['item_single','attack_cards','skill_cards'];
+  var __ok = __singleCats.indexOf(c._category) >= 0 && (!__nb || __singleCats.indexOf(__nb._category) < 0);
   if (__ok) {
     recoverCost(seat, 1, '莉莉SP');
     addBattleLog(seat, '【莉莉SP】放回的是单次且当前墓地最下方不为单次，视为使用【' + c.name + '】并回复1音韵');
@@ -14059,11 +14124,10 @@ function aiUsePermanentActive(player, done) {
          （实测会放行非[侵略]卡）且下面加的是 `attackBuff+1`（旧口径）；
          玩家侧早已按作者口径改成"按 tag/属性/类型判[侵略]" + "最终伤害+1（`_teamFinalDmgUp`）" ⇒
          这里改用**同一个判据** `__isAggroCard` 与**同一个通道** `_teamFinalDmgUp` ✓ */
-      (p.grave || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'grave' }); });
-      (p.removed || []).forEach(function (c) { if (__isAggroCard(c)) pool.push({ c: c, z: 'removed' }); });
+      collectZoneCards(player, ['grave','removed'], null, null, null, true).forEach(function (x) { var c = x.card; if (__isAggroCard(c)) pool.push({c:c,z:x.zone}); });
       if (!pool.length) { next(); return; }
       var pk = pool[0]; __spendCost(p, 3);
-      var arr = pk.z === 'grave' ? p.grave : p.removed; var ix = arr.indexOf(pk.c); if (ix >= 0) arr.splice(ix, 1);
+      var arr = p[pk.z]; var ix = arr.indexOf(pk.c); if (ix >= 0) arr.splice(ix, 1);
       p.hand.push(pk.c); p._teamFinalDmgUp = (p._teamFinalDmgUp || 0) + 1;
       L('对手【福金与穆宁】付3音韵回收【' + pk.c.name + '】，之后造成的最终伤害+1（累计+' + p._teamFinalDmgUp + '）');
       syncNext(card, act); return;
@@ -14124,16 +14188,16 @@ function aiUsePermanentActive(player, done) {
       if (!p.removed) p.removed = []; p.removed.push(sac);
       if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: player, card: sac });
       L('对手【巧匠之手】【' + sac.name + '】移出游戏');
-      var pool2 = (p.removed || []).filter(function (c) { return c !== sac; });
+      var pool2 = collectZoneCards(player, ['removed'], null, null, null, true).filter(function (x) { return x.card !== sac; });
       if (pool2.length) {
-        var rc = pool2[0]; var ri = p.removed.indexOf(rc); if (ri >= 0) p.removed.splice(ri, 1);
+        var rc = pool2[0].card, source = p[pool2[0].zone]; var ri = source.indexOf(rc); if (ri >= 0) source.splice(ri, 1);
         p.hand.push(rc); if (typeof __emitAddHand === 'function') __emitAddHand(player, rc, 'removed');
         L('对手【巧匠之手】移出区【' + rc.name + '】加入手卡');
       }
       syncNext(card, act); return;
     }
     if (h === 'langya') { // 狼牙鹰爪（每回合一次）：选墓地[侵略]单次卡付其费用+1适用其效果（走统一指令层）
-      var gl = (typeof collectZoneCards === 'function') ? collectZoneCards(player, ['grave'], ['侵略'], ['item_single']) : [];
+      var gl = (typeof collectZoneCards === 'function') ? collectZoneCards(player, ['grave'], ['侵略'], ['item_single','attack_cards','skill_cards']) : [];
       if (!gl.length) { next(); return; }
       var gops = compileStepOps('选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。');
       if (!gops) { next(); return; }
@@ -14288,11 +14352,12 @@ function checkLevelUp(player) {
           if (i === 0) { p.attackBuff = (p.attackBuff || 0) + 1; addBattleLog(player, '【核心的供给者】升级奖励：攻击力+1'); __supOnce(remain - 1); }
           else if (i === 1) {
             if (p._supplierRecovered) { addBattleLog(player, '【核心的供给者】回收移出卡整局限一次，已使用过'); __supOnce(remain - 1); return; }
-            var rm = (p.removed || []).slice();
+            var rmEntries = collectZoneCards(player, ['removed'], null, null, null, true);
+            var rm = rmEntries.map(function (x) { return x.card; });
             if (!rm.length) { addBattleLog(player, '【核心的供给者】移出区无卡，该项不适用'); __supOnce(remain - 1); return; }
             function __recoverSup(idx) {
               var ii = Array.isArray(idx) ? idx[0] : idx;
-              if (ii != null && ii >= 0) { var real = p.removed.indexOf(rm[ii]); if (real >= 0) { var rc = p.removed.splice(real, 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); p._supplierRecovered = true; addBattleLog(player, '【核心的供给者】回收移出卡【' + rc.name + '】加入手卡'); } }
+              if (ii != null && ii >= 0) { var source = p[rmEntries[ii].zone], real = source.indexOf(rm[ii]); if (real >= 0) { var rc = source.splice(real, 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); p._supplierRecovered = true; addBattleLog(player, '【核心的供给者】回收移出卡【' + rc.name + '】加入手卡'); } }
               __supOnce(remain - 1);
             }
             if (__supOL) Online.awaitAnswer({ label: '供给者·选移出卡回收（对手）', cards: rm.map(function(c){ return c.name; }) }, __recoverSup);
@@ -14780,6 +14845,11 @@ function __decideLiveTags() {
       }
     }
   } catch (e) { try { console.error('[catch] assets/engine.js:12584', e); } catch (e2) {} }
+  try {
+    var req = typeof DecisionHub !== 'undefined' && DecisionHub.active;
+    var tm = doc.getElementById('targetSelectModal');
+    if (req && req.kind === 'targetPlayer' && req.tag && tm && tm.classList.contains('active')) live[req.tag] = 1;
+  } catch (e) { console.error('目标请求对账失败', e); }
   return live;
 }
 function __decideReconcile(why) {
@@ -14838,10 +14908,24 @@ var DecisionHub = {
     var done = function (v) { self.finish(req.id, v); };
     try {
       if (req.kind === 'chainChoice') __showChainChoiceNow(req.spec.title, req.spec.cardName, req.spec.effect, req.spec.choices, done, req);
+      else if (req.kind === 'pickCards') __showPickCardsNow(req.spec, done, req);
+      else if (req.kind === 'targetPlayer') {
+        done = __decideWrapped(done, 'targetPlayer');
+        req.tag = done.__decideTag;
+        req.cleanup = function () {
+          document.getElementById('targetSelectModal').classList.remove('active');
+          effectEngine.pendingTargetCallback = null;
+          _targetSelectOpen = false;
+          __decideLeaveKind('targetPlayer');
+        };
+        if (req.spec.attackCards) __showAttackCardSelectNow(req.spec.attackCards, done, req);
+        else __showTargetSelectNow(req.spec.card, req.spec.effectText, done, req.spec.pre, req);
+      }
       else _showChoiceModalNow(req.spec.title, req.spec.cardName, req.spec.effect, req.spec.choices, done);
     } catch (e) {
       console.error('决策弹窗渲染失败，取消本次请求', e);
-      closeChoiceModal();
+      if (req.kind === 'choice' || req.kind === 'chainChoice') closeChoiceModal();
+      else this.cancel(req.id);
     }
   },
   finish: function (id, payload) {
@@ -14859,6 +14943,10 @@ var DecisionHub = {
     req.ending = true;
     try { if (req.cleanup) req.cleanup(); }
     finally { this.active = null; this.next(); }
+  },
+  reset: function () {
+    this.queue.length = 0;
+    if (this.active) this.cancel(this.active.id);
   },
   next: function () {
     if (this.active) return;
@@ -16093,6 +16181,7 @@ function closeCardModal(e) {
 }
 function closeCardPicker(e) {
   if (!e || e.target.id === 'cardPicker') {
+    if (DecisionHub.active && DecisionHub.active.kind === 'pickCards') { DecisionHub.cancel(DecisionHub.active.id); return; }
     document.getElementById('cardPicker').classList.remove('active');
     /* 【2026-10-07 结构修】选卡器关掉（未作答就关）时，也要释放它自己那一笔账，
        否则没人答也没人关的账会一直挂着 ⇒ AI 永远等（或反之被旧逻辑连带抹掉别人的账） */
@@ -16130,6 +16219,13 @@ function __askPickCardsLocal(spec, callback) {
     setTimeout(function() { callback(__an >= 2 ? __apick : (__apick[0] === undefined ? null : __apick[0])); }, 0);
     return;
   }
+  return DecisionHub.submit('pickCards', spec, callback);
+}
+
+function __showPickCardsNow(spec, callback, req) {
+  callback = __decideWrapped(callback, 'cardPicker');
+  var cards = spec.cards || [], title = spec.label || '选择卡牌';
+  var needCount = spec.need || 1, allowLess = !!spec.allowLess;
   var picker = document.getElementById('cardPicker');
   var grid = document.getElementById('cardPickerGrid');
   var titleEl = picker.querySelector('h3');
@@ -16137,7 +16233,7 @@ function __askPickCardsLocal(spec, callback) {
   var need = needCount || 1;
   var multi = need >= 2;
   var chosen = [];
-  _cardPickerMultiCallback = callback;
+  _cardPickerMultiCallback = fire;
   /* 【2026-10-07 结构修·只收账，不改行为】下面 grid.innerHTML='' 会把旧选卡器的按钮清掉 ⇒
      旧回调永远不会被调用。这里只把它的决策账收掉（窗口已不在屏幕上 = 事实），**不替它应答** ——
      理由同 _showChoiceModalNow 那处：补答会让效果重复执行（已被 card_expect_batchB 打脸）。 */
@@ -16152,18 +16248,29 @@ function __askPickCardsLocal(spec, callback) {
   grid.innerHTML = '';
   var oldBar = document.getElementById('cardPickerBtnBar'); if (oldBar) oldBar.remove();
   var __pickerAnswered = false;
+  req.cleanup = function () {
+    __pickerAnswered = true;
+    picker.style.display = 'none';
+    picker.classList.remove('active');
+    var ix = _cardPickerStack.indexOf(callback);
+    if (ix >= 0) _cardPickerStack.splice(ix, 1);
+    if (_cardPickerMultiCallback === fire) _cardPickerMultiCallback = null;
+    __decideLeaveKind('cardPicker');
+  };
   function fire(payload) {
+    if (__pickerAnswered || DecisionHub.active !== req) return;
     /* 关键修复（2026-09-13）：回调必须走**本次调用自己的闭包**，不能从 `_cardPickerMultiCallback` 单槽里取。
        旧写法在"第二个选卡弹窗先于第一个被应答"时（弹窗排队/负载下很常见）会让第一个弹窗的按钮调到
        第二个弹窗的回调 → 第一个操作永远收不到答复而卡住（表现成"效果结算不全面/某一步没执行"）。
        同时把槽维护成**栈**：应答谁就移除谁，槽始终指向"最后打开的那个"，这样排队逻辑仍然能正确判断
        "还有没有弹窗在等"（我第一版只清自己那一格，结果排队逻辑一直以为有弹窗 → 深度不释放）。 */
     picker.style.display = 'none';
+    picker.classList.remove('active');
     if (__pickerAnswered) return;
     __pickerAnswered = true;
     var __ix = _cardPickerStack.indexOf(callback);
     if (__ix >= 0) _cardPickerStack.splice(__ix, 1);
-    _cardPickerMultiCallback = _cardPickerStack.length ? _cardPickerStack[_cardPickerStack.length - 1] : null;
+    _cardPickerMultiCallback = null;
     try { callback(payload); } catch (e) { console.error('选卡回调异常', e); }
   }
   /* 取消按钮（仅当 spec.allowCancel）：全宽放在网格最后，点击 ⇒ fire(null)（走正常应答/广播/栈维护） */
@@ -16232,6 +16339,7 @@ function __askPickCardsLocal(spec, callback) {
     picker.querySelector('.card-picker').appendChild(bar);
   }
   picker.style.display = 'flex';
+  picker.classList.add('active');
 }
 
 function getCardBorderColor(card) {
@@ -17226,14 +17334,9 @@ function __onlineTargetPrealloc(effectText) {
 
 function __askTargetPlayerLocal(card, effectText, callback) {
   var pre = __onlineTargetPrealloc(effectText);
-  if (_targetSelectOpen || effectEngine.pendingTargetCallback) {
-    _targetSelectQueue.push({ card: card, effectText: effectText, callback: callback, pre: pre });
-    addBattleLog('system', '【目标选择排队】“' + ((card && card.name) || '效果') + '”等待当前目标选择结束后弹出');
-    return;
-  }
-  __showTargetSelectNow(card, effectText, callback, pre);
+  return DecisionHub.submit('targetPlayer', {card: card, effectText: effectText, pre: pre}, callback);
 }
-function __showTargetSelectNow(card, effectText, callback, pre) {
+function __showTargetSelectNow(card, effectText, callback, pre, req) {
   try { if (typeof __modalShadowNote === 'function') __modalShadowNote('targetPlayer', (card && card.name) || ''); } catch (e) {}
   _targetSelectOpen = true;
   var modal = document.getElementById('targetSelectModal');
@@ -17280,22 +17383,22 @@ function __showTargetSelectNow(card, effectText, callback, pre) {
     '<div class="target-info">同步值: ' + battleState.p2.sync + ' | 入迷值: ' + battleState.p2.fascination + ' | 位置: 第' + battleState.p2.position + '格</div>';
   
   if (targetType === 'self') {
-    p1Option.onclick = function() { selectTarget('p1'); };
+    p1Option.onclick = function() { if (DecisionHub.active !== req) return; selectTarget('p1'); };
     p2Option.classList.add('disabled');
     optionsDiv.appendChild(p1Option);
     optionsDiv.appendChild(p2Option);
   } else if (targetType === 'opponent') {
     p1Option.classList.add('disabled');
-    p2Option.onclick = function() { selectTarget('p2'); };
+    p2Option.onclick = function() { if (DecisionHub.active !== req) return; selectTarget('p2'); };
     optionsDiv.appendChild(p1Option);
     optionsDiv.appendChild(p2Option);
   } else if (targetType === 'other_player') {
     // 对使用者来说，其他玩家就是AI
-    p2Option.onclick = function() { selectTarget('p2'); };
+    p2Option.onclick = function() { if (DecisionHub.active !== req) return; selectTarget('p2'); };
     optionsDiv.appendChild(p2Option);
   } else {
-    p1Option.onclick = function() { selectTarget('p1'); };
-    p2Option.onclick = function() { selectTarget('p2'); };
+    p1Option.onclick = function() { if (DecisionHub.active !== req) return; selectTarget('p1'); };
+    p2Option.onclick = function() { if (DecisionHub.active !== req) return; selectTarget('p2'); };
     optionsDiv.appendChild(p1Option);
     optionsDiv.appendChild(p2Option);
   }
@@ -17318,7 +17421,7 @@ function __dequeueTargetSelect() {
   var q = _targetSelectQueue.shift();
   if (!q) return;
   if (q.attackCards) showAttackCardSelect(q.attackCards, q.callback);
-  else __showTargetSelectNow(q.card, q.effectText, q.callback, q.pre); // 排队时已预分配序列号，直接展示，不再重复分配
+  else DecisionHub.submit('targetPlayer', {card:q.card, effectText:q.effectText, pre:q.pre}, q.callback); // 排队时已预分配序列号，直接展示，不再重复分配
 }
 
 // selectTarget函数已在前面定义
@@ -17760,7 +17863,7 @@ function __routeChoice(core, permanent) {
 }
 
 function __looksActionable(t) {
-  return /造成|造\d|给予|伤害|回复|回\s*\d|扣除|失去|获得|得到|抽取?|前进|后退|移动|跃向|选[^。；]{0,8}(一张|一张卡|\d\s*张)|破坏|送入墓地|送墓|献祭|投掷|掷骰|面骰判定|驱散|抵消|降低|提升|增加|减少|付\d|支付\s*\d|追加|打断|改变|打落|回收|放回|洗(牌|切)|升级|金币|护盾|防御|入迷|音韵|同步值?|攻击力|位移/.test(t);
+  return /造成|造\d|给予|伤害|回复|回\s*\d|扣除|失去|获得|得到|抽取?|前进|后退|移动|跃向|选[^。；]{0,8}(一张|一张卡|\d\s*张)|破坏|送入墓地|送墓|献祭|投掷|掷骰|面骰判定|驱散|抵消|降低|提升|增加|减少|付\d|支付\s*\d|追加|打断|改变|打落|回收|加入|放回|洗(牌|切)|升级|金币|护盾|防御|入迷|音韵|同步值?|攻击力|位移/.test(t);
 }
 
 function __parseSources(t) { var s = []; if (/牌组|卡组|牌库/.test(t)) s.push('deck'); if (/墓地/.test(t)) s.push('grave'); if (/移出游戏|移出区|被移出/.test(t)) s.push('removed'); return s; }
@@ -17771,11 +17874,11 @@ function __parseTags(t) { return (t.match(/\[[^\]]+\]/g) || []).map(function (x)
    只有标签限制（无序以外 ✓）。而原来 `/单次种类|单次卡|道具/` 把光秃秃的「道具」也算作**单次** ✗
    ⇒ 永续道具（如设计师的直尺 ✓）被排除 ⇒「无法加入则不处理」⇒ 检索被整段跳过 ✓（作者实测 ✓）
    ⇒ 修法：**只有明确写「单次种类 / 单次卡」才限单次** ✓；只写「道具」⇒ **单次 + 永续都算** ✓ */
-function __parseCats(t) { var c = []; if (/攻击卡/.test(t)) c.push('attack_cards'); if (/技能卡/.test(t)) c.push('skill_cards'); if (/单次种类|单次卡/.test(t)) c.push('item_single'); else if (/道具/.test(t)) { c.push('item_single'); c.push('item_permanent'); } if (/永续/.test(t)) c.push('item_permanent'); return c; }
+function __parseCats(t) { var c = []; if (/攻击卡/.test(t)) c.push('attack_cards'); if (/技能卡/.test(t)) c.push('skill_cards'); if (/单次种类/.test(t) && !/道具/.test(t)) c.push('item_single','attack_cards','skill_cards'); else if (/单次种类|单次卡/.test(t)) c.push('item_single'); else if (/道具/.test(t)) { c.push('item_single'); c.push('item_permanent'); } if (/永续/.test(t)) c.push('item_permanent'); return c; }
 
 function matchCardQuery(c, tags, cats, exclude) {
   if (cats && cats.length && cats.indexOf(c._category) < 0) return false;
-  if (exclude && (c.attribute === exclude || (c.type && c.type.indexOf(exclude) >= 0))) return false;
+  if (exclude && (c.attribute === exclude || __ruleAttrOf(c) === exclude)) return false;
   if (tags && tags.length) {
     /* 【2026-10-17 作者实测·修】**标签只认"卡自己的标签"，不能把"卡组流派(archetypes)"当标签** ✗
        病象：作者报「【祓禊】可以回收【比翼恋理】，但比翼恋理不是[侵略]标签」——
@@ -18165,7 +18268,7 @@ function __compileBody(t) {
   if (/抵消一次即将受到的伤害|抵消一次[^。；]*伤害/.test(t)) ops.push({ op: 'prevent_next_damage' });
 
   // 检索 / 回收 / 放回
-  var exm = t.match(/(无序|热忱|理智|混沌)以外/); // 仅四属性可作排除项，修复把"加入无序/选这张卡"误捕获为属性
+  var exm = t.match(/(无序|热忱|理智|混沌)(?:属性)?以外/); // 仅四属性可作排除项，修复把"加入无序/选这张卡"误捕获为属性
   /* 【2026-10-07 新增·**正向属性筛选**（镌刻的艺术需要）】
      实测缺陷：文本"从牌组把一张**混沌属性**的卡加入手卡"编译出来是
      `{op:'search', sources:['deck'], tags:[], cats:[], excludeAttr:null, …}` ——
@@ -18173,7 +18276,7 @@ function __compileBody(t) {
      这里补上正向 attr：只有当文本不是"X属性**以外**"（那是排除项）时才认。 */
   var __posAttr = null;
   if (!/属性\s*以外/.test(t)) { var __pam = t.match(/(无序|热忱|理智|混沌)\s*属性/); if (__pam) __posAttr = __pam[1]; }
-  if (/加入手卡|加入手牌|加入[^。；，]{0,14}(?:道具卡|卡)|回收/.test(t)) {
+  if (/加入手卡|加入手牌|加入[^。；，]*(?:道具卡|卡)|回收/.test(t)) {
     var sources = __parseSources(t); if (!sources.length) sources = ['deck'];
     var tags = __parseTags(t), cats = __parseCats(t);
     var need = __matchNum(new RegExp('(?:选|将)?[^。；，]{0,8}' + __NUM + '\\s*张'), t) || 1;
@@ -18221,7 +18324,7 @@ function __compileBody(t) {
   // 从墓地选卡发动/适用其“卡牌效果”（狼牙鹰爪等）：取 effect 而非 sp，支付该卡费用+额外
   if (/墓地/.test(t) && /(发动|适用)[^。；]*(那张卡|其|此卡)?的?效果|那张卡的效果/.test(t) && /音韵|费用|支付/.test(t) && !/加入手卡|加入手牌|回收/.test(t)) {
     var __gcTags = __parseTags(t);
-    var __gcCats = /单次种类|单次卡|单次种类的卡/.test(t) ? ['item_single'] : [];
+    var __gcCats = __parseCats(t);
     var __gcExtra = __matchNum(/(?:所需要的音韵值)?\s*[+＋]\s*(\d+)\s*点音韵/, t) || (/[+＋]/.test(t) ? 1 : 0);
     ops.push({ op: 'grave_copy', tags: __gcTags, cats: __gcCats, extraCost: __gcExtra });
   }
@@ -18351,14 +18454,20 @@ function advanceActionLapse(player) {
   }
 }
 
-function collectZoneCards(who, zones, tags, cats, exclude) {
+function collectZoneCards(who, zones, tags, cats, exclude, includeOtherTeams) {
   var me = battleState[who], out = [];
   var __tn = []; try { __tn = ((deckConfig[who] && deckConfig[who].chars) || []).filter(Boolean).map(function (c) { return c.name; }); } catch (e) { try { console.error('[catch] assets/engine.js:15608', e); } catch (e2) {} }
   // 作者口径（2026-09-13）：**C1 卡可以被"选区域内一张卡"的效果搬走，这是允许存在的机制** ——
   // 所以这里不排除 _chainC1 卡（搬走后的去向由那个效果决定；送墓出口会识别"被搬走"并跳过按种类送墓，
   // 见 __chainC1Exit 的返回值处理，避免同一张卡同时出现在两个区域）。
-  (zones || ['hand']).forEach(function (z) { (me[z] || []).forEach(function (c, i) {
-    if ((c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __tn.length && !cardBelongsToTeam(c, __tn)) return; // 非本队角色卡不可被检索/选取
+  var requested = (zones || ['hand']).slice();
+  if (requested.indexOf('removed') >= 0 && requested.indexOf('removedFromGame') < 0) requested.push('removedFromGame');
+  var seen = [];
+  requested.forEach(function (z) { (me[z] || []).forEach(function (c, i) {
+    if (seen.indexOf(c) >= 0) return;
+    seen.push(c);
+    // 牌组检索沿用本队约束；明确从已持有区域回收/复制任意卡的入口可显式包含其他队伍卡。
+    if (!includeOtherTeams && (c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __tn.length && !cardBelongsToTeam(c, __tn)) return;
     if (matchCardQuery(c, tags, cats, exclude)) out.push({ card: c, zone: z, index: i });
   }); });
   return out;
@@ -18563,8 +18672,7 @@ function applyMove(user, signedN) {
 
 function blueprintCopy(user, selfCard, done) {
   var p = battleState[user], pool = [];
-  (p.hand || []).forEach(function (c, i) { if (c._category === 'item_single' && c !== selfCard) pool.push({ card: c, zone: 'hand', index: i }); });
-  (p.grave || []).forEach(function (c, i) { if (c._category === 'item_single') pool.push({ card: c, zone: 'grave', index: i }); });
+  pool = collectZoneCards(user, ['hand','grave'], null, ['item_single','attack_cards','skill_cards'], null, true).filter(function (x) { return x.card !== selfCard; });
   if (!pool.length) { addBattleLog(user, '手牌与墓地没有可复制的单次卡，蓝图不适用'); done(); return; }
   pickFromList(user, pool, '魔法蓝图：选择一张单次种类的卡（此卡变为该卡并加入手卡，之后再次使用它来适用效果）', 1, function (picks) {
     if (!picks || !picks.length) { done(); return; }
@@ -20587,11 +20695,11 @@ function __opsCards(op, ctx, next, env) {
       if (op.attr) {
         list = list.filter(function (x) {
           var a = (typeof __ruleAttrOf === 'function') ? __ruleAttrOf(x && x.card) : (x && x.card && x.card.attribute);
-          return a === op.attr;
+          return (x.card && x.card.attribute === op.attr) || a === op.attr;
         });
       }
       /* 【魔法清点名单】费用上限：卡面"选一张费用不大于**2**的卡"（2026-10-09 平衡性改动 3→2）⇒ search 支持 maxCost 过滤 */
-      if (op.maxCost != null) list = list.filter(function (x) { return (Number(x.card && x.card.cost) || 0) <= Number(op.maxCost); });
+      if (op.maxCost != null) list = list.filter(function (x) { return (parseInt(x.card && x.card.cost, 10) || 0) <= Number(op.maxCost); });
       /* 【2026-10-20 AI v2】AI 检索不再拿“第一张”：按 aiScoreOf 选最合适的一张；玩家侧保持原顺序。 */
       try {
         if (typeof isAISeat === 'function' && isAISeat(user) && list.length > 1 && typeof aiScoreOf === 'function') {
@@ -21578,68 +21686,27 @@ function __psMoveCostClauses(user, target, effectText) {
 
 function __psSearchDrawClauses(user, target, effectText, context, hold, finish) {
   // 从牌组/墓地/移出游戏选卡加入手卡（玩家选择）
-  if (effectText.indexOf('加入手卡') >= 0 && effectText.indexOf('选') >= 0) {
+  if ((effectText.indexOf('加入手卡') >= 0 && effectText.indexOf('选') >= 0) || (/牌组|墓地|移出/.test(effectText) && /加入[^。；，]*(?:卡|手牌)/.test(effectText))) {
     // 收集候选卡
     var searchCandidates = [];
     var searchSources = []; // {card, source, sourceIndex}
     var searchTags = [];
     var searchCategories = [];
     
-    // 解析检索条件
-    if (effectText.indexOf('移动') >= 0 || effectText.indexOf('[移动]') >= 0) searchTags.push('移动');
-    if (effectText.indexOf('战术') >= 0 || effectText.indexOf('[战术]') >= 0) searchTags.push('战术');
-    if (effectText.indexOf('侵略') >= 0 || effectText.indexOf('[侵略]') >= 0) searchTags.push('侵略');
-    if (effectText.indexOf('增益') >= 0 || effectText.indexOf('[增益]') >= 0) searchTags.push('增益');
-    if (effectText.indexOf('攻击卡') >= 0 || effectText.indexOf('攻击') >= 0) searchCategories.push('attack_cards');
-    if (effectText.indexOf('技能卡') >= 0 || effectText.indexOf('技能') >= 0) searchCategories.push('skill_cards');
-    
-    // 如果没有明确标签条件，默认所有卡
-    if (searchTags.length === 0 && searchCategories.length === 0) {
-      searchCategories = ['attack_cards', 'skill_cards', 'item_single', 'item_permanent'];
-    }
-    
-    var __searchTeamNames = []; try { __searchTeamNames = ((deckConfig[user] && deckConfig[user].chars) || []).filter(Boolean).map(function (c) { return c.name; }); } catch (e) { try { console.error('检索：队名推断失败（按空处理）', e); } catch (e2) { try { console.error('[catch] assets/engine.js:18208', e2); } catch (e2) {} } }
-    function matchSearchCard(c) {
-      if ((c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __searchTeamNames.length && !cardBelongsToTeam(c, __searchTeamNames)) return false; // 非本队角色卡不可检索
-      if (searchCategories.length > 0) {
-        if (searchCategories.indexOf(c._category) >= 0) return true;
-      }
-      if (searchTags.length > 0) {
-        for (var ti = 0; ti < searchTags.length; ti++) {
-          var tag = searchTags[ti];
-          if (c.type && c.type.indexOf(tag) >= 0) return true;
-          if (c.attribute === tag) return true;                 // 四属性命中
-          if (c.tags && c.tags.indexOf(tag) >= 0) return true;   // [侵略]/[移动]等标签命中 tags
-          /* 【2026-10-17 作者实测·修·与 `matchCardQuery` 同一处病根】**不许拿"卡组流派(archetypes)"当标签** ✗
-             （比翼恋理只有 archetypes:["快攻侵略队"] ⇒ 被当成 [侵略] 而可被祓禊回收 ✗）。
-             已核对全池 30 种标签：没有任何标签只能靠 archetypes 匹配 ⇒ 删掉这条兜底 ✓ */
-        }
-      }
-      return false;
-    }
-    
-    // 从牌组收集（牌组空则先立即用墓地重置）
-    if (typeof __refillDeckIfEmpty === 'function') __refillDeckIfEmpty(user);
-    if (battleState[user].deck) {
-      for (var si = 0; si < battleState[user].deck.length; si++) {
-        var sc = battleState[user].deck[si];
-        if (matchSearchCard(sc)) searchSources.push({card: sc, source: 'deck', index: si});
-      }
-    }
-    // 从墓地收集
-    if (effectText.indexOf('墓地') >= 0 && battleState[user].grave) {
-      for (var gi2 = 0; gi2 < battleState[user].grave.length; gi2++) {
-        var gc2 = battleState[user].grave[gi2];
-        if (matchSearchCard(gc2)) searchSources.push({card: gc2, source: 'grave', index: gi2});
-      }
-    }
-    // 从移出游戏收集
-    if (effectText.indexOf('移出') >= 0 && battleState[user].removed) {
-      for (var ri = 0; ri < battleState[user].removed.length; ri++) {
-        var rc = battleState[user].removed[ri];
-        if (matchSearchCard(rc)) searchSources.push({card: rc, source: 'removed', index: ri});
-      }
-    }
+    // 与指令出口共用来源、标签和类别判据；各项条件取交集。
+    searchTags = __parseTags(effectText);
+    searchCategories = __parseCats(effectText);
+    var sources = __parseSources(effectText);
+    if (!sources.length) sources = ['deck'];
+    if (sources.indexOf('deck') >= 0 && typeof __refillDeckIfEmpty === 'function') __refillDeckIfEmpty(user);
+    var excluded = effectText.match(/(无序|热忱|理智|混沌)(?:属性)?以外/);
+    var positive = !excluded && effectText.match(/(无序|热忱|理智|混沌)属性/);
+    var limit = effectText.match(/费用\s*(?:不大于|不超过|≤|<=)\s*(\d+)/);
+    searchSources = collectZoneCards(user, sources, searchTags, searchCategories, excluded && excluded[1]).filter(function (x) {
+      if (positive && x.card.attribute !== positive[1] && __ruleAttrOf(x.card) !== positive[1]) return false;
+      if (limit && (parseInt(x.card.cost, 10) || 0) > Number(limit[1])) return false;
+      return true;
+    }).map(function (x) { return {card:x.card, source:x.zone, index:x.index}; });
     
     if (searchSources.length > 0) {
       // 解析需选择的张数（“选墓地2张”=2，默认 1 张）
@@ -21655,9 +21722,7 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
            （最典型＝牌库空 ⇒ 墓地整体翻面成新牌组，那张卡已经被抽走），下标就指向别的卡或越界
            ⇒ 该删的没删、不该动的动了 ⇒ 同一张卡同时存在于两个区域。
            改为**按身份删**（indexOf 找到它才删）；若已不在原区域，明确写日志、不重复取。 */
-        var __srcArr = (sel.source === 'deck') ? battleState[user].deck
-          : (sel.source === 'grave') ? battleState[user].grave
-          : (sel.source === 'removed') ? battleState[user].removed : null;
+        var __srcArr = battleState[user][sel.source];
         if (__srcArr) {
           var __idIx = __srcArr.indexOf(card);
           if (__idIx >= 0) __srcArr.splice(__idIx, 1);
@@ -21985,12 +22050,13 @@ function __eventCasesA(card, player, p, done, env) {
         var __ed = false;
         try { __ed = ((deckConfig[player].chars || [])).some(function (ch) { return ch && ch.name && ch.name.indexOf('露璐缇雅') >= 0; }); } catch (e) { try { console.error('[catch] assets/engine.js:18566', e); } catch (e2) {} }
         if (__ed) {
-          var __rc = (p.removed || []).slice();
+          var __rcEntries = collectZoneCards(player, ['removed'], null, null, null, true);
+          var __rc = __rcEntries.map(function (x) { return x.card; });
           var __opts = __rc.map(function (x) { return x.name; });
           if (__opts.length) {
             __opts.push('不回收');
             function __recycle(o) {
-              if (o >= 0 && o < __rc.length) { var rc = p.removed.splice(p.removed.indexOf(__rc[o]), 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); addBattleLog(player, '【露璐缇雅】将【' + rc.name + '】加入手卡'); }
+              if (o >= 0 && o < __rc.length) { var source = p[__rcEntries[o].zone], rc = source.splice(source.indexOf(__rc[o]), 1)[0]; p.hand.push(rc); __emitAddHand(player, rc, 'removed'); addBattleLog(player, '【露璐缇雅】将【' + rc.name + '】加入手卡'); }
               updateBattleUI();
             }
             if (__ecOL && player === 'p2') onlineDecideModal('p2', '命运之回声（对手）', '露璐缇雅·爱德华', '破坏后将一张移出游戏的卡加入手卡', __opts, __recycle);
@@ -23753,9 +23819,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
            而这里原来只取 **grave** ✗ ⇒ "移出游戏"那一半从未可选。
            口径与本仓库既有写法**同源**（见 evaluatePlayable 的 `__alsoRemoved`：移出区 = removed + removedFromGame ✓），
            不新造机制 ✗。候选按 zone 各自带 `zone/index`（pickFromList 就是按这对字段回取并 splice ✓）。 */
-        var __gc = collectZoneCards(player, ['grave'], null, ['attack_cards', 'skill_cards'])
-          .concat(collectZoneCards(player, ['removed'], null, ['attack_cards', 'skill_cards']))
-          .concat(collectZoneCards(player, ['removedFromGame'], null, ['attack_cards', 'skill_cards']));
+        var __gc = collectZoneCards(player, ['grave','removed'], null, ['attack_cards', 'skill_cards']);
         if (!__gc.length) { addBattleLog(player, '【典籍之残页·SP】墓地和移出游戏里都没有角色携带卡 ⇒ 改选②或放弃'); return; }
         pickFromList(player, __gc, '典籍之残页·SP：选墓地或移出游戏一张角色携带卡加入手卡（然后失去2点同步值）', 1, function (picks) {
           if (!picks.length) { addBattleLog(player, '【典籍之残页·SP】未选择卡 ⇒ 本项不处理'); return; }
@@ -25375,14 +25439,12 @@ var PERMANENT_ACTIVE_HANDLERS = {
        非侵略卡，例如混沌属性的【小恶魔的投喂】✗）。判据与 `engine.js:12058` 那一族的写法保持一致 ✓
        【2026-10-16 A5 结构修 ✓】该判据已提成模块级唯一函数 `__isAggroCard`（AI 内联那份原来还在用 matchCardQuery ✗） */
     var pool = [], zone = [];
-    p.grave.forEach(function (c) { if (__isAggroCard(c)) { pool.push(c); zone.push('grave'); } });
-    (p.removed || []).forEach(function (c) { if (__isAggroCard(c)) { pool.push(c); zone.push('removed'); } });
+    collectZoneCards(user, ['grave','removed'], null, null, null, true).forEach(function (x) { var c = x.card; if (__isAggroCard(c)) { pool.push(c); zone.push(x.zone); } });
     if (!pool.length) { if (user === 'p1') showToast('【福金与穆宁】墓地与移出区都没有[侵略]卡。', 'warn'); return false; }
     function __applyHuginn(idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
       var picked = pool[idx], z = zone[idx]; __spendCost(p, 3);
-      if (z === 'grave') { var i = p.grave.indexOf(picked); if (i >= 0) p.grave.splice(i, 1); }
-      else { var j = p.removed.indexOf(picked); if (j >= 0) p.removed.splice(j, 1); }
+      var source = p[z], i = source.indexOf(picked); if (i >= 0) source.splice(i, 1);
       p.hand.push(picked);
       /* 【2026-10-12 作者报："造成的最终伤害+1 实际处理为+1攻击力" ✗】卡面是「那之后**造成的最终伤害+1**」✓
          ⇒ 必须走**最终伤害**通道 ✓，不能再加攻击力 ✗（攻击力还要÷2折算 ⇒ 数值与卡面不符 ✓）。
@@ -25468,11 +25530,12 @@ var PERMANENT_ACTIVE_HANDLERS = {
       if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: user, card: sac });
       addBattleLog(user, '【巧匠之手】【' + sac.name + '】已移出游戏');
       updateBattleUI();
-      var pool = p.removed.filter(function (c) { return c !== sac; });
+      var poolEntries = collectZoneCards(user, ['removed'], null, null, null, true).filter(function (x) { return x.card !== sac; });
+      var pool = poolEntries.map(function (x) { return x.card; });
       if (!pool.length) { addBattleLog(user, '【巧匠之手】没有其他被移出的卡可回收'); return; }
       function __qjRecover(ri) {
         if (ri === null || ri === undefined || ri < 0) { updateBattleUI(); return; }
-        var rc = pool[ri], ii = p.removed.indexOf(rc); if (ii >= 0) p.removed.splice(ii, 1);
+        var rc = pool[ri], source = p[poolEntries[ri].zone], ii = source.indexOf(rc); if (ii >= 0) source.splice(ii, 1);
         p.hand.push(rc); __emitAddHand(user, rc, 'removed'); addBattleLog(user, '【巧匠之手】移出区【' + rc.name + '】加入手卡'); updateBattleUI();
       }
       if (OL2) Online.awaitAnswer({ label: '巧匠之手·选移出卡回收（对手）', cards: pool.map(function(c){ return c.name; }) }, __qjRecover);
@@ -25486,7 +25549,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
   langya: function (card, user) {
     // 统一走指令层 grave_copy：标签匹配按 type/tags/attribute 一致判定（破损电子设备 type=侵略、attribute=混沌 也能命中），取目标卡 effect 而非 SP
     var foe = foeOf(user);
-    var list = (typeof collectZoneCards === 'function') ? collectZoneCards(user, ['grave'], ['侵略'], ['item_single']) : [];
+    var list = (typeof collectZoneCards === 'function') ? collectZoneCards(user, ['grave'], ['侵略'], ['item_single','attack_cards','skill_cards']) : [];
     if (!list.length) { if (user === 'p1') showToast('【狼牙鹰爪】墓地没有[侵略]标签的单次卡。', 'warn'); return false; }
     var ops = compileStepOps('选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。');
     runOps(ops, { user: user, target: foe, card: card }, function () { addBattleLog(user, '【狼牙鹰爪】适用完毕'); updateBattleUI(); });

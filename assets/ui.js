@@ -1352,8 +1352,7 @@ function __renderBattleLogFromState() {
 }
 
 function showCardPickerMulti(cards, title, callback, needCount, allowLess, allowCancel) {
-  /* 【2026-10-05】选卡 = 玩家决策 ⇒ 让闸门看见 */
-  try { callback = __decideWrapped(callback, 'cardPicker'); } catch (e) { try { console.error('[catch] assets/ui.js:1167', e); } catch (e2) {} }
+  /* 显示与决策账由 Hub 的实际选卡渲染步骤管理。 */
   /* allowCancel（2026-10-01）：允许玩家点"取消"放弃这次选卡（如献祭，防止误触浪费每回合次数）。
      默认 false ⇒ 其它"必须选卡"的效果流程完全不受影响。 */
   return ENV.ask('p1', { kind: 'pickCards', cards: cards, label: title, need: needCount, allowLess: allowLess, allowCancel: !!allowCancel }, callback);
@@ -1662,12 +1661,9 @@ function showTargetCards(player, zone, title, selectable, callback, decider) {
 }
 
 function showAttackCardSelect(attackCards, callback) {
-  // 目标选择单槽占用中：排队等当前询问结束后再弹（防回调覆盖）
-  if (_targetSelectOpen || effectEngine.pendingTargetCallback) {
-    _targetSelectQueue.push({ attackCards: attackCards, callback: callback });
-    addBattleLog('system', '【目标选择排队】“善意面具选攻击卡”等待当前目标选择结束后弹出');
-    return;
-  }
+  return DecisionHub.submit('targetPlayer', {attackCards:attackCards}, callback);
+}
+function __showAttackCardSelectNow(attackCards, callback, req) {
   _targetSelectOpen = true;
   var modal = document.getElementById('targetSelectModal');
   document.getElementById('targetSelectTitle').textContent = '善意面具效果 - 选择要打出的攻击卡';
@@ -1686,6 +1682,7 @@ function showAttackCardSelect(attackCards, callback) {
       option.innerHTML = '<div class="target-name">' + card.name + '</div>' +
         '<div class="target-info">费用: ' + (card.cost || 0) + ' | 基础伤害: ' + (card.baseDamage || 2) + ' | 效果: ' + (card.effect || '').substring(0, 50) + '</div>';
       option.onclick = function() {
+        if (DecisionHub.active !== req) return;
         __tsFinish(card);
       };
       optionsDiv.appendChild(option);
