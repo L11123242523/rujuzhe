@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
+import GateProof from '../tools/gate-proof.cjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = n => { const a = process.argv.find(x => x.startsWith('--' + n + '=')); return a ? a.split('=').slice(1).join('=') : null; };
 const dry = process.argv.includes('--dry');
@@ -40,6 +41,15 @@ if (!files.length) {
 }
 const run = (cmd, args, opts = {}) => spawnSync(process.execPath, [path.join(ROOT, 'port-old', cmd), ...args], { cwd: ROOT, encoding: 'utf8', ...opts });
 
+let releasePrepared = false;
+try { GateProof.verify(ROOT, false, files.filter(f => f !== 'gamefiles.json')); console.log('✅ 发布前门禁凭据与当前文件一致'); }
+catch (e) {
+  try { GateProof.verify(ROOT, true, files.filter(f => f !== 'gamefiles.json')); }
+  catch (preparedError) { console.error('❌ 中止发布：' + e.message); process.exit(1); }
+  releasePrepared = true;
+  console.log('✅ 文件精确匹配上次已准备的发布内容，继续同一版本');
+}
+
 console.log('=== ① 语法/结构自检 ===');
 {
   const r = run('_writecheck.cjs', ['game.html']);
@@ -50,10 +60,12 @@ console.log('=== ① 语法/结构自检 ===');
 console.log('\n=== ② 自动升版本号（缓存键必须变）===');
 {
   /* 【第 73 轮修】dry 必须**传导**给 bump 脚本，否则空跑也会改盘（我上轮就这么误写过一次 ✗） */
-  const r = run('bump-asset-version.cjs', dry ? ['--dry'] : []);
-  const out = String(r.stdout || '');
-  console.log(out.split('\n').filter(l => l.trim()).slice(0, 10).join('\n'));
-  if (r.status !== 0) process.exit(1);
+  if (!releasePrepared) {
+    const r = run('bump-asset-version.cjs', dry ? ['--dry'] : []);
+    const out = String(r.stdout || '');
+    console.log(out.split('\n').filter(l => l.trim()).slice(0, 10).join('\n'));
+    if (r.status !== 0) process.exit(1);
+  } else console.log('  沿用已批准的版本号，不重复升版');
   if (dry) { console.log('\n（dry：已确认不会写盘；到此为止）'); process.exit(0); }
   /* 记录升级后的版本号，供第 ④ 步核验 */
   const html = fs.readFileSync(path.join(ROOT, 'game.html'), 'utf8');
@@ -81,14 +93,16 @@ console.log('\n=== ② 自动升版本号（缓存键必须变）===');
 if (files.includes('data/cards.json')) {
   const ap = path.join(ROOT, 'assets', 'app.js');
   if (fs.existsSync(ap)) {
-    const src = fs.readFileSync(ap, 'utf8');
-    const m = src.match(/fetch\('data\/cards\.json\?v=(\d+)'/);
-    if (!m) { console.log('❌ 找不到 assets/app.js 里的 data/cards.json?v=N（母本缓存键）⇒ 中止，别发旧数据'); process.exit(1); }
-    if (dry) { console.log('（dry：会把 assets/app.js 的母本键 v=' + m[1] + ' 升到 v=' + (Number(m[1]) + 1) + '）'); }
-    else {
-      const next = src.replace(m[0], "fetch('data/cards.json?v=" + (Number(m[1]) + 1) + "'");
-      fs.writeFileSync(ap, next, 'utf8');
-      console.log('  母本缓存键：data/cards.json?v=' + m[1] + ' → v=' + (Number(m[1]) + 1) + '（已写 assets/app.js）');
+    if (!releasePrepared) {
+      const src = fs.readFileSync(ap, 'utf8');
+      const m = src.match(/fetch\('data\/cards\.json\?v=(\d+)'/);
+      if (!m) { console.log('❌ 找不到 assets/app.js 里的 data/cards.json?v=N（母本缓存键）⇒ 中止，别发旧数据'); process.exit(1); }
+      if (dry) { console.log('（dry：会把 assets/app.js 的母本键 v=' + m[1] + ' 升到 v=' + (Number(m[1]) + 1) + '）'); }
+      else {
+        const next = src.replace(m[0], "fetch('data/cards.json?v=" + (Number(m[1]) + 1) + "'");
+        fs.writeFileSync(ap, next, 'utf8');
+        console.log('  母本缓存键：data/cards.json?v=' + m[1] + ' → v=' + (Number(m[1]) + 1) + '（已写 assets/app.js）');
+      }
     }
     for (const f of ['assets/app.js', 'game.html']) if (!files.includes(f)) files.push(f);
     console.log('  连带发布：' + files.join('、'));
@@ -97,13 +111,45 @@ if (files.includes('data/cards.json')) {
 
 if (dry) { console.log('\n（dry：到此为止，未发布）'); process.exit(0); }
 
+/* ============================================================
+ * 【2026-10-15】发布链**自动**生成并连带发布 `gamefiles.json`（软件版增量更新清单）
+ * ------------------------------------------------------------
+ * 作者痛点：「软件版每次更新都要换包挺麻烦的」。软件版现在会在启动时拉这份清单，
+ * 只下载**变了的文件**（引擎/卡表/卡图/音效…）⇒ 作者照常发布网页版，玩家不用换包 ✓。
+ * 为什么放在发布链里（而不是让作者记得手动跑）：
+ *   手跑一定会漏 ⇒ 清单与线上文件漂移 ⇒ 软件版要么漏更新、要么反复下一堆相同文件 ✗。
+ *   放在这里 ⇒ **清单与它所描述的那批文件永远同一次提交**（同一 commit ⇒ 原子一致）✓。
+ * ============================================================ */
+console.log('\n=== ②.5 生成游戏内容清单 gamefiles.json（软件版增量更新用）===');
+{
+  /* 【2026-10-15 补·结构性防漂移】本步会按"**当前本地**内容"算哈希，其中包含 game.html。
+     而 ② 步**已经**把本地 game.html 的 ?v= 升过位了 ⇒ 若本次不把 game.html 一起发出去，
+     清单就会描述一个**仓库里并不存在**的 game.html 版本 ⇒ 软件版增量更新时必然"哈希不符，跳过" ✗
+     （实测发生过：只发 gamefiles.json ⇒ 仓库 game.html 停在 v351、清单却指向 v352 的字节）
+     ⇒ 清单一旦带上 game.html，就**强制**把它并进本次发布，保证两者同一次提交 ✓ */
+  const r = run('gen-gamefiles-manifest.cjs', ['--write'], { cwd: path.join(ROOT, 'port-old') });
+  console.log(String(r.stdout || '').split('\n').filter(l => l.trim()).slice(0, 4).join('\n'));
+  if (r.status !== 0) { console.log('❌ 清单生成失败 ⇒ 中止（不让清单与线上文件漂移）'); process.exit(1); }
+  if (!files.includes('gamefiles.json')) files.push('gamefiles.json');
+  try {
+    const mf = JSON.parse(fs.readFileSync(path.join(ROOT, 'gamefiles.json'), 'utf8'));
+    if (mf && mf.files && mf.files['game.html'] && !files.includes('game.html')) {
+      files.push('game.html');
+      console.log('  【自动补】清单里含 game.html ⇒ 强制把它一并发布（否则清单会指向仓库里不存在的版本）');
+    }
+  } catch (e) { console.log('  ⚠ 读清单失败（跳过自动补 game.html）：' + (e && e.message)); }
+  console.log('  已并入本次发布：' + files.join('、'));
+}
+
 console.log('\n=== ③ 发布 ===');
 {
   const missing = files.filter(f => !fs.existsSync(path.join(ROOT, f)));
   if (missing.length) { console.log('❌ 缺文件：' + missing.join('、')); process.exit(1); }
   const args = [...files];
   if (msgFile) args.push('--msg=' + msgFile);
-  const r = run('publish-api-item2.cjs', args);
+  try { GateProof.verify(ROOT, true, files); }
+  catch (e) { console.error('❌ 中止发布：' + e.message); process.exit(1); }
+  const r = run('publish-api-item2.cjs', args, { env: { ...process.env, RUJUZHE_RELEASE_PREPARED: '1' } });
   console.log(String(r.stdout || '').split('\n').filter(l => /PUBLISHED|回滚|错误|失败/.test(l)).join('\n'));
   if (r.status !== 0) process.exit(1);
 }
@@ -138,6 +184,14 @@ console.log('  提示：本地/镜像 git 提交请自行执行（git add -A && 
 /* === ⑥ 顺手清一次 Cloudflare 缓存（作者 2026-10-11 接上 ✓）===
    为什么：assets 都带新的 `?v=` 键 ⇒ 不靠清缓存也能取到新版 ✓；
    但 `game.html` / 首页这类**没有版本键**的路径万一被边缘缓存住，玩家会看到旧页面 ✗（表现为"你说发了但我这儿没变" ✓）。
+   【2026-10-17 补·**`gamefiles.json` 必须一起清**（作者报「桌面版重启后还是 v412」⇒ 真因 ✓）】
+     桌面版的「游戏内容增量更新」在启动时取 `https://rujuzhe-b-a-gs.top/gamefiles.json`，
+     再按里面的哈希决定下哪些文件（见 D:\入局者桌面版\main.js 的 checkContentUpdate）。
+     而该路径被 CF 边缘缓存成 `Cache-Control: public, max-age=86400`（实测 `cf-cache-status: HIT`、Age 1.7 万秒）
+     ⇒ 桌面版读到的是**几天前的旧清单** ⇒ 判断「需要更新 0 个」⇒ **永远不更新** ✗✗
+     （它请求头里虽然带了 `cache-control: no-cache`，CF 对这条**不生效** ⇒ 只能靠发布时清 ✓）
+     现状核对：裸路径的 `assets/engine.js` 是 `MISS`、`game.html` 是 `DYNAMIC` ⇒ 都能取到新版 ✓，
+     **只有 `gamefiles.json` 被缓存住** ⇒ 加进清理清单即可根治 ✓
    凭据：`Cloudflare.txt` 的 `ID:`（zone）与 `API:`（token，作者 2026-10-11 新建的 cfut_ 那枚 ✓）。
    失败**不影响发布结果**（只打印状态 ✓，绝不因此把已成功的发布判失败 ✗）。 */
 try {
@@ -149,10 +203,14 @@ try {
   const zone2 = (cfg2.match(/ID:\s*([0-9a-f]{32})/i) || [])[1];
   const tok2 = (cfg2.match(/API:\s*(\S+)/) || [])[1];
   if (zone2 && tok2) {
+    /* 【2026-10-17 实测·**逐文件清理不够，必须整区清**】
+       先用 `files:[…, gamefiles.json]` 调 ⇒ 返回 `success:true`，但 30 秒后复核**仍是 `cf-cache-status: HIT`、Age 继续涨**
+       （线上还是 v412）✗；改用 `purge_everything:true` ⇒ 立刻 `MISS`、线上变 v421 ✓。
+       ⇒ 本链固定用**整区清理**（本站很小，代价可接受；资产都带 `?v=` 新键，本来就要重新取 ✓）。 */
     const purge = await fetch('https://api.cloudflare.com/client/v4/zones/' + zone2 + '/purge_cache', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + tok2, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files: ['https://rujuzhe-b-a-gs.top/', 'https://rujuzhe-b-a-gs.top/game.html', 'https://rujuzhe-b-a-gs.top/query.html'] })
+      body: JSON.stringify({ purge_everything: true })
     });
     const purgeTxt = await purge.text();
     let purgeOk = false;
@@ -160,7 +218,30 @@ try {
     /* 【2026-10-13 修】原来只看 `purge.status === 200` ✗ —— Cloudflare 的"成功"是响应体里的 success:true ✓
        （HTTP 200 也可能带着 errors 返回 ⇒ 之前"已清缓存 ✓"这句话本身也可能是假绿灯 ✗）。 */
     console.log(purgeOk
-      ? '=== ⑥ Cloudflare 缓存已清（首页 / game.html / query.html）✓ ==='
+      ? '=== ⑥ Cloudflare **整区**缓存已清（含 gamefiles.json ⇒ 桌面版下次启动就能看到新内容清单）✓ ==='
       : '=== ⑥ 清缓存未成功（HTTP ' + purge.status + '，success≠true，不影响本次发布 ✓）：' + String(purgeTxt).slice(0, 160) + ' ===');
   } else { console.log('=== ⑥ 跳过清缓存（Cloudflare.txt 里没解析到 zone/token）==='); }
 } catch (e) { console.log('=== ⑥ 清缓存出错（不影响本次发布 ✓）：' + (e && e.message) + ' ==='); }
+
+/* === ⑦ 发布后自检：**内容清单（gamefiles.json）也要能取到新版本** ===
+   【2026-10-17 新增】作者报「桌面版重启后还是 v412」⇒ 真因就是这个路径被 CF 边缘缓存住：
+     桌面版的「游戏内容增量更新」启动时取它，读到旧清单 ⇒ 判断"需要更新 0 个" ⇒ **永远不更新** ✗
+     （当时实测：线上清单 v412 / 本地 v421；加 `?cb=` 绕缓存才是 v421 ⇒ 一眼可辨）
+   为什么必须自检：第 ④ 步只核 `assets/*.js|css`（它们带 `?v=`，缓存键变了必然回源 ✓），
+     而 `gamefiles.json` 是**裸路径**、最容易被缓存住 ⇒ 之前一直没被发现 ✗
+   ⇒ 这里**不带任何参数**取一次线上清单，v 必须等于本地刚写的那份 ✓（失败只告警，不推翻已完成的发布） */
+try {
+  const fs3 = await import('node:fs');
+  const path3 = await import('node:path');
+  const url3 = await import('node:url');
+  const ROOT3 = path3.join(path3.dirname(url3.fileURLToPath(import.meta.url)), '..');
+  const localMan = JSON.parse(fs3.readFileSync(path3.join(ROOT3, 'gamefiles.json'), 'utf8'));
+  await new Promise((r) => setTimeout(r, 8000));   /* 清缓存有传播延迟（实测整区清 ~12 秒内生效 ✓） */
+  const r7 = await fetch('https://rujuzhe-b-a-gs.top/gamefiles.json', { headers: { 'cache-control': 'no-cache' } });
+  const onlineMan = await r7.json();
+  const same = String(onlineMan && onlineMan.v) === String(localMan && localMan.v);
+  console.log(same
+    ? '=== ⑦ 内容清单自检：线上 gamefiles.json v=' + onlineMan.v + ' = 本地 ✓（桌面版下次启动能看到新内容）==='
+    : '=== ⑦ ⚠ 内容清单自检**不一致**：线上 v=' + (onlineMan && onlineMan.v) + ' / 本地 v=' + (localMan && localMan.v) +
+      ' ｜ cf-cache-status=' + (r7.headers.get('cf-cache-status') || '-') + ' ⇒ 桌面版会读到旧清单、不会更新（发布本身已完成 ✓）===');
+} catch (e) { console.log('=== ⑦ 内容清单自检出错（不影响本次发布 ✓）：' + (e && e.message) + ' ==='); }
