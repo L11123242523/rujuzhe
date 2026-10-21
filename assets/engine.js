@@ -18621,7 +18621,7 @@ function __resolveBackPathTouch(user, n) {
     });
   } catch (e) { try { console.error('[catch] assets/engine.js 谢幕路径触碰', e); } catch (e2) {} }
 }
-function applyMove(user, signedN) {
+function applyMove(user, signedN, sourceCard) {
   var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
   /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
   try { if (typeof __busOffNetwork === 'function') __busOffNetwork(p); } catch (e) { try { console.error('[catch] assets/engine.js:15719', e); } catch (e2) {} }
@@ -18650,10 +18650,11 @@ function applyMove(user, signedN) {
   }
   rioAccumulateMove(user, n);
   accumulateMovePassives(user, n, oldPos); // 卡牌效果移动同样累计直尺SP/小春先机
-  /* 【2026-10-15】后退路径触碰判定（【谢幕】SP）⇒ 仅后退时生效 ✓
-     放在这里的原因：_lastMoveFrom/_lastMoveSteps 已在上面记好、且**尚未**触发落点格子效果
-     （与「移动中触碰」的语义一致：先触碰造伤，再结算落点格子）✓ */
-  try { __resolveBackPathTouch(user, n); } catch (e) { try { console.error('[catch] 后退路径触碰', e); } catch (e2) {} }
+  /* 谢幕 SP 只属于本卡主效果的位移；来源由移动指令显式传入。
+     不在座位上保留标记，后续卡牌与落点引起的移动不会继承；触碰仍先于落点格子结算。 */
+  if (sourceCard && sourceCard.name === '谢幕') {
+    try { __resolveBackPathTouch(user, n); } catch (e) { try { console.error('[catch] 后退路径触碰', e); } catch (e2) {} }
+  }
   if (p._rioMizugiSP && !p._rioMizugiFirstMove) {
     p._rioMizugiFirstMove = true;
     if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
@@ -20271,7 +20272,7 @@ function __opsResource(op, ctx, next, env) {
 function __opsMove(op, ctx, next, env) {
   var user = env.user, target = env.target, p = env.p, q = env.q;
   switch (op.op) {
-    case 'move': applyMove(user, op.n); break;
+    case 'move': applyMove(user, op.n, ctx.card); break;
     case 'move_range': { // 区间移动（前进/后退 N-M 格）：玩家在区间内自选格数；both=前进与后退各自可选（风纪飞踢“前进/后退3-6格”）
       function __applyRangeChoice(oi) {
         if (op.both) { var __s = op.min + Math.floor(oi / 2); applyMove(user, (oi % 2 === 1 ? -1 : 1) * __s); }
