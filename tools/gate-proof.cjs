@@ -17,7 +17,7 @@ function capture(root) {
   for (const rel of ['_relaytest', 'tools']) walk(rel, f => /\.(js|cjs|mjs)$/.test(f));
   for (const name of fs.readdirSync(path.join(root, 'port-old')).sort()) {
     if (/^probe-.*\.cjs$/.test(name) || ['run-probes.cjs', 'run-9suites.cjs', 'run-gates-parallel.cjs',
-      'deploy-with-v.mjs', 'publish-api-item2.cjs', '_writecheck.cjs', 'bump-asset-version.cjs', 'gen-gamefiles-manifest.cjs'].includes(name)) walk('port-old/' + name);
+      'deploy-with-v.mjs', 'publish-api-item2.cjs', '_writecheck.cjs', 'bump-asset-version.cjs', 'gen-gamefiles-manifest.cjs', '_audit-card-behavior.cjs'].includes(name)) walk('port-old/' + name);
   }
   walk('port-old/e2e', f => /\.(js|cjs|mjs)$/.test(f));
   const sources = {};

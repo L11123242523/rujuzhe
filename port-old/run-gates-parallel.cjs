@@ -96,6 +96,7 @@ function __inputsOf(item) {
     path.join(ROOT, 'game.html'), path.join(ROOT, 'data', 'cards.json'),
     path.join(ROOT, 'cards.js'), __filename, path.join(ROOT, 'tools', 'gate-proof.cjs'),
     path.join(ROOT, 'tools', 'gate-then.cjs'),
+    path.join(ROOT, 'tools', 'check-mobile-playable.cjs'), path.join(ROOT, 'port-old', '_audit-card-behavior.cjs'),
     path.join(ROOT, 'port-old', 'run-probes.cjs'), path.join(ROOT, 'port-old', 'run-9suites.cjs')];
   // 运行资源和浏览器夹具变化也必须使旧绿灯失效。
   fs.readdirSync(path.join(ROOT, 'assets')).filter(f => /\.(js|css)$/.test(f)).sort()
