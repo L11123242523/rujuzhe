@@ -794,6 +794,7 @@ var Online = {
         if(!this.isGuest){
           try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch (e) { try { console.error('[catch] assets/engine.js:702', e); } catch (e2) {} }
           this._sendSnapshotNow({ full:true });
+          this._resendPendingAsks();
         }
         break;
       case 'resync':
@@ -876,7 +877,7 @@ var Online = {
     }
     this.seed=m.seed; this.active=true;
     this.isGuest=(this.role==='guest');
-    this._asks={}; this._askSeq=0; this._enteredBattle=false; this._verWarned=false; this._snapSeq=0;
+    this._asks={}; this._receivedAsks={}; this._askSeq=0; this._enteredBattle=false; this._verWarned=false; this._snapSeq=0;
     if(typeof NetSync!=='undefined') NetSync.resetRegistry();   // 新客人接入：卡定义要重发
     setGameSeed(m.seed);
     this.mySide='p1';                    // 两种角色在各自引擎/视图里都是"自己占 p1"
@@ -903,7 +904,7 @@ var Online = {
       try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
       self._startingOnlineBattle = false;
       self._enteredBattle=true;
-      self._savedAt=0; self._savedOnce=false;
+      self._savedAt=0; self._savedOnce=false; self._savedIdle=false; self._completeCheckpoint=null;
       /* 【2026-10-14 诊断·版本对照】到这一步 battleState 已建立 ⇒ 写进去才不会被丢 ✓
          （原来放在 _onGameStart 里是错的：那一刻 battleState 还没建，日志会被静默丢掉） */
       try { __logOnlineVersion(self, '房主'); } catch (e) {}
@@ -976,6 +977,13 @@ var Online = {
       case 'ask':                       // 客人：收到房主的问题，画出来让玩家选
         this._onAsk(m);
         break;
+      case 'recoveryFailed':
+        this.status('房主刷新后没有完整恢复点，请双方重开房间');
+        showToast('本局无法安全恢复，请双方重开房间','warn');
+        break;
+      case 'askAck':                    // 房主已接收答案，释放客人的重发记录
+        if(this._receivedAsks) delete this._receivedAsks[m.id];
+        break;
       case 'snap':                      // 客人：收到权威状态快照，整包覆盖并重绘
         this._onSnapshot(m.s);
         break;
@@ -991,6 +999,7 @@ var Online = {
         if(!this.isGuest){
           try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch (e) { try { console.error('[catch] assets/engine.js:886', e); } catch (e2) {} }
           this._sendSnapshotNow({ full:true });
+          this._resendPendingAsks();
         }
         break;
       /* ---------- 旧协议（不再使用，保留仅为兼容旧页面）---------- */
@@ -1299,6 +1308,11 @@ var Online = {
       }
       return;
     }
+    if(s.recoveryToken && this._lastRecoveryToken!==s.recoveryToken){
+      __clearTransientBattleState('房主刷新后同步完整检查点');
+      this._receivedAsks={};
+      this._lastRecoveryToken=s.recoveryToken;
+    }
     try{
       if(typeof NetSync!=='undefined') NetSync.applySnapshot(s);
     }catch(e){ console.error('套用快照失败',e); }
@@ -1580,7 +1594,8 @@ var Online = {
        `askRemote` 被调用了、连接其实可用，却走了这条静默分支 ⇒ 客人 0 弹窗、房主收 null）。
        ⇒ 改成**由发送本身决定能不能问**：能发就发（发失败再退回兜底），
          并且**绝不静默** —— 失败时写明显日志 + 提示，让"没人问客人"这件事看得见。 */
-    var id='q'+(++this._askSeq);
+    if(!this._askEpoch) this._askEpoch=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+    var id='q'+this._askEpoch+'-'+(++this._askSeq);
     this._asks[id]={ cb:cb, spec:spec, at:Date.now() };
     var __sent=false;
     /* ⚠ 必须看 `_send` 的**返回值**：它在 ws 未就绪时**静默 return false**（不抛异常）。
@@ -1588,11 +1603,10 @@ var Online = {
        于是房主一直等一个不存在的回答（双实例探针实测：客人侧 ask 收到 0 条）。 */
     try{ __sent = (this._send({t:'relay', m:{k:'ask', id:id, spec:spec}}) === true); }catch(e){ __sent=false; }
     if(!__sent){
-      delete this._asks[id];
-      try{ __onlineDiverge('无法把选择「'+(spec.label||'')+'」发给对手（连接异常）——本次选择未能询问对方'); }catch (e) { try { console.error('[catch] assets/engine.js:1484', e); } catch (e2) {} }
-      try{ addBattleLog('system','⚠️ 【联机】无法询问对手选择：「'+(spec.label||'')+'」（连接异常）；本次没有替对手做决定'); }catch (e) { try { console.error('[catch] assets/engine.js:1485', e); } catch (e2) {} }
-      try{ if(typeof showToast==='function') showToast('无法询问对手选择（连接异常）','warn'); }catch (e) { try { console.error('[catch] assets/engine.js:1486', e); } catch (e2) {} }
-      cb(null); return;
+      /* 请求与回调由房主保留，连接恢复后重发同一 id，不能以 null 替玩家作答。 */
+      this._showWaiting(true, '连接恢复后继续选择：'+(spec.label||''));
+      addBattleLog('system','【联机】选择暂未送达，等待重连后重发：「'+(spec.label||'')+'」');
+      return;
     }
     this._showWaiting(true, spec.label||'等待对手选择');
     /* 让"在等对手回答"这件事**看得见**（作者 2026-09-13 报："效果已经结算完却仍卡在连锁结算中"）：
@@ -1609,6 +1623,7 @@ var Online = {
     var rec=this._asks[m.id];
     if(!rec) return;                       // 超时后迟到的回答：直接丢弃
     delete this._asks[m.id];
+    this._send({t:'relay', m:{k:'askAck', id:m.id}});
     if(rec.timer) clearTimeout(rec.timer);
     this._hideWaiting();
     /* 【2026-10-07】对手答了 ⇒ "在等对手回答"这个事实结束 ⇒ 唤醒 AI 闸门（事件唤醒） */
@@ -1618,12 +1633,32 @@ var Online = {
     var self=this;
     setTimeout(function(){ try{ self.pushSnapshot(); }catch (e) { try { console.error('[catch] assets/engine.js:1511', e); } catch (e2) {} } }, 260);
   },
-  sendAnswer:function(id, v){ this._send({t:'relay', m:{k:'ans', id:id, v:v}}); },
+  sendAnswer:function(id, v){
+    var rec=this._receivedAsks && this._receivedAsks[id];
+    if(rec){ rec.answered=true; rec.value=v; }
+    return this._send({t:'relay', m:{k:'ans', id:id, v:v}});
+  },
+  _resendPendingAsks:function(){
+    if(this.isGuest || this._isServerAuthority()) return;
+    var self=this;
+    Object.keys(this._asks||{}).forEach(function(id){
+      var rec=self._asks[id];
+      if(rec) self._send({t:'relay', m:{k:'ask', id:id, spec:rec.spec}});
+    });
+  },
   /* 客人侧：收到房主的问题，用现成弹窗画出来再把选择回传。
      批次 3：渲染逻辑抽成 _renderAsk(spec, done)，旧协议与服务器权威共用同一份 ——
      两边的问题形状本来就同源（都是 ENV.ask 的 spec），只是通道不同（relay/ans 与 engine/ans）。 */
   _onAsk:function(m){
     var self=this;
+    if(!m || !m.id) return;
+    var received=this._receivedAsks || (this._receivedAsks={});
+    var previous=received[m.id];
+    if(previous){
+      if(previous.answered) this.sendAnswer(m.id, previous.value);
+      return;
+    }
+    received[m.id]={answered:false};
     /* 【2026-10-15 作者报「客机端关时点但是还是会因为非必发效果而弹是否连锁」⇒ 结构修 ✓】
        根因：本入口原来**直接**画窗，从不看本机的「关闭连锁询问」开关
        —— 而带该判定的 `_onEngineAsk`（L1259）服务的是**另一条**消息（k:'engine'），管不到这条 k:'ask' 路径 ✗
@@ -1904,6 +1939,7 @@ var Online = {
     var snap;
     try{ snap=NetSync.buildSnapshot({ full:!!opts.full }); }catch(e){ console.error('快照构建失败',e); return; }
     if(!snap) return;
+    if(this._recoveryToken) snap.recoveryToken=this._recoveryToken;
     var n=++this._snapSeq;
     this._lastSnapAt=Date.now();
     if(this._tickOn) this._lastSig=this._stateSig();   // 刚推过：更新指纹，避免巡检紧接着重复推
@@ -2125,6 +2161,7 @@ var Online = {
       // 对方是全新连接：它的卡定义缓存是空的，必须重置注册表再发一份完整快照
       try{ if(typeof NetSync!=='undefined') NetSync.resetRegistry(); }catch (e) { try { console.error('[catch] assets/engine.js:1999', e); } catch (e2) {} }
       this._sendSnapshotNow({ full:true });
+      this._resendPendingAsks();
     }
   },
   // 自己重连成功后：按角色走不同的恢复路径
@@ -2161,73 +2198,43 @@ var Online = {
       }
       return;
     }
-    this._send({ t:'resync' });     // 房主：向服务器要权威自存快照
-  },
-  _onResync:function(m){
-    var s=m&&m.s;
-    if(!s){
-      this.status('服务器没有可恢复的对局快照');
-      try{ showToast('服务器上没有可恢复的对局快照，本局无法继续，请重开房间', 'warn'); }catch (e) { try { console.error('[catch] assets/engine.js:2043', e); } catch (e2) {} }
+    if(this._enteredBattle && typeof battleState!=='undefined' && battleState){
+      /* 页面仍在，结算闭包也仍在：恢复传输即可，不能用快照覆盖它们。 */
+      this.status('已重连，继续当前对局');
+      NetSync.resetRegistry();
+      this._sendSnapshotNow({full:true});
+      this._resendPendingAsks();
       return;
     }
-    try{
-      if(typeof NetSync!=='undefined'){
-        NetSync.resetRegistry();                 // 本地缓存已随刷新丢失
-        NetSync.applySnapshot(s);
-      }
-    }catch(e){ console.error('恢复对局失败',e); }
-    /* 收口·第 2 步：恢复后把"结算进行中"的残留状态清掉。
-       刷新页面时引擎本来就是新的，但**重连不一定刷新**（例如断网后又接上）——
-       那种情况下旧的结算锁/队列会带进恢复后的局面，不清就会又变成"点了没反应"。 */
-    try{ if(typeof __eeForceUnlock==='function') __eeForceUnlock('重连恢复时复位结算状态', 0); }catch (e) { try { console.error('[catch] assets/engine.js:2055', e); } catch (e2) {} }
-    /* ============================================================
-     * 2026-09-16 收口·第 2 步补：**恢复局面必须"和解"待结算的标记**
-     * ------------------------------------------------------------
-     * 线上实测的两个症状，根因是同一个：
-     *   · "没有移动却凭空触发了所在格子的效果"（实测：触发易物格）
-     *   · "对手队伍有枫，却全程没弹出 SP 选项框"
-     * 它们的共同点是：`battleState` 上那些"待结算/待选"的标记**会被快照原样带回来**，
-     * 但**驱动它们的调用栈与计时器在重连时已经不存在了**。于是：
-     *   · 残留的结算窗口 / 挂起的阶段意图会被重放逻辑再执行一次 → 重复触发格子效果；
-     *   · 残留的 `_kaedeSPPending` 则没有任何人会再发起询问 → 那个选择永远不结算。
-     * 所以：**先清掉无法接续的结算窗口**（并明确写日志，让玩家知道丢了什么），
-     * **再重放那些"只差一个询问"的待决项**。
-     * （预防一侧见 `__eeIdleForSnapshot`：那类"在飞行中"的局面从此不会被当成检查点。）
-     * ============================================================ */
-    try{
-      var __dropped = __clearTransientBattleState('重连恢复');
-      if(__dropped && __dropped.length){
-        try{ addBattleLog('system','【联机】恢复对局：已丢弃无法接续的结算状态（' + __dropped.join('、') +
-          '）—— 它们是断线那一刻的半成品，留着会被重放、导致重复触发，所以只清不重放。'); }catch (e) { try { console.error('[catch] assets/engine.js:2074', e); } catch (e2) {} }
-      }
-    }catch (e) { try { console.error('[catch] assets/engine.js:2076', e); } catch (e2) {} }
-    /* 重放"只差一个询问"的开局待决项（枫SP 3选2）：没有人再问它，它就永远不会结算。 */
-    try{
-      if(!this.isGuest && typeof kaedeSPSelect==='function' && typeof battleState!=='undefined' && battleState){
-        playerIds().forEach(function(w){
-          var __p = battleState[w];
-          if(__p && __p._kaedeSPPending){
-            try{ addBattleLog('system','【联机】恢复对局：补发起「' + w + '」的入间枫SP选择（断线时这份选择还没结算）'); }catch (e) { try { console.error('[catch] assets/engine.js:2083', e); } catch (e2) {} }
-            setTimeout(function(){ try{ kaedeSPSelect(w); }catch (e) { try { console.error('[catch] assets/engine.js:2084', e); } catch (e2) {} } }, 400);
-          }
-        });
-      }
-    }catch (e) { try { console.error('[catch] assets/engine.js:2088', e); } catch (e2) {} }
-    this._enteredBattle=true;
-    try{ showScreen('battleScreen'); }catch (e) { try { console.error('[catch] assets/engine.js:2090', e); } catch (e2) {} }
-    var safe=!!(m&&m.safe);
-    try{ addBattleLog('system','已从服务器快照恢复对局状态' + (safe?'（引擎空闲检查点）':'（**非**空闲检查点）')); }catch (e) { try { console.error('[catch] assets/engine.js:2092', e); } catch (e2) {} }
-    /* 没有"引擎空闲时刻"的检查点可用时，**明确说出来** ——
-       宁可让玩家看到"这次恢复可能不完整"，也不要静默恢复一个撕裂局面而事后无从判断。 */
-    if(!safe){
-      var why=(m&&m.idleWhy)?('（当时的忙碌原因：'+m.idleWhy+'）'):'';
-      try{
-        addBattleLog('system','【联机】注意：服务器上还没有"引擎空闲时刻"的检查点，本次恢复取自一次结算中途'+why+
-          '，局面可能有偏差；若出现卡住或数值异常，请重开房间。');
-      }catch (e) { try { console.error('[catch] assets/engine.js:2100', e); } catch (e2) {} }
-      try{ showToast('注意：恢复的快照取自一次结算中途，局面可能有偏差', 'warn'); }catch (e) { try { console.error('[catch] assets/engine.js:2101', e); } catch (e2) {} }
+    this._send({ t:'resync' });     // 只有页面重建后才需要恢复权威状态
+  },
+  _onResync:function(m){
+    if(this._enteredBattle && typeof battleState!=='undefined' && battleState) return;
+    var latest=m&&m.s;
+    var s=latest && latest.idle===true ? latest : latest && latest.completeCheckpoint;
+    if(!s || s.idle!==true || !s.state || !s.cards){
+      this.status('没有完整结算结束的恢复点，本局无法安全恢复，请重开房间');
+      showToast('本局没有完整恢复点，请双方重开房间','warn');
+      this._relay({k:'recoveryFailed'});
+      return;
     }
-    if(!this.isGuest) this._sendSnapshotNow({ full:true });   // 房主恢复后立刻把状态补给客人
+    var rolledBack=s!==latest;
+    try{
+      __clearTransientBattleState('刷新后恢复完整检查点');
+      NetSync.resetRegistry();
+      NetSync.applySnapshot(s);
+    }catch(e){ console.error('完整检查点恢复失败',e);this.status('恢复失败，请双方重开房间');return; }
+    this.seed=s.gameSeed;
+    this._asks={};this._receivedAsks={};this._askSeq=0;
+    this._completeCheckpoint=JSON.parse(JSON.stringify(s));
+    delete this._completeCheckpoint.completeCheckpoint;
+    this._enteredBattle=true;
+    this._recoveryToken=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+    showScreen('battleScreen');
+    addBattleLog('system',rolledBack?'【联机恢复】房主刷新：双方同步回退到最近完整结算结束的状态，未完成的操作已撤销，请重新操作。':'【联机恢复】房主刷新：已恢复完整结算结束的状态。');
+    this.status('已恢复完整检查点，双方局面重新同步');
+    this._savedAt=0;this._savedOnce=false;
+    if(!this.isGuest) this._sendSnapshotNow({full:true});
   },
   // 房主把"权威自存"快照存到服务器（供任意一方重连恢复）。
   // 只带【新增】卡定义（约 5KB），服务器会累积成一份自含快照 —— 这样每次都快、且回滚窗口 <1 秒。
@@ -2236,18 +2243,19 @@ var Online = {
     if(!this.active || this.isGuest) return;
     if(this._isServerAuthority()) return;             // 批次 3：权威状态由服务器自己存，本机不存
     var now=Date.now();
-    if(!force && now-(this._savedAt||0)<700) return;
+    var busy=__eeIdleForSnapshot();
+    // 忙转空闲时必须保存完整恢复点，不能被传输节流跳过。
+    if(!force && now-(this._savedAt||0)<700 && (this._savedIdle || busy)) return;
     this._savedAt=now;
+    this._savedIdle=!busy;
     try{
       if(typeof NetSync==='undefined') return;
       var needFull=!this._savedOnce;                  // 本局第一次必须带全部定义，服务器才有底
-      var s=NetSync.buildSnapshot({ mode:'self', full:needFull });
+      var s=NetSync.buildSnapshot({ mode:'self', full:needFull || !busy });
       if(s){
-        /* 收口·第 2 步：给快照打上"这是不是一个**引擎空闲时刻**的检查点"。
-           服务器据此把"最近一次空闲快照"单独留一份，房主重连时优先用它恢复 ——
-           这样就不会把"结算到一半"的局面恢复出来（细节见 __eeIdleForSnapshot 的注释）。 */
-        var busy=(typeof __eeIdleForSnapshot==='function')?__eeIdleForSnapshot():'（判据不可用）';
-        s.idle=!busy; s.idleWhy=busy||'';
+        s.idle=!busy; s.idleWhy=busy||'';s.gameSeed=this.seed;
+        if(!busy) this._completeCheckpoint=JSON.parse(JSON.stringify(s));
+        else if(this._completeCheckpoint) s.completeCheckpoint=this._completeCheckpoint;
         this._savedOnce=true; this._send({ t:'relay', m:{ k:'snapSave', s:s } });
       }
     }catch (e) { try { console.error('[catch] assets/engine.js:2126', e); } catch (e2) {} }
@@ -9432,6 +9440,12 @@ function resolveSimultaneous(tp, candidates, allDone) {
      驱动，每次发动后都会重新收集候选，新必发自动补入，链长不设上限。
      兼容：调用方若通过第 2 个参数之外的渠道提供重扫（candidates.scan），也会被采纳。 */
   candidates = (candidates || []).filter(Boolean);
+  /* 正在逆结算的链不能等排在自己后面的新触发窗口，交给既有的链后触发队列。 */
+  if (TW.active && (TW.active.state === 'settling' || TW.active._stepEntry)) {
+    candidates.forEach(function (candidate) { queueOrRunTrigger(Object.assign({}, candidate, { _afterChainWindow: true })); });
+    if (typeof allDone === 'function') allDone();
+    return;
+  }
   var scan = (candidates && typeof candidates.scan === 'function') ? candidates.scan : null;
   if (!candidates.length && !scan) { if (typeof allDone === 'function') allDone(); return; }
   TW.open({ type: 'simultaneous', tp: tp, candidates: candidates, scan: scan, done: allDone });
@@ -10236,6 +10250,11 @@ function __tryDrainTriggers() {
             if (typeof next === 'function') next();
           }
           try { effectEngine._drainingCard = x.card || null; } catch (e) { try { console.error('[catch] assets/engine.js:8710', e); } catch (e2) {} }
+          /* 新窗口候选本身带完成回调；交接后仍由它明确结束，不走旧轮询。 */
+          if (x._afterChainWindow) {
+            try { x.fire(finish); } catch (e) { console.error('链后窗口候选异常', e); finish(); }
+            return;
+          }
           try { x.fire(); } catch (e) {
             try { addBattleLog('system', '【连锁】新一轮里的效果结算异常：' + ((e && e.message) || e)); } catch (e2) { try { console.error('[catch] assets/engine.js:8712', e2); } catch (e2) {} }
           }
@@ -16886,6 +16905,9 @@ function __eeIdleForSnapshot() {
     if (typeof TW !== 'undefined' && TW && TW.active) {
       return '连锁窗口进行中（' + TW.active.type + '／' + TW.active.state + '，已 ' + (TW.active.chain || []).length + ' 环）';
     }
+    if (typeof DecisionHub !== 'undefined' && (DecisionHub.active || DecisionHub.queue.length)) return '统一决策尚未完成';
+    if (typeof TW !== 'undefined' && (TW.queue.length || TW._closing || TW._pumping)) return '时点窗口尚未收尾';
+    if (ee && ee._animating) return '效果演出尚未完成';
     if (ee && (ee._resolveDepth || 0) > 0) return '效果结算中（深度' + ee._resolveDepth + '）';
     if (ee && ee._chainLock) return '连锁锁未释放';
     if (ee && ee._pendingTriggers && ee._pendingTriggers.length) return '待触发时点队列（' + ee._pendingTriggers.length + '）';

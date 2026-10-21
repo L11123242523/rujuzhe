@@ -370,6 +370,11 @@ const GROUPS = [
     'probe-publish-gate-proof.cjs',
     'probe-audit-verdicts.cjs',
     'probe-mobile-entry.cjs',
+    'probe-chain-after-damage-deadlock.cjs',
+    'probe-reconnect-continuity.cjs',
+    'probe-reconnect-checkpoint.cjs',
+    'probe-reconnect-live.cjs',
+    'probe-mobile-touch.cjs',
     /* 【2026-10-20】永奏3点/SP、血戒8费。 */
     'probe-yongzou-balance.cjs',
     /* 【2026-10-20】永奏「每3张卡进墓」计数：自己+对手都算、触发不再重复加计数。 */

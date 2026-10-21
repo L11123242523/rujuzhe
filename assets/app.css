@@ -4432,4 +4432,8 @@ body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
   #timingModal .card-modal, #cardModal .card-modal { width: 96vw !important; max-width: 96vw !important; max-height: 56vh !important; padding: 10px 12px !important; }
   #cardPicker .card-picker { width: 97vw !important; max-width: 97vw !important; max-height: 58vh !important; padding: 9px !important; }
   #cardPicker .card-picker-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)) !important; }
+  /* 手机端墓地入口保留原布局，扩大可点区域。 */
+  #battleScreen button[onclick="showOppZone('grave')"],
+  #battleScreen button[onclick="showOppZone('removed')"],
+  #battleScreen button[onclick="showPublicGraveList()"] { min-height: 36px; min-width: 36px; }
 }
