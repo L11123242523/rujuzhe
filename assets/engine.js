@@ -18505,55 +18505,43 @@ function pickFromList(user, list, title, need, cb, allowLess) {
   } else cb(list.slice(0, need));
 }
 
-function resolveBarrierOnMove(user, oldPos, newPos, dir) {
-  var bs = battleState._barriers || [];
-  if (!bs.length) return newPos;
-  var steps = (((dir < 0 ? oldPos - newPos : newPos - oldPos) % 42) + 42) % 42;
-  for (var k = 1; k <= steps; k++) {
-    var g = ((oldPos + dir * k) % 42 + 42) % 42;
-    var bi = -1;
-    for (var x = 0; x < bs.length; x++) if (bs[x].pos === g) { bi = x; break; }
-    if (bi >= 0 && g !== newPos) {
-      var b = bs.splice(bi, 1)[0];
-      addBattleLog(user, '⚠️ 路障拦截！移动被强制改为前往第' + g + '格');
-      if (b.by && b.by !== user) {
-        var ow = battleState[b.by];
-        if (ow) { ow.position = ((ow.position + 3) % 42 + 42) % 42; addBattleLog(b.by, '【拦路者SP】路障成功阻止移动，前进3格到第' + ow.position + '格'); if (typeof triggerTileEffect === 'function') triggerTileEffect(b.by); }
-      }
-      return g;
+/* 只读路径结果供预览和执行共用；副作用仅由 resolveBarrierOnMove 执行。 */
+function __traceMovePath(oldPos, newPos, dir) {
+  var barriers = battleState._barriers || [], path = [oldPos], barrierIndex = -1;
+  var distance = (((dir < 0 ? oldPos - newPos : newPos - oldPos) % 42) + 42) % 42;
+  for (var k = 1; k <= distance; k++) {
+    var tile = ((oldPos + dir * k) % 42 + 42) % 42;
+    path.push(tile);
+    for (var x = 0; x < barriers.length; x++) {
+      if (barriers[x] && barriers[x].pos === tile && tile !== newPos) { barrierIndex = x; break; }
+    }
+    if (barrierIndex >= 0) break;
+  }
+  return { from: oldPos, to: path[path.length - 1], steps: dir * (path.length - 1), path: path, barrierIndex: barrierIndex };
+}
+function __planCardMove(player, signedN) {
+  var p = battleState[player];
+  var n = Math.max(-20, Math.min(20, signedN));
+  if (p._nextMoveAdjust) n = Math.max(-20, Math.min(20, n + p._nextMoveAdjust));
+  return __traceMovePath(p.position, ((p.position + n) % 42 + 42) % 42, n >= 0 ? 1 : -1);
+}
+function resolveBarrierOnMove(user, oldPos, newPos, dir, move) {
+  var result = move || __traceMovePath(oldPos, newPos, dir);
+  if (result.barrierIndex >= 0) {
+    var b = battleState._barriers.splice(result.barrierIndex, 1)[0];
+    addBattleLog(user, '⚠️ 路障拦截！移动被强制改为前往第' + result.to + '格');
+    if (b.by && b.by !== user) {
+      var ow = battleState[b.by];
+      if (ow) { ow.position = ((ow.position + 3) % 42 + 42) % 42; addBattleLog(b.by, '【拦路者SP】路障成功阻止移动，前进3格到第' + ow.position + '格'); if (typeof triggerTileEffect === 'function') triggerTileEffect(b.by); }
     }
   }
-  return newPos;
+  return result.to;
 }
 
-/* 【2026-10-10 作者要求"移动前能看地图 + 落点高亮预览"】
-   · `__previewLandingTile`：算"这一步会落到哪一格"，**只读**、绝不改状态 ——
-     算式与 `applyMove` 同源（`((pos+n)%42+42)%42`、大风 debuff 的 -2 也照算），
-     ⚠ 路障**不能**调 `resolveBarrierOnMove` 试算：那个函数会 `splice` 消耗路障、把路障主人推 3 格、
-     还会打日志（副作用一串 ✗）⇒ 这里按**同一条规则只读预判**（沿路径找第一块非落点路障）。
-   · `__movePreviewBegin/End`：弹窗打开时①走公交/地铁那套"半透明贴底"（`.bus-chooser`）让地图不被挡，
-     ②把候选落点在地图上高亮；选完/关闭立刻清掉。 */
+/* 落点预览只读同一份路径计算，不消费位移调整或路障。 */
 function __previewLandingTile(player, signedN) {
-  var p = battleState && battleState[player];
-  if (!p) return null;
-  var n = Math.max(-20, Math.min(20, signedN));
-  var dir = n >= 0 ? 1 : -1;
-  /* 【2026-10-17 统一·作者「5 可以统一」】预览要跟 `applyMove` **同一个字段**算（否则落点预览与实际不符 ✗） */
-  if (p._nextMoveAdjust) n = n + p._nextMoveAdjust;
-  if (n === 0) return p.position;                       // 位移 0 = 原地跳一下（位置不变）
-  var dest = ((p.position + n) % 42 + 42) % 42;
-  try {
-    var bs = battleState._barriers || [];
-    if (bs.length) {
-      var steps = (((dir < 0 ? p.position - dest : dest - p.position) % 42) + 42) % 42;
-      for (var k = 1; k <= steps; k++) {
-        var g = ((p.position + dir * k) % 42 + 42) % 42, hit = false;
-        for (var x = 0; x < bs.length; x++) if (bs[x] && bs[x].pos === g) { hit = true; break; }
-        if (hit && g !== dest) return g;                // 会被拦在这里（条件与 resolveBarrierOnMove 一致）
-      }
-    }
-  } catch (e) { try { console.error('[catch] assets/engine.js:15698', e); } catch (e2) {} }
-  return dest;
+  if (!battleState || !battleState[player]) return null;
+  return __planCardMove(player, signedN).to;
 }
 function __movePreviewBegin(player, list) {
   try { __busSetChooserUi(true); } catch (e) { try { console.error('[catch] assets/engine.js:15702', e); } catch (e2) {} }         // 半透明贴底：选的时候地图始终看得见
@@ -18622,16 +18610,15 @@ function __resolveBackPathTouch(user, n) {
   } catch (e) { try { console.error('[catch] assets/engine.js 谢幕路径触碰', e); } catch (e2) {} }
 }
 function applyMove(user, signedN, sourceCard) {
-  var p = battleState[user], n = Math.max(-20, Math.min(20, signedN)), oldPos = p.position, __dir = n >= 0 ? 1 : -1;
+  var p = battleState[user], move = __planCardMove(user, signedN), n = move.steps, oldPos = move.from;
   /* 【2026-10-03】正常位移把人从公交/地铁锚点带回格子 */
   try { if (typeof __busOffNetwork === 'function') __busOffNetwork(p); } catch (e) { try { console.error('[catch] assets/engine.js:15719', e); } catch (e2) {} }
   // 【2026-10-17 统一·作者「5 可以统一」】用后即清：位移调整唯一字段 `_nextMoveAdjust`
   if (p._nextMoveAdjust) {
-    n = Math.max(-20, Math.min(20, n + p._nextMoveAdjust));
     addBattleLog(user, '位移量调整' + (p._nextMoveAdjust > 0 ? '+' : '') + p._nextMoveAdjust);
     p._nextMoveAdjust = 0;
   }
-  p._lastMoveFrom = oldPos; p._lastMoveSteps = n; // 记录移动前位置/步数，供“路径上”类效果（风纪委员Lv7）使用
+  p._lastMoveFrom = oldPos; p._lastMoveSteps = n; // 只记录实际路径，截停后的路程不计入效果
   /* 【2026-10-03 作者口径】位移 0 = **原地跳一下**：位置不变，但照常结算当前格子的效果
      （负数位移＝反方向移动，本来就走下面的通用路径）。 */
   if (n === 0) {
@@ -18640,8 +18627,7 @@ function applyMove(user, signedN, sourceCard) {
     try { if (typeof triggerTileEffect === 'function') triggerTileEffect(user); } catch (e) { console.error('原地跳结算格子效果出错', e); }
     return;
   }
-  var __dest = ((p.position + n) % 42 + 42) % 42;
-  p.position = resolveBarrierOnMove(user, oldPos, __dest, __dir);
+  p.position = resolveBarrierOnMove(user, oldPos, move.to, n >= 0 ? 1 : -1, move);
   addBattleLog(user, (n >= 0 ? '前进' : '后退') + Math.abs(n) + '格，第' + oldPos + '格→第' + p.position + '格');
   // 经过起点（前进跨越0但未停在0）：400金币+1音韵；精确停在0由 triggerTileEffect 给双倍
   if (n > 0 && oldPos + n >= 42 && p.position !== 0) {
