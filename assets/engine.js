@@ -20374,7 +20374,7 @@ function __opsMove(op, ctx, next, env) {
     case 'move_by_roll': {
       var __seat = (user === 'p1' || user === 'p2') ? user : (user === battleState.p1 ? 'p1' : 'p2');
       var __n = (typeof __batSpBonus === 'function') ? __batSpBonus(__seat) : 0;
-      if (__n <= 0) { __n = (battleState[__seat] && battleState[__seat]._lastRoll) || 0; }
+      // 零附加是合法位移量，不继承任何先前骰点。
       addBattleLog(__seat, '【某女士爱用球棒】按"附加的伤害值"移动 ' + __n + ' 格（[突破手]×' + __n + '）');
       applyMove(__seat, __n);
       break;
