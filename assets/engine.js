@@ -2464,7 +2464,7 @@ function onlineUseCardP2(handIndex, cardName, done) {
     }
     __pay(false);
   }
-  if (typeof needTargetSelect === 'function' && needTargetSelect(effectText)) {
+  if (card.name !== '妖刀五月雨' && typeof needTargetSelect === 'function' && needTargetSelect(effectText)) {
     var __tt2 = (typeof parseTargetType === 'function') ? parseTargetType(effectText) : 'any_player';
     var __tOpts = __onlineTargetNeutralOptions(__tt2);
     if (__tOpts === null) { __go('p2'); return; } // 纯自身：无决策点
@@ -18908,56 +18908,56 @@ function triggerLanzhangAfterJudge(user, target, done) {
   else __settle(GameRNG.coin() ? '正面' : '反面');
 }
 
-function triggerYaodaoOnDamage(user, dmg, done) {
-  function __d() { if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof done === 'function') done(); }
-  if (dmg == null || dmg < 5) { __d(); return; }
-  var p = battleState[user]; if (!p || p._yaodaoTriggered) { __d(); return; }
-  var has = (typeof playerOwnsCard==='function') ? playerOwnsCard(user, /妖刀|五月雨/) : (p.permanent || []).some(function (c) { return c.name && /妖刀|五月雨/.test(c.name); });
-  if (!has) { __d(); return; }
-  function __lose() { p.sync = Math.max(0, p.sync - 3); }
-  if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
-    // 联机：远端位等待对方选择（①破坏②抽1③不发动；破坏目标再经第二个答案同步）
-    onlineDecideModal('p2', '妖刀五月雨（对手）', '本次单次造成' + dmg + '点伤害（≥5），每回合一次，选择一项（均自失3同步）', '', ['①破坏场上1张卡', '②抽1张卡', '不发动'], function (i) {
-      if (i === 2 || i == null) { __d(); return; }
-      p._yaodaoTriggered = true; __lose();
-      if (i === 0) {
-        var pool = [], side = [];
-        playerIds().forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
-        if (!pool.length) { addBattleLog(user, '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
-        Online.awaitAnswer({ label: '妖刀五月雨·破坏目标（对手）', cards: pool.map(function(c,i){ return c.name + '（' + (side[i]==='p1'?'房主':'自己') + '）'; }) }, function (v) {
-          var ids = Array.isArray(v) ? v[0] : v;
-          if (ids != null && ids >= 0 && pool[ids]) {
-            var c = pool[ids], sd = side[ids], arr = battleState[sd].permanent, ri = arr.indexOf(c);
-            if (ri >= 0) { arr.splice(ri, 1); moveCardToGrave(sd, c, 'destroy'); addBattleLog(user, '【妖刀五月雨】破坏' + (sd === 'p1' ? '我方' : '对方') + '场上【' + c.name + '】，自失3同步'); }
-          }
-          __d();
-        });
-      } else { drawCard(user); addBattleLog(user, '【妖刀五月雨】抽1张，自失3同步'); __d(); }
+/* 妖刀的两次破坏共用候选与原区域出口，保密展示不改变真实卡引用。 */
+function __yaodaoDestroyFieldCard(user, title, done) {
+  var pool = [], zones = ['permanent', 'faceDownCards', 'eventCards', 'musicCards'];
+  var names = { permanent: '永续区', faceDownCards: '盖伏区', eventCards: '事件区', musicCards: '乐谱区' };
+  othersOf(user).concat([user]).forEach(function (side) {
+    var seat = battleState[side]; if (!seat) return;
+    zones.forEach(function (zone) {
+      (seat[zone] || []).forEach(function (card) {
+        if (!card) return;
+        var hidden = side !== user && zone !== 'permanent' && !__isPublicCard(card, zone);
+        var label = hidden ? names[zone] + '卡（内容保密）' : card.name;
+        var view = hidden ? { _hidden: true } : Object.assign({}, card);
+        view.name = label + '（' + (side === user ? '自己' : (playerCount() > 2 ? '玩家' + side.slice(1) : '对手')) + '·' + names[zone] + '）';
+        pool.push({ card: view, realCard: card, side: side, zone: zone, hidden: hidden });
+      });
     });
-    return;
-  }
-  if (user !== 'p1' || typeof showChoiceModal !== 'function') {
-    p._yaodaoTriggered = true; __lose();
-    if (typeof drawCard === 'function') drawCard(user);
-    addBattleLog(user, '【妖刀五月雨】单次造成' + dmg + '伤，选择抽1，自失3同步');
-    __d(); return;
-  }
-  showChoiceModal('妖刀五月雨', '本次单次造成' + dmg + '点伤害（≥5），每回合一次，选择一项（均自失3同步）', '', ['①破坏场上1张卡', '②抽1张卡', '不发动'], function (i) {
-    if (i === 2) { __d(); return; }
-    p._yaodaoTriggered = true; __lose();
-    if (i === 0) {
-      var pool = [], side = [];
-      playerIds().forEach(function (sd) { (battleState[sd].permanent || []).forEach(function (c) { pool.push(c); side.push(sd); }); });
-      if (!pool.length) { addBattleLog('p1', '【妖刀五月雨】场上无卡可破坏，自失3同步'); __d(); return; }
-      showCardPickerMulti(pool, '妖刀五月雨：选择场上1张卡破坏', function (idx) {
-        var ids = Array.isArray(idx) ? idx[0] : idx;
-        if (ids == null || ids < 0) { __d(); return; }
-        var c = pool[ids], sd = side[ids], arr = battleState[sd].permanent, ri = arr.indexOf(c);
-        if (ri >= 0) { arr.splice(ri, 1); moveCardToGrave(sd, c, 'destroy'); addBattleLog('p1', '【妖刀五月雨】破坏' + (sd === 'p1' ? '我方' : '对方') + '场上【' + c.name + '】，自失3同步'); }
-        __d();
-      }, 1);
-    } else { drawCard('p1'); addBattleLog('p1', '【妖刀五月雨】抽1张，自失3同步'); __d(); }
   });
+  if (!pool.length) { addBattleLog(user, '【妖刀五月雨】场上无卡可破坏'); done(); return; }
+  pickFromList(user, pool, title, 1, function (picks) {
+    var pick = picks && picks[0];
+    if (pick) {
+      var arr = battleState[pick.side][pick.zone], card = pick.realCard, index = arr.indexOf(card);
+      if (index >= 0) {
+        arr.splice(index, 1);
+        if (card._category === 'event_cards' || card._category === 'music_cards') {
+          var grave = publicGraveyard[card._category];
+          if (grave.indexOf(card) < 0) grave.push(card);
+          if (card._chainC1) card._alreadyInPublicGrave = true;
+        } else moveCardToGrave(pick.side, card, 'destroy');
+        addBattleLog(user, '【妖刀五月雨】破坏' + (pick.hidden ? names[pick.zone] + '卡（内容保密）' : '【' + card.name + '】') + '（' + (pick.side === user ? '自己' : (playerCount() > 2 ? '玩家' + pick.side.slice(1) : '对手')) + '·' + names[pick.zone] + '）');
+      }
+    }
+    updateBattleUI(); done();
+  });
+}
+
+function triggerYaodaoOnDamage(user, dmg, done) {
+  function finish() { updateBattleUI(); if (typeof done === 'function') done(); }
+  var p = battleState[user];
+  if (dmg == null || dmg < 5 || !p || p._yaodaoTriggered || !playerOwnsCard(user, /妖刀|五月雨/)) { finish(); return; }
+  function resolve(index) {
+    if (index !== 0 && index !== 1) { finish(); return; }
+    p._yaodaoTriggered = true;
+    function lose() { p.sync = Math.max(0, p.sync - 3); finish(); }
+    if (index === 0) __yaodaoDestroyFieldCard(user, '妖刀五月雨：选择场上1张卡破坏', lose);
+    else { drawCard(user); addBattleLog(user, '【妖刀五月雨】抽1张，自失3同步'); lose(); }
+  }
+  var online = typeof Online !== 'undefined' && Online.active && !battleState._over;
+  if (!online && user !== 'p1') { resolve(1); return; }
+  onlineDecideModal(user, '妖刀五月雨', '本次单次造成' + dmg + '点伤害（≥5）', '每回合一次，选择一项；适用后自己失去3点同步值', ['①破坏场上1张卡', '②抽1张卡', '不发动'], resolve);
 }
 
 const TIMING = {
@@ -25229,7 +25229,8 @@ function resolvePermanentOnPlay(card, user, cb) {
      ⇒ 被编译器落成**第二个 `draw`**（假动作）⇒ 整句判为「能编译」⇒ **handler 被跳过** ✗。
      修法：**从句里含指令层执行不了的「（手卡）公开」⇒ 走具名 handler**（这张卡的专用实现更权威 ✓）。
      影响面：全池**只有死灵令牌**含此句式 ⇒ 其余带具名 handler 的卡（臂章/福金/善意面具/妖刀/永奏/巧匠/雷閃）一字不动 ✓。 */
-  var __needsNamedHandler = !!st.onPlayHandler && /选[^。；]{0,10}(?:一张)?手卡公开|手卡公开/.test(String(text || ''));
+  // 妖刀的全场选卡与可选伤害有不同目标，由其专用处理器管理两段决策。
+  var __needsNamedHandler = !!st.onPlayHandler && (st.onPlayHandler === 'yaodaoPlay' || /选[^。；]{0,10}(?:一张)?手卡公开|手卡公开/.test(String(text || '')));
   if (st.onPlayHandler && PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler] && (!__opsOk || __needsNamedHandler)) {
     PERMANENT_ONPLAY_HANDLERS[st.onPlayHandler](card, user, function () {
       if (cb) cb();
@@ -25339,33 +25340,35 @@ var PERMANENT_ONPLAY_HANDLERS = {
     }
     cb && cb();
   },
-  // 妖刀五月雨：破坏对方场上1张卡 → 造5混沌 → 自失3同步；AI 简化为造5+失3
+  // 妖刀：先破坏场上一张卡，再选择其他玩家造伤，或放弃整个后段。
   yaodaoPlay: function (card, user, cb) {
-    var p = battleState[user], o = permOther(user);
-    function rest() {
-      dealDamageWithResponse(o, 5, card.name, function () {
-        p.sync = Math.max(0, p.sync - 3);
-        addBattleLog(user, '【妖刀五月雨】自己失3同步（当前' + p.sync + '）');
-        updateBattleUI(); cb && cb();
-      }, '混沌', user);
-    }
-    if (user === 'p1' && battleState.p2.permanent.length) {
-      showTargetCards('p2', 'permanent', '妖刀五月雨：选择对方场上1张卡破坏', true, function (sc, si) {
-        if (si >= 0) { battleState.p2.permanent.splice(si, 1); moveCardToGrave('p2', sc, 'destroy'); addBattleLog('p1', '【妖刀五月雨】破坏【' + sc.name + '】'); }
-        rest();
+    var p = battleState[user];
+    function finish() { updateBattleUI(); if (cb) cb(); }
+    __yaodaoDestroyFieldCard(user, '妖刀五月雨：发动时选择场上1张卡破坏', function () {
+      if (__chainC1WasTakenAway(user, card)) { finish(); return; }
+      var targets = othersOf(user).filter(function (side) {
+        var q = battleState[side]; return q && !q._eliminated && q.sync > 0;
       });
-    } else if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2' && battleState.p1.permanent.length) {
-      // 联机：远端位等待对方选择破坏目标（p1 弹窗广播索引）
-      Online.awaitAnswer({ label: '妖刀五月雨·选破坏目标（对手）', cards: battleState.p1.permanent.map(function(c){ return c.name; }) }, function (v) {
-        var ix = Array.isArray(v) ? v[0] : v;
-        if (ix != null && ix >= 0 && ix < battleState.p1.permanent.length) {
-          var sc = battleState.p1.permanent[ix];
-          battleState.p1.permanent.splice(ix, 1); moveCardToGrave('p1', sc, 'destroy');
-          addBattleLog(user, '【妖刀五月雨】破坏【' + sc.name + '】');
+      if (!targets.length) { finish(); return; }
+      function resolve(index) {
+        var target = targets[index];
+        if (!target || __chainC1WasTakenAway(user, card)) {
+          addBattleLog(user, '【妖刀五月雨】未适用可选伤害后段'); finish(); return;
         }
-        rest();
-      });
-    } else rest();
+        dealDamageWithResponse(target, 5, card.name, function () {
+          if (!__chainC1WasTakenAway(user, card)) {
+            p.sync = Math.max(0, p.sync - 3);
+            addBattleLog(user, '【妖刀五月雨】自己失3同步（当前' + p.sync + '）');
+          }
+          finish();
+        }, '混沌', user);
+      }
+      var online = typeof Online !== 'undefined' && Online.active && !battleState._over;
+      if (!online && user !== 'p1') { resolve(0); return; }
+      var choices = targets.map(function (side) { return '对' + (playerCount() > 2 ? '玩家' + side.slice(1) : '对手') + '造成5点混沌伤害'; });
+      choices.push('放弃伤害');
+      onlineDecideModal(user, '妖刀五月雨·可选伤害', card.name, '可以对一名其他玩家造成5点混沌伤害，然后自己失去3点同步值', choices, resolve);
+    });
   },
   // 永奏进行曲：抽2，再选一张手卡/区域内卡送墓；AI 只抽2
   yongzouPlay: function (card, user, cb) {
@@ -25919,7 +25922,8 @@ function useCardCompleteFor(seat, handIndex) {
   }
 
   // 步骤1：检查是否需要选择目标
-  if (needTargetSelect(effectText)) {
+  // 妖刀在破坏之后才选择可选伤害目标，发动前不提前收取另一段的目标。
+  if (cardName !== '妖刀五月雨' && needTargetSelect(effectText)) {
     showTargetSelect(card, effectText, function(target) {
       proceedCardUse(handIndex, card, cost, effectText, isPermanent, actionType, target);
     });

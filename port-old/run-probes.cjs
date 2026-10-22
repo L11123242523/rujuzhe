@@ -380,6 +380,7 @@ const GROUPS = [
     'probe-audit-batch1-play.cjs',
     'probe-audit-batch2.cjs',
     'probe-audit-batch3.cjs',
+    'probe-yaodao-field.cjs',
     /* 【2026-10-20】永奏3点/SP、血戒8费。 */
     'probe-yongzou-balance.cjs',
     /* 【2026-10-20】永奏「每3张卡进墓」计数：自己+对手都算、触发不再重复加计数。 */
