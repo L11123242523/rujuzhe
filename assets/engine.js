@@ -6619,6 +6619,7 @@ function collectChainable(player, effect){
   function consider(c,from,index){
     if(!c) return;
     var __kd=(typeof RJEngine!=='undefined'&&RJEngine.classifyChainCard)?RJEngine.classifyChainCard(c):null;
+    if (c.name === '崩塌之乌托邦' && !__utopiaCanRespond(effect)) return;
     /* 作者口径（2026-09-13）：**技能卡是全时点卡**，任何效果发动前都可以作为连锁响应发动 ——
        不做 isChainOnlyCard / hasChainTarget / __matchStage 阶段过滤（那三道闸是给"连锁专用卡"用的），
        只校验：角色在本队、费用够、本回合未用过、盖伏当回合不能翻。 */
@@ -18079,7 +18080,7 @@ function __compileBody(t) {
         // 「对自己造成N点X属性伤害」（贪欲者的烙印）：承受者=使用者本人。
         // 旧编译把整段一律落到 ctx.target（默认对手）——编译"成功"但语义反转，属静默错误，故在此显式标注。
         if (/对自己造成|对自身造成/.test(t)) d.targetWho = 'self';
-        if (__aoe) d.aoe = __aoe;
+        if (__aoe) { d.aoe = __aoe; if (__rowAoe && !/(?:其他|其余|别的)玩家/.test(t)) d.aoe.includeSelf = true; }
         else if (__tgtRange) d.range = __tgtRange;
         if (!__aoe && __pbN != null) d.pushN = __pbN; // 击退（风纪飞踢）：造伤执行后把目标推送N格，到达格不触发格子效果（见SP口径）
         ops.push(d);
@@ -20005,7 +20006,7 @@ function __opsDamage(op, ctx, next, env) {
       }
       function __dealDamage() {
         if (op.aoe && !__selfHit) {
-          var __foes = Object.keys(battleState).filter(function (k) { return k !== user && battleState[k] && typeof battleState[k].sync === 'number'; });
+          var __foes = Object.keys(battleState).filter(function (k) { return (k !== user || op.aoe.includeSelf === true) && battleState[k] && typeof battleState[k].sync === 'number'; });
           var __hit = __foes.filter(function (tp) { return __inTileRange(user, tp, op.aoe); });
           if (!__hit.length) { addBattleLog(user, '范围内没有其他玩家，该造伤不适用'); next(); return; }
           var __hi = 0;
@@ -24770,7 +24771,17 @@ function isChainOnlyCard(card) {
   return false;
 }
 
+// 乌托邦只认当前待处理效果的资格；候选扫描与发动检查共用，旧窗口类型标记不作为来源。
+function __utopiaCanRespond(effect) {
+  if (!effect || effect.cancelled || (effect._stage || effect.type) !== 'effect_activate') return false;
+  var text = (effect.card && (effect.card.effect || effect.card.text)) || effect.description || '';
+  return /加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(text) && !__negateTimingMissed(text);
+}
 function hasChainTarget(card, stage) {
+  if (card && card.name === '崩塌之乌托邦') {
+    var win = typeof TW !== 'undefined' && TW.active;
+    return !!(win && win.state === 'collect' && __utopiaCanRespond(win.effect));
+  }
   if (!card) return false;
   var name = card.name || '';
   var effect = card.effect || card.text || '';
@@ -24938,6 +24949,7 @@ function aiPickFaceDownForWindow(effect, seat) {
     var eff = (c.effect || '') + (c.sp || '');
     var nm = c.name || '';
     var usable = false;
+    if (c.name === '崩塌之乌托邦' && !__utopiaCanRespond(effect)) continue;
     if (stage === 'damage' || dmg > 0) usable = /抵消/.test(eff) && /伤害/.test(eff);
     else if (stage === 'move' || stage === 'dice_result' || stage === 'dice') usable = /位移量|打断|改变[^。；]*方向|修改.*(骰|点)/.test(eff) || nm.indexOf('侦探放大镜') >= 0 || nm.indexOf('猎手爪链') >= 0 || nm.indexOf('遥控骰子') >= 0 || nm.indexOf('颠倒骰子') >= 0;
     else if (stage === 'rand' || stage === 'rand_result') usable = nm === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
