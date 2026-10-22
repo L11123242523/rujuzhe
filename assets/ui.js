@@ -1,14 +1,14 @@
 /* assets/ui.js —— 由 game.html 的 UI 类顶层函数**原样外移**而成（只搬位置、不改函数体/函数名）
    导出：文件末尾用 window.<name> 挂回全局，供 game.html 内联代码继续直接调用。 */
-/* 【2026-10-20 作者要求】主界面背景在 插画2 / 插画3 之间**每次刷新随机**（同一页面内保持不变）。 */
+/* 【2026-10-22 作者要求】主界面背景换成 插画2 / 插画3 / 插画4 三张，**每次刷新随机**（同一页面内保持不变）。 */
 var __mmBgPicked = false;
 function __mmPickBg() {
   if (__mmBgPicked) return; __mmBgPicked = true;
   try {
-    var n = Math.random() < 0.5 ? 2 : 3;
+    var n = [2, 3, 4][Math.floor(Math.random() * 3)];
     /* 绝对路径（以 / 开头）：自定义属性里的相对 url 会按**引用它的样式表**（/assets/app.css）解析，
        写 assets/images/... 会变成 /assets/assets/images/...（实测 404、背景整层消失）✗ */
-    document.documentElement.style.setProperty('--mm-bg', "url('/assets/images/mainmenu-bg-" + n + ".webp?v=1')");
+    document.documentElement.style.setProperty('--mm-bg', "url('/assets/images/mainmenu-bg-" + n + ".webp?v=2')");
   } catch (e) {}
 }
 /* 【2026-10-20 修】主界面是 HTML 里默认 active 的（首屏并不经过 showScreen）⇒ 必须**加载即选一次**，
