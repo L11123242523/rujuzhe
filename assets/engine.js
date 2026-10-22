@@ -3064,7 +3064,7 @@ function evaluatePlayable(card,player,opts){
   // 1) 连锁响应类必须有作用对象（盖伏翻开同样需要对象，不能凭空）；双面卡自己回合主动发动豁免
   if(isChain && !hasChainTarget(card) && !isDualChain) return {ok:false,reason:chainBlockReason(name)};
   // 缴械：持续期间不可打出[侵略]标签卡
-  if (typeof StatusSys!=='undefined' && StatusSys.has(player,'缴械') && /\[?侵略\]?/.test((card.type||'')+(card.effect||'')) && /侵略/.test((card.type||'')+(card.effect||''))) return {ok:false,reason:'处于【缴械】状态，不能打出[侵略]标签卡'};
+  if (typeof StatusSys!=='undefined' && StatusSys.has(player,'缴械') && (card._printedTags ? __cardTags(card).indexOf('侵略') >= 0 : (/\[?侵略\]?/.test((card.type||'')+(card.effect||'')) && /侵略/.test((card.type||'')+(card.effect||''))))) return {ok:false,reason:'处于【缴械】状态，不能打出[侵略]标签卡'};
   // 1.5) 回合归属：对手回合时，只有连锁响应类（有对象时）可发动，或盖伏卡翻开；
   //      角色技能卡虽然"全时点"，但规则书第四章三明确限定为【自己回合】的其余任意阶段，
   //      故对手回合也不能从手牌手发（应盖伏后在对手回合翻开，或等自己回合再发）。
@@ -3634,6 +3634,9 @@ function initCards() {
       // 规范化：主效果(effect)与SP段严格分离。effect 内若内嵌“SP：…”则剥离，
       // SP 文本单独存入 card.sp（主动SP只由玩家手动发动，被动SP只由触发点处理，主效果结算绝不自动执行SP）
       var __normalizeCard = function (card) {
+        // 已逐图核验的卡面标签单独登记；旧type与_category继续保留原用途。
+        if (card.name === '小试身手！堆沙堡') card._printedTags = ['丰沛'];
+        if (card.name === 'Huginn&Muninn') { card.tags = ['战术']; card._printedTags = card.tags.slice(); }
         var eff = card.effect || card.text || '';
         var spAt = eff.search(/SP[：:]/);
         if (spAt >= 0) {
@@ -17909,7 +17912,7 @@ function matchCardQuery(c, tags, cats, exclude) {
        已核对全池 30 种标签：**没有任何标签**只能靠 archetypes 匹配（「侵略」靠真标签匹配 31 张，
        archetypes 兜底会额外错收 27 张：四叶草发卡/魔法蓝图/镇定药片/能量饮料/镌刻的艺术/金刚镯…）
        ⇒ 去掉兜底，只认 `tags` / `type` / `attribute` ✓（《唯一真相》= 卡面自己的标签字段） */
-    var ok = tags.some(function (tg) { return (c.tags && c.tags.indexOf(tg) >= 0) || (c.type && String(c.type).indexOf(tg) >= 0) || c.attribute === tg; });
+    var ok = tags.some(function (tg) { return c._printedTags ? __cardTags(c).indexOf(tg) >= 0 : ((c.tags && c.tags.indexOf(tg) >= 0) || (c.type && String(c.type).indexOf(tg) >= 0) || c.attribute === tg); });
     if (!ok) return false;
   }
   return true;
@@ -18451,13 +18454,18 @@ function advanceActionLapse(player) {
   if (typeof StatusSys !== 'undefined') StatusSys.tickAction(player);
   lapseDefenseDown(player); // 临时降防按“一次行动”流逝，到期恢复
   lapseDefenseUp(player);   // 【2026-10-14】「持续N次行动」的加防御同样流逝 ✓
-  // 延迟 N 次行动后移出游戏（搜查令等）
+  // 搜查令：卡已即时移出，到持有者第N次行动结束持续时间后返手。
   if (p._exilePending && p._exilePending.length) {
-    p._exilePending.forEach(function (e) { e.in -= 1; });
     p._exilePending = p._exilePending.filter(function (e) {
-      if (e.in <= 0) { (p.removedFromGame = p.removedFromGame || p.removed || []).push(e.card);
-        try { if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: player, card: e.card }); } catch (er) { console.error('延迟移出时点发射出错', er); } addBattleLog(player, '延迟到期：【' + e.card.name + '】移出游戏'); return false; }
-      return true;
+      var zone = p.removedFromGame || [], ix = zone.indexOf(e.card);
+      if (ix < 0) return false; // 已被其他效果搬走，原临时移出生命周期结束。
+      e.in -= 1;
+      if (e.in > 0) return true;
+      zone.splice(ix, 1);
+      e.card._addedByEffect = true; p.hand.push(e.card);
+      __emitAddHand(player, e.card, 'removedFromGame');
+      addBattleLog(player, '临时移出到期：【' + e.card.name + '】返回手牌');
+      return false;
     });
   }
   // 过载：持续 N 次行动（until=-1 直到本场游戏结束，不流逝）
@@ -18488,8 +18496,8 @@ function collectZoneCards(who, zones, tags, cats, exclude, includeOtherTeams) {
   requested.forEach(function (z) { (me[z] || []).forEach(function (c, i) {
     if (seen.indexOf(c) >= 0) return;
     seen.push(c);
-    // 牌组检索沿用本队约束；明确从已持有区域回收/复制任意卡的入口可显式包含其他队伍卡。
-    if (!includeOtherTeams && (c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __tn.length && !cardBelongsToTeam(c, __tn)) return;
+    // 本队携带限制只属于牌组构筑/牌组检索；已持有区域按区域与卡面条件筛选。
+    if (z === 'deck' && !includeOtherTeams && (c._category === 'attack_cards' || c._category === 'skill_cards') && typeof cardBelongsToTeam === 'function' && __tn.length && !cardBelongsToTeam(c, __tn)) return;
     if (matchCardQuery(c, tags, cats, exclude)) out.push({ card: c, zone: z, index: i });
   }); });
   return out;
@@ -20801,7 +20809,14 @@ function __opsCards(op, ctx, next, env) {
       var el = collectZoneCards(target, ['hand'], null, null);
       pickFromList(user, el, '选1张在' + op.actions + '次行动内移出游戏', 1, function (picks) {
         q._exilePending = q._exilePending || [];
-        picks.forEach(function (pk) { var ix = q.hand.indexOf(pk.card); if (ix >= 0) q.hand.splice(ix, 1); q._exilePending.push({ card: pk.card, in: op.actions }); addBattleLog(user, '登记延迟移出：' + pk.card.name); });
+        picks.forEach(function (pk) {
+          var ix = q.hand.indexOf(pk.card); if (ix < 0) return;
+          q.hand.splice(ix, 1);
+          (q.removedFromGame = q.removedFromGame || []).push(pk.card);
+          q._exilePending.push({ card: pk.card, in: op.actions });
+          runTiming(TIMING.ON_REMOVE, { player: target, card: pk.card });
+          addBattleLog(user, '【' + pk.card.name + '】临时移出游戏，持续' + op.actions + '次行动');
+        });
         next();
       });
       return;
@@ -26398,6 +26413,7 @@ function placeAfterUse(user, card, isPerm) {
 }
 
 function __cardTags(card) {
+  if (card && Array.isArray(card._printedTags)) return card._printedTags.slice();
   var out = (card && card.tags) ? card.tags.slice() : [];
   if (card && card.type && out.indexOf(card.type) < 0) out.push(card.type);
   return out;
