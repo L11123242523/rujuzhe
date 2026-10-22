@@ -2776,7 +2776,7 @@ function isDualUseChainCard(card){
      原来它靠下面那条"卡面写了『自己回合使用』"的正则被算成双面卡 ⇒ 能在空场时凭空发动 ✗（作者实测）。
      它仍然只在**受伤响应窗口**里可用 —— 那条路直接收"手牌/盖伏护符"（dealDamageWithResponse 里），
      不经过本函数 ✓。其余三张（特制手套/颠倒骰子/Twice）不受影响 ✓ */
-  if (card.name === '幸运护符') return false;
+  if (card.name === '幸运护符' || card.name === '能量饮料') return false;
   var eff=(card.effect||'')+(card.text||'');
   if(!isChainOnlyCard(card)) return false;
   return /自己的?回合(才能|可以)?(使用|从手卡发动)/.test(eff);
@@ -6618,6 +6618,7 @@ function collectChainable(player, effect){
   }
   function consider(c,from,index){
     if(!c) return;
+    if (c.name === '能量饮料' && !__energyDrinkMoveSource(effect)) return;
     var __kd=(typeof RJEngine!=='undefined'&&RJEngine.classifyChainCard)?RJEngine.classifyChainCard(c):null;
     if (c.name === '崩塌之乌托邦' && !__utopiaCanRespond(effect)) return;
     /* 作者口径（2026-09-13）：**技能卡是全时点卡**，任何效果发动前都可以作为连锁响应发动 ——
@@ -6707,7 +6708,7 @@ function collectChainable(player, effect){
       if (!canChainFromHandOnOppTurn(__ht)) return;
     }
     // 自己回合·移动将要执行前：位移增益主动卡（能量饮料“移动动作的位移量x2”）作为发动选项
-    if (__myTurn && stage === 'move' && effect && effect.player === player) {
+    if (c.name !== '能量饮料' && __myTurn && stage === 'move' && effect && effect.player === player) {
       var __sbEff = (c.effect||'') + (c.text||'');
       if (/移动动作的位移量\s*[x×]\s*2|位移量\s*[x×]\s*2/.test(__sbEff) && /移动/.test(__sbEff)) {
         if ((parseInt(c.cost,10)||0) <= (me.cost||0)) out.push({card:c,from:'hand',index:i,selfBuff:true});
@@ -6937,6 +6938,13 @@ function applyChainCard(player,pick,effect,done,target){
   }
   function __orig(){ return (effect.moveAmount!==undefined&&effect.moveAmount!==null)?effect.moveAmount:null; } // 锁定时的原始值（结算前不被改动）
   // 位移增益主动卡（能量饮料）：自己在移动将要执行前发动，本次位移x2（最多+6格）
+  if (name === '能量饮料') {
+    if (!__energyDrinkMoveSource(effect)) { done(); return; }
+    payAndRemove();
+    __chainWithC1().push({kind:'energy_double', by:player, name:name, card:c});
+    afterUse();
+    return;
+  }
   if (pick.selfBuff) {
     payAndRemove();
     var __sbOrig = __orig();
@@ -9757,6 +9765,16 @@ function resolveChainStack(effect, onDone) {
       try { __executeCardEffectBody(e.by, __skCard, function () { finished(); }, e.target || null); }
       catch (err) { console.error('技能卡连锁结算异常', err); finished(); }
       return;
+    } else if (e.kind === 'energy_double') {
+      if (!actionAlive || !hasNum) { __lostSet[i] = true; addBattleLog(e.by, '【能量饮料】本次移动已被打断，失去作用对象'); }
+      else {
+        var energyBonus = Math.min(Math.abs(cur), 6);
+        cur += (cur < 0 ? -energyBonus : energyBonus);
+        effect._energyDrinkSP = effect._energyDrinkSP || [];
+        effect._energyDrinkSP.push({by:e.by});
+        __doneSet[i] = true;
+        addBattleLog(e.by, '【能量饮料】本次位移翻倍，最多额外6格，当前位移' + cur + '格');
+      }
     } else if (e.kind === 'selfdouble') {
       // 位移增益（能量饮料）：发动时已即时把位移 x2（最多+6）写入待结算值，这里只做链上确认
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】移动已被打断，位移增益随之无效'); }
@@ -10805,6 +10823,30 @@ function accumulateMovePassives(player, amount, oldPos) {
     }
   }
 }
+// 饮料的对象与SP归属于移动动作，动作结束即消费，不在人物身上预挂。
+function __energyDrinkMoveSource(effect) {
+  return !!(effect && !effect.cancelled && (effect._stage || effect.type) === 'move' && typeof effect.moveAmount === 'number' && battleState[effect.player]);
+}
+function __finishEnergyDrinkMove(effect, steps) {
+  var pending = effect._energyDrinkSP || [];
+  delete effect._energyDrinkSP;
+  if (effect.cancelled) return;
+  var amount = Math.abs(steps) > 14 ? 5 : (Math.abs(steps) > 7 ? 3 : 0);
+  if (!amount) return;
+  pending.forEach(function (entry) {
+    var by = entry.by;
+    var targets = allInGamePlayers().filter(function (w) { return w !== by && battleState[w].sync > 0; });
+    if (!targets.length) return;
+    function choose(i) {
+      if (i == null || !targets[i]) return;
+      dealDamageWithResponse(targets[i], amount, '能量饮料SP·位移' + Math.abs(steps), null, '热忱', by);
+    }
+    var options = targets.map(playerDisplayName).concat(['放弃发动']);
+    if (by === 'p2' && typeof Online !== 'undefined' && Online.active) onlineDecideModal(by, '能量饮料·SP（对手）', '本次实际位移' + Math.abs(steps) + '格', '可以造成' + amount + '点热忱伤害', options, choose);
+    else if (by === 'p1') showChoiceModal('能量饮料·SP', '本次实际位移' + Math.abs(steps) + '格', '可以造成' + amount + '点热忱伤害', options, choose);
+    else choose(Math.max(0, targets.indexOf(foeOf(by))));
+  });
+}
 function executeMoveEffect(effect) {
   // 结算锁：移动落地与踩格级联期间禁止手动插入发动
   var __eeM=(typeof effectEngine!=='undefined')?effectEngine:null;
@@ -10819,6 +10861,7 @@ function executeMoveEffect(effect) {
   /* 【2026-10-21】圆桌会议：连锁中登记 ⇒ 链后终止本次移动（不再走剩余步数） */
   if (battleState && battleState._roundtableStopMove) {
     battleState._roundtableStopMove = false;
+    __finishEnergyDrinkMove(effect, 0);
     addBattleLog(effect.player || 'p1', '圆桌会议：本次移动被中断，不再继续移动');
     battleState._diceRolledThisPhase = true; battleState._moveResolved = true;
     try { rwClose('move'); rwClose('dice'); } catch (e) {}
@@ -10827,7 +10870,7 @@ function executeMoveEffect(effect) {
     if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent();
     __relM(); return;
   }
-  if (effect.cancelled) { addBattleLog(effect.player || 'p1', '本次移动已被连锁打断，不执行移动'); battleState._diceRolledThisPhase = true; battleState._moveResolved = true; rwClose('move'); rwClose('dice'); var __ac3 = document.getElementById('diceAnimationArea'); if (__ac3) __ac3.style.display = 'none'; if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent(); __relM(); return; }
+  if (effect.cancelled) { __finishEnergyDrinkMove(effect, 0); addBattleLog(effect.player || 'p1', '本次移动已被连锁打断，不执行移动'); battleState._diceRolledThisPhase = true; battleState._moveResolved = true; rwClose('move'); rwClose('dice'); var __ac3 = document.getElementById('diceAnimationArea'); if (__ac3) __ac3.style.display = 'none'; if (typeof updateBattleUI === 'function') updateBattleUI(); if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent(); __relM(); return; }
   var moveAmount = effect.moveAmount;
   var player = effect.player || 'p1';
   var p = battleState[player];
@@ -10840,6 +10883,7 @@ function executeMoveEffect(effect) {
     if (typeof triggerTileEffect === 'function') triggerTileEffect(player);
     rwClose('move'); rwClose('dice');
     battleState._diceRolledThisPhase = true; battleState._moveResolved = true;
+    __finishEnergyDrinkMove(effect, 0);
     var __ac4 = document.getElementById('diceAnimationArea'); if (__ac4) __ac4.style.display = 'none';
     if (typeof updateBattleUI === 'function') updateBattleUI();
     if (typeof __replayPendingPhaseIntent === 'function') __replayPendingPhaseIntent();
@@ -10880,8 +10924,10 @@ function executeMoveEffect(effect) {
     // 直尺SP / 小春被动：统一累计（掷骰主移动，按实际距离）
     accumulateMovePassives(player, __realDist, oldPos);
     // 触发格子效果（仅实际发生位移时，修复0格移动重复吃格）
+    __finishEnergyDrinkMove(effect, __realDist);
     triggerTileEffect(player);
   } else {
+    __finishEnergyDrinkMove(effect, 0);
     addBattleLog(player, '本次移动被完全阻止，未触发格子效果');
   }
   
@@ -12644,6 +12690,7 @@ function aiExecuteMove(dice, callback) {
       p._diceCancelToStart = false;
       p.position = 0;
       rwClose('move'); rwClose('dice');
+      __finishEnergyDrinkMove(res, 0);
       addBattleLog(player, '【颠倒骰子SP】取消本次移动并回到起点（第0格）');
       if (typeof triggerTileEffect === 'function') triggerTileEffect(player);
       if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -12669,8 +12716,10 @@ function aiExecuteMove(dice, callback) {
       rioAccumulateMove(player, Math.abs(__realD2));
       // 直尺SP / 小春被动：AI 掷骰主移动同样累计（修复 AI 漏触发）
       accumulateMovePassives(player, __realD2, oldPos);
+      __finishEnergyDrinkMove(res, __realD2);
       triggerTileEffect(player);
     } else {
+      __finishEnergyDrinkMove(res, 0);
       addBattleLog(player, '对手本次移动被完全阻止，未触发格子效果');
     }
 
@@ -18677,13 +18726,6 @@ function applyMove(user, signedN, sourceCard) {
     if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
     addBattleLog(user, '【里绪(水着)SP】首次移动后再抽2张卡');
   }
-  // 能量饮料SP：下次移动位移量>7造3热忱，>14改为5
-  if (p.moveBuff && p.moveBuff.energyDrinkSP) {
-    p.moveBuff.energyDrinkSP = false;
-    var __ed = Math.abs(n), __edFoe = foeOf(user);
-    if (__ed > 14) { dealDamageWithResponse(__edFoe, 5, '能量饮料SP·位移' + __ed, null, '热忱', user); addBattleLog(user, '【能量饮料SP】位移' + __ed + '格(>14)，造成5点热忱伤害'); }
-    else if (__ed > 7) { dealDamageWithResponse(__edFoe, 3, '能量饮料SP·位移' + __ed, null, '热忱', user); addBattleLog(user, '【能量饮料SP】位移' + __ed + '格(>7)，造成3点热忱伤害'); }
-  }
   // 位移落点必须触发所在格子效果（含原地跳跃/0格移动与卡牌效果移动，统一在此收口）
   if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
 }
@@ -20545,6 +20587,7 @@ function __opsBuff(op, ctx, next, env) {
     case 'attack_buff': p.attackBuff = (p.attackBuff || 0) + op.amount; break;
     case 'attack_buff_temp': p._tempAttack = (p._tempAttack || 0) + op.amount; addBattleLog(user, '攻击力临时+' + op.amount + '（直到本回合结束）'); break;
     case 'buff_double_move': {
+      if (ctx.card && ctx.card.name === '能量饮料') { addBattleLog(user, '能量饮料必须响应当前移动，不登记人物增益'); break; }
       /* 【2026-10-19 作者报「鼓舞的位移×2不能让玩家自主控制」】
          1) 卡面是「选择一名玩家，其…」⇒ buff 必须挂在 target，而不是使用者 p；
          2) 鼓舞允许玩家在本次行动内**选择是否/何时**使用这次 ×2 ⇒ 标 choice（能量饮料不标，仍是即时）。
@@ -20584,29 +20627,36 @@ function __opsBuff(op, ctx, next, env) {
     case 'apply_status': StatusSys.add(target, { type: op.status, value: op.value, actions: op.actions, addedBy: user }); break;
     case 'cleanse': StatusSys.cleanse(op.who === 'target' ? target : user); break;
     case 'swim_ring': {
-      // 沿方向飞掷：最远 op.range 格，命中第一个玩家后继续沿同方向飞，可再命中后续玩家（每人各吃一次伤害+破甲）；全程无命中则飞满销毁
+      // 每格推进，命中后重置本段无命中距离；每次造伤完成再读取后续站位。
       function ring(dir) {
-        var L = (typeof ringLen === 'function') ? ringLen() : (MAP_TILES ? MAP_TILES.length : 42);
-        var hits = [];
-        Object.keys(battleState).forEach(function (k) {
-          if (!/^p\d+$/.test(k) || k === user) return;
-          var qp = battleState[k]; if (!qp || (qp.sync || 0) <= 0) return;
-          var dd = ((qp.position - p.position) % L + L) % L;
-          var dist = dir > 0 ? dd : ((dd === 0) ? 0 : L - dd);
-          if (dist >= 1 && dist <= op.range) hits.push({ k: k, dist: dist });
-        });
-        hits.sort(function (a, b) { return a.dist - b.dist; });
-        if (!hits.length) { addBattleLog(user, '泳圈沿方向飞满' + op.range + '格未触碰任何玩家，飞行物销毁'); next(); return; }
-        var hi = 0;
-        (function hitNext() {
-          if (hi >= hits.length) { addBattleLog(user, '泳圈飞行结束（共命中' + hits.length + '名玩家）'); next(); return; }
-          var hk = hits[hi++].k, hq = battleState[hk];
-          applyDamageOps(user, hk, { judge: false, base: op.damage, kind: 'sanity' }, function () {
-            applyDefenseDown(hk, op.def, 2);
-            addBattleLog(user, '泳圈命中【' + (hk === 'p1' ? '我方' : '对手') + '】，造成' + op.damage + '理智伤害并降低' + op.def + '点防御（持续2次行动），随后继续沿方向飞行');
-            hitNext();
-          });
-        })();
+        var L = (typeof ringLen === 'function') ? ringLen() : MAP_TILES.length;
+        var flight = {position:p.position, empty:0, hits:0};
+        function advance() {
+          flight.position = ((flight.position + dir) % L + L) % L;
+          flight.empty++;
+          var tileHit = {};
+          function touch() {
+            var hk = Object.keys(battleState).find(function (k) {
+              var qp = battleState[k];
+              return /^p\d+$/.test(k) && k !== user && !tileHit[k] && qp && qp.sync > 0 && qp.position === flight.position;
+            });
+            if (hk) {
+              tileHit[hk] = true; flight.empty = 0; flight.hits++;
+              applyDamageOps(user, hk, {judge:false, base:op.damage, kind:'sanity'}, function () {
+                applyDefenseDown(hk, op.def, 2);
+                addBattleLog(user, '泳圈命中【' + playerDisplayName(hk) + '】，造成' + op.damage + '理智伤害并降低' + op.def + '点防御，随后沿原方向继续飞行');
+                touch();
+              });
+              return;
+            }
+            if (flight.empty >= op.range) {
+              addBattleLog(user, '泳圈连续飞满' + op.range + '格无命中，飞行物销毁（共命中' + flight.hits + '次）'); next(); return;
+            }
+            advance();
+          }
+          touch();
+        }
+        advance();
       }
       if (typeof Online !== 'undefined' && Online.active && user === 'p2') {
         onlineDecideModal('p2', '泳圈飞掷方向（对手）', '', '', ['向前飞掷', '向后飞掷'], function (o) { ring(o === 1 ? -1 : 1); });
@@ -24778,6 +24828,12 @@ function __utopiaCanRespond(effect) {
   return /加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(text) && !__negateTimingMissed(text);
 }
 function hasChainTarget(card, stage) {
+  if (card && card.name === '能量饮料') {
+    // 候选预扫描发生在TW开窗前；带时点的调用已由consider校验真实移动对象。
+    if (stage != null) return stage === 'move';
+    var moveWin = typeof TW !== 'undefined' && TW.active;
+    return !!(moveWin && moveWin.state === 'collect' && __energyDrinkMoveSource(moveWin.effect));
+  }
   if (card && card.name === '崩塌之乌托邦') {
     var win = typeof TW !== 'undefined' && TW.active;
     return !!(win && win.state === 'collect' && __utopiaCanRespond(win.effect));
@@ -24950,6 +25006,7 @@ function aiPickFaceDownForWindow(effect, seat) {
     var nm = c.name || '';
     var usable = false;
     if (c.name === '崩塌之乌托邦' && !__utopiaCanRespond(effect)) continue;
+    if (c.name === '能量饮料' && !__energyDrinkMoveSource(effect)) continue;
     if (stage === 'damage' || dmg > 0) usable = /抵消/.test(eff) && /伤害/.test(eff);
     else if (stage === 'move' || stage === 'dice_result' || stage === 'dice') usable = /位移量|打断|改变[^。；]*方向|修改.*(骰|点)/.test(eff) || nm.indexOf('侦探放大镜') >= 0 || nm.indexOf('猎手爪链') >= 0 || nm.indexOf('遥控骰子') >= 0 || nm.indexOf('颠倒骰子') >= 0;
     else if (stage === 'rand' || stage === 'rand_result') usable = nm === 'Twice' || /重新进行(?:一次)?判定|重新判定/.test(eff);
