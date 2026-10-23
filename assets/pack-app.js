@@ -1,0 +1,70 @@
+/* 卡包页面与只读对局桥接：资产只交给P1，战斗状态及随机源只读。 */
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory();else{root.RJPackApp=factory();if(root.document){var boot=function(){if(root.RJPackApp.isPageReady())root.RJPackApp.boot().catch(function(e){console.error('卡包初始化失败',e);});};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();}}})(typeof globalThis!=='undefined'?globalThis:this,function(){
+ 'use strict';
+ function createController(profile){var busy=false;return Object.freeze({
+  async openPack(){if(busy){var e=new Error('正在保存上一包');e.code='PACK_BUSY';throw e;}busy=true;try{var p=profile.getSnapshot(),saved=await profile.openPack('standard',p.revision);return saved.result;}finally{busy=false;}},
+  resume:function(){return profile.resumeReveal();},confirm:function(id){return profile.confirmReveal(id);},snapshot:function(){return profile.getSnapshot();}
+ });}
+ function createMatchBridge(options){
+  var crypt=options.crypto,profile=Promise.resolve(options.profile),local=new WeakMap(),remote=new Map(),active=null;
+  function onlineId(meta){if(!meta.roomId||meta.seed===undefined)throw Error('联机开局信息缺失，未发券');return crypt.subtle.digest('SHA-256',new TextEncoder().encode('rujuzhe-match-v1:'+meta.roomId+':'+meta.seed)).then(function(b){return 'online:'+Array.from(new Uint8Array(b),function(x){return x.toString(16).padStart(2,'0');}).join('');});}
+  function schedule(ctx){var run=function(){return ctx.id.then(function(id){return profile.then(async function(store){await store.beginMatch(id,ctx.mode);return ctx.outcome?store.settleMatch(id,ctx.outcome):{begun:true,matchId:id};});});};var job=ctx.queue.then(run,run);ctx.queue=job.then(function(){},function(){});return job;}
+  function complete(outcome){if(!active)return Promise.resolve({ignored:true});if(active.outcome&&active.outcome!==outcome)return Promise.reject(Error('同一局的领奖结果冲突'));active.outcome=outcome;return schedule(active);}
+  return Object.freeze({
+   observe:function(state,meta){if(!state||typeof state!=='object')return Promise.resolve({ignored:true});meta=meta||{};var key=meta.online?meta.roomId+':'+meta.seed:null,ctx=meta.online?remote.get(key):local.get(state),created=false;
+    if(!ctx){ctx={id:meta.online?onlineId(meta):Promise.resolve('match:'+crypt.randomUUID()),mode:meta.sandbox?'sandbox':meta.online?'online':'pve',queue:Promise.resolve(),outcome:null};if(meta.online)remote.set(key,ctx);else local.set(state,ctx);created=true;}active=ctx;
+    if(meta.over&&(meta.winner==='p1'||meta.winner==='p2'))return complete(meta.winner==='p1'?'win':'loss');return created?schedule(ctx):ctx.queue;
+   },finish:function(win){return complete(win?'win':'loss');},abandon:function(){if(active&&active.outcome)return active.queue;return complete('abandoned');},retry:function(){return active?schedule(active):Promise.resolve({ignored:true});}
+  });
+ }
+ // 页面模块的环境契约：需要真实Document所属window及已安装的卡包容器；纯引擎运行时不启动页面I/O。
+ function isPageReady(){return typeof document!=='undefined'&&!!document.defaultView&&document.defaultView.document===document&&!!document.getElementById('packScreen');}
+ var instance=null,booting=null;
+ function boot(options){
+  if(booting)return booting;options=options||{};
+  booting=(async function(){
+   var doc=options.document||document,host=doc.getElementById('packScreen'),collectionHost=doc.getElementById('collectionScreen');if(!host||!collectionHost)throw Error('卡包与收藏容器未就绪');
+   var load=async function(url){var r=await fetch(url);if(!r.ok)throw Error('收藏数据加载失败：'+url);return r.json();};
+   var data=await Promise.all([load('data/collection-catalog.json'),load('data/pack-rules.json'),load('data/cards.json?v=40')]);
+   var profile=options.profile||await RJProfile.createStore({catalog:data[0],rules:data[1]}),collection=RJCollection.create({profile:profile,cards:data[2]}),controller=createController(profile),rules=profile.getRules(),pool=rules.pools.standard;
+   function el(tag,cls,text){var n=doc.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
+   function button(text,fn,cls){var n=el('button',cls,text);n.type='button';n.addEventListener('click',fn);return n;}
+   var root=el('section','rjc-root'),header=el('header','rjc-header'),title=el('h2','','卡包与收藏'),balance=el('p','rjc-balance'),body=el('div','rjc-pack-body'),status=el('p','rjc-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+   header.append(title,balance,button('返回主菜单',function(){showScreen('mainMenu');}));root.append(header,status,body);host.appendChild(root);
+   var busy=false,animationTimer=null,destroyed=false;
+   var collectionUI=RJCollectionUI.mount({container:collectionHost,collection:collection,onClose:function(){showScreen('packScreen');render();}});
+   function updateBalance(){var p=profile.getSnapshot();balance.textContent='抽卡券：'+p.tickets+' · 星尘：'+p.dust;var menu=doc.getElementById('packTicketCount');if(menu)menu.textContent='抽卡券 '+p.tickets+(p.pendingReveal?' · 有待展示结果':'');}
+   function report(e){console.error('收藏操作未完成',e);status.textContent=e.message;var menu=doc.getElementById('packTicketCount');if(menu)menu.textContent='收藏保存未完成，打开后可重试';}
+   var bridge=createMatchBridge({profile:profile,crypto:globalThis.crypto});
+   function rates(weights){var total=Object.values(weights).reduce(function(a,b){return a+b;},0);return Object.entries(weights).map(function(pair){return pair[0]+' '+(pair[1]/total*100).toFixed(0)+'%';}).join(' / ');}
+   function stopAnimation(){if(animationTimer!==null){clearTimeout(animationTimer);animationTimer=null;}}
+   function showResults(result){
+    stopAnimation();body.replaceChildren();title.textContent='开包结果';body.appendChild(el('p','rjc-note','结果已保存并加入仓库。重复卡仅标记，不会自动分解。'));
+    var grid=el('div','rjc-grid');result.cards.forEach(function(entry){var c=collection.getCard(entry.cardId),cell=el('article','rjc-card');cell.dataset.cardId=c.id;var image=el('img');image.src=c.source.image_url||c.source.avatar_url||'';image.alt=c.name;image.className='rjc-result-image';cell.append(image,el('h3','rjc-card-name',c.name));var badge=el('span','rjc-rarity',entry.rarity);badge.dataset.rarity=entry.rarity;cell.append(badge,el('span','rjc-count',entry.duplicate?'重复':'新收藏'));grid.appendChild(cell);});body.appendChild(grid);
+    var confirm=button('确认结果，返回卡包',async function(){if(busy)return;busy=true;confirm.disabled=true;try{await controller.confirm(result.resultId);busy=false;render();}catch(e){busy=false;confirm.disabled=false;report(e);}},'rjc-primary');body.appendChild(confirm);updateBalance();
+   }
+   function animate(result){
+    body.replaceChildren();title.textContent='正在开包';var stage=el('div','rjc-pack-animation','✦'),skip=button('跳过动画',function(){showResults(result);},'rjc-primary');body.append(stage,el('p','rjc-note','卡包结果已保存'),skip);
+    if(globalThis.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)showResults(result);else animationTimer=setTimeout(function(){animationTimer=null;showResults(result);},1600);
+   }
+   function render(){
+    if(destroyed)return;stopAnimation();updateBalance();var pending=controller.resume();if(pending){showResults(pending);return;}
+    title.textContent='卡包与收藏';status.textContent='';body.replaceChildren();var p=controller.snapshot();
+    body.appendChild(el('p','rjc-note','每包 '+pool.cardsPerPack+' 张，消耗 '+pool.ticketCost+' 张抽卡券。只用于收藏，所有卡仍可编组。'));
+    var probabilities=el('section','rjc-probabilities');probabilities.append(el('h3','','完整概率'),el('p','','普通槽（前'+pool.ordinarySlots+'张）：'+rates(pool.ordinaryWeights)),el('p','','保证槽（第'+pool.guaranteedSlot.position+'张）：'+rates(pool.guaranteedSlot.weights)),el('p','','保底：连续'+pool.pity.afterMisses+'包无'+pool.pity.rarity+'后，下一包必有'+pool.pity.rarity+'；任意位置抽到即归零。'),el('p','','同稀有度内均匀抽取；公共卡不入包。'));
+    body.append(probabilities,el('p','rjc-pity','连续未出'+pool.pity.rarity+'：'+p.pity.standard.packsWithoutUR+' / '+pool.pity.afterMisses));
+    var open=button('开1包 · '+pool.ticketCost+'券',async function(){if(busy)return;busy=true;open.disabled=true;status.textContent='正在保存卡包…';try{var saved=await controller.openPack();busy=false;status.textContent='';updateBalance();animate(saved);}catch(e){busy=false;open.disabled=false;if(e.code==='PACK_PENDING'){showResults(controller.resume());}else report(e);}},'rjc-primary');open.dataset.action='open-pack';open.disabled=p.tickets<pool.ticketCost;body.appendChild(open);
+    var actions=el('div','rjc-actions');actions.append(button('每日领取 '+rules.economy.dailyTickets+' 券',async function(){if(busy)return;busy=true;try{var saved=await profile.claimDaily(),r=saved.result||saved;busy=false;render();status.textContent=r.duplicate?'今天已经领取':'已领取 '+r.awardedTickets+' 张抽卡券';}catch(e){busy=false;report(e);}}),button('仓库 / 图鉴 / 合成',function(){collectionUI.show('warehouse');showScreen('collectionScreen');}),button('重试保存对局奖励',function(){bridge.retry().then(function(){render();},report);}));body.appendChild(actions);
+    body.appendChild(el('p','rjc-note','北京时间每日：每日领取'+rules.economy.dailyTickets+'券；前'+rules.economy.participationDailyCap+'局正常完成每局'+rules.economy.participationTickets+'券；首胜额外'+rules.economy.firstWinTickets+'券。沙盒和直接退出不发对局券。'));
+   }
+   var api={open:function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');render();showScreen('packScreen');},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
+   globalThis.addEventListener('storage',function(event){if(event.key==='rujuzhe_profile'&&!busy){try{updateBalance();if(host.classList.contains('active'))render();}catch(e){report(e);}}});
+   render();instance=api;return api;
+  })().catch(function(e){booting=null;var n=typeof document!=='undefined'&&document.getElementById('packTicketCount');if(n)n.textContent='收藏不可用，点击重试';throw e;});return booting;
+ }
+ function ready(action){if(!isPageReady())return Promise.resolve({ignored:true});return boot().then(action).catch(function(e){console.error('卡包操作失败',e);var n=typeof document!=='undefined'&&document.getElementById('packTicketCount');if(n)n.textContent=e.message;});}
+ // 只读桥接按事件顺序消费；开局上下文在当前事件结束后即捕获，不等档案网络加载。
+ var bridgeEvents=Promise.resolve();
+ function bridgeEvent(action){if(!isPageReady())return Promise.resolve({ignored:true});var job=bridgeEvents.then(function(){return boot().then(action);});bridgeEvents=job.catch(function(e){console.error('对局领奖桥接未完成',e);});return bridgeEvents;}
+ return Object.freeze({createController:createController,createMatchBridge:createMatchBridge,isPageReady:isPageReady,boot:boot,enterBattle:function(getContext){var context=Promise.resolve().then(getContext);return bridgeEvent(function(app){return context.then(function(c){app.observeBattle(c.state,c.meta);});});},open:function(){return ready(function(app){app.open();});},observeBattle:function(state,meta){return ready(function(app){app.observeBattle(state,meta);});},finishBattle:function(win){return bridgeEvent(function(app){app.finishBattle(win);});},abandonBattle:function(){return bridgeEvent(function(app){app.abandonBattle();});}});
+});

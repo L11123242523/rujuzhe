@@ -20,6 +20,7 @@ try {
   }
 } catch (e) {}
 function showScreen(id) {
+  if ((id === 'mainMenu' || id === 'onlineLobby') && typeof RJPackApp !== 'undefined' && typeof battleState !== 'undefined' && battleState && !battleState._over && document.getElementById('battleScreen') && document.getElementById('battleScreen').classList.contains('active')) RJPackApp.abandonBattle();
   try { __mmPickBg(); } catch (e) {}
   /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
   try { if (typeof window !== 'undefined') window.__screenId = id; } catch (e) { try { console.error('[catch] assets/ui.js:5', e); } catch (e2) {} }
@@ -31,6 +32,9 @@ function showScreen(id) {
   if (target) {
     target.classList.add('active');
   }
+  if (id === 'battleScreen' && typeof RJPackApp !== 'undefined') RJPackApp.enterBattle(function () {
+    return { state: typeof battleState !== 'undefined' ? battleState : null, meta: { online: typeof Online !== 'undefined' && Online.active, roomId: typeof Online !== 'undefined' ? Online.roomId : '', seed: typeof Online !== 'undefined' ? Online.seed : undefined, sandbox: typeof battleState !== 'undefined' && battleState && (battleState._sandbox || (typeof __pendingSandbox !== 'undefined' && __pendingSandbox)), over: typeof battleState !== 'undefined' && battleState && battleState._over, winner: typeof battleState !== 'undefined' && battleState ? battleState._winner : null } };
+  });
   if (id === 'cardViewer') renderCardGrid();
   if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) { try { console.error('[catch] assets/ui.js:15', e); } catch (e2) {} } }
   /* 回到主菜单/联机大厅 = 明确已经不在战斗里了 → 把战斗残留的浮层与临时状态清干净。
@@ -58,6 +62,7 @@ function showScreen(id) {
 }
 
 function showToast(msg, kind, dur) {
+  if (typeof RJPackApp !== 'undefined' && typeof battleState !== 'undefined' && battleState && battleState._over && (battleState._winner === 'p1' || battleState._winner === 'p2')) RJPackApp.finishBattle(battleState._winner === 'p1');
   var wrap = document.getElementById('uiToastWrap');
   if (!wrap) { console.warn('[toast]', msg); return; }
   var t = document.createElement('div');
@@ -73,6 +78,7 @@ function showToast(msg, kind, dur) {
 }
 
 function showBattleResult(win, title, desc, stats) {
+  if (typeof RJPackApp !== 'undefined') RJPackApp.finishBattle(!!win);
   var ov = document.getElementById('resultOverlay');
   if (!ov) { alert(title + (desc ? ('\n' + desc) : '')); return; }
   var box = document.getElementById('resultBox');

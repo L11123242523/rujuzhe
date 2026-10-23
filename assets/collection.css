@@ -1,0 +1,60 @@
+/* 所有规则仅作用于独立收藏容器，不触及战斗或既有卡牌详情。 */
+.rjc-root { --rjc-bg:#141b2c; --rjc-panel:#202b40; --rjc-ink:#edf3ff; --rjc-muted:#b2bed1; box-sizing:border-box; color:var(--rjc-ink); background:var(--rjc-bg); font:15px/1.5 system-ui,sans-serif; width:100%; min-height:100%; padding:20px; }
+.rjc-root *, .rjc-root *::before, .rjc-root *::after { box-sizing:border-box; }
+.rjc-root[hidden], .rjc-root [hidden] { display:none !important; }
+.rjc-root button, .rjc-root select, .rjc-root input { font:inherit; }
+.rjc-root button, .rjc-root select { color:var(--rjc-ink); background:var(--rjc-panel); border:1px solid #526581; border-radius:9px; padding:9px 12px; min-height:42px; cursor:pointer; }
+.rjc-root button:focus-visible, .rjc-root select:focus-visible, .rjc-root input:focus-visible { outline:3px solid #84caff; outline-offset:2px; }
+.rjc-root button:disabled { opacity:.5; cursor:default; }
+.rjc-root button[aria-pressed=true], .rjc-root .rjc-primary { color:#122039; background:#9ed8ff; border-color:#9ed8ff; }
+.rjc-root .rjc-header, .rjc-root .rjc-tabs, .rjc-root .rjc-filters, .rjc-root .rjc-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.rjc-root .rjc-header { justify-content:space-between; }
+.rjc-root h2 { margin:0; font-size:24px; }
+.rjc-root .rjc-balance { margin:0; font-weight:700; }
+.rjc-root .rjc-note, .rjc-root .rjc-count { color:var(--rjc-muted); }
+.rjc-root .rjc-tabs { margin:18px 0 12px; }
+.rjc-root .rjc-filters { margin:0 0 12px; }
+.rjc-root .rjc-filter { display:flex; flex-direction:column; gap:4px; flex:1 1 135px; min-width:0; }
+.rjc-root .rjc-filter select { width:100%; }
+.rjc-root .rjc-status { min-height:24px; margin:10px 0; }
+.rjc-root .rjc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
+.rjc-root .rjc-card { background:var(--rjc-panel); border:1px solid #40516c; border-radius:13px; padding:10px; min-width:0; display:flex; flex-direction:column; gap:7px; }
+.rjc-root .rjc-picture { border:0; padding:0; min-height:0; background:transparent; display:block; width:100%; overflow:hidden; }
+.rjc-root .rjc-picture img { display:block; width:100%; height:auto; aspect-ratio:663/974; object-fit:contain; border-radius:6px; }
+.rjc-root .rjc-card-name { font-size:16px; line-height:1.45; margin:0; overflow-wrap:anywhere; }
+.rjc-root .rjc-meta { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:13px; }
+.rjc-root .rjc-rarity { display:inline-block; border:1px solid currentColor; border-radius:5px; padding:0 6px; font-weight:800; }
+.rjc-root .rjc-rarity[data-rarity=UR] { color:#ffd181; }
+.rjc-root .rjc-rarity[data-rarity=SR] { color:#dbadff; }
+.rjc-root .rjc-rarity[data-rarity=R] { color:#93ccff; }
+.rjc-root .rjc-rarity[data-rarity=N] { color:#d3dfef; }
+.rjc-root .rjc-card .rjc-actions { margin-top:auto; }
+.rjc-root .rjc-card .rjc-actions button { flex:1 1 100%; width:100%; }
+.rjc-root .rjc-backdrop { position:fixed; inset:0; z-index:30000; padding:16px; background:#040a16db; display:flex; align-items:center; justify-content:center; }
+.rjc-root .rjc-dialog { width:100%; max-width:520px; max-height:calc(100dvh - 32px); overflow:auto; overscroll-behavior:contain; background:var(--rjc-bg); border:1px solid #617897; border-radius:16px; padding:18px; }
+.rjc-root .rjc-dialog h3 { margin:0 0 12px; overflow-wrap:anywhere; }
+.rjc-root .rjc-dialog img { display:block; width:100%; max-width:280px; height:auto; margin:12px auto; }
+.rjc-root .rjc-effect { white-space:pre-wrap; overflow-wrap:anywhere; }
+.rjc-root .rjc-quantity { display:block; width:100%; color:var(--rjc-ink); background:var(--rjc-panel); border:1px solid #6a7d99; border-radius:8px; padding:10px; margin:8px 0; }
+.rjc-root .rjc-dialog-error { color:#ffb7b7; min-height:24px; }
+@media (max-width:480px) {
+  .rjc-root { padding:12px; }
+  .rjc-root .rjc-header { align-items:flex-start; }
+  .rjc-root .rjc-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .rjc-root .rjc-card { padding:8px; }
+  .rjc-root .rjc-card-name { font-size:14px; }
+  .rjc-root .rjc-meta { font-size:12px; }
+  .rjc-root .rjc-tabs { gap:6px; }
+  .rjc-root .rjc-tabs button { flex:1 1 40%; }
+  .rjc-root .rjc-dialog { padding:14px; }
+}
+
+/* P3卡包专用；不改变既有战斗界面。 */
+.rjc-root .rjc-pack-body { display:flex; flex-direction:column; gap:16px; }
+.rjc-root .rjc-probabilities { background:var(--rjc-panel); border:1px solid #526581; border-radius:12px; padding:14px; }
+.rjc-root .rjc-probabilities h3 { margin-top:0; }
+.rjc-root .rjc-probabilities p { overflow-wrap:anywhere; }
+.rjc-root .rjc-result-image { display:block; width:100%; height:auto; aspect-ratio:663/974; object-fit:contain; }
+.rjc-root .rjc-pack-animation { padding:65px 0; text-align:center; font-size:100px; color:#ffe0a0; animation:rjcPackPulse .8s ease-in-out infinite alternate; }
+@keyframes rjcPackPulse { from { transform:scale(.85); opacity:.5; } to { transform:scale(1); opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .rjc-root .rjc-pack-animation { animation:none; } }

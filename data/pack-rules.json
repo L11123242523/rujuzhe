@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "collectionOnly": true,
+  "pools": {
+    "standard": {
+      "version": 1,
+      "cardsPerPack": 5,
+      "ticketCost": 1,
+      "ordinarySlots": 4,
+      "ordinaryWeights": {
+        "UR": 5,
+        "SR": 15,
+        "R": 35,
+        "N": 45
+      },
+      "guaranteedSlot": {
+        "position": 5,
+        "weights": {
+          "UR": 25,
+          "SR": 75,
+          "R": 0,
+          "N": 0
+        }
+      },
+      "pity": {
+        "rarity": "UR",
+        "afterMisses": 9,
+        "replacementSlot": 5,
+        "resetOnAnyUR": true
+      },
+      "selectionWithinRarity": "uniform",
+      "allowDuplicates": true
+    }
+  },
+  "economy": {
+    "initialTickets": 5,
+    "dailyTickets": 1,
+    "participationTickets": 1,
+    "participationDailyCap": 3,
+    "firstWinTickets": 1,
+    "dayTimeZone": "Asia/Shanghai",
+    "eligibleModes": [
+      "pve",
+      "online"
+    ],
+    "excludedModes": [
+      "sandbox"
+    ]
+  },
+  "dust": {
+    "N": {
+      "disassemble": 5,
+      "craft": 20
+    },
+    "R": {
+      "disassemble": 20,
+      "craft": 80
+    },
+    "SR": {
+      "disassemble": 100,
+      "craft": 400
+    },
+    "UR": {
+      "disassemble": 400,
+      "craft": 1600
+    }
+  },
+  "duplicates": {
+    "automaticDisassembly": false,
+    "keepAtLeast": 1
+  }
+}
