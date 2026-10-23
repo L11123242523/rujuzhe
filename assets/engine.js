@@ -6648,7 +6648,7 @@ function collectChainable(player, effect){
       if (__kd === 'negate_effect') {
         if (stage !== 'effect_activate') return;
         var __srcFd = ((effect && effect.card && (effect.card.effect || effect.card.text)) || (effect && effect.description) || '');
-        if (!/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__srcFd)) return;
+        if (c.name === '崩塌之乌托邦' ? !__utopiaCanRespond(effect) : !/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__srcFd)) return;
         /* 与原反制分支**逐条一致**：时点被卡（灰流丽类）时也不能发动 ✓ */
         if (typeof __negateTimingMissed === 'function' && __negateTimingMissed(__srcFd)) {
           try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { try { console.error('[catch] assets/engine.js:6089', e); } catch (e2) {} }
@@ -6663,7 +6663,7 @@ function collectChainable(player, effect){
          而【永眠之棺】卡面是「选**场上一张卡**…效果无效」⇒ 对**任何效果**都能用 ⇒ 必须豁免 ✓。
          只按卡名豁免这一张；其它 negate_effect 卡行为一字不变 ✓。 */
       var __ymCard = (((c && c.name) || '').indexOf('永眠之棺') >= 0);
-      if (!__ymCard && !/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__src)) return;
+      if (!__ymCard && (c.name === '崩塌之乌托邦' ? !__utopiaCanRespond(effect) : !/加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(__src))) return;
       /* __UTOPIA_TIMING：灰流丽类 ⇒ 触发步不是该次结算的最后一步时**时点被卡**、不能发动 */
       if (typeof __negateTimingMissed === 'function' && __negateTimingMissed(__src)) {
         try { addBattleLog(player, '【连锁·卡时点】要反制的效果"加入手卡/送墓/抽卡"之后还有后续处理 ⇒ 时点被卡，「' + (c.name || '反制卡') + '」不能发动'); } catch (e) { try { console.error('[catch] assets/engine.js:6100', e); } catch (e2) {} }
@@ -11120,7 +11120,7 @@ function rollPlayerDice(player) {
           var __gRun = function () {
             __g[__gKey] = true;   // 一轮内每名玩家限一次（发动时才占用）
             var __gPool = (p.grave || []).map(function (c) { return { card: c, zone: 'grave' }; })
-              .filter(function (x) { return x.card && ['item_single','attack_cards','skill_cards'].indexOf(x.card._category) >= 0; });
+              .filter(function (x) { return x.card && x.card._category === 'item_single'; });
             var __gTake = function (pick) {
               if (pick) {
                 var ix = p.grave.indexOf(pick);
@@ -13842,7 +13842,7 @@ function __lilyApply(seat, done) {
   var c = p.grave.shift(); p.deck.push(c); // 墓地最下方(grave[0]最早进墓) -> 牌组最下方(末位)
   addBattleLog(seat, '【莉莉SP】墓地最下方【' + c.name + '】放回牌组最下方');
   var __nb = p.grave.length ? p.grave[0] : null; // 取走后新的墓地最下方
-  var __singleCats = ['item_single','attack_cards','skill_cards'];
+  var __singleCats = ['item_single'];
   var __ok = __singleCats.indexOf(c._category) >= 0 && (!__nb || __singleCats.indexOf(__nb._category) < 0);
   if (__ok) {
     recoverCost(seat, 1, '莉莉SP');
@@ -14272,7 +14272,7 @@ function aiUsePermanentActive(player, done) {
       syncNext(card, act); return;
     }
     if (h === 'langya') { // 狼牙鹰爪（每回合一次）：选墓地[侵略]单次卡付其费用+1适用其效果（走统一指令层）
-      var gl = (typeof collectZoneCards === 'function') ? collectZoneCards(player, ['grave'], ['侵略'], ['item_single','attack_cards','skill_cards']) : [];
+      var gl = (typeof collectZoneCards === 'function') ? collectZoneCards(player, ['grave'], ['侵略'], ['item_single']) : [];
       if (!gl.length) { next(); return; }
       var gops = compileStepOps('选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。');
       if (!gops) { next(); return; }
@@ -17952,7 +17952,15 @@ function __parseTags(t) { return (t.match(/\[[^\]]+\]/g) || []).map(function (x)
    只有标签限制（无序以外 ✓）。而原来 `/单次种类|单次卡|道具/` 把光秃秃的「道具」也算作**单次** ✗
    ⇒ 永续道具（如设计师的直尺 ✓）被排除 ⇒「无法加入则不处理」⇒ 检索被整段跳过 ✓（作者实测 ✓）
    ⇒ 修法：**只有明确写「单次种类 / 单次卡」才限单次** ✓；只写「道具」⇒ **单次 + 永续都算** ✓ */
-function __parseCats(t) { var c = []; if (/攻击卡/.test(t)) c.push('attack_cards'); if (/技能卡/.test(t)) c.push('skill_cards'); if (/单次种类/.test(t) && !/道具/.test(t)) c.push('item_single','attack_cards','skill_cards'); else if (/单次种类|单次卡/.test(t)) c.push('item_single'); else if (/道具/.test(t)) { c.push('item_single'); c.push('item_permanent'); } if (/永续/.test(t)) c.push('item_permanent'); return c; }
+function __parseCats(t) {
+  var c = [], single = /单次种类|单次卡|单次道具/.test(t), permanent = /永续/.test(t);
+  if (/攻击卡|携带卡/.test(t)) c.push('attack_cards');
+  if (/技能卡|携带卡/.test(t)) c.push('skill_cards');
+  if (single) c.push('item_single');
+  if (permanent) c.push('item_permanent');
+  if (/道具/.test(t) && !single && !permanent) c.push('item_single', 'item_permanent');
+  return c;
+}
 
 function matchCardQuery(c, tags, cats, exclude) {
   if (cats && cats.length && cats.indexOf(c._category) < 0) return false;
@@ -18730,7 +18738,7 @@ function applyMove(user, signedN, sourceCard) {
 
 function blueprintCopy(user, selfCard, done) {
   var p = battleState[user], pool = [];
-  pool = collectZoneCards(user, ['hand','grave'], null, ['item_single','attack_cards','skill_cards'], null, true).filter(function (x) { return x.card !== selfCard; });
+  pool = collectZoneCards(user, ['hand','grave'], null, ['item_single'], null, true).filter(function (x) { return x.card !== selfCard; });
   if (!pool.length) { addBattleLog(user, '手牌与墓地没有可复制的单次卡，蓝图不适用'); done(); return; }
   pickFromList(user, pool, '魔法蓝图：选择一张单次种类的卡（此卡变为该卡并加入手卡，之后再次使用它来适用效果）', 1, function (picks) {
     if (!picks || !picks.length) { done(); return; }
@@ -24823,7 +24831,16 @@ function isChainOnlyCard(card) {
 function __utopiaCanRespond(effect) {
   if (!effect || effect.cancelled || (effect._stage || effect.type) !== 'effect_activate') return false;
   var text = (effect.card && (effect.card.effect || effect.card.text)) || effect.description || '';
-  return /加入手卡|加入手牌|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/.test(text) && !__negateTimingMissed(text);
+  var flow = /加入手卡|加入手牌|加入[^。；，]*(?:道具卡|卡)|送入墓地|送墓|抽\s*\d?\s*张|抽一张|检索/;
+  if (!flow.test(text) || __negateTimingMissed(text)) return false;
+  // 按每段加手/送墓效果的对象类别判断；源卡自身是什么类别不参与筛选。
+  return text.split(/[。；\n]|那之后|然后/).some(function (clause) {
+    if (!flow.test(clause)) return false;
+    if (/抽(?:取)?\s*(?:\d+|[一二两三四五六七八九十])\s*张(?:卡|牌|(?=[，,。；;）)\s]|$))/.test(clause)) return true;
+    var cats = __parseCats(clause);
+    return /事件卡|馈赠卡|乐谱卡/.test(clause) || !cats.length ||
+      cats.indexOf('item_single') >= 0 || cats.indexOf('item_permanent') >= 0;
+  });
 }
 function hasChainTarget(card, stage) {
   if (card && card.name === '能量饮料') {
@@ -25643,7 +25660,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
   langya: function (card, user) {
     // 统一走指令层 grave_copy：标签匹配按 type/tags/attribute 一致判定（破损电子设备 type=侵略、attribute=混沌 也能命中），取目标卡 effect 而非 SP
     var foe = foeOf(user);
-    var list = (typeof collectZoneCards === 'function') ? collectZoneCards(user, ['grave'], ['侵略'], ['item_single','attack_cards','skill_cards']) : [];
+    var list = (typeof collectZoneCards === 'function') ? collectZoneCards(user, ['grave'], ['侵略'], ['item_single']) : [];
     if (!list.length) { if (user === 'p1') showToast('【狼牙鹰爪】墓地没有[侵略]标签的单次卡。', 'warn'); return false; }
     var ops = compileStepOps('选墓地一张[侵略]标签的单次种类的卡发动，支付那张卡使用时所需要的音韵值+1点音韵值来适用那张卡的效果。');
     runOps(ops, { user: user, target: foe, card: card }, function () { addBattleLog(user, '【狼牙鹰爪】适用完毕'); updateBattleUI(); });
