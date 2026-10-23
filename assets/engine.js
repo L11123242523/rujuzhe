@@ -8972,7 +8972,16 @@ var TW = {
   },
   _avail: function (win, who) {
     /* 【2026-10-01】_chainDisabled：已被"同链一次"拒绝过的候选不再提供（否则 AI 会反复重选 ⇒ 死循环） */
-    return win.candidates.filter(function (c) { return c && c.owner === who && !c._chainDisabled && win.chain.indexOf(c) < 0 && (typeof c.alive !== 'function' || c.alive()); });
+    return win.candidates.filter(function (c) {
+      if (!c || c.owner !== who || c._chainDisabled || win.chain.indexOf(c) >= 0) return false;
+      if (typeof c.alive === 'function' && !c.alive()) return false;
+      /* 【2026-10-24】候选是开窗时扫出来的；开窗后费用可能被支付/削减 ⇒ 每次取候选都按“当前余额”重验，
+         否则会问“2音韵能否连锁3费卡”，选中后又被费用闸拒绝（作者截图事故）。 */
+      if (c.onAdd && c.pick && typeof __costAffordable === 'function'
+          && ['hand','faceDown','event'].indexOf(c.pick.from) >= 0
+          && !__costAffordable(c.owner, c.pick.card)) return false;
+      return true;
+    });
   },
   _chainText: function (win) {
     return win.chain.length ? win.chain.map(function (c, i) { return 'C' + (i + 1) + ' ' + TW._whoName(c.owner) + '·' + c.label; }).join('、') : '（暂无）';
@@ -10465,7 +10474,9 @@ function runResponseWindow(opts) {
       var pick = node.pick || {};
       var card = pick.card || {};
       if (who !== 'p1') return '🔗 ' + (card.name || '?');
-      return (pick.selfBuff ? '⚡ 使用 ' : '🔗 ') + (card.name || '?') + '（' + (card.cost || 0) + '费）' +
+      /* 【2026-10-24】显示“当前所需费用”，不是卡面基础费：有钢笔/葵/等级减免时，3费卡可能实际2费。 */
+      var __lblCost = (typeof computeRequiredCost === 'function' && card && card.name) ? computeRequiredCost(card, who) : (card.cost || 0);
+      return (pick.selfBuff ? '⚡ 使用 ' : '🔗 ') + (card.name || '?') + '（' + __lblCost + '费）' +
         (pick.selfBuff ? ' · 本次位移x2' : '') + (pick.from === 'faceDown' ? '[盖伏]' : '');
     },
     passLabelOf: function () { return '■ 不连锁'; },
