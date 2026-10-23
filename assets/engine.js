@@ -6629,8 +6629,7 @@ function collectChainable(player, effect){
       /* 【2026-10-15 作者裁决】技能卡不再有「每回合一次」限制 ⇒ 这句闸已删除 ✓
        （被删掉的原句：`if (c._skillUsedThisTurn) return;`） */
       if (typeof teamHasCardCharacter === 'function' && !teamHasCardCharacter(player, c)) return;
-      var __skCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
-      if ((parseInt(c.cost,10)||0) > (me.cost||0) + __skCap) return;
+      if (!__costAffordable(player, c)) return;
       if (from === 'faceDown' && c._faceDownTurn === battleState.turn && c._faceDownPlayer === player) return;
       out.push({card:c, from:from, index:index, isSkill:true});
       return;
@@ -6673,8 +6672,7 @@ function collectChainable(player, effect){
     } else {
       if(!isChainOnlyCard(c) || !__chainTargetOk(c) || !__matchStage(c)) return;
     }
-    var __clCap = (typeof __overclockLoanCap === 'function') ? __overclockLoanCap(player) : 0;
-    if((parseInt(c.cost,10)||0)>(me.cost||0)+__clCap) return;
+    if (!__costAffordable(player, c)) return;
     if(from==='faceDown' && c._faceDownTurn===battleState.turn && c._faceDownPlayer===player) return;
     out.push({card:c,from:from,index:index});
   }
@@ -6711,7 +6709,7 @@ function collectChainable(player, effect){
     if (c.name !== '能量饮料' && __myTurn && stage === 'move' && effect && effect.player === player) {
       var __sbEff = (c.effect||'') + (c.text||'');
       if (/移动动作的位移量\s*[x×]\s*2|位移量\s*[x×]\s*2/.test(__sbEff) && /移动/.test(__sbEff)) {
-        if ((parseInt(c.cost,10)||0) <= (me.cost||0)) out.push({card:c,from:'hand',index:i,selfBuff:true});
+        if (__costAffordable(player, c)) out.push({card:c,from:'hand',index:i,selfBuff:true});
         return;
       }
     }
@@ -6804,6 +6802,9 @@ function collectChainable(player, effect){
   }
   return __dedup;
 }
+function __chainPickAffordable(player, pick) {
+  return !!pick && (pick.from === 'seatEffect' || pick.from === 'permSP' || pick.horus || __costAffordable(player, pick.card));
+}
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
 // 会话级记忆（刷新页面即失效，避免永久改变规则）
 /* 【2026-10-03】作者口径：连锁窗**要有倒计时**（原来 8 秒太短，玩家还在想就被自动 PASS、
@@ -6895,22 +6896,15 @@ function applyChainCard(player,pick,effect,done,target){
     setTimeout(function () { if (typeof done === 'function') done(); }, 200);
     return;
   }
-  /* 【2026-10-11 撤回·流程不安全（作者报：AI 事件卡留在效果处理区 / 一直"效果结算中" / 永续卡进墓地）】
-     这里原有一道"连锁费用闸"（余额+超频额度 ≥ 费用，否则 return 不发动）—— 它位于**调用方已经决定发动之后**：
-     调用方（连锁窗 / 时点候选的 onAdd）已把这一环当成"已上链"，我却在 payAndRemove() 之前 return
-     ⇒ 卡没上链、没付费、也没移出原区域 ⇒ 状态与流程不一致 ✗（正是上面那三个症状的形态）
-     ⇒ 撤回该闸，恢复"一发动就照原流程走"（付费 → 移出原区域 → 入链 → 逆结算）✓
-     · 越界保护改由 _addChain 里那道闸承担（它在**入链之前**判、打日志 + 标记候选，不产生任何副作用 ✓）
-     · ⚠ 已知遗留：绕过 _addChain 的"阶段时点发动卡"那一类仍可能把 cost 扣到超出超频额度（原 bug 会回来），
-       但**宁可有数值越界，也不能让对局流程错乱** ✗；该遗留应当用"付费封顶到允许下限（不拒绝发动）"安全修。
-     —— 原闸代码：if (c && c.cost && !__costAffordable(player, c)) { …本次不能发动…; return; } */
+  // 普通响应在任何入链/付费动作前再核验；角色能力与SP已在上方独立返回。
+  if (!__chainPickAffordable(player, pick)) { if (typeof done === 'function') done(); return; }
   effect._chain = effect._chain || [];
   function payAndRemove(){
     /* 【2026-10-09 第2件】连锁发动时卡会被移出所有区域 ⇒ "用卡后被动"的归属守卫查不到它。
        这里打一个"本次正由该玩家使用"的标记（守卫认它、placeAfterUse 里清除）。 */
     try { if (c) c._inUseBy = player; } catch (e) { try { console.error('[catch] assets/engine.js:6221', e); } catch (e2) {} }
     // 盖伏放置时不付费，连锁翻开时与手牌一样支付费用
-    __spendCost(me, (parseInt(c.cost,10)||0));
+    __spendCost(me, computeActualCost(c, player));
     if (typeof __settleOverclockLoan === 'function') __settleOverclockLoan(player);
     if(pick.from==='faceDown') me.faceDownCards.splice(pick.index,1); else if(pick.from==='event') me.eventCards.splice(pick.index,1); else me.hand.splice(pick.index,1);
     if (pick.from === 'event') {
@@ -8934,6 +8928,7 @@ var TW = {
           __fresh.push(c);
         });
         var __kept = win.candidates.filter(function (c) {
+          if (c.pick && !__chainPickAffordable(c.owner, c.pick)) return false;
           if (__fresh.indexOf(c) >= 0) return false;       // 同一对象：已被本次重扫覆盖
           var k = __ck(c);
           if (k && __seen[k]) return false;                // 同一张卡（对象被重建过）：也已覆盖
@@ -9037,11 +9032,12 @@ var TW = {
        判据与出牌闸共用唯一出口 `__costAffordable()`；处理方式与去重/速度两道闸同款
        （打日志 + 标记候选已用，否则 AI 会反复重选 ⇒ 死循环 + 不入链）。 */
     try {
-      if (c && c.owner && c.card && typeof c.onAdd === 'function' && !__costAffordable(c.owner, c.card)) {
+      var __costCard = c && ((c.pick && c.pick.card) || c.card);
+      if (c && c.owner && __costCard && typeof c.onAdd === 'function' && !(c.pick ? __chainPickAffordable(c.owner, c.pick) : __costAffordable(c.owner, __costCard))) {
         var __cp = battleState[c.owner] || {};
-        var __cc = parseInt(c.card.cost, 10) || 0;
+        var __cc = computeRequiredCost(__costCard, c.owner);
         try { c._chainDisabled = true; } catch (e) { try { console.error('[catch] assets/engine.js:7857', e); } catch (e2) {} }
-        addBattleLog((c.owner || 'system'), '【连锁·费用闸】「' + (c.label || c.card.name || c.key) + '」需要 ' + __cc
+        addBattleLog((c.owner || 'system'), '【连锁·费用闸】「' + (c.label || __costCard.name || c.key) + '」需要 ' + __cc
           + ' 点音韵值，当前 ' + __cp.cost + '（可透支 '
           + ((typeof __overclockLoanCap === 'function') ? __overclockLoanCap(c.owner) : 0) + '）⇒ 本次不能发动');
         return __fin0();
@@ -26143,6 +26139,10 @@ function computeRequiredCost(card, user) {
   if (/费用随使用次数增加|每用一次\+1/.test((card.sp || '') + (card.effect || ''))) {
     actual = cost + (card._escalateCount || 0);
   }
+  if (card.name === '鼓舞') {
+    var __guwuMin = playerIds().some(function (w) { return ((deckOf(w) || {}).chars || []).some(function (ch) { return ch && ch.name === '入间予'; }); }) ? 0 : 1;
+    actual = Math.max(__guwuMin, actual - (card._guwuUseCount || 0));
+  }
   // 小野葵：整副牌组（8道具 + 4角色携带卡 = 12张）每张的"首次使用"费用-1 ⇒ 属「所需要的音韵值-1」✓
   /* 【2026-10-15 作者报「葵的SP:所有携带卡（道具卡、技能卡或攻击卡）首次使用是所需要的费用-1没有生效」⇒ 结构修 ✓】
      卡面（实测抄录）：「sp: 初始手牌+1，暴击伤害+1；游戏开始时队伍携带的所有卡在首次使用时所需要的音韵值-1。
@@ -26571,6 +26571,7 @@ function postUsePassiveHooks(user, card, done) {
   }
   var p = battleState[user];
   var tp = battleState.currentPlayer || user;
+  if (card.name === '鼓舞') card._guwuUseCount = (card._guwuUseCount || 0) + 1;
   var cands = [];
   function __add(owner, mandatory, label, fire, alive) {
     cands.push({ owner: owner, mandatory: mandatory, label: label, fire: fire, alive: alive });
