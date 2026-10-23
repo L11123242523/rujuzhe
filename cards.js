@@ -172,7 +172,7 @@ window.__CARD_DATA__ = {
          ],
          "sync": 6,
          "sp_member": false,
-         "image_url": "assets/images/ui2/card_face_songshanhui.webp?v=11",
+         "image_url": "assets/images/ui2/card_face_songshanhui.webp?v=12",
          "_category": "characters",
          "type": "术士/调度者/增益者",
          "sync_value": 6,
@@ -730,7 +730,7 @@ window.__CARD_DATA__ = {
             "调度者"
          ],
          "sp_member": true,
-         "image_url": "assets/images/ui2/card_yunai_wangxi_v2.webp?v=5",
+         "image_url": "assets/images/ui2/card_yunai_wangxi_v2.webp?v=6",
          "sync": 5,
          "_category": "characters",
          "sync_value": 5,

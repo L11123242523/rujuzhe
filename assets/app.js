@@ -12,7 +12,7 @@ try {
        【2026-10-11 又一次踩到同一个坑】卡图 URL 键升位后母本内容变了 ⇒ 键 7 → **8** ✓
        （实测 `data/cards.json?v=6` 原样取回 194448B ≠ 本地 194449B ⇒ 旧母本仍在 CDN 上 ✓）
        注：下面 data/rogue-cards.json 那一行**不动**（肉鸽，未经点名不碰）。 */
-    fetch('data/cards.json?v=39', { cache: 'force-cache' })
+    fetch('data/cards.json?v=40', { cache: 'force-cache' })
       .then(function (r) { return r && r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.characters) { window.__cardDataAsync = j; } })
       .catch(function () {});
