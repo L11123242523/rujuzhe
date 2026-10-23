@@ -10743,6 +10743,12 @@ function rioTriggerOnce(player) {
 function accumulateMovePassives(player, amount, oldPos) {
   var p = battleState[player]; if (!p) return;
   var amt = Math.abs(amount || 0); if (!amt) return;
+  // 首次真实移动抽2：普通投掷、卡效果和AI共用此收口。
+  if (oldPos != null && p.position !== oldPos && p._rioMizugiSP && !p._rioMizugiFirstMove) {
+    p._rioMizugiFirstMove = true;
+    drawCard(player); drawCard(player);
+    addBattleLog(player, '【里绪(水着)SP】首次移动后再抽2张卡');
+  }
   // 设计师直尺SP：单回合每累计移动6格（2026-10-09 平衡性改动：8→6），对一名其他玩家造2理智（队伍≥2名[位移]角色→3）
   var __zhichiCard = (p.permanent || []).find(function (c) { return c.name && c.name.indexOf('直尺') >= 0; });
   if (__zhichiCard) {
@@ -13071,6 +13077,7 @@ function __busOffNetwork(p) { if (p && p._onAnchor) p._onAnchor = 0; }
 /** 公交/地铁：**先问是否上车**（作者 2026-10-03 口径），确认后才付车票、上站台锚点、投四面骰 */
 function __busRide(player, tile) {
   var p = battleState[player]; if (!p || !tile) return;
+  if (p._busRolledThisAction) { addBattleLog(player, '本次行动已经乘车，不能再次乘车'); return; }
   var __kasumi = !!p._kasumiSP;
   if (!p.gold) p.gold = 0;
   if (!__kasumi && p.gold < 200) { addBattleLog(player, '【' + tile.name + '】金币不足200，无法乘车（当前' + p.gold + '）'); return; }
@@ -13087,6 +13094,7 @@ function __busRide(player, tile) {
 /** 确认上车后：付车票 → 上站台锚点 → 投四面骰（小仓霞免判定） */
 function __busBoard(player, tile, __kasumi) {
   var p = battleState[player]; if (!p) return;
+  if (p._busRolledThisAction) { addBattleLog(player, '本次行动已经乘车，不能再次乘车'); return; }
   if (!__kasumi) { if (!p.gold) p.gold = 0; p.gold -= (p, 200); addBattleLog(player, '【' + tile.name + '】支付200金币车票'); }
   p._ridingThisAction = true;   // 乘坐期间不能被距离限制卡攻击、也不能使用这些卡
   var st = BUS_STATION_ANCHOR[tile.id];
@@ -13094,7 +13102,6 @@ function __busBoard(player, tile, __kasumi) {
   p._onAnchor = st;
   addBattleLog(player, '【' + tile.name + '】上车：移动到站台 ' + __busLabel(st));
   if (typeof updateBattleUI === 'function') updateBattleUI();
-  if (p._busRolledThisAction) { addBattleLog(player, '本次行动已经投过四面骰 ⇒ 只能停在锚点上'); return; }
   if (__kasumi) { p._busRolledThisAction = true; __busChooseStep(player, 1, true, tile.id); return; }   // 免判定：直接选下车点
   /* 【2026-10-11】公交站四面骰也是"一次投掷" ⇒ 走唯一出口（投掷者 = 当前玩家 player ✓） */
   var raw = __rollFor(player, 4, '公交站·四面骰');
@@ -18716,11 +18723,6 @@ function applyMove(user, signedN, sourceCard) {
      不在座位上保留标记，后续卡牌与落点引起的移动不会继承；触碰仍先于落点格子结算。 */
   if (sourceCard && sourceCard.name === '谢幕') {
     try { __resolveBackPathTouch(user, n); } catch (e) { try { console.error('[catch] 后退路径触碰', e); } catch (e2) {} }
-  }
-  if (p._rioMizugiSP && !p._rioMizugiFirstMove) {
-    p._rioMizugiFirstMove = true;
-    if (typeof drawCard === 'function') { drawCard(user); drawCard(user); }
-    addBattleLog(user, '【里绪(水着)SP】首次移动后再抽2张卡');
   }
   // 位移落点必须触发所在格子效果（含原地跳跃/0格移动与卡牌效果移动，统一在此收口）
   if (typeof triggerTileEffect === 'function') triggerTileEffect(user);
