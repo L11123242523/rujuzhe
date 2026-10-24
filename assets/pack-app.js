@@ -12,7 +12,7 @@
   }
  }
  function createController(profile){var busy=false;return Object.freeze({
-  async openPack(){if(busy){var e=new Error('正在保存上一包');e.code='PACK_BUSY';throw e;}busy=true;try{var p=profile.getSnapshot(),saved=await profile.openPack('standard',p.revision);return saved.result;}finally{busy=false;}},
+  async openPack(poolId,count){if(poolId===undefined)poolId='character';if(count===undefined)count=1;if(busy){var e=new Error('正在保存上一包');e.code='PACK_BUSY';throw e;}busy=true;try{var p=profile.getSnapshot(),saved=await profile.openPack(poolId,p.revision,count);return saved.result;}finally{busy=false;}},
   resume:function(){return profile.resumeReveal();},confirm:function(id){return profile.confirmReveal(id);},snapshot:function(){return profile.getSnapshot();}
  });}
  function createMatchBridge(options){
@@ -38,7 +38,7 @@
    var data=await Promise.all([load('data/collection-catalog.json'),load('data/pack-rules.json'),load('data/cards.json?v=40')]);
    if(!options.economy)await dependencies(doc);
    var guest=options.profile||await RJProfile.createStore({catalog:data[0],rules:data[1]}),profile=options.economy||RJEconomy.create({guest:guest,account:RJAccount.client()});await profile.initialize();
-   var collection=RJCollection.create({profile:profile,cards:data[2]}),controller=createController(profile),rules=profile.getRules(),pool=rules.pools.standard;
+   var collection=RJCollection.create({profile:profile,cards:data[2]}),controller=createController(profile),rules=profile.getRules(),poolConfig=await profile.getPools(),selectedPool='character';
    function el(tag,cls,text){var n=doc.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
    function button(text,fn,cls){var n=el('button',cls,text);n.type='button';n.addEventListener('click',fn);return n;}
    var root=el('section','rjc-root'),header=el('header','rjc-header'),title=el('h2','','卡包与收藏'),balance=el('p','rjc-balance'),body=el('div','rjc-pack-body'),status=el('p','rjc-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
@@ -52,7 +52,8 @@
    function stopAnimation(){if(animationTimer!==null){clearTimeout(animationTimer);animationTimer=null;}}
    function showResults(result){
     stopAnimation();body.replaceChildren();title.textContent='开包结果';body.appendChild(el('p','rjc-note','结果已保存并加入仓库。重复卡仅标记，不会自动分解。'));
-    var grid=el('div','rjc-grid');result.cards.forEach(function(entry){var c=collection.getCard(entry.cardId),cell=el('article','rjc-card');cell.dataset.cardId=c.id;var image=el('img');image.src=c.source.image_url||c.source.avatar_url||'';image.alt=c.name;image.className='rjc-result-image';cell.append(image,el('h3','rjc-card-name',c.name));var badge=el('span','rjc-rarity',entry.rarity);badge.dataset.rarity=entry.rarity;cell.append(badge,el('span','rjc-count',entry.duplicate?'重复':'新收藏'));grid.appendChild(cell);});body.appendChild(grid);
+    var totals={UR:0,SR:0,R:0,N:0},duplicates=0;result.cards.forEach(function(c){totals[c.rarity]++;if(c.duplicate)duplicates++;});body.appendChild(el('p','rjc-summary',(result.cards.length/5)+'包 · '+result.cards.length+'张 · '+Object.entries(totals).map(function(pair){return pair[0]+' '+pair[1];}).join(' / ')+' · 重复 '+duplicates+'张'));
+    var grid=el('div','rjc-grid rjc-pack-results');result.cards.forEach(function(entry){var c=collection.getCard(entry.cardId),cell=el('article','rjc-card');cell.dataset.cardId=c.id;var image=el('img');image.src=c.source.image_url||c.source.avatar_url||'';image.alt=c.name;image.className='rjc-result-image';cell.append(image,el('h3','rjc-card-name',c.name));var badge=el('span','rjc-rarity',entry.rarity);badge.dataset.rarity=entry.rarity;cell.append(badge,el('span','rjc-count',entry.duplicate?'重复':'新收藏'));grid.appendChild(cell);});body.appendChild(grid);
     var confirm=button('确认结果，返回卡包',async function(){if(busy)return;busy=true;confirm.disabled=true;try{await controller.confirm(result.resultId);busy=false;render();}catch(e){busy=false;confirm.disabled=false;report(e);}},'rjc-primary');body.appendChild(confirm);updateBalance();
    }
    function animate(result){
@@ -61,15 +62,16 @@
    }
    function render(){
     if(destroyed)return;stopAnimation();updateBalance();var pending=controller.resume();if(pending){showResults(pending);return;}
-    title.textContent='卡包与收藏';status.textContent='';body.replaceChildren();var p=controller.snapshot();
+    title.textContent='卡包与收藏';status.textContent='';body.replaceChildren();var p=controller.snapshot(),pool=poolConfig.pools[selectedPool],tabs=el('div','rjc-tabs');for(var id of Object.keys(poolConfig.pools)){(function(id){var tab=button(poolConfig.pools[id].name,function(){if(!busy){selectedPool=id;render();}});tab.dataset.pool=id;tab.setAttribute('aria-pressed',String(id===selectedPool));tabs.appendChild(tab);})(id);}body.appendChild(tabs);
+    body.appendChild(el('p','rjc-note',(selectedPool==='character'?'角色、攻击卡、技能卡':'单次道具、永续道具')+' · '+pool.cardCount+'张；公共卡不入包。'));
     body.appendChild(el('p','rjc-note','每包 '+pool.cardsPerPack+' 张，消耗 '+pool.ticketCost+' 张抽卡券。只用于收藏，所有卡仍可编组。'));
     var probabilities=el('section','rjc-probabilities');probabilities.append(el('h3','','完整概率'),el('p','','普通槽（前'+pool.ordinarySlots+'张）：'+rates(pool.ordinaryWeights)),el('p','','保证槽（第'+pool.guaranteedSlot.position+'张）：'+rates(pool.guaranteedSlot.weights)),el('p','','保底：连续'+pool.pity.afterMisses+'包无'+pool.pity.rarity+'后，下一包必有'+pool.pity.rarity+'；任意位置抽到即归零。'),el('p','','同稀有度内均匀抽取；公共卡不入包。'));
-    body.append(probabilities,el('p','rjc-pity','连续未出'+pool.pity.rarity+'：'+p.pity.standard.packsWithoutUR+' / '+pool.pity.afterMisses));
-    var open=button('开1包 · '+pool.ticketCost+'券',async function(){if(busy)return;busy=true;open.disabled=true;status.textContent='正在保存卡包…';try{var saved=await controller.openPack();busy=false;status.textContent='';updateBalance();animate(saved);}catch(e){busy=false;open.disabled=false;if(e.code==='PACK_PENDING'){showResults(controller.resume());}else report(e);}},'rjc-primary');open.dataset.action='open-pack';open.disabled=p.tickets<pool.ticketCost;body.appendChild(open);
+    body.append(probabilities,el('p','rjc-pity','共享保底计数（兼容旧字段）：连续未出'+pool.pity.rarity+' '+p.pity.standard.packsWithoutUR+' / '+pool.pity.afterMisses));
+    var opens=el('div','rjc-actions rjc-pack-opens');poolConfig.allowedCounts.forEach(function(count){var open=button('开'+count+'包 · '+(count*pool.ticketCost)+'券',async function(){if(busy)return;busy=true;opens.querySelectorAll('button').forEach(function(b){b.disabled=true;});status.textContent='正在保存整批卡包…';try{var saved=await controller.openPack(selectedPool,count);busy=false;status.textContent='';updateBalance();animate(saved);}catch(e){busy=false;if(e.code==='PACK_PENDING'){showResults(controller.resume());}else{render();report(e);}}},'rjc-primary');open.dataset.action='open-pack';open.dataset.count=count;open.disabled=p.tickets<count*pool.ticketCost;opens.appendChild(open);});body.appendChild(opens);
     var actions=el('div','rjc-actions');actions.append(button('每日领取 '+rules.economy.dailyTickets+' 券',async function(){if(busy)return;busy=true;try{var saved=await profile.claimDaily(),r=saved.result||saved;busy=false;render();status.textContent=r.duplicate?'今天已经领取':'已领取 '+r.awardedTickets+' 张抽卡券';}catch(e){busy=false;report(e);}}),button('仓库 / 图鉴 / 合成',function(){collectionUI.show('warehouse');showScreen('collectionScreen');}),button('重试保存对局奖励',function(){bridge.retry().then(function(){render();},report);}));body.appendChild(actions);
     body.appendChild(el('p','rjc-note','北京时间每日：每日领取'+rules.economy.dailyTickets+'券；前'+rules.economy.participationDailyCap+'局正常完成每局'+rules.economy.participationTickets+'券；首胜额外'+rules.economy.firstWinTickets+'券。沙盒和直接退出不发对局券。'));
    }
-   var api={open:async function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');try{await profile.refreshPending();render();showScreen('packScreen');}catch(e){report(e);showScreen('packScreen');}},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
+   var api={open:async function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');try{await profile.refreshPending();poolConfig=await profile.getPools();render();showScreen('packScreen');}catch(e){report(e);showScreen('packScreen');}},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
    profile.subscribe(function(){if(!busy){updateBalance();if(host.classList.contains('active'))render();}});
    globalThis.addEventListener('storage',function(event){if(event.key==='rujuzhe_account_active'){profile.syncSelection().catch(report);return;}if((event.key==='rujuzhe_profile'||event.key&&event.key.startsWith('rujuzhe_account_cache_'))&&!busy){try{updateBalance();if(host.classList.contains('active'))render();}catch(e){report(e);}}});
    render();instance=api;return api;

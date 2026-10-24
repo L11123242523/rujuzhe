@@ -29,7 +29,81 @@
         "resetOnAnyUR": true
       },
       "selectionWithinRarity": "uniform",
-      "allowDuplicates": true
+      "allowDuplicates": true,
+      "legacyOnly": true
+    },
+    "character": {
+      "version": 1,
+      "cardsPerPack": 5,
+      "ticketCost": 1,
+      "ordinarySlots": 4,
+      "ordinaryWeights": {
+        "UR": 5,
+        "SR": 15,
+        "R": 35,
+        "N": 45
+      },
+      "guaranteedSlot": {
+        "position": 5,
+        "weights": {
+          "UR": 25,
+          "SR": 75,
+          "R": 0,
+          "N": 0
+        }
+      },
+      "pity": {
+        "rarity": "UR",
+        "afterMisses": 9,
+        "replacementSlot": 5,
+        "resetOnAnyUR": true
+      },
+      "selectionWithinRarity": "uniform",
+      "allowDuplicates": true,
+      "legacyOnly": false,
+      "name": "角色",
+      "categories": [
+        "characters",
+        "attack_cards",
+        "skill_cards"
+      ],
+      "cardCount": 76
+    },
+    "item": {
+      "version": 1,
+      "cardsPerPack": 5,
+      "ticketCost": 1,
+      "ordinarySlots": 4,
+      "ordinaryWeights": {
+        "UR": 5,
+        "SR": 15,
+        "R": 35,
+        "N": 45
+      },
+      "guaranteedSlot": {
+        "position": 5,
+        "weights": {
+          "UR": 25,
+          "SR": 75,
+          "R": 0,
+          "N": 0
+        }
+      },
+      "pity": {
+        "rarity": "UR",
+        "afterMisses": 9,
+        "replacementSlot": 5,
+        "resetOnAnyUR": true
+      },
+      "selectionWithinRarity": "uniform",
+      "allowDuplicates": true,
+      "legacyOnly": false,
+      "name": "道具",
+      "categories": [
+        "item_single",
+        "item_permanent"
+      ],
+      "cardCount": 60
     }
   },
   "economy": {
@@ -68,5 +142,10 @@
   "duplicates": {
     "automaticDisassembly": false,
     "keepAtLeast": 1
-  }
+  },
+  "allowedCounts": [
+    1,
+    5,
+    10
+  ]
 }

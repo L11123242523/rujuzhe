@@ -37,6 +37,8 @@
   }
   function validateRules(rules) {
     need(object(rules) && rules.version === 1 && rules.collectionOnly === true && object(rules.pools) && object(rules.pools.standard), '卡包配置格式不支持');
+    need(canonical(Object.keys(rules.pools).sort()) === canonical(['character','item','standard']) && canonical(rules.allowedCounts) === canonical([1,5,10]), '只允许角色/道具新池和1/5/10包');
+    need(rules.pools.standard.legacyOnly === true && rules.pools.character.legacyOnly === false && rules.pools.item.legacyOnly === false, '旧standard仅供历史结果兼容');
     var p = rules.pools.standard, e = rules.economy;
     need(p.version === 1 && p.cardsPerPack === 5 && p.ticketCost === 1 && p.ordinarySlots === 4, '首版卡包张数/费用不符');
     need(canonical(p.ordinaryWeights) === canonical({ UR: 5, SR: 15, R: 35, N: 45 }), '普通槽概率不符');
@@ -85,12 +87,18 @@
         var reveal = p.pendingReveal, fields = ['version','resultId','packId','createdAt','cards','ticketsSpent','pityBefore','pityAfter'];
         need(object(reveal) && reveal.version === 1 && Object.keys(reveal).length === fields.length && fields.every(function(k){return own(reveal,k);}), '待展示结果字段或版本无效');
         var serverResult = accountCache && typeof reveal.resultId === 'string' && /^srvpack:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(reveal.resultId);
-        need(reveal.packId === 'standard' && p.packsOpened > 0 && (reveal.resultId === 'pack:' + p.profileId + ':' + p.packsOpened || serverResult), '待展示resultId非法或与包序号重复冲突');
-        need(integer(reveal.createdAt) && reveal.ticketsSpent === rules.pools.standard.ticketCost && integer(reveal.pityBefore) && integer(reveal.pityAfter), '待展示结果数值无效');
-        need(Array.isArray(reveal.cards) && reveal.cards.length === rules.pools.standard.cardsPerPack, '待展示卡数无效');
-        reveal.cards.forEach(function(card){var entry=card&&byId.get(card.cardId);need(object(card)&&Object.keys(card).length===3&&entry&&entry.collectible&&!entry.public&&card.rarity===entry.rarity&&typeof card.duplicate==='boolean','待展示卡ID、稀有度或重复标记无效');});
-        var hasUR=reveal.cards.some(function(card){return card.rarity===rules.pools.standard.pity.rarity;});
-        need(reveal.pityAfter === (hasUR ? 0 : reveal.pityBefore + 1) && reveal.pityAfter === p.pity.standard.packsWithoutUR && (reveal.pityBefore < rules.pools.standard.pity.afterMisses || hasUR), '待展示保底记录冲突');
+        var legacy = reveal.packId === 'standard', pool = own(rules.pools,reveal.packId) && rules.pools[reveal.packId], count = reveal.ticketsSpent;
+        need(pool && p.packsOpened >= count && (reveal.resultId === 'pack:' + p.profileId + ':' + p.packsOpened || serverResult), '待展示resultId非法或与包序号重复冲突');
+        need(integer(reveal.createdAt) && (legacy ? count === 1 : rules.allowedCounts.includes(count)) && integer(reveal.pityBefore) && integer(reveal.pityAfter), '待展示结果数值无效');
+        need(Array.isArray(reveal.cards) && reveal.cards.length === 5 * count, '待展示卡数无效');
+        reveal.cards.forEach(function(card){var entry=card&&byId.get(card.cardId);need(object(card)&&Object.keys(card).length===3&&entry&&entry.collectible&&!entry.public&&card.rarity===entry.rarity&&typeof card.duplicate==='boolean'&&(legacy||pool.categories.includes(entry.category)),'待展示卡ID、范围、稀有度或重复标记无效');});
+        var counter = reveal.pityBefore;
+        for(var offset=0;offset<reveal.cards.length;offset+=5){
+          var part=reveal.cards.slice(offset,offset+5),hasUR=part.some(function(card){return card.rarity==='UR';});
+          need(legacy || ['UR','SR'].includes(part[4].rarity), '每包保证槽必须SR及以上');
+          need(counter < pool.pity.afterMisses || hasUR, '待展示结果缺少保底UR');counter=hasUR?0:counter+1;
+        }
+        need(reveal.pityAfter === counter && counter === p.pity.standard.packsWithoutUR, '待展示共享保底计数冲突');
       }
       need(p.lastImportDigest === null || /^[a-f0-9]{64}$/.test(p.lastImportDigest), '导入幂等标识无效'); return p;
     }
@@ -238,18 +246,20 @@
           return { action: action, cardId: id, count: count, ownedCount: p.owned[id], dustDelta: delta, dustBalance: p.dust };
         });
       },
-      openPack: function (packId, expectedRevision) {
+      openPack: function (packId, expectedRevision, count) {
+        if (count === undefined) count = 1;
         return change(function(p){
           if (p.pendingReveal !== null) fail('PACK_PENDING', '请先恢复并确认上一包结果');
-          if (packId !== 'standard') fail('PACK_POOL', '未知卡包');
+          if (!own(rules.pools, packId) || rules.pools[packId].legacyOnly !== false) fail('PACK_POOL', '该卡池不开放新开包');
+          if (!integer(count) || !rules.allowedCounts.includes(count)) fail('PACK_COUNT', '包数只能为1、5、10');
           if (!integer(expectedRevision) || expectedRevision !== p.revision) fail('PACK_STALE', '档案已变化，请刷新卡包页再操作');
-          var pool=rules.pools[packId]; if(p.tickets < pool.ticketCost) fail('PACK_TICKETS', '抽卡券不足');
+          var pool=rules.pools[packId]; if(p.tickets < pool.ticketCost * count) fail('PACK_TICKETS', '抽卡券不足');
           var library=env.RJPacks||(typeof require==='function'?require('./packs.js'):null);
           if(!library) fail('PACK_SETUP', '卡包抽样模块未加载');
-          var sampled=library.createSampler(catalog,rules,{crypto:crypt,random:options.packRandom}).sample(p.pity.standard.packsWithoutUR,p.owned);
-          p.tickets-=pool.ticketCost;p.packsOpened++;p.pity.standard.packsWithoutUR=sampled.pityAfter;
+          var sampled=library.createSampler(catalog,rules,{crypto:crypt,random:options.packRandom,poolId:packId}).sample(p.pity.standard.packsWithoutUR,p.owned,count);
+          p.tickets-=sampled.ticketsSpent;p.packsOpened+=count;p.pity.standard.packsWithoutUR=sampled.pityAfter;
           sampled.cards.forEach(function(card){p.owned[card.cardId]=(p.owned[card.cardId]||0)+1;});
-          p.pendingReveal={version:1,resultId:'pack:'+p.profileId+':'+p.packsOpened,packId:packId,createdAt:timestamp(),cards:sampled.cards,ticketsSpent:pool.ticketCost,pityBefore:sampled.pityBefore,pityAfter:sampled.pityAfter};
+          p.pendingReveal={version:1,resultId:'pack:'+p.profileId+':'+p.packsOpened,packId:packId,createdAt:timestamp(),cards:sampled.cards,ticketsSpent:sampled.ticketsSpent,pityBefore:sampled.pityBefore,pityAfter:sampled.pityAfter};
           return p.pendingReveal;
         });
       },

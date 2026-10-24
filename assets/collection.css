@@ -58,3 +58,12 @@
 .rjc-root .rjc-pack-animation { padding:65px 0; text-align:center; font-size:100px; color:#ffe0a0; animation:rjcPackPulse .8s ease-in-out infinite alternate; }
 @keyframes rjcPackPulse { from { transform:scale(.85); opacity:.5; } to { transform:scale(1); opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .rjc-root .rjc-pack-animation { animation:none; } }
+
+/* B仅卡包页：五列结果、批量滚动；仓库与图鉴的既有样式不变。 */
+#packScreen .rjc-pack-results { grid-template-columns:repeat(5,minmax(0,1fr)); max-height:60dvh; overflow-y:auto; overflow-x:hidden; align-items:start; gap:8px; padding:2px; }
+#packScreen .rjc-pack-results .rjc-card { min-width:0; padding:5px; gap:4px; }
+#packScreen .rjc-pack-results .rjc-card-name { font-size:12px; overflow-wrap:anywhere; }
+#packScreen .rjc-pack-results .rjc-count, #packScreen .rjc-pack-results .rjc-rarity { font-size:11px; }
+#packScreen .rjc-pack-opens button { flex:1 1 85px; }
+#packScreen .rjc-summary, #packScreen .rjc-pity { overflow-wrap:anywhere; }
+@media(max-width:480px) { #packScreen .rjc-pack-results { gap:4px; } #packScreen .rjc-pack-results .rjc-card { padding:3px; } #packScreen .rjc-pack-results .rjc-card-name { font-size:10px; } }

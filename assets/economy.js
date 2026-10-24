@@ -17,7 +17,7 @@
   async function refreshPending(){
    if(!identity)return {profile:guest.getSnapshot(),pending:guest.resumeReveal()};network();var token=epoch,value=await account.request('/pack/pending');await accept(value,token);
    if(phase==='offline'&&hint===identity.id){phase='ready';emit();}var pending=snapshot().pendingReveal;
-   if(pending){var all=cache.requests();for(var signature of Object.keys(all)){var entry=all[signature];if(entry.path==='/pack/open'&&entry.data.poolId===pending.packId)await cache.finishRequest(signature,entry.requestId);}}
+   if(pending){var all=cache.requests();for(var signature of Object.keys(all)){var entry=all[signature];if(entry.path==='/pack/open'&&entry.data.poolId===pending.packId&&(entry.data.count||1)===pending.ticketsSpent)await cache.finishRequest(signature,entry.requestId);}}
    return {profile:snapshot(),pending:pending};
   }
   async function initialize(){if(initialized)return initialized;if(!hint&&!identity)return Promise.resolve(state());initialized=(async function(){try{var me=await account.me();connect(me.account);if(hint===me.account.id){phase='ready';await refreshPending();}}catch(e){if(e.status===401)connect(null);else{phase='offline';emit();}}return state();})();return initialized;}
@@ -27,7 +27,9 @@
    ready();var token=epoch,owner=identity.id;
    return exclusive(async function(){
     ready();var me=await account.me();if(me.account.id!==owner||token!==epoch)throw issue('ECONOMY_SESSION_CHANGED','登录账号已改变，请重新读取云档案');
-    var signature=JSON.stringify([path,data]),command=hasRequest?await cache.claimRequest(signature,{path:path,data:data}):null;
+    var signature=JSON.stringify([path,data]);
+    if(path==='/pack/open'&&Object.entries(cache.requests()).some(function(pair){return pair[0]!==signature&&pair[1].path==='/pack/open'&&['character','item'].includes(pair[1].data.poolId);}))throw issue('PACK_REQUEST_UNCERTAIN','上一批开包结果待查询；请恢复结果或按原池和数量重试');
+    var command=hasRequest?await cache.claimRequest(signature,{path:path,data:data}):null;
     try{
      var value=await account.request(path,'POST',Object.assign({},data,command?{requestId:command.requestId}:{}));
      await accept(value,token);if(command)await cache.finishRequest(signature,command.requestId);if(value.duplicate&&value.result)value.result=Object.assign({},value.result,{duplicate:true});return Object.assign({},value,{profile:snapshot()});
@@ -72,7 +74,8 @@
    deleteAccount:function(word){if(word!=='删除账号')return Promise.reject(issue('DELETE_CONFIRM','请输入确认词“删除账号”'));return managed(async function(){await cache.backupForDelete();var token=await account.request('/account/delete-token','POST',{});await account.request('/account','DELETE',{confirmationToken:token.confirmationToken});await guest.clearAccountHint();epoch++;identity=null;cache=null;phase='guest';emit();return {deleted:true};});},
    activateCloud:activate,refreshPending:refreshPending,subscribe:function(fn){listeners.add(fn);return function(){listeners.delete(fn);};},
    getSnapshot:snapshot,getCatalog:function(){return guest.getCatalog();},getRules:function(){return guest.getRules();},getCardCount:function(id){return snapshot().owned[id]||0;},resumeReveal:function(){return snapshot().pendingReveal;},
-   openPack:async function(poolId,revision){if(!connected())return guestCall('openPack',arguments);ready();await refreshPending();if(snapshot().pendingReveal)throw issue('PACK_PENDING','请先确认上一包结果');return mutate('/pack/open',{poolId:poolId},true);},
+   openPack:async function(poolId,revision,count){if(count===undefined)count=1;if(!connected())return guest.openPack(poolId,revision,count);ready();await refreshPending();if(snapshot().pendingReveal)throw issue('PACK_PENDING','请先确认上一包结果');return mutate('/pack/open',{poolId:poolId,count:count},true);},
+   getPools:async function(){if(connected()){network();return account.request('/pack/pools');}var rules=guest.getRules();return {version:1,allowedCounts:rules.allowedCounts,pools:Object.fromEntries(Object.entries(rules.pools).filter(function(pair){return pair[1].legacyOnly===false;}))};},
    confirmReveal:function(resultId){return connected()?mutate('/pack/confirm',{resultId:resultId},false):guestCall('confirmReveal',arguments);},
    collectionAction:function(action,cardId,count){return connected()?mutate('/collection/'+action,Object.assign({cardId:cardId},action==='disassemble'?{count:count}:{}),true):guestCall('collectionAction',arguments);},
    claimDaily:function(){return connected()?mutate('/reward/daily',{},false):guestCall('claimDaily',arguments);},
