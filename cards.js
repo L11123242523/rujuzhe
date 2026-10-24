@@ -26,7 +26,7 @@ window.__CARD_DATA__ = {
    "characters": [
       {
          "name": "现实间冬马",
-         "avatar_url": "assets/avatars/av_7.jpg",
+         "avatar_url": "assets/avatars/av_7.jpg?v=1",
          "attribute": "无序",
          "passive": "分析大师的游刃有余：自己的回合的主要阶段可以发动一次，声明一种属性（颜色）然后选择一名玩家的一张暗置的卡公开，如果那张卡的属性（颜色）与自己声明的属性（颜色）：相同，其选择①将那张卡放回持有者牌组的最下方②受到你造成的4点无序属性伤害；不同，那张卡的持有者必须使用那张卡，不能使用的场合将那张卡弃舍。",
          "sp": "当有玩家的卡不因使用而离开其原本所在的区域时可以发动，对其造成2点无序属性伤害，如果自己因此受到伤害则适用效果：回复自身2点音韵值，如果自己墓地的无序属性卡最多还能再抽一张。",
@@ -149,7 +149,7 @@ window.__CARD_DATA__ = {
       },
       {
          "name": "松山惠",
-         "avatar_url": "assets/avatars/av_9.jpg?v=2",
+         "avatar_url": "assets/avatars/av_9.jpg?v=3",
          "attribute": "理智",
          "passive": "音律感应：编排旋律以触发效果：当你使用3张牌后，若这些牌所需的音韵值为依次递增则执行[乐曲α]，依次递减则执行[乐曲β]；数字相同则执行[乐曲δ]；若为特殊音韵值[3，2，5]则执行[乐曲γ]。那之后保留最后一张牌的音韵值并重新编排旋律。",
          "sp": "以下为目前已有的乐曲：①乐曲α，回复4点音韵值并抽1张②乐曲β，执行一次献祭动作，且那次献祭回复的音韵值+2③乐曲γ，回复6点同步值并抽取一张[馈赠卡]④乐曲δ，本回合献祭次数+1，那之后对一名其他玩家造成4点理智属性伤害。",
@@ -721,7 +721,7 @@ window.__CARD_DATA__ = {
       },
       {
          "name": "羽奈(往昔)",
-         "avatar_url": "assets/avatars/av_19.jpg",
+         "avatar_url": "assets/avatars/av_19.jpg?v=1",
          "attribute": "理智",
          "passive": "憧憬的正义：①自己的回合内有卡不因使用而被送入墓地时可以发动，调整自己墓地至多两张卡的位置。那之后如果自己墓地内的卡不存在相邻的单次种类卡可以对一名其他玩家造成4点理智属性伤害。②每个自己回合可以发动一次，将自己墓地最下方的一张卡以正面朝上的形式放置在牌组最上方。",
          "sp": "自己每有一张公开的卡片都会让全队造成的最终伤害+1。这个效果即使作为队员编组时也会生效。这个效果会与其他队员编组类效果冲突。",
@@ -1089,7 +1089,7 @@ window.__CARD_DATA__ = {
       },
       {
          "name": "里绪(水着)",
-         "avatar_url": "assets/avatars/av_23.jpg?v=2",
+         "avatar_url": "assets/avatars/av_23.jpg?v=3",
          "attribute": "热忱",
          "passive": "令人羡慕的运气！：首次抽取[馈赠卡]时必定抽中[和声]，首次到达[神社]时必定抽中[大吉]（这两个效果只会生效其中1个）。此外，里绪在抽取[馈赠卡]时可以随机剔除奖池中的2张卡。",
          "sp": "首次投掷后可以回复与骰子点数相同的音韵值；首次移动后还能再抽2张卡。这个效果即使作为队员编组也会生效。这个效果会与其他队员的编组类效果冲突。",
@@ -1676,7 +1676,7 @@ window.__CARD_DATA__ = {
             "琉璃(水着)"
          ],
          "combo_notes": "打没护盾的目标固定5点，所以用法是先剥盾再补刀：宫樱子当队员给队伍攻击+2、克制+1，小野结衣再给热忱卡+1伤害并无视1点防御，落下来就是6-7点。对有护盾的目标则专门拆盾，拆完接红宝之杖·运（付多少音韵就打多少热忱伤害）；杂鱼！杂鱼！先降3点防御。",
-         "image_url": "assets/images/ui2/img_rVfi2yisPj.webp?v=12",
+         "image_url": "assets/images/ui2/img_rVfi2yisPj.webp?v=13",
          "character_full": "小仓霞",
          "attack_range": "同一行内一名玩家",
          "range_adjustment": 0.15,
@@ -1718,7 +1718,7 @@ window.__CARD_DATA__ = {
             "侦探放大镜"
          ],
          "combo_notes": "3费把上一张用过的卡整张捡回手，若回收的是[侵略]卡还多打2点热忱，所以前一手得刻意下侵略牌。最顺手的是神乐铃（1费热忱侵略，每进一次墓下次伤害+1）：打神乐铃→案件还原捡回它并补2点热忱→再打神乐铃。红宝之杖·运付7音韵以上让下次伤害+20%，反复回收叠加后第6次直接秒杀。",
-         "image_url": "assets/images/ui2/img_RhBCWqW0x2.webp?v=12",
+         "image_url": "assets/images/ui2/img_RhBCWqW0x2.webp?v=13",
          "character_full": "椎名小春",
          "attack_range": "SP：一名玩家（无距离限制）",
          "range_adjustment": 0.1,
@@ -1760,7 +1760,7 @@ window.__CARD_DATA__ = {
             "里绪(水着)"
          ],
          "combo_notes": "1费驱散一名玩家的所有负面与附加效果，并让另一名玩家失去1点同步值：既解自家的[神醉]、[缴械]，也能扒掉对手的弱点分析、鼓舞这类附加效果，是少见的双向解法。同步压制接结晶碎弧（伤害前扣目标5点同步）与搜查令，里绪(水着)当队员时首次移动抽2张正好触发伊织的恩典。",
-         "image_url": "assets/images/ui2/img_CEYwyNKafJ.webp?v=12",
+         "image_url": "assets/images/ui2/img_CEYwyNKafJ.webp?v=13",
          "character_full": "小野伊织",
          "attack_range": "无（驱散卡）",
          "range_adjustment": 0,
@@ -2096,7 +2096,7 @@ window.__CARD_DATA__ = {
             "拦路者"
          ],
          "combo_notes": "枫(水着)专属卡，3费直线飞4格，命中谁就2点理智并降1防，穿多人可连续破甲。关键是每段吃理智加成：予(水着)把全队伤害转成理智，她和枫(水着)的SP各再+1，一段4点；先垫杂鱼！杂鱼！或一刀两断！打西瓜！压成负防更疼。命中过的泳圈不销毁、留场上，拦路者把路障摆在轨道上逼人撞。",
-         "image_url": "assets/images/ui2/img_AzVyk90HGB.webp?v=11",
+         "image_url": "assets/images/ui2/img_AzVyk90HGB.webp?v=12",
          "character_full": "枫(水着)",
          "attack_range": "前/后方飞行物最远4格，命中后继续飞行(穿透)",
          "range_adjustment": 0,
@@ -2281,7 +2281,7 @@ window.__CARD_DATA__ = {
             "入间枫"
          ],
          "combo_notes": "2费同时给+1攻击和500金币，等于一次动作拿两样资源。500金币交给镌刻的艺术，每回合消耗金币可少花1000，正好被这张卡喂饱；搭配木原光太郎（献祭回音韵）和松山惠（抽馈赠）时还能把献祭与过牌接起来。2费换2资源的效率本来就高，所以它适合当铺场的第一拍，先垫攻击再上攻击卡。",
-         "image_url": "assets/images/ui2/img_qhKTTGtFmB.webp?v=10",
+         "image_url": "assets/images/ui2/img_qhKTTGtFmB.webp?v=11",
          "character_full": "木原光太郎",
          "_category": "skill_cards",
          "dims": {
@@ -2571,7 +2571,7 @@ window.__CARD_DATA__ = {
             "幸运护符"
          ],
          "combo_notes": "回3同步并让双方的下一次用卡各减1费，等于用2费把双方节奏都往前推一拍。用来抵超频扣掉的1点同步最顺手，减费还能让下一张卡提前落地；接人格修正拳！时，琉璃判定后回音韵的被动能在同回合把费用补回来，入间予的全队判定伤害+1则让这次减费买到的卡打得更重。",
-         "image_url": "assets/images/ui2/img_XLQKhlAY5H.webp?v=10",
+         "image_url": "assets/images/ui2/img_XLQKhlAY5H.webp?v=11",
          "character_full": "小沙香琉璃",
          "_category": "skill_cards",
          "dims": {
@@ -2719,7 +2719,7 @@ window.__CARD_DATA__ = {
             "镌刻的艺术"
          ],
          "combo_notes": "抽二再送一张进墓地，是标准的滤牌：送给鸣奏之\"圣音\"时它能从墓地回2音韵，等于抽二丢一还换回2音韵。配小野伊织能把这类战术与增益卡的使用转成馈赠卡抽取，把弃牌变成资源；黑色卡片与镌刻的艺术都需要墓地里的卡，掌握送墓正好是给它们的燃料。",
-         "image_url": "assets/images/ui2/img_dD5sVjOACw.webp?v=10",
+         "image_url": "assets/images/ui2/img_dD5sVjOACw.webp?v=11",
          "character_full": "小野伊织",
          "_category": "skill_cards",
          "dims": {
@@ -3048,7 +3048,7 @@ window.__CARD_DATA__ = {
             "破损电子设备"
          ],
          "combo_notes": "臂章落场对一名对手打3点理智，此后全队理智最终伤害+1，0-13格内常驻20%控骰，正压判定段。配蓝宝之杖·命时，它的d6判定与硬币判定每段都吃这+1；小沙香琉璃判定后回1音韵、累计4次再给全队判定+1，燃料就续上了。予(水着)把队伍伤害转成理智后，破损电子设备这类d4也被推高。",
-         "image_url": "assets/images/ui2/img_WRw1FlKIMG.webp?v=9",
+         "image_url": "assets/images/ui2/img_WRw1FlKIMG.webp?v=10",
          "_category": "item_permanent",
          "dims": {
             "cost": 8,
@@ -3120,7 +3120,7 @@ window.__CARD_DATA__ = {
             "宁雨清"
          ],
          "combo_notes": "7费落地先检索一张攻击卡或技能卡，顺手丢1抽1，此后攻击卡技能卡永久-1费、判定伤害+1。检索首选人格修正拳！或破损电子设备这类判定卡，配小沙香琉璃判定回1音韵、累计4次给全队判定+1，段数越多回费越多。宁雨清让检索进手的卡再-1费，还扣对手1同步。",
-         "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=12",
+         "image_url": "assets/images/ui2/img_v3L1fg9il2.webp?v=13",
          "_category": "item_permanent",
          "dims": {
             "cost": 8.5,
@@ -3184,7 +3184,7 @@ window.__CARD_DATA__ = {
             "入间枫"
          ],
          "combo_notes": "黑卡管三条线：回合开始多抽一张、首次献祭额外回1音韵、消耗金币时每次少花1000。它最放大智能手机——等价交换扣700金币，减掉1000后等于白送一次丢手卡打3点理智；善意面具每500金币换1点最终伤害也变成零成本。再叠巧匠之手每回合献祭+1，献祭回音韵与抽牌就转成净赚循环。",
-         "image_url": "assets/images/ui2/img_uDJ22RFVA7.webp?v=9",
+         "image_url": "assets/images/ui2/img_uDJ22RFVA7.webp?v=10",
          "_category": "item_permanent",
          "dims": {
             "cost": 8.5,
@@ -3217,7 +3217,7 @@ window.__CARD_DATA__ = {
             "现实间里绪"
          ],
          "combo_notes": "杖是每回合稳定的两段判定：落场d6，此后主要阶段硬币正面再补2点判定伤害。段数就是它的上限——钢笔的判定+1与攻击技能卡减费、风纪委员臂章的理智最终伤害+1，每段都吃；小沙香琉璃判定后回1音韵、累计4次再给全队判定+1，把它从单发火力变成能自养的循环。硬币背面空过，稳定性是短板。",
-         "image_url": "assets/images/ui2/img_aGVPDZCwUr.webp?v=9",
+         "image_url": "assets/images/ui2/img_aGVPDZCwUr.webp?v=10",
          "_category": "item_permanent",
          "dims": {
             "cost": 7.5,
@@ -3320,7 +3320,7 @@ window.__CARD_DATA__ = {
             "永奏进行曲"
          ],
          "combo_notes": "血戒落场回3音韵，此后每回合自然回复+2、上限+2，把高费回合的底盘抬起来；一回合一次还能付2同步给一次伤害+1最终伤害。这2点同步不白花：镌刻的艺术每失去4同步全队攻击力+1，妖刀五月雨每发动一次失3同步，两家开销都被血戒换成攻击力。多出的每回合2音韵正好留给钢笔这类7费件。",
-         "image_url": "assets/images/ui2/card_xuejie.webp?v=9",
+         "image_url": "assets/images/ui2/card_xuejie.webp?v=10",
          "_category": "item_permanent",
          "dims": {
             "cost": 7.5,
@@ -3520,7 +3520,7 @@ window.__CARD_DATA__ = {
          "attribute": "混沌",
          "type": "永续",
          "card_type": "道具/永续",
-         "image_url": "assets/images/ui2/img_iTclHZs9kb.webp?v=10",
+         "image_url": "assets/images/ui2/img_iTclHZs9kb.webp?v=11",
          "effect": "振聋发聩的轰鸣声是为了迎接神的到来。发动时作为效果处理：获取1点引导核心。每个自己回合可以发动一次：获得3点激励点数。每次提升等级后可以从以下效果中选择一项适用：①队伍攻击力+1②选移出游戏的一张卡加入手卡（限一次）③对一名玩家造成一次四面骰判定伤害。",
          "tags": [
             "丰沛"
@@ -3558,7 +3558,7 @@ window.__CARD_DATA__ = {
          "attribute": "混沌",
          "type": "永续",
          "card_type": "道具/永续",
-         "image_url": "assets/images/ui2/card_jiye.webp?v=10",
+         "image_url": "assets/images/ui2/card_jiye.webp?v=11",
          "effect": "发动时作为效果处理：对一名玩家造成一次四面骰判定伤害。一回合一次，造成判定伤害后可以从以下效果中选择一项发动：①随机将自己的一张手卡移出游戏，然后再造成一次同等数值的判定伤害。②选移出游戏的一张卡以正面朝上的形式放置在持有者牌组的最上方，然后自己下次造成的判定伤害+1（可叠加）。",
          "tags": [
             "丰沛"
@@ -3682,7 +3682,7 @@ window.__CARD_DATA__ = {
             "能量饮料"
          ],
          "combo_notes": "1费把指定玩家下一次投掷换成20面骰，平均位移从3.5格跳到10.5格，专门用来踩位移阈值。先让里绪掷出大位移，再结算她单回合累计7格的那段判定伤害；给小春则每4格换1先机。位移端接星奈(水着)吃超5格的两段伤害，接直尺凑每回合6格造伤。该次投掷的判定伤害-8，判定伤害队别带。",
-         "image_url": "assets/images/ui2/img_fdt8Wq6uSJ.webp?v=8",
+         "image_url": "assets/images/ui2/img_fdt8Wq6uSJ.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 6.5,
@@ -3948,7 +3948,7 @@ window.__CARD_DATA__ = {
             "御神签·中吉"
          ],
          "combo_notes": "付多少打多少，1费起步10费封顶，每次付7以上还给下一次+20%伤害，攒满5次后第6发直接秒杀。秒杀线吃长期音韵，配松山惠乐曲α（回4音韵抽1）、血之佑戒·红泪拉克莎（回复+2、上限+2）与御神签·中吉堆音韵。小野结衣的SP让每次热忱伤害+1并无视1点防御，10费一发就是11点。",
-         "image_url": "assets/images/ui2/img_O8SSYi9PkE.webp?v=8",
+         "image_url": "assets/images/ui2/img_O8SSYi9PkE.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 6.5,
@@ -4112,7 +4112,7 @@ window.__CARD_DATA__ = {
             "血之佑戒·红泪拉克莎"
          ],
          "combo_notes": "1费打1点热忱，本体便宜到可以随便扔；杀招在SP——每进墓一次下次伤害+1、最多叠9层，攒满后每次1费打10。前提是能反复捞回手卡：来自地狱的盒子3费直接捞2张，案件还原回收上一张使用的卡，魔法蓝图还能从墓地再演一次。伤害端接小野结衣与血之佑戒·红泪拉克莎，每发都在给终局加码。",
-         "image_url": "assets/images/ui2/img_oG0h5KxjBT.webp?v=8",
+         "image_url": "assets/images/ui2/img_oG0h5KxjBT.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 9.3,
@@ -4145,7 +4145,7 @@ window.__CARD_DATA__ = {
             "宁雨清"
          ],
          "combo_notes": "3费三选一：让某人抽牌再后退2格、送自己区域卡后前进3格、或墓地捞卡换手卡，同色或同费还回1音韵。模式①喂宁雨清，她抽到手卡就回1音韵；模式②能把来自地狱的盒子送墓，直接吃它的SP，配永奏进行曲还能往它每3张进墓的计数里添一张。模式③给入间枫用[战术]抽馈赠，也能让枫(水着)累计8格后回收它。",
-         "image_url": "assets/images/ui2/img_YH4uedK3SX.webp?v=8",
+         "image_url": "assets/images/ui2/img_YH4uedK3SX.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 8,
@@ -4444,7 +4444,7 @@ window.__CARD_DATA__ = {
             "魔法蓝图"
          ],
          "combo_notes": "2费改掉一次投掷的全部点数，是判定伤害队的保险丝：破损电子设备的4面骰、某女士爱用球棒的6面骰都能改成满值，球棒的位移量也涨；音叉的20面骰改成不小于10，稳拿1音韵。小沙香琉璃每段判定后回1音韵、累计4次全队判定+1，改骰把循环拉满。它在别人回合也能从手卡发动，搅黄对手的骰。",
-         "image_url": "assets/images/ui2/img_hVKZnAy85U.webp?v=8",
+         "image_url": "assets/images/ui2/img_hVKZnAy85U.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 8.8,
@@ -4510,7 +4510,7 @@ window.__CARD_DATA__ = {
             "案件还原"
          ],
          "combo_notes": "2费抽2是全卡池最实在的费用效率，判定成功还能回1音韵。宁雨清在场时每次抽卡后回1音韵，音叉抽2直接回2，加判定就是2费抽2回3；入间予的被动每3次投掷回1音韵，那枚20面骰无论成败都能帮她攒计数。想稳吃判定就用遥控骰子把点数改到10以上；案件还原能把刚进墓的音叉回收再抽一轮。",
-         "image_url": "assets/images/ui2/img_FqchbTcRFp.webp?v=9",
+         "image_url": "assets/images/ui2/img_FqchbTcRFp.webp?v=10",
          "_category": "item_single",
          "dims": {
             "cost": 9,
@@ -4644,7 +4644,7 @@ window.__CARD_DATA__ = {
             "能量饮料"
          ],
          "combo_notes": "2费回3同步再前进3格，本身就是位移队最顺的续航；更狠的是SP——把墓地的它移出游戏还能再前进3到6格。真正的闭环在魔法清点名单：枕头只要2费，名单能从被移出游戏的卡里把它捞回手，于是“枕头前进、进墓移出、名单捞回”可以反复跑，位移再配设计师的直尺（每6格2点理智伤害）变现。",
-         "image_url": "assets/images/ui2/img_UAmTOmSfVB.webp?v=8",
+         "image_url": "assets/images/ui2/img_UAmTOmSfVB.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 8.5,
@@ -5073,7 +5073,7 @@ window.__CARD_DATA__ = {
             "妖刀五月雨"
          ],
          "combo_notes": "2费、任意回合可用：选场上**一张卡**为对象发动，那张卡直到本回合结束前**效果无效**——是\"这一回合先把你那张卡按住\"的即时解，用来打断对手的关键效果链或压住对方永续/领域的收益。因为它选的是\"场上一张卡\"，所以既能压制对方，也能在自己回合做出取舍（例如让某张卡的负面效果本回合不生效）。配合需要抢先手的快攻轮次，能有效削掉对手一回合的收益。",
-         "image_url": "assets/images/ui2/card_yongmian_zhiguan.webp?v=4",
+         "image_url": "assets/images/ui2/card_yongmian_zhiguan.webp?v=5",
          "_category": "item_single",
          "card_type": "道具/单次",
          "tags": [
