@@ -226,12 +226,18 @@
           before: { tickets: current.tickets, dust: current.dust, owned: clone(current.owned) }, after: { tickets: imported.tickets, dust: imported.dust, owned: clone(imported.owned) }, operation: 'replace' };
         previews.set(token, { baseRaw: raw, imported: clone(imported), digest: envelope.checksum }); return freeze(summary);
       },
-      importProfile: function (previewId) {
+      importProfile: function (previewId, importOptions) {
         if (!previews.has(previewId)) fail('PROFILE_PREVIEW_REQUIRED', '必须先在本仓库预览导入'); var preview = previews.get(previewId);
         return exclusive(function () { var current = load(), raw = read(KEYS.main);
-          if (current.lastImportDigest === preview.digest) return freeze({ imported: false, duplicate: true, profile: current });
+          if (current.lastImportDigest === preview.digest && !(importOptions && importOptions.cloudBackup === true)) return freeze({ imported: false, duplicate: true, profile: current });
           if (raw !== preview.baseRaw) fail('PROFILE_PREVIEW_STALE', '预览后档案已变化，请重新预览');
-          var next = clone(preview.imported); next.lastImportDigest = preview.digest; return freeze({ imported: true, duplicate: false, profile: commit(current, next, raw) });
+          var backupKey = null;
+          if (importOptions && importOptions.cloudBackup === true) {
+            backupKey = 'rujuzhe_profile_cloud_backup_' + timestamp() + '_' + uuid(); write(backupKey, raw);
+            if (read(backupKey) !== raw) fail('PROFILE_STORAGE', '云下载前备份校验失败，未覆盖本机档案');
+          }
+          var next = clone(preview.imported); next.lastImportDigest = preview.digest;
+          var result = { imported: true, duplicate: false, profile: commit(current, next, raw) }; if (backupKey) result.backupKey = backupKey; return freeze(result);
         });
       },
       claimDaily: function () { return change(function (p) { var key = day(timestamp()), rec = dayRecord(p, key); if (rec.dailyClaimed) return { noChange: true, value: { duplicate: true, awardedTickets: 0 } }; rec.dailyClaimed = true; p.tickets += rules.economy.dailyTickets; return { duplicate: false, awardedTickets: rules.economy.dailyTickets, day: key }; }); },

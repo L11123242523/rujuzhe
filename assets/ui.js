@@ -19,7 +19,10 @@ try {
     else __mmPickBg();
   }
 } catch (e) {}
+function openAccountDialog() { if (typeof RJCloud !== 'undefined') return RJCloud.open(); }
+function closeAccountDialog() { if (typeof RJCloud !== 'undefined') RJCloud.close(); }
 function showScreen(id) {
+  closeAccountDialog();
   if ((id === 'mainMenu' || id === 'onlineLobby') && typeof RJPackApp !== 'undefined' && typeof battleState !== 'undefined' && battleState && !battleState._over && document.getElementById('battleScreen') && document.getElementById('battleScreen').classList.contains('active')) RJPackApp.abandonBattle();
   try { __mmPickBg(); } catch (e) {}
   /* 【批次3·状态权威】把"当前界面"记成状态（BGM 等判据都读它 ⇒ 不依赖 DOM 查询 ✓ 真假 DOM 都稳 ✓） */
