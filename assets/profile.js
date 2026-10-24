@@ -66,7 +66,7 @@
       var at = timestamp(); return { version: 1, profileId: uuid(), catalogVersion: catalog.version, revision: 0, owned: {}, tickets: rules.economy.initialTickets, dust: 0,
         pity: { standard: { packsWithoutUR: 0 } }, packsOpened: 0, createdAt: at, updatedAt: at, rewards: { days: {} }, pendingMatches: {}, matchReceipts: {}, pendingReveal: null, lastImportDigest: null };
     }
-    function validate(p) {
+    function validate(p, accountCache) {
       if (object(p) && Number.isInteger(p.version) && p.version > 1) fail('PROFILE_FUTURE_VERSION', '档案来自更高版本，保留原文并停止写入');
       need(object(p) && p.version === 1, '档案版本不支持');
       var fields = ['version','profileId','catalogVersion','revision','owned','tickets','dust','pity','packsOpened','createdAt','updatedAt','rewards','pendingMatches','matchReceipts','pendingReveal','lastImportDigest'];
@@ -84,7 +84,8 @@
       if (p.pendingReveal !== null) {
         var reveal = p.pendingReveal, fields = ['version','resultId','packId','createdAt','cards','ticketsSpent','pityBefore','pityAfter'];
         need(object(reveal) && reveal.version === 1 && Object.keys(reveal).length === fields.length && fields.every(function(k){return own(reveal,k);}), '待展示结果字段或版本无效');
-        need(reveal.packId === 'standard' && p.packsOpened > 0 && reveal.resultId === 'pack:' + p.profileId + ':' + p.packsOpened, '待展示resultId非法或与包序号重复冲突');
+        var serverResult = accountCache && typeof reveal.resultId === 'string' && /^srvpack:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(reveal.resultId);
+        need(reveal.packId === 'standard' && p.packsOpened > 0 && (reveal.resultId === 'pack:' + p.profileId + ':' + p.packsOpened || serverResult), '待展示resultId非法或与包序号重复冲突');
         need(integer(reveal.createdAt) && reveal.ticketsSpent === rules.pools.standard.ticketCost && integer(reveal.pityBefore) && integer(reveal.pityAfter), '待展示结果数值无效');
         need(Array.isArray(reveal.cards) && reveal.cards.length === rules.pools.standard.cardsPerPack, '待展示卡数无效');
         reveal.cards.forEach(function(card){var entry=card&&byId.get(card.cardId);need(object(card)&&Object.keys(card).length===3&&entry&&entry.collectible&&!entry.public&&card.rarity===entry.rarity&&typeof card.duplicate==='boolean','待展示卡ID、稀有度或重复标记无效');});
@@ -165,7 +166,46 @@
     function day(at) { return new Date(at + 8 * 3600000).toISOString().slice(0, 10); }
     function dayRecord(p, key) { if (!own(p.rewards.days, key)) p.rewards.days[key] = { dailyClaimed: false, participationCount: 0, firstWinClaimed: false }; return p.rewards.days[key]; }
     function checkMatchId(id) { if (!validId(id)) fail('PROFILE_MATCH_ID', '对局ID无效'); }
+    // 账号缓存与命令凭证使用独立键；所有写入仍经过档案仓库的跨标签页互斥。
+    function accountCache(accountId) {
+      need(validId(accountId), '账号ID无效');
+      var key = 'rujuzhe_account_cache_' + accountId, intentKey = key + '_requests', selections = new Map();
+      function checked(value) {
+        need(object(value) && integer(value.profileRevision) && value.profileRevision > 0, '云版本无效');
+        var p = clone(value.profile); if (!own(p, 'pendingReveal')) p.pendingReveal = null;
+        return { profileRevision: value.profileRevision, profile: validate(p, true) };
+      }
+      function current() { var raw = read(key); return raw === null ? null : freeze(checked(JSON.parse(raw))); }
+      function save(value) {
+        var next = checked(value), previous = current();
+        if (previous && previous.profileRevision > next.profileRevision) return previous;
+        if (previous && previous.profileRevision === next.profileRevision && canonical(previous.profile) !== canonical(next.profile)) fail('ACCOUNT_CACHE_CONFLICT', '同一云版本出现不同内容，请重新读取');
+        var raw = JSON.stringify(next), old = read(key); if (old !== null) write(key + '_backup', old);
+        write(key, raw); if (read(key) !== raw) fail('PROFILE_STORAGE', '账号缓存写回校验失败'); return freeze(clone(next));
+      }
+      function intents() { var raw = read(intentKey), value = raw === null ? {} : JSON.parse(raw); need(object(value), '命令凭证格式无效'); return value; }
+      return freeze({
+        key: key, get: current, validate: checked,
+        accept: function (value) { return exclusive(function () { return save(value); }); },
+        preview: function (value) { var next = checked(value), token = uuid(), p = snapshot(); selections.set(token, { value: next, guestRaw: read(KEYS.main), cacheRaw: read(key) }); return freeze({previewId: token, before: {tickets:p.tickets,dust:p.dust,owned:clone(p.owned)}, after:{tickets:next.profile.tickets,dust:next.profile.dust,owned:clone(next.profile.owned)}, operation:'account-cache'}); },
+        download: function (token) { return exclusive(function () {
+          var selected = selections.get(token); if (!selected) fail('PROFILE_PREVIEW_REQUIRED', '请先预览云档案');
+          if (read(KEYS.main) !== selected.guestRaw) fail('PROFILE_PREVIEW_STALE', '预览后游客档已变化，请重新读取');
+          if (read(key) !== selected.cacheRaw) fail('PROFILE_PREVIEW_STALE', '预览后账号缓存版本已变化，请重新读取');
+          var backupKey = 'rujuzhe_profile_cloud_backup_' + timestamp() + '_' + uuid(); write(backupKey, selected.guestRaw);
+          if (read(backupKey) !== selected.guestRaw) fail('PROFILE_STORAGE', '云下载前备份校验失败');
+          var saved = save(selected.value); return freeze({imported:true,backupKey:backupKey,profile:saved.profile,profileRevision:saved.profileRevision});
+        }); },
+        claimRequest: function (signature, command) { return exclusive(function () { var all = intents(); if (!own(all, signature)) { all[signature] = Object.assign({requestId:uuid()}, clone(command)); write(intentKey, JSON.stringify(all)); if (read(intentKey) !== JSON.stringify(all)) fail('PROFILE_STORAGE', '请求编号保存失败，未发送操作'); } return freeze(clone(all[signature])); }); },
+        finishRequest: function (signature, requestId) { return exclusive(function () { var all = intents(); if (own(all,signature) && all[signature].requestId === requestId) { delete all[signature]; write(intentKey, JSON.stringify(all)); } }); },
+        requests: function () { return freeze(clone(intents())); },
+        activate: function () { return exclusive(function () { write('rujuzhe_account_active', accountId); }); }
+      });
+    }
     var api = {
+      createAccountCache: accountCache,
+      getAccountHint: function () { var value = read('rujuzhe_account_active'); if (value !== null) need(validId(value), '账号缓存标识无效'); return value; },
+      clearAccountHint: function () { return exclusive(function () { try { storage.removeItem('rujuzhe_account_active'); } catch (e) { fail('PROFILE_STORAGE', '清除账号选择失败'); } }); },
       getSnapshot: snapshot,
       getCardCount: function (id) { need(byId.has(id), '未知卡ID'); var p = snapshot(); return own(p.owned, id) ? p.owned[id] : 0; },
       getCatalog: function () { return catalog; }, getRules: function () { return rules; },

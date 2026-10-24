@@ -1,6 +1,16 @@
 /* 卡包页面与只读对局桥接：资产只交给P1，战斗状态及随机源只读。 */
 (function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory();else{root.RJPackApp=factory();if(root.document){var boot=function(){if(root.RJPackApp.isPageReady())root.RJPackApp.boot().catch(function(e){console.error('卡包初始化失败',e);});};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();}}})(typeof globalThis!=='undefined'?globalThis:this,function(){
  'use strict';
+ var moduleURL=typeof document!=='undefined'&&document.currentScript&&document.currentScript.src;
+ async function dependencies(doc){
+  for(var entry of [['RJAccount','account.js'],['RJEconomy','economy.js']]){
+   if(typeof globalThis[entry[0]]==='object')continue;
+   if(!moduleURL)throw Error('卡包模块依赖地址缺失，未启动经济操作');
+   var url=new URL(entry[1],moduleURL);url.search=new URL(moduleURL).search;
+   await new Promise(function(resolve,reject){var script=doc.createElement('script');script.src=url.href;script.onload=resolve;script.onerror=function(){reject(Error('卡包依赖加载失败：'+url.pathname));};doc.head.appendChild(script);});
+   if(typeof globalThis[entry[0]]!=='object')throw Error('卡包依赖未就绪：'+entry[0]);
+  }
+ }
  function createController(profile){var busy=false;return Object.freeze({
   async openPack(){if(busy){var e=new Error('正在保存上一包');e.code='PACK_BUSY';throw e;}busy=true;try{var p=profile.getSnapshot(),saved=await profile.openPack('standard',p.revision);return saved.result;}finally{busy=false;}},
   resume:function(){return profile.resumeReveal();},confirm:function(id){return profile.confirmReveal(id);},snapshot:function(){return profile.getSnapshot();}
@@ -26,7 +36,9 @@
    var doc=options.document||document,host=doc.getElementById('packScreen'),collectionHost=doc.getElementById('collectionScreen');if(!host||!collectionHost)throw Error('卡包与收藏容器未就绪');
    var load=async function(url){var r=await fetch(url);if(!r.ok)throw Error('收藏数据加载失败：'+url);return r.json();};
    var data=await Promise.all([load('data/collection-catalog.json'),load('data/pack-rules.json'),load('data/cards.json?v=40')]);
-   var profile=options.profile||await RJProfile.createStore({catalog:data[0],rules:data[1]}),collection=RJCollection.create({profile:profile,cards:data[2]}),controller=createController(profile),rules=profile.getRules(),pool=rules.pools.standard;
+   if(!options.economy)await dependencies(doc);
+   var guest=options.profile||await RJProfile.createStore({catalog:data[0],rules:data[1]}),profile=options.economy||RJEconomy.create({guest:guest,account:RJAccount.client()});await profile.initialize();
+   var collection=RJCollection.create({profile:profile,cards:data[2]}),controller=createController(profile),rules=profile.getRules(),pool=rules.pools.standard;
    function el(tag,cls,text){var n=doc.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;}
    function button(text,fn,cls){var n=el('button',cls,text);n.type='button';n.addEventListener('click',fn);return n;}
    var root=el('section','rjc-root'),header=el('header','rjc-header'),title=el('h2','','卡包与收藏'),balance=el('p','rjc-balance'),body=el('div','rjc-pack-body'),status=el('p','rjc-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
@@ -57,8 +69,9 @@
     var actions=el('div','rjc-actions');actions.append(button('每日领取 '+rules.economy.dailyTickets+' 券',async function(){if(busy)return;busy=true;try{var saved=await profile.claimDaily(),r=saved.result||saved;busy=false;render();status.textContent=r.duplicate?'今天已经领取':'已领取 '+r.awardedTickets+' 张抽卡券';}catch(e){busy=false;report(e);}}),button('仓库 / 图鉴 / 合成',function(){collectionUI.show('warehouse');showScreen('collectionScreen');}),button('重试保存对局奖励',function(){bridge.retry().then(function(){render();},report);}));body.appendChild(actions);
     body.appendChild(el('p','rjc-note','北京时间每日：每日领取'+rules.economy.dailyTickets+'券；前'+rules.economy.participationDailyCap+'局正常完成每局'+rules.economy.participationTickets+'券；首胜额外'+rules.economy.firstWinTickets+'券。沙盒和直接退出不发对局券。'));
    }
-   var api={open:function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');render();showScreen('packScreen');},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
-   globalThis.addEventListener('storage',function(event){if(event.key==='rujuzhe_profile'&&!busy){try{updateBalance();if(host.classList.contains('active'))render();}catch(e){report(e);}}});
+   var api={open:async function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');try{await profile.refreshPending();render();showScreen('packScreen');}catch(e){report(e);showScreen('packScreen');}},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
+   profile.subscribe(function(){if(!busy){updateBalance();if(host.classList.contains('active'))render();}});
+   globalThis.addEventListener('storage',function(event){if(event.key==='rujuzhe_account_active'){profile.syncSelection().catch(report);return;}if((event.key==='rujuzhe_profile'||event.key&&event.key.startsWith('rujuzhe_account_cache_'))&&!busy){try{updateBalance();if(host.classList.contains('active'))render();}catch(e){report(e);}}});
    render();instance=api;return api;
   })().catch(function(e){booting=null;var n=typeof document!=='undefined'&&document.getElementById('packTicketCount');if(n)n.textContent='收藏不可用，点击重试';throw e;});return booting;
  }

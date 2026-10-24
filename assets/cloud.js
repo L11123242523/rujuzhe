@@ -12,21 +12,18 @@
   function canonical(o){if(Array.isArray(o))return '['+o.map(canonical).join(',')+']';if(o&&typeof o==='object')return '{'+Object.keys(o).sort().map(function(k){return JSON.stringify(k)+':'+canonical(o[k]);}).join(',')+'}';return JSON.stringify(o);}
   function issue(code,message){var e=new Error(message);e.code=code;return e;}
   function create(options){
-    var account=options.account,remote=null,preview=null,busy=false,disposed=false;
+    var account=options.account,remote=null,preview=null,busy=false,disposed=false,cache=null;
     var crypt=options.crypto||globalThis.crypto;
     async function store(){var p=typeof options.profile==='function'?await options.profile():await options.profile;if(!p)throw Error('本地档案尚未就绪');return p;}
-    async function previewData(data){
-      var p=await store(),bytes=await crypt.subtle.digest('SHA-256',new TextEncoder().encode(canonical(data)));
-      var checksum=Array.from(new Uint8Array(bytes),function(n){return n.toString(16).padStart(2,'0');}).join('');
-      return p.previewImport(JSON.stringify({format:'rujuzhe-profile',version:1,catalogVersion:p.getCatalog().version,profile:data,checksum:checksum}));
-    }
+    async function accountCache(){if(cache)return cache;var p=await store();if(p.getAccountCache)cache=p.getAccountCache();else{var me=await account.me();cache=p.createAccountCache(me.account.id);}return cache;}
+    async function previewData(data,revision){return (await accountCache()).preview({profileRevision:revision,profile:data});}
     function alive(){if(disposed)throw issue('CLOUD_CLOSED','账号已切换，请重新打开云档案');}
     async function getProfile(){return account.request('/profile');}
     async function putProfile(data,expectedRevision){return account.request('/profile','PUT',{data:data,expectedRevision:expectedRevision});}
     async function pull(){
       var result=await getProfile();alive();
       if(!result||!Number.isSafeInteger(result.revision)||result.revision<0||!Object.hasOwn(result,'data')||(result.data===null)!==(result.revision===0))throw issue('CLOUD_RESPONSE','云档案格式无效，本机档案未更改');
-      var next=result.data===null?null:await previewData(result.data);alive();
+      var next=result.data===null?null:await previewData(result.data,result.revision);alive();
       remote=result;preview=next;return state();
     }
     function state(){return {remote:remote?JSON.parse(JSON.stringify(remote)):null,preview:preview?JSON.parse(JSON.stringify(preview)):null,busy:busy};}
@@ -35,14 +32,16 @@
       try{return await action();}finally{busy=false;}
     }
     return Object.freeze({
-      getProfile:getProfile,putProfile:putProfile,getState:state,pull:function(){return exclusive(pull);},
+      getProfile:getProfile,putProfile:putProfile,getState:state,getAccountCache:accountCache,pull:function(){return exclusive(pull);},
       upload:function(){return exclusive(async function(){
         if(!remote)throw issue('CLOUD_CHOICE','请先读取云档案并选择操作');
-        var p=await store(),data=p.getSnapshot(),expected=remote.revision;
+        if(remote.data!==null){var managed=issue('CLOUD_MANAGED','已有云档由服务端管理，禁止整档覆盖；请读取、下载或保留本机');managed.status=409;throw managed;}
+        var p=await store(),local=p.getGuestProfile?p.getGuestProfile():p,data=local.getSnapshot(),expected=remote.revision;
         try{
           var saved=await putProfile(data,expected);alive();
           if(!Number.isSafeInteger(saved.revision)||saved.revision!==expected+1)throw issue('CLOUD_RESPONSE','上传响应版本无效，请重新读取云档案');
-          remote={revision:saved.revision,data:data,updatedAt:saved.updatedAt};preview=await previewData(data);alive();
+          remote={revision:saved.revision,data:data,updatedAt:saved.updatedAt};preview=await previewData(data,saved.revision);alive();
+          if(p.activateCloud)await p.activateCloud({profileRevision:saved.revision,profile:data});
           return saved;
         }catch(e){
           if(e.status===409){
@@ -56,8 +55,9 @@
       download:function(){return exclusive(async function(){
         if(!remote||!remote.data||!preview)throw issue('CLOUD_CHOICE','没有可下载的云档案，请先读取');
         var p=await store();alive();
-        var saved=await p.importProfile(preview.previewId,{cloudBackup:true});alive();
-        preview=await previewData(remote.data);return saved;
+        var saved=await (await accountCache()).download(preview.previewId);alive();
+        if(p.activateCloud)await p.activateCloud(saved);
+        preview=await previewData(remote.data,remote.revision);return saved;
       });},
       keepLocal:function(){alive();return {kept:true};},
       dispose:function(){disposed=true;remote=null;preview=null;}
@@ -79,8 +79,9 @@
     function button(parent,text,action,fn){
       var b=el('button',text);b.type='button';b.dataset.action=action;b.disabled=busy;b.addEventListener('click',fn);parent.appendChild(b);return b;
     }
-    function setAccount(a){
-      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;menu();
+    async function source(){return typeof profile==='function'?await profile():await profile;}
+    async function setAccount(a){
+      if(controller)controller.dispose();current=a;var p=await source();if(p.connect)p.connect(a);controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;menu();
     }
     function summary(remote){
       if(!remote)return '尚未读取云档案';
@@ -93,13 +94,13 @@
       if(current){
         box.appendChild(el('p','已登录：'+mask(current.email)));
         var state=controller.getState();box.appendChild(el('p',summary(state.remote)));
-        box.appendChild(el('p','本机档案即时保存；云端仅在你点击按钮后上传或下载，不会合并。'));
+        box.appendChild(el('p','账号资产以服务端为准；下载仅更新独立账号缓存。游客档保留，不会自动合并。'));
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
         button(actions,'读取云档案','pull',function(){work(function(){return controller.pull();},'已读取云档案，请选择操作');});
-        var upload=button(actions,'上传本机','upload',function(){if(doc.defaultView.confirm('上传本机档案到云端？将替换所示云版本，不会合并。'))work(function(){return controller.upload();},'本机档案已上传');});upload.disabled=busy||!state.remote;
-        var download=button(actions,'下载云端','download',function(){if(doc.defaultView.confirm('下载并替换本机档案？替换前会保留本机备份，不会合并。'))work(function(){return controller.download();},'云档案已下载，本机备份已保留');});download.disabled=busy||!state.remote||!state.remote.data;
+        var upload=button(actions,'上传本机','upload',function(){if(doc.defaultView.confirm('首次上传本机档案到空云档？不会合并。'))work(function(){return controller.upload();},'本机档案已首次迁入');});upload.disabled=busy||!state.remote||state.remote.data!==null;
+        var download=button(actions,'下载云端','download',function(){if(doc.defaultView.confirm('下载到独立账号缓存？下载前保留本机备份，游客档不会被覆盖。'))work(function(){return controller.download();},'账号缓存已更新，游客档及备份保留');});download.disabled=busy||!state.remote||!state.remote.data;
         button(actions,'保留本机','keep',function(){controller.keepLocal();close();});
-        button(actions,'登出','logout',function(){work(async function(){await account.logout();setAccount(null);},'已登出，本机档案仍保留');});
+        button(actions,'登出','logout',function(){work(async function(){var p=await source();if(p.logout)await p.logout();else await account.logout();await setAccount(null);},'本地缓存与云端可能不同；已恢复原游客档，未自动合并');});
       }else{
         var label=el('label','邮箱');label.htmlFor='rjaEmail';var input=el('input');input.id='rjaEmail';input.type='email';input.autocomplete='email';input.value=email;input.disabled=busy;input.addEventListener('input',function(){email=input.value.trim();});box.append(label,input);
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
@@ -111,9 +112,10 @@
         var verifyActions=el('div');verifyActions.className='rja-actions';box.appendChild(verifyActions);
         button(verifyActions,'登录/绑定账号','verify',function(){
           if(!email||!/^\d{6}$/.test(code)){notice='请输入邮箱和六位验证码';render();return;}
-          work(async function(){await account.verify(email,code);var me=await account.me();setAccount(me.account);await controller.pull();code='';},'登录成功，请选择云档案操作');
+          work(async function(){var p=await source(),me;if(p.verifyLogin)me=await p.verifyLogin(email,code);else{await account.verify(email,code);me=await account.me();}await setAccount(me.account);await controller.pull();code='';},'登录成功，请选择云档案操作');
         });
         if(account.isLocalDev)box.appendChild(el('p','开发模式：验证码在本地 Worker 日志。'));
+        button(verifyActions,'继续游客','guest',function(){work(async function(){var p=await source();if(p.logout)await p.logout();else{try{await account.logout();}catch(e){if(e.status!==401)throw e;}}await setAccount(null);},'本地缓存与云端可能不同；已恢复原游客档，未自动合并');});
       }
       var status=el('p',notice);status.className='rja-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');box.appendChild(status);
       var bottom=el('div');bottom.className='rja-actions';box.appendChild(bottom);button(bottom,'关闭','close',close);
@@ -128,11 +130,11 @@
       if(destroyed||busy)return;
       var main=doc.getElementById('mainMenu');if(!main||!main.classList.contains('active'))return;
       epoch++;opened=true;overlay.hidden=false;notice='';render();
-      await work(async function(){try{var me=await account.me();setAccount(me.account);await controller.pull();}catch(e){if(e.status===401){setAccount(null);return;}throw e;}},'');
+      await work(async function(){try{var me=await account.me();await setAccount(me.account);await controller.pull();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}},'');
     }
     function close(){if(!opened)return;opened=false;overlay.hidden=true;var n=doc.getElementById('accountMenuButton');if(n)n.focus();}
     overlay.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();}});
-    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch)setAccount(result.account);}catch(e){if(e.status===401&&!destroyed&&token===epoch)setAccount(null);}}
+    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch)await controller.pull();}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);}}
     menu();initialize();
     return Object.freeze({open:open,close:close,getState:function(){return {loggedIn:!!current,maskedEmail:current?mask(current.email):null,busy:busy,notice:notice,opened:opened};},destroy:function(){destroyed=true;epoch++;if(controller)controller.dispose();host.replaceChildren();}});
   }
