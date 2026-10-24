@@ -1,6 +1,6 @@
 /* assets/ui.js —— 由 game.html 的 UI 类顶层函数**原样外移**而成（只搬位置、不改函数体/函数名）
    导出：文件末尾用 window.<name> 挂回全局，供 game.html 内联代码继续直接调用。 */
-/* 【2026-10-22 作者要求】主界面背景换成 插画2 / 插画3 / 插画4 三张，**每次刷新随机**（同一页面内保持不变）。 */
+/* 主菜单专属动效：首图随机2/3/4，统一可见性生命周期；不消耗战斗中的随机数。 */
 var __mmBgPicked = false;
 function __mmPickBg() {
   if (__mmBgPicked) return; __mmBgPicked = true;
@@ -9,6 +9,55 @@ function __mmPickBg() {
     /* 绝对路径（以 / 开头）：自定义属性里的相对 url 会按**引用它的样式表**（/assets/app.css）解析，
        写 assets/images/... 会变成 /assets/assets/images/...（实测 404、背景整层消失）✗ */
     document.documentElement.style.setProperty('--mm-bg', "url('/assets/images/mainmenu-bg-" + n + ".webp?v=2')");
+    const ZOOM_MS = 26000, SWITCH_MS = 32000, FADE_MS = 1800, MAX_SHIFT = 8;
+    var menu = document.getElementById('mainMenu'), bg = menu && menu.querySelector('.mm-bg');
+    if (!bg || bg.children.length !== 2 || typeof requestAnimationFrame !== 'function') return;
+    var layers = Array.from(bg.children), reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    var mouse = matchMedia('(min-width: 769px) and (hover: hover) and (pointer: fine)');
+    var running = false, raf = 0, last = null, clock = 0, switchAt = SWITCH_MS, front = 0, current = n, loading = null, fade = null, x = 0, y = 0;
+    function imageUrl(index) { return '/assets/images/mainmenu-bg-' + index + '.webp?v=2'; }
+    layers[front].style.backgroundImage = 'url("' + imageUrl(current) + '")';
+    layers[front].style.opacity = '1';
+    function mmFrame(at) {
+      raf = 0; if (!running) return;
+      clock += last === null ? 0 : at - last; last = at;
+      var scale = 1.06 + .06 * (1 - Math.cos(2 * Math.PI * clock / ZOOM_MS)) / 2;
+      layers.forEach(function (layer) { layer.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0) scale(' + scale + ')'; });
+      if (!fade && clock >= switchAt) {
+        if (!loading) {
+          var candidate = { index: 2 + (current - 1) % 3, ready: false, failed: false }, image = new Image(); loading = candidate;
+          image.onload = function () { image.decode().then(function () { candidate.ready = true; }, function () { candidate.failed = true; }); };
+          image.onerror = function () { candidate.failed = true; }; image.src = imageUrl(candidate.index);
+        }
+        if (loading.failed) { loading = null; switchAt = clock + SWITCH_MS; }
+        else if (loading.ready) {
+          var next = 1 - front; layers[next].style.backgroundImage = 'url("' + imageUrl(loading.index) + '")';
+          fade = { from: front, to: next, started: clock }; front = next; current = loading.index; loading = null; switchAt = clock + SWITCH_MS;
+        }
+      }
+      if (fade) {
+        var progress = Math.min(1, (clock - fade.started) / FADE_MS), blend = (1 - Math.cos(Math.PI * progress)) / 2;
+        layers[0].style.opacity = '1'; layers[1].style.opacity = String(fade.to === 1 ? blend : 1 - blend);
+        if (progress === 1) { layers[fade.from].style.opacity = '0'; layers[front].style.opacity = '1'; fade = null; }
+      }
+      raf = requestAnimationFrame(mmFrame);
+    }
+    function syncMotion() {
+      running = menu.classList.contains('active') && !document.hidden && !reduced.matches;
+      if (!running || !mouse.matches || navigator.maxTouchPoints) x = y = 0;
+      if (!running) { if (raf) cancelAnimationFrame(raf); raf = 0; last = null; }
+      if (reduced.matches) { fade = null; layers.forEach(function (layer, i) { layer.style.transform = 'none'; layer.style.opacity = i === front ? '1' : '0'; }); }
+      if (running && !raf) raf = requestAnimationFrame(mmFrame);
+    }
+    menu.addEventListener('pointermove', function (event) {
+      if (!running || !mouse.matches || navigator.maxTouchPoints || event.pointerType !== 'mouse') return;
+      x = Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, (event.clientX / innerWidth - .5) * 2 * MAX_SHIFT));
+      y = Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, (event.clientY / innerHeight - .5) * 2 * MAX_SHIFT));
+    }, { passive: true });
+    menu.addEventListener('pointerleave', function () { x = y = 0; }, { passive: true });
+    new MutationObserver(syncMotion).observe(menu, { attributes: true, attributeFilter: ['class'] });
+    document.addEventListener('visibilitychange', syncMotion); reduced.addEventListener('change', syncMotion); mouse.addEventListener('change', syncMotion);
+    syncMotion();
   } catch (e) {}
 }
 /* 【2026-10-20 修】主界面是 HTML 里默认 active 的（首屏并不经过 showScreen）⇒ 必须**加载即选一次**，

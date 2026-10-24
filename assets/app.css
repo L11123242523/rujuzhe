@@ -3700,17 +3700,30 @@ body:not(.ui-classic) #battleScreen .side-zones .zone-name{ font-size:10px !impo
 #mainMenu.main-menu-v2 .mm-bg {
   position: absolute;
   inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
   background:
     radial-gradient(900px 600px at 12% 18%, rgba(254,202,87,.12), transparent 62%),
     radial-gradient(700px 500px at 86% 78%, rgba(72,219,251,.10), transparent 64%),
     var(--mm-bg, url('images/mainmenu-bg.webp')) 78% 34% / cover no-repeat;
   filter: blur(.5px) saturate(.86) brightness(.58);
-  transform: scale(1.06);
+  transform: none;
+}
+#mainMenu.main-menu-v2 .mm-bg-slide {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: 78% 34% / cover no-repeat;
+  opacity: 0;
 }
 #mainMenu.main-menu-v2 .mm-bg::after {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 1;
+  pointer-events: none;
   background:
     linear-gradient(90deg, rgba(5,8,14,.94) 0%, rgba(5,8,14,.76) 38%, rgba(5,8,14,.46) 62%, rgba(5,8,14,.86) 100%),
     repeating-linear-gradient(0deg, rgba(255,255,255,.028) 0 1px, transparent 1px 4px);
