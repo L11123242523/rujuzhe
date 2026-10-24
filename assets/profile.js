@@ -186,6 +186,7 @@
       function intents() { var raw = read(intentKey), value = raw === null ? {} : JSON.parse(raw); need(object(value), '命令凭证格式无效'); return value; }
       return freeze({
         key: key, get: current, validate: checked,
+        backupForDelete: function () { return exclusive(function () { var raw=read(key),target=key+'_delete_backup_'+timestamp()+'_'+uuid();write(target,raw===null?'null':raw);if(read(target)!==(raw===null?'null':raw))fail('PROFILE_STORAGE','删除前账号缓存备份失败');return target; }); },
         accept: function (value) { return exclusive(function () { return save(value); }); },
         preview: function (value) { var next = checked(value), token = uuid(), p = snapshot(); selections.set(token, { value: next, guestRaw: read(KEYS.main), cacheRaw: read(key) }); return freeze({previewId: token, before: {tickets:p.tickets,dust:p.dust,owned:clone(p.owned)}, after:{tickets:next.profile.tickets,dust:next.profile.dust,owned:clone(next.profile.owned)}, operation:'account-cache'}); },
         download: function (token) { return exclusive(function () {
@@ -204,6 +205,13 @@
     }
     var api = {
       createAccountCache: accountCache,
+      getGuestMergeMark: function (id) { need(validId(id),'游客档标识无效');var raw=read('rujuzhe_guest_merged_'+id);return raw===null?null:freeze(JSON.parse(raw)); },
+      backupGuestForMerge: function (expected) { return exclusive(function () {
+        var p=snapshot(),raw=read(KEYS.main);if(canonical(p)!==canonical(expected))fail('PROFILE_PREVIEW_STALE','游客档已变化，请重新核对');
+        if(p.pendingReveal!==null)fail('PENDING_REVEAL','请先展示并确认游客开包结果');
+        var key='rujuzhe_profile_merge_backup_'+timestamp()+'_'+uuid();write(key,raw);if(read(key)!==raw)fail('PROFILE_STORAGE','游客合并前备份失败');return freeze({backupKey:key,localProfile:clone(p)});
+      }); },
+      markGuestMerged: function (id,accountId,summary) { return exclusive(function () { need(validId(id)&&validId(accountId),'合并标识无效');var key='rujuzhe_guest_merged_'+id,raw=JSON.stringify({sourceProfileId:id,accountId:accountId,summary:clone(summary)});write(key,raw);if(read(key)!==raw)fail('PROFILE_STORAGE','合并标记保存失败，请查询合并状态恢复'); }); },
       getAccountHint: function () { var value = read('rujuzhe_account_active'); if (value !== null) need(validId(value), '账号缓存标识无效'); return value; },
       clearAccountHint: function () { return exclusive(function () { try { storage.removeItem('rujuzhe_account_active'); } catch (e) { fail('PROFILE_STORAGE', '清除账号选择失败'); } }); },
       getSnapshot: snapshot,
