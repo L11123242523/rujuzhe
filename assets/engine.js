@@ -9209,7 +9209,7 @@ var TW = {
       self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); });
     }
     /** 激活一个候选：入链（含 onAdd 域内动作，例如响应卡的付费+上链）→ 然后继续优先权流程 */
-    function activate(node) { self._addChain(win, node, function () { fire(node.label); }); }
+    function activate(node) { self._addChain(win, node, function (ok) { if (ok === false) { pass(); return; } fire(node.label); }); }
     if (!pool.length) { pass(); return; }
     if (who !== 'p1') {
       if (typeof Online !== 'undefined' && Online.active) {
@@ -9295,7 +9295,7 @@ var TW = {
       /* 【2026-10-19 作者报「遥控骰子能连锁但结算被跳过」】p1 原来不传完成回调，
          紧接着 fire 推进；而遥控骰子的“改几点”弹窗是异步的 ⇒ 窗口先结算、选值后才写 je.val ✗。
          必须与 activate() 同款：等 onAdd 完成（选完点数）再 fire。 */
-      else { self._addChain(win, pool[idx], function () { fire(pool[idx].label); }); }
+      else activate(pool[idx]);
     };
     /* 【2026-10-11 修正·按引擎自己的候选约定】候选的 mandatory 约定见 L6829：
        「`mandatory: false` 表示选发（**缺省 = 必发**）」✓
@@ -10470,7 +10470,7 @@ function runResponseWindow(opts) {
             onAdd: function (done) {
               /* 目标已在**连锁窗自己的槽**里收好（ui.showChainChoice 的第二步）；这里只兜底：
                  AI 座 / 无窗 / 阶段时点等场合才现场取，且**绝不取对手** ✓ */
-              if (pick.from === 'permSP') { activateFn(side, pick, effect, done, pick.target); return; }
+              if (pick.from === 'permSP') { applyChainCard(side, pick, effect, done, pick.target); return; }
               var __tg = pick.target;
               if (__tg === undefined || __tg === null) {
                 if (typeof __collectChainTarget === 'function') {
@@ -24235,7 +24235,12 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
       return '🔗 ' + (card.name || '?') + '（' + (card.cost || 0) + '费）' + (pick.from === 'faceDown' ? '[盖伏]' : '');
     },
     passLabelOf: function () { return '■ 不连锁'; },
-    onClosed: function (eff, finishWindow) { __close(); finishWindow(); }
+    onClosed: function (eff, finishWindow) {
+      // 全时点SP仍在本条链内逆结算；先释放收集窗口，再适用判定结果。
+      if ((eff._chain || []).length) {
+        __afterSync(function () { finishWindow(); resolveChainStack(eff, __close); });
+      } else { __close(); finishWindow(); }
+    }
   });
 }
 
