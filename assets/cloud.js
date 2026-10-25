@@ -95,7 +95,7 @@
     }
     async function source(){return typeof profile==='function'?await profile():await profile;}
     async function setAccount(a){
-      if(controller)controller.dispose();current=a;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';var p=await source();if(p.connect)p.connect(a);controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;menu();
+      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';menu();var p=await source();if(p.connect)p.connect(a);
     }
     function summary(remote){
       if(!remote)return '尚未读取云档案';
@@ -107,7 +107,7 @@
       menu();if(!opened||destroyed)return;box.replaceChildren();box.appendChild(el('h2','账号与云档案'));
       if(current){
         box.appendChild(el('p','已登录：'+mask(current.email)));
-        var state=controller.getState();box.appendChild(el('p',summary(state.remote)));
+        var state=controller?controller.getState():{remote:null,management:null};box.appendChild(el('p',summary(state.remote)));
         box.appendChild(el('p','账号资产以服务端为准；下载仅更新独立账号缓存。游客档保留，不会自动合并。'));
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
         button(actions,'读取云档案','pull',function(){work(function(){return controller.pull();},'已读取云档案，请选择操作');});
@@ -157,23 +157,24 @@
         button(verifyActions,'继续游客','guest',function(){work(async function(){var p=await source();if(p.logout)await p.logout();else{try{await account.logout();}catch(e){if(e.status!==401)throw e;}}await setAccount(null);},'本地缓存与云端可能不同；已恢复原游客档，未自动合并');});
       }
       var status=el('p',notice);status.className='rja-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');box.appendChild(status);
-      var bottom=el('div');bottom.className='rja-actions';box.appendChild(bottom);button(bottom,'关闭','close',close);
+      var bottom=el('div');bottom.className='rja-actions';box.appendChild(bottom);button(bottom,'重试连接','retry',function(){work(reload,'连接已重试');});button(bottom,'关闭','close',close);
     }
     async function work(fn,success){
-      if(busy)return;busy=true;var token=epoch;render();
-      try{await fn();if(token===epoch)notice=typeof success==='function'?success():success;}
+      if(busy)return;busy=true;var token=epoch;
+      try{render();await fn();if(token===epoch)notice=typeof success==='function'?success():success;}
       catch(e){if(token===epoch)notice=e.message;}
       finally{busy=false;if(token===epoch)render();}
     }
+    async function reload(){try{var me=await account.me();await setAccount(me.account);var p=await source();if(p.initialize)await p.initialize(true);await controller.pull();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}}
     async function open(){
       if(destroyed||busy)return;
       var main=doc.getElementById('mainMenu');if(!main||!main.classList.contains('active'))return;
       epoch++;opened=true;overlay.hidden=false;notice='';render();
-      await work(async function(){try{var me=await account.me();await setAccount(me.account);await controller.pull();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}},'');
+      await work(reload,'');
     }
     function close(){if(!opened)return;opened=false;overlay.hidden=true;var n=doc.getElementById('accountMenuButton');if(n)n.focus();}
     overlay.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();}});
-    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch)await controller.pull();}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);}}
+    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch)await controller.pull();}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);else if(!destroyed&&token===epoch){notice=e.message;render();}}}
     menu();initialize();
     return Object.freeze({open:open,close:close,getState:function(){return {loggedIn:!!current,maskedEmail:current?mask(current.email):null,busy:busy,notice:notice,opened:opened};},destroy:function(){destroyed=true;epoch++;if(controller)controller.dispose();host.replaceChildren();}});
   }
@@ -181,7 +182,7 @@
   function boot(){
     if(app)return app;
     var host=document.getElementById('accountRoot');if(!host)return null;
-    app=mount({container:host,account:RJAccount.client(),profile:async function(){return (await RJPackApp.boot()).profile;}});
+    app=mount({container:host,account:RJAccount.client(),profile:async function(){return RJPackApp.getEconomy();}});
     return app;
   }
   return Object.freeze({create:create,mount:mount,maskEmail:mask,boot:boot,open:function(){var a=boot();return a?a.open():Promise.resolve();},close:function(){if(app)app.close();}});

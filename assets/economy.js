@@ -7,7 +7,7 @@
   var hint=guest.getAccountHint(),identity=hint?{id:hint}:null,cache=hint?guest.createAccountCache(hint):null,phase=hint?'loading':'guest',epoch=0,initialized=null,listeners=new Set(),matches=new Map();
   function emit(){listeners.forEach(function(fn){fn();});}
   function connected(){return !!identity;}
-  function snapshot(){var saved=cache&&cache.get();return saved?saved.profile:guest.getSnapshot();}
+  function snapshot(){if(!identity)return guest.getSnapshot();var saved=cache&&cache.get();if(!saved)throw issue('ACCOUNT_CACHE_UNAVAILABLE','暂无法读取账号缓存');return saved.profile;}
   function network(){if(!online())throw issue('ECONOMY_OFFLINE','需要联网，未扣券、未发卡；联网后可用原请求重试');}
   function exclusive(fn){if(!locks||typeof locks.request!=='function')return Promise.reject(issue('ECONOMY_LOCK','当前环境缺少账号跨标签页互斥，停止账号经济操作'));return locks.request('rujuzhe-account-session',{mode:'exclusive'},fn);}
   function connect(a){if(a){if(!identity||identity.id!==a.id){epoch++;identity={id:a.id};cache=guest.createAccountCache(a.id);phase='choice';}else if(phase==='loading'||phase==='expired')phase='choice';}else if(identity){phase='expired';}else phase='guest';emit();}
@@ -20,7 +20,7 @@
    if(pending){var all=cache.requests();for(var signature of Object.keys(all)){var entry=all[signature];if(entry.path==='/pack/open'&&entry.data.poolId===pending.packId&&(entry.data.count||1)===pending.ticketsSpent)await cache.finishRequest(signature,entry.requestId);}}
    return {profile:snapshot(),pending:pending};
   }
-  async function initialize(){if(initialized)return initialized;if(!hint&&!identity)return Promise.resolve(state());initialized=(async function(){try{var me=await account.me();connect(me.account);if(hint===me.account.id){phase='ready';await refreshPending();}}catch(e){if(e.status===401)connect(null);else{phase='offline';emit();}}return state();})();return initialized;}
+  async function initialize(retry){if(retry)initialized=null;if(initialized)return initialized;if(!hint&&!identity)return Promise.resolve(state());var token=epoch;initialized=(async function(){try{var me=await account.me();if(token!==epoch)return state();connect(me.account);token=epoch;if(hint===me.account.id){await refreshPending();if(token===epoch){phase='ready';emit();}}}catch(e){if(token!==epoch)return state();if(e.status===401)connect(null);else{phase='offline';emit();}}return state();})();return initialized;}
   async function syncSelection(){var selected=guest.getAccountHint();if(selected===(identity?identity.id:null))return state();epoch++;hint=selected;identity=selected?{id:selected}:null;cache=selected?guest.createAccountCache(selected):null;phase=selected?'loading':'guest';initialized=null;emit();return selected?initialize():state();}
   function state(){return {mode:identity?'account':'guest',phase:phase,accountId:identity?identity.id:null};}
   async function mutate(path,data,hasRequest){
@@ -75,7 +75,7 @@
    activateCloud:activate,refreshPending:refreshPending,subscribe:function(fn){listeners.add(fn);return function(){listeners.delete(fn);};},
    getSnapshot:snapshot,getCatalog:function(){return guest.getCatalog();},getRules:function(){return guest.getRules();},getCardCount:function(id){return snapshot().owned[id]||0;},resumeReveal:function(){return snapshot().pendingReveal;},
    openPack:async function(poolId,revision,count){if(count===undefined)count=1;if(!connected())return guest.openPack(poolId,revision,count);ready();await refreshPending();if(snapshot().pendingReveal)throw issue('PACK_PENDING','请先确认上一包结果');return mutate('/pack/open',{poolId:poolId,count:count},true);},
-   getPools:async function(){if(connected()){network();return account.request('/pack/pools');}var rules=guest.getRules();return {version:1,allowedCounts:rules.allowedCounts,pools:Object.fromEntries(Object.entries(rules.pools).filter(function(pair){return pair[1].legacyOnly===false;}))};},
+   getPools:async function(){var error=null;if(connected()){try{network();return await account.request('/pack/pools');}catch(e){error={code:e.code||'POOL_UNAVAILABLE',message:e.message};}}var rules=guest.getRules(),local={version:1,allowedCounts:rules.allowedCounts,pools:Object.fromEntries(['character','item'].map(function(id){return [id,rules.pools[id]];}))};return error?Object.assign(local,{source:'local-rules',error:error}):local;},
    confirmReveal:function(resultId){return connected()?mutate('/pack/confirm',{resultId:resultId},false):guestCall('confirmReveal',arguments);},
    collectionAction:function(action,cardId,count){return connected()?mutate('/collection/'+action,Object.assign({cardId:cardId},action==='disassemble'?{count:count}:{}),true):guestCall('collectionAction',arguments);},
    claimDaily:function(){return connected()?mutate('/reward/daily',{},false):guestCall('claimDaily',arguments);},
