@@ -17,7 +17,7 @@
       catch(cause){var network=new Error('网络连接失败，请稍后重试；本机档案未更改');network.code='ACCOUNT_NETWORK';throw network;}
       var body;try{body=await response.json();}catch(e){var invalid=new Error('账号服务返回了无效数据');invalid.code='ACCOUNT_RESPONSE';throw invalid;}
       if(!response.ok){
-        var error=new Error(response.status===503?'邮件登录未启用':(body.message||'账号操作未完成'));
+        var error=new Error(response.status===503&&body.error==='AUTH_DISABLED'?'邮件登录未启用':(body.message||'账号操作未完成'));
         error.status=response.status;error.code=body.error||'ACCOUNT_HTTP';error.detail=body;throw error;
       }
       return body;

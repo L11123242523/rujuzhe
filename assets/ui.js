@@ -243,6 +243,7 @@ function renderDeckBuilder() {
 /* 【2026-10-09 作者目标第6项·卡组编辑】一键清空：把该玩家的 3 名角色 / 8 张道具 / 4 张携带全部置空。
    与"删除单张"同一套数据口径（deckConfig[player][type][index] = null）✓，清完立即重绘并落盘 ✓。 */
 function deckClear(player) {
+  if(__onlineDeckEditBlocked()) return;
   try {
     var cfg = deckConfig[player]; if (!cfg) return;
     if (typeof closeCardPicker === 'function') { try { closeCardPicker(); } catch (e) { try { console.error('[catch] assets/ui.js:170', e); } catch (e2) {} } }
@@ -338,6 +339,7 @@ function renderDeckSide(player) {
   }
   // 每次渲染即持久化（所有修改路径最终都会经过这里）
   if (typeof saveDeckConfig === 'function') saveDeckConfig();
+  if(typeof __deckModeUI==='function') __deckModeUI();
 }
 
 function showPickerTip(msg) { showToast(msg, 'warn'); }

@@ -429,6 +429,7 @@ var Online = {
    *  调用方：联机大厅/启动流程；本函数自身**不做任何自动启用**，避免悄悄改变现有行为。
    * ============================================================ */
   tryEnableAuthoritativeFromUrl: function (hooks) {
+    return false; /* v556正式入口禁止普通URL启用服务器权威，内部实现保留。 */
     try {
       if (typeof location === 'undefined' || !location.search) return false;
       var m = /[?&]auth=([^&]*)/.exec(String(location.search));
@@ -554,7 +555,10 @@ var Online = {
     return false;
   },
   _relay:function(m){ this._send({t:'relay', m:m}); },
-  createRoom:function(){
+  createRoom:function(){ return RJOnlineAccess.enter(this,'host'); },
+  _createRoom:function(){
+    if(this.serverAuthoritative) throw new Error('正式联机仅支持房主权威模式');
+    var __entrySession=RJOnlineAccess.get();
     var self=this;
     /* 进联机必须先切到"联机那套卡组"（否则会用上一次编辑的单机卡组） */
     try{ if(typeof enterOnlineDeckMode==='function') enterOnlineDeckMode(); }catch (e) { try { console.error('[catch] assets/engine.js:541', e); } catch (e2) {} }
@@ -597,27 +601,32 @@ var Online = {
     var http=this._httpOf(this.relayBase);
     this.status('正在向中继服务器申请房号…\n'+http+'/newroom'+(this._isServerAuthority()?'\n（服务器权威模式：规则跑在服务器里，双方都只是客户端）':''));
     /* 申请房号也走重试（0.6/1.2/2.0 秒，最多 3 次）⇒ 瞬时抖动自动恢复 ✓ */
-    this._withRetry(function(){
+    return this._withRetry(function(){
       return fetch(http+'/newroom', { cache:'no-store' }).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
     }, 3, [600,1200,2000], function(n, d, err){
       self.status('联机服务器有点忙，正在重试（第 '+n+'/3 次）…');
       try{ console.error('[联机] 申请房号第 '+n+' 次失败（'+((err&&err.message)||err)+'），'+d+'ms 后重试；地址='+http+'/newroom'); }catch(e){}
     })
-      .then(function(j){
+      .then(async function(j){
+        if(RJOnlineAccess.get()!==__entrySession) throw Object.assign(new Error('原建房请求已取消'),{code:'ONLINE_SESSION_CHANGED'});
         var code=String((j&&j.code)||'').toUpperCase();
         if(!/^[A-Z0-9]{4}$/.test(code)) throw new Error('服务器未返回有效房号');
         self.roomId=code;
         self.status('已拿到房号 '+code+'，正在进入房间…');
+        await RJOnlineAccess.pass(code,'host');
         self._connect(function(){ self._send(self._hello('host')); }, code);
       })
       .catch(function(e){
+        if(e.code) throw e;
         var msg=(e&&e.message)||String(e);
         try{ console.error('[联机] 申请房号失败：'+msg+'（地址：'+http+'/newroom）—— 本地调试需先运行 node online_server.js；线上需中继可用'); }catch(e2){}
         self.status('联机服务器暂时连不上（已重试 3 次）。\n可以：① 稍后再点一次「创建房间」 ② 换个网络再试 ③ 单机对战不受影响 ✓');
         showToast('联机服务器暂时连不上，请稍后再试（或换个网络）', 'warn');
       });
   },
-  joinRoom:function(){
+  joinRoom:function(){ return RJOnlineAccess.enter(this,'guest'); },
+  _joinRoom:function(){
+    if(this.serverAuthoritative) throw new Error('正式联机仅支持房主权威模式');
     var id=(document.getElementById('olRoomId').value||'').trim().toUpperCase();
     if(!id){ showToast('请输入对方房号', 'warn'); return; }
     if(!/^[A-Z0-9]{4}$/.test(id)){ showToast('房号是 4 位字母或数字', 'warn'); return; }
@@ -653,13 +662,13 @@ var Online = {
     this._rememberRelay((this._serverInput()||'').trim());
     this.roomId=id;
     this.status('正在进入房间 '+id+' …'+(this._isServerAuthority()?'\n（服务器权威模式）':''));
-    this._connect(function(){ self._send(self._hello('guest')); }, id);
+    return RJOnlineAccess.pass(id,'guest').then(function(){ self._connect(function(){ self._send(self._hello('guest')); }, id); });
   },
   /* 统一的 hello：服务器权威模式下必须带 engine:true。
      注意（实测）：中继把 WS 请求转发给房间 DO 时只保留 ?r=，**?engine=1 会被丢掉** ——
      所以真正让服务器建权威引擎的是这一条 engine:true（`worker.mjs` hello 分支里的 m.engine===true）。 */
   _hello:function(role){
-    var h={ t:'hello', role:role, name:this._name() };
+    var h={ t:'hello', role:role, name:this._name(), pass:RJOnlineAccess.get()&&RJOnlineAccess.get().pass };
     if(this._isServerAuthority()) { h.engine=true; h.delta=1; }   // delta=1：声明"我能吃增量视图"（批次 4 安全闸）
     return h;
   },
@@ -724,9 +733,10 @@ var Online = {
         self.connected=true;
         if(onOpen) onOpen();
       };
+      var messages=Promise.resolve();
       ws.onmessage=function(ev){
         var m=null; try{ m=JSON.parse(ev.data); }catch(e){ return; }
-        self._onServer(m);
+        messages=messages.then(function(){ if(self.ws===ws) return self._onServer(m); }).catch(function(e){if(self.ws===ws){self.leave();self.status(e.message);}});
       };
       ws.onclose=function(){ self._onClose(); };
       ws.onerror=function(){
@@ -753,10 +763,13 @@ var Online = {
     this.relayBase=this._wsUrl(this._serverInput());
     attemptConnect();
   },
-  _onServer:function(m){
+  _onServer:async function(m){
     var self=this;
     if(!m||!m.t) return;
     switch(m.t){
+      case 'ready':
+        await RJOnlineAccess.accept(m.cfg);
+        break;
       case 'joined':
         this.roomId=m.id; this.mySession=m.sid; this.isHost=!!m.isHost; this.connected=true;
         this._reconnectTry=0;
@@ -811,13 +824,14 @@ var Online = {
         this._onOpponentLeft();
         break;
       case 'error':
-        this.status('服务器：'+(m.msg||'未知错误'));
+        if(/^ONLINE_/.test(m.code||'')){ this._authRejected=true; this.leave(); showScreen('onlineLobby'); }
+        this.status('服务器：'+(m.message||m.msg||'未知错误'));
         break;
     }
   },
   _onClose:function(){
     this.connected=false;
-    if(this._gotStart && this.active){
+    if(!this._authRejected && this._gotStart && this.active){
       // 对局中掉线：不结束对局，自动尝试重连（权威在房主那边，恢复是安全的）
       this.status('与服务器断开，正在尝试自动重连…');
       this._scheduleReconnect();
@@ -845,7 +859,7 @@ var Online = {
       this.status('已准备（服务器权威模式：座位在手，等服务器开局…）');
       return;
     }
-    this._send({t:'ready'});
+    this._send({t:'ready',cfg:this._myDeckCfg()});
     this.status('已准备，等待对手…');
   },
   copyRoomId:function(){ if(!this.roomId){ showToast('还未进入房间'); return; } var self=this;
@@ -853,6 +867,8 @@ var Online = {
     else prompt('复制房号',this.roomId);
   },
   leave:function(){
+    if(typeof RJOnlineAccess!=='undefined') RJOnlineAccess.clear(); this._entryPending=false;
+    if(this._reconnectTimer){ clearTimeout(this._reconnectTimer); this._reconnectTimer=null; }
     try{ if(this.ws){ this._send({t:'leave'}); this.ws.close(); } }catch (e) { try { console.error('[catch] assets/engine.js:762', e); } catch (e2) {} }
     this.ws=null; this.connected=false; this.active=false; this._gotStart=false; this._battleStarted=false;
     this._decSeq=0; this._answers={}; this._intentQueue=[]; this._intentBusy=false; this._oppDeck=null; this._oppDeckWaiters=[];
@@ -900,6 +916,11 @@ var Online = {
       if(self.isGuest){ self.status('已收到对手卡组，等待房主开始对局…'); return; }  // 客人等快照，不建局
       self.status('双方卡组已同步，对局建立中…');
       // 标记"这次 startBattle 是联机开局"，startBattle 据此**不切单机卡组**（作者报的：联机用的是单机卡组）
+      if(typeof RJOnlineAccess!=='undefined'){
+        var approved=RJOnlineAccess.get()&&RJOnlineAccess.get().approved;
+        if(!approved){self.leave();self.status('实际卡组尚未通过服务器确认，请重新进房');return;}
+        deckConfig.p1=JSON.parse(JSON.stringify(approved));
+      }
       self._startingOnlineBattle = true;
       try{ if(typeof startBattle==='function') startBattle(); }catch(e){ console.error('联机开局失败',e); }
       self._startingOnlineBattle = false;
@@ -915,6 +936,7 @@ var Online = {
   /* 本机卡组（本机视角里"自己"永远是 p1）序列化成 deckConfig 形状 —— 旧协议与服务器权威两条路共用。
      服务器权威模式下它是 {k:'deck'} 的载荷；旧协议下它是 {k:'deck'} 中继消息的载荷。 */
   _myDeckCfg:function(){
+    if(typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.get()) return JSON.parse(JSON.stringify(RJOnlineAccess.get().approved||RJOnlineAccess.get().cfg));
     var cfg={chars:[],items:[],carries:[]};
     try{
       var __mine=deckOf('p1');
@@ -2269,13 +2291,13 @@ var Online = {
     this._reconnectTimer=setTimeout(function(){
       self._reconnectTimer=null;
       self.status('正在重连（第 '+self._reconnectTry+' 次）…');
-      self._connect(function(){
+      RJOnlineAccess.pass(self.roomId,self.isGuest?'guest':'host').then(function(){ self._connect(function(){
         /* 批次 3：服务器权威模式下重连要**再声明一次 engine**（DO 可能已被回收重建，
            它对新连接只看 hello 里的 engine:true）。role 仍按房间里的身份，resume 让中继认识这是老座位。 */
         var h=self._hello(self.isGuest?'guest':'host');
         h.resume=true; h.name=self.myName||'玩家';
         self._send(h);
-      }, self.roomId);
+      }, self.roomId); }).catch(function(e){self._authRejected=true;self.leave();self.status(e.message);});
     }, wait);
   },
   /* ---------------- 投降 ---------------- */
@@ -3248,6 +3270,8 @@ function setDeckMode(mode, silent) {
   __deckModeUI();
   if (!silent) { try { renderDeckSide('p1'); renderDeckSide('p2'); } catch (e) { try { console.error('[catch] assets/engine.js:2969', e); } catch (e2) {} } }
 }
+function __onlineDeckEditBlocked(){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
+function __onlineUnowned(card){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.unowned(card);}
 function __deckModeUI() {
   try {
     var side = document.getElementById('p2DeckSide');
@@ -3256,13 +3280,19 @@ function __deckModeUI() {
     if (b1) b1.classList.toggle('active', deckSetMode === 'online');
     if (b2) b2.classList.toggle('active', deckSetMode === 'pve');
     var hint = document.getElementById('deckModeHint');
+    if (deckSetMode==='online' && hint && typeof RJOnlineAccess!=='undefined') {
+      var missing=[].concat(deckOf('p1').chars||[],deckOf('p1').items||[],deckOf('p1').carries||[]).filter(function(c){return c&&RJOnlineAccess.unowned(c);}).length;
+      hint.dataset.missing=String(missing);
+    }
     if (hint) hint.textContent = (deckSetMode === 'pve')
       ? '当前编辑：单机 vs 对手 卡组（你 + 对手 各 12 张，只用于单机对战）'
-      : '当前编辑：联机卡组（只有你自己的 12 张，用于联机对战；AI 那套在「单机卡组」里配）';
+      : '当前编辑：联机卡组（3角色／8道具／4携带）'+(hint.dataset.missing>0?'；有 '+hint.dataset.missing+' 张未持有卡，无法开始联机对战':'');
   } catch (e) { try { console.error('[catch] assets/engine.js:2982', e); } catch (e2) {} }
 }
 /** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
 function openDeckBuilder(mode) {
+  if(mode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online)) return;
+  if(mode==='online' && typeof RJOnlineAccess!=='undefined') RJOnlineAccess.inspect().then(function(){if(deckSetMode==='online')renderDeckBuilder();}).catch(function(e){showToast(e.message,'warn');});
   /* 【2026-10-03 清单③】卡组配置页顶部注入"我的卡组"存档条 */
   try {
     var __scr = document.getElementById('deckBuilder');
@@ -3312,6 +3342,7 @@ function __refreshDeckBackBtn() {
 }
 /** 从**房间**里打开联机卡组编辑（不离开房间） */
 function openDeckBuilderFromRoom() {
+  if(typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online)) return;
   __deckFromScreen = 'onlineLobby';
   try { enterOnlineDeckMode(); } catch (e) {}
   openDeckBuilder('online');
@@ -3332,7 +3363,8 @@ function returnFromDeckBuilder() {
   } catch (e) {}
   showScreen('mainMenu');
 }
-function openOnlineLobby() {
+async function openOnlineLobby() {
+  try{await RJOnlineAccess.gate();}catch(e){showToast(e.message,'warn');return;}
   enterOnlineDeckMode();
   try { showScreen('onlineLobby'); } catch (e) { try { console.error('[catch] assets/engine.js:3020', e); } catch (e2) {} }
   try { Online.refreshLobby(); } catch (e) { try { console.error('[catch] assets/engine.js:3021', e); } catch (e2) {} }
@@ -3341,6 +3373,7 @@ function openOnlineLobby() {
 }
 /** 一键清空某一方（作者要求：现在只能一张张换） */
 function clearDeckSide(player) {
+  if(__onlineDeckEditBlocked()) return;
   if (player !== 'p1' && player !== 'p2') return;
   if (!window.confirm((player === 'p1' ? '你' : '对手') + '这一方的卡组要全部清空吗？（3 角色 / 8 道具 / 4 携带）')) return;
   deckConfig[player].chars = [null, null, null];
@@ -3737,6 +3770,7 @@ function __deckLibSaveCurrent(name) {
   } catch (e) { console.error('保存卡组出错', e); return null; }
 }
 function __deckLibApply(id) {
+  if(__onlineDeckEditBlocked()) return;
   try {
     var arr = __deckLibAll(), rec = null;
     for (var i = 0; i < arr.length; i++) if (arr[i].id === id) { rec = arr[i]; break; }
@@ -3814,6 +3848,7 @@ const DECK_ATTR_COLOR = { '无序': '#94a3b8', '热忱': '#e94560', '理智': '#
 const ATTR_COLOR = DECK_ATTR_COLOR; // 全局唯一四属性配色（红热忱/蓝理智/灰无序/紫混沌，对齐查询站）
 
 function deckAutoFill(player) {
+  if(__onlineDeckEditBlocked()) return;
   var cfg = deckConfig[player];
   if ((cfg.chars || []).filter(Boolean).length < 3) { showToast('请先选满3名角色，再按属性配额补全道具', 'warn'); return; }
   cfg.items = autoFillItems(cfg.chars, cfg.items);
@@ -3855,7 +3890,8 @@ function createDeckSlot(card, player, type, index) {
     /* 【2026-10-09 作者要求】卡组编组界面：**鼠标悬停在卡上即浮出原图**（通用浮层 __cardPeekShow，
        卡名编码后传参，避免卡名里的引号截断 HTML）。点击行为（打开选择器）不变 ✓。 */
     var __peek = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
-    var html = '<div class="deck-slot filled"' + __peek + ' onclick="openCardPicker(\'' + player + '\', \'' + type + '\', ' + index + ')">';
+    var __locked=__onlineUnowned(card);
+    var html = '<div class="deck-slot filled'+(__locked?' online-unowned':'')+'"' + __peek + ' onclick="openCardPicker(\'' + player + '\', \'' + type + '\', ' + index + ')">';
     if (card.image_url) {
       html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '">';
     }
@@ -3863,6 +3899,7 @@ function createDeckSlot(card, player, type, index) {
       var __spSt = (typeof __charSpStatus === 'function') ? __charSpStatus(player, index) : null;
       if (__spSt) html += '<div class="deck-slot-sp" title="' + __spSt.full + '" style="position:absolute;top:2px;left:2px;z-index:4;font-size:8px;line-height:1.1;padding:1px 3px;border-radius:5px;background:rgba(0,0,0,.78);color:' + __spSt.color + ';border:1px solid ' + __spSt.color + ';">' + __spSt.short + '</div>';
     }
+    if(__locked) html += '<span class="online-lock">🔒 未持有</span>';
     html += '<div class="deck-slot-name">' + card.name + '</div>';
     html += '<div class="deck-slot-remove" onclick="event.stopPropagation();removeCard(\'' + player + '\', \'' + type + '\', ' + index + ')">✕</div>';
     html += '</div>';
@@ -3873,6 +3910,7 @@ function createDeckSlot(card, player, type, index) {
 }
 
 function removeCard(player, type, index) {
+  if(__onlineDeckEditBlocked()) return;
   deckConfig[player][type][index] = null;
   /* 【2026-10-09 修·**删掉一张卡之后点不动补充**（作者实测，需 F5 才好）】
      选卡器 cardPicker 是**全屏遮罩**（game.html 的 .card-picker-overlay；active 时 display:flex）
@@ -3885,6 +3923,7 @@ function removeCard(player, type, index) {
 
 
 function openCardPicker(player, type, index) {
+  if(__onlineDeckEditBlocked()) return;
   pickerState = { player: player, type: type, index: index };
   
   var picker = document.getElementById('cardPicker');
@@ -3952,10 +3991,12 @@ function openCardPicker(player, type, index) {
       /* 【2026-10-09 作者要求】选卡弹窗里的卡格：**鼠标悬停即浮出原图**（通用浮层 __cardPeekShow；
          卡名编码后传参，避免卡名里的引号截断 HTML）。点击选择的行为不变 ✓。 */
       var __peekAttr = ' onmouseenter="__cardPeekShow(this, \'' + encodeURIComponent(card.name || '') + '\')" onmouseleave="__cardPeekHide()"';
-      html += '<div class="card-picker-item' + (__disReason ? ' picker-disabled' : '') + '"' + __peekAttr + (__disReason ? ' title="' + __disReason + '"' : '') + ' onclick="' + __onClick + '">';
+      var __missing=__onlineUnowned(card);
+      html += '<div class="card-picker-item' + (__missing?' online-unowned':'') + (__disReason ? ' picker-disabled' : '') + '"' + __peekAttr + (__disReason ? ' title="' + __disReason + '"' : '') + ' onclick="' + __onClick + '">';
       if (card.image_url) {
         html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '">';
       }
+      if(__missing) html += '<span class="online-lock">🔒 未持有</span>';
       html += '<div class="card-picker-item-name">' + card.name + '</div>';
       if (type === 'items' && card.attribute) {
         var __ac = (typeof DECK_ATTR_COLOR!=='undefined' && DECK_ATTR_COLOR[card.attribute]) || '#cdd7f0';
@@ -3970,6 +4011,7 @@ function openCardPicker(player, type, index) {
 }
 
 function selectCard(cardIndex) {
+  if(__onlineDeckEditBlocked()) return;
   /* 【2026-10-14 诊断·零干扰打点】作者报偶发「编组界面删卡后加不进卡」（点卡没反应/槽位不变）。
      这里**只在"点了卡但没加进去"这一刻**记现场（即下面每一个 `return` 之前都打一条日志），
      正常加入**不记**（不刷屏 ✓）；**不改任何判据** ✗ —— 纯观测，下次偶发时日志里就是证据 ✓。
@@ -4214,6 +4256,7 @@ function __cloneDeckSlots(arr, n) {
   return out;
 }
 function applySmartDeck(player, d, showMsg) {
+  if(__onlineDeckEditBlocked()) return;
   deckConfig[player].chars = __cloneDeckSlots(d.chars, 3);
   deckConfig[player].items = __cloneDeckSlots(d.items, 8);
   deckConfig[player].carries = __cloneDeckSlots(d.carries, 4);
@@ -4291,6 +4334,7 @@ function exportDeckCode(player) {
   window.prompt((player === 'p1' ? '你的' : '对手的') + '卡组码已生成（Ctrl+C 复制保存）：', code);
 }
 function importDeckCode(player) {
+  if(__onlineDeckEditBlocked()) return;
   player = (player === 'p2') ? 'p2' : 'p1';
   var raw = window.prompt('粘贴' + (player === 'p1' ? '你的' : '对手的') + '卡组码：'); if (!raw) return;
   var obj;
@@ -27826,7 +27870,7 @@ try {
       try {
         var box = document.getElementById('olAuthority');
         var btn = document.getElementById('olAuthGo');
-        if (!box || !btn) return;
+        if (!box || !btn || btn.disabled) return;
         var __sayAuth = function (s) { try { if (typeof Online.status === 'function') Online.status(s); } catch (e) { try { console.error('[catch] assets/engine.js:22991', e); } catch (e2) {} } };
         btn.addEventListener('click', function () {
           var base = String(box.value || '').trim();
