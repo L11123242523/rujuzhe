@@ -306,6 +306,8 @@ var NetSync = {
     var __keepLogs = (battleState && Array.isArray(battleState._logs)) ? battleState._logs : null;
     if (!battleState) { try { battleState = st; } catch (e) { return false; } }
     else NetSync._overwrite(battleState, st);
+    // 完整自用快照恢复后稳定区域；客机遮蔽视图带playable，绝不在本机搬隐藏牌。
+    if (!Object.prototype.hasOwnProperty.call(snap, 'playable') && typeof __stabilizePlayerZones === 'function') __stabilizePlayerZones();
     /* 【2026-10-17 日志增量·与 buildSnapshot 配套】guest 视图里 `_logs` 被摘掉 ⇒ `_overwrite` 会把它**删掉**
        （它会把 src 里没有的键从 target 删掉）⇒ 这里必须把本地累积的那份接回去，再按 `snap.log` 追加新增行 ✓
        否则症状是：每收到一份快照，客人的战斗日志就被清空 ✗ */

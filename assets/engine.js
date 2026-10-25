@@ -2569,7 +2569,7 @@ function onlineSacrificeP2(idx, name, done) {
     if (!isFinite(ix) || ix < 0 || ix >= p.hand.length) { if (done) done(); return; }
     ix = Math.floor(ix);
     var sacCard = p.hand.splice(ix, 1)[0];
-    p.grave.push(sacCard);
+    __putPlayerGrave('p2', sacCard);
     var __kotaroEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
     if (__kotaroEff) p._kotaroGraveViewTurn = battleState.turn;
     if (typeof checkGraveTrigger === 'function') checkGraveTrigger('p2', sacCard, __kotaroEff ? 'effect' : 'sacrifice');
@@ -5949,6 +5949,19 @@ function shuffleArray(arr) {
 }
 
 // 统一牌库补充：牌库一空就立即把墓地所有卡按序作为新牌库（不洗牌；原墓地最上方=最近进墓的卡成为新牌组最下方，原墓地最下方=最早进墓的卡成为新牌组最上方、最先被抽）。返回是否还有卡可抽。
+// 玩家区域变更的同步提交：先完成本次移区，再稳定空牌组；不由UI或计时器搬牌。
+function __commitPlayerZones(player, change) {
+  var p = battleState && battleState[player]; if (!p) return null;
+  var result = change(p); __refillDeckIfEmpty(player); return result;
+}
+function __putPlayerGrave(player, card) {
+  return __commitPlayerZones(player, function (p) { (p.grave = p.grave || []).push(card); return card; });
+}
+function __deckTopToGrave(player) {
+  var p = battleState && battleState[player]; if (!p || !p.deck || !p.deck.length) return null;
+  return __commitPlayerZones(player, function (state) { var card = state.deck.shift(); (state.grave = state.grave || []).push(card); return card; });
+}
+function __stabilizePlayerZones() { playerIds().forEach(function (who) { __commitPlayerZones(who, function () {}); }); }
 function __refillDeckIfEmpty(player) {
   var __p = battleState[player];
   if (__p.deck && __p.deck.length > 0) return true;
@@ -5971,13 +5984,12 @@ function __takeFromDeckAt(player, index) {
   var __p = battleState[player]; if (!__p || !__p.deck) return null;
   var __i = (typeof index === 'number' && index >= 0 && index < __p.deck.length) ? index : -1;
   if (__i < 0) return null;
-  var __c = __p.deck.splice(__i, 1)[0];
-  if (__p.deck.length === 0) __refillDeckIfEmpty(player);   // 摘走最后一张 ⇒ 立刻翻面 ✓
-  return __c;
+  return __commitPlayerZones(player, function (p) { return p.deck.splice(__i, 1)[0]; });
 }
 function takeTopCard(player) {
   var __p = battleState[player]; if (!__p) return null;
   if (!__p.deck || __p.deck.length === 0) { if (!__refillDeckIfEmpty(player)) return null; }
+  return __commitPlayerZones(player, function (__p) {
   var __c = __p.deck.shift();
   // 牌组顶"公开卡"离开牌组顶 → 结束公开显示（修复：旧代码从不调用 clearDeckTopCard，公开标记会永久残留）
   try {
@@ -5987,8 +5999,8 @@ function takeTopCard(player) {
     }
   } catch (e) { try { console.error('[catch] assets/engine.js:5506', e); } catch (e2) {} }
   // 规则：牌组剩余卡为0就立即把墓地所有卡翻面成为新牌组（原墓地最上方→新牌组最下方），抽完最后一张即补
-  if (__p.deck.length === 0) __refillDeckIfEmpty(player);
   return __c;
+  });
 }
 /* ============================================================
    牌组堆模型 + "牌组最上方公开卡"API（为以后"把卡公开放到牌组最上方"的效果预留）
@@ -6062,7 +6074,7 @@ function drawCard(player) {  var __p = battleState[player];
   }
   // 莉莉被动·逝者之眼：抽卡前可观看牌组最下方一张(牌顶=deck[0]，最下方=末位)，并可选择从最上/最下抽（_lilyDrawFrom=bottom 时从底=末位抽）
   if (__p._lilyPassive && __p.deck.length) { var __botCard = __p.deck[__p.deck.length-1]; addBattleLog(player, '【莉莉被动】牌组最下方为【' + (__botCard ? __botCard.name : '空') + '】'); }
-  var card = (__p._lilyPassive && __p._lilyDrawFrom === 'bottom') ? __p.deck.pop() : takeTopCard(player);
+  var card = (__p._lilyPassive && __p._lilyDrawFrom === 'bottom') ? __takeFromDeckAt(player, __p.deck.length - 1) : takeTopCard(player);
   /* 【2026-10-03 加固·"显示与实际不符"这一类】抽到空/undefined **绝不入手**：
      旧实现会把 undefined 塞进 hand ⇒ 手牌"多一张看不见的卡"、界面显示"无"（作者报过"显示无、实际抽了"）。 */
   try { if (typeof __sfx !== 'undefined') __sfx.play('draw'); } catch (e) { try { console.error('[catch] assets/engine.js:5586', e); } catch (e2) {} }
@@ -6735,7 +6747,7 @@ function collectChainable(player, effect){
      代价与时点无关：发动时把**牌组最上方**送墓（由处理器负责 ✓）；"一回合一次"标记在**逆结算执行时**消费 ✓。 */
   try {
     (me.permanent || []).forEach(function (c, i) {
-      if (!c || c.name !== '雷閃') return;
+      if (!c || c.name !== '雷閃' || !__activeEligibility(c, player, true).ok) return;
       /* 【2026-10-14 作者报「一回合一次拦不住」⇒ 结构修 ✓】标记记在**座位**上（`me._leishanSPTurn`）——
          原来记在**卡对象**上，而场上的卡对象会被快照/联机克隆替换 ⇒ 标记一丢就又能发 ✗。
          座位写法与 `p._edwardSPTurn` / `p._lilySPTurn` **同一套** ✓（对局状态的一部分，不会丢）。 */
@@ -6802,8 +6814,52 @@ function collectChainable(player, effect){
   }
   return __dedup;
 }
+// 发动资格只读；牌的印刷费用与场上效果的发动代价分别判定。
+function __activeEligibility(card, user, chain) {
+  var p = battleState && battleState[user], st = card && permanentStruct(card), act = st && st.active;
+  function no(reason) { return { ok: false, reason: reason }; }
+  if (!p || !act || !act.handler || (p.permanent || []).indexOf(card) < 0) return no('卡已不在场上');
+  var h = act.handler, pool = [];
+  if (__cardEffectDisabledNow(card)) return no('本回合效果无效');
+  if (!chain && typeof TW !== 'undefined' && TW.active) return no('请先完成当前连锁；响应请走连锁候选');
+  if (!chain && battleState.phase !== 'main1' && battleState.phase !== 'main2') return no('当前不是主要阶段');
+  if ((!act.noAutoFlag && act.flag && card[act.flag]) || (h === 'leishanSP' && p._leishanSPTurn === battleState.turn)) return no('本次发动次数已使用');
+  if (h === 'leishanSP' && (!(p.deck || []).length || !othersOf(user).length)) return no('没有可送墓的牌组顶或其他玩家');
+  if (h === 'huginn') { pool = collectZoneCards(user, ['grave','removed'], null, null, null, true).filter(function (x) { return __isAggroCard(x.card); }); if (p.cost < 3 || !pool.length) return no('需要3音韵及可回收的侵略卡'); }
+  if (h === 'ruler' && p.cost <= 0) return no('音韵不足');
+  if (h === 'phone' && ((card._phoneUsedThisTurn && card._phoneExtraThisTurn) || p.gold < 700 + (card._phoneUsedThisTurn ? 500 : 0))) return no('金币或追加次数不足');
+  if (h === 'qiaojiang' && !(p.hand || []).length) return no('没有可献祭的手卡');
+  if (h === 'langya' && !collectZoneCards(user, ['grave'], ['侵略'], ['item_single']).some(function (x) { return p.cost >= (Number(x.card.cost) || 0) + 1; })) return no('没有付得起费用的墓地侵略单次卡');
+  return { ok: true, handler: h, pool: pool };
+}
+function __prepareActive(user, card, chain, target, done) {
+  var check = __activeEligibility(card, user, chain); if (!check.ok) { done(null); return; }
+  var plan = { user: user, card: card, chain: chain, handler: check.handler, paid: false };
+  if (check.handler === 'huginn') {
+    var pool = check.pool, choose = function (i) { i = Array.isArray(i) ? i[0] : i; if (i == null || i < 0 || !pool[i]) { done(null); return; } plan.pickCard = pool[i].card; plan.pickZone = pool[i].zone; done(plan); };
+    if (user === 'p2' && typeof Online !== 'undefined' && Online.active) Online.awaitAnswer({ label: '福金与穆宁：发动前选侵略回收卡', allowCancel: true, cards: pool.map(function (x) { return x.card.name; }) }, choose);
+    else showCardPickerMulti(pool.map(function (x) { return x.card; }), '福金与穆宁：支付3音韵，发动前选回收卡', choose, 1, false, true);
+  } else if (check.handler === 'leishanSP') {
+    var foes = othersOf(user), pickTarget = function (who) { if (foes.indexOf(who) < 0) { done(null); return; } plan.target = who; plan.top = battleState[user].deck[0]; done(plan); };
+    if (target != null) { pickTarget(target); return; } if (foes.length === 1 || (typeof isAISeat === 'function' && isAISeat(user))) { pickTarget(foes[0]); return; }
+    var select = function (i) { pickTarget(i == null || i < 0 ? null : foes[i]); };
+    if (user === 'p2' && typeof Online !== 'undefined' && Online.active) onlineDecideModal(user, '雷閃·SP', '发动前选其他玩家', '', foes.map(playerDisplayName), select);
+    else showChoiceModal('雷閃·SP', '发动前选其他玩家', '', foes.map(playerDisplayName), select);
+  } else done(plan);
+}
+function __commitActive(plan) {
+  if (!plan || plan.paid) return null; var p = battleState[plan.user], check = __activeEligibility(plan.card, plan.user, plan.chain); if (!check.ok) return null;
+  if (plan.handler === 'huginn' && (!(p[plan.pickZone] || []).includes(plan.pickCard) || !__isAggroCard(plan.pickCard))) return null;
+  if (plan.handler === 'leishanSP' && (p.deck[0] !== plan.top || othersOf(plan.user).indexOf(plan.target) < 0)) return null;
+  __beginCostPay(); try {
+    if (plan.handler === 'huginn') __spendCost(p, 3);
+    if (plan.handler === 'leishanSP') { plan.top = __deckTopToGrave(plan.user); addBattleLog(plan.user, '【雷閃·SP】发动代价：牌组顶【' + plan.top.name + '】送入墓地'); }
+    plan.paid = true;
+    if (plan.handler === 'leishanSP') checkGraveTrigger(plan.user, plan.top, 'effect');
+  } finally { __endCostPay(); } return plan;
+}
 function __chainPickAffordable(player, pick) {
-  return !!pick && (pick.from === 'seatEffect' || pick.from === 'permSP' || pick.horus || __costAffordable(player, pick.card));
+  return !!pick && (pick.from === 'seatEffect' || (pick.from === 'permSP' ? __activeEligibility(pick.card, player, true).ok : false) || (pick.from !== 'permSP' && (pick.horus || __costAffordable(player, pick.card))));
 }
 /* ===== 弹窗减负：连锁窗口自动 PASS 倒计时 + “本会话不再询问” ===== */
 // 会话级记忆（刷新页面即失效，避免永久改变规则）
@@ -6884,8 +6940,10 @@ function applyChainCard(player,pick,effect,done,target){
     return;
   }
   if (pick.from === 'permSP') {
+    __prepareActive(player, c, true, target, function (plan) {
+    var receipt = __commitActive(plan); if (!receipt) { if (done) done(false); return; }
     effect._chain = effect._chain || [];
-    __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c });
+    __chainWithC1().push({ kind: 'permSP', by: player, name: name, permSP: pick.permSP, card: c, activation: receipt });
     /* 【2026-10-14 作者报「主要阶段发一次、跟连锁又发一次」⇒ 结构修 ✓】
        次数**在入链这一刻就消费**（发动即算用掉），且记在**座位**上 ✓ */
     try { battleState[player]._leishanSPTurn = battleState.turn; } catch (e) { try { console.error('[catch] 雷閃 SP 回合标记', e); } catch (e2) {} }
@@ -6893,11 +6951,11 @@ function applyChainCard(player,pick,effect,done,target){
     if (typeof ChainAnim !== 'undefined' && ChainAnim.flash) ChainAnim.flash('连锁发动 · ' + name, 'flash-activate');
     if (typeof renderChainBar === 'function') renderChainBar(effect);
     if (typeof updateBattleUI === 'function') updateBattleUI();
-    setTimeout(function () { if (typeof done === 'function') done(); }, 200);
-    return;
+    setTimeout(function () { if (typeof done === 'function') done(true); }, 200);
+    }); return;
   }
   // 普通响应在任何入链/付费动作前再核验；角色能力与SP已在上方独立返回。
-  if (!__chainPickAffordable(player, pick)) { if (typeof done === 'function') done(); return; }
+  if (!__chainPickAffordable(player, pick)) { if (typeof done === 'function') done(false); return; }
   effect._chain = effect._chain || [];
   function payAndRemove(){
     /* 【2026-10-09 第2件】连锁发动时卡会被移出所有区域 ⇒ "用卡后被动"的归属守卫查不到它。
@@ -7884,7 +7942,7 @@ registerTrigger({
     q._rioHWSPTurn = battleState.turn;
     var top = (q.deck || [])[0];
     if (!top) { addBattleLog(owner, '【里绪（万圣祭）SP】牌组已空，无法送墓'); updateBattleUI(); return; }
-    q.deck.shift(); q.grave.push(top);
+    __deckTopToGrave(owner);
     addBattleLog(owner, '【里绪（万圣祭）SP】本回合首次献祭后，牌组最上方【' + (top.name || '?') + '】送入墓地');
     if (typeof updateBattleUI === 'function') updateBattleUI();
   }
@@ -8533,7 +8591,7 @@ function __lilithDiscardDraw(owner, done) {
     function __dropPick(card) {
       if (card) {
         var ix = q.hand.indexOf(card);
-        if (ix >= 0) { q.hand.splice(ix, 1); (q.grave = q.grave || []).push(card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, card, 'effect'); }
+        if (ix >= 0) { q.hand.splice(ix, 1); __putPlayerGrave(owner, card); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(owner, card, 'effect'); }
       }
       __lilithAfterDiscard(owner, card);
       __fin();
@@ -8975,6 +9033,7 @@ var TW = {
     return win.candidates.filter(function (c) {
       if (!c || c.owner !== who || c._chainDisabled || win.chain.indexOf(c) >= 0) return false;
       if (typeof c.alive === 'function' && !c.alive()) return false;
+      if (c.pick && c.pick.from === 'permSP' && !__chainPickAffordable(c.owner, c.pick)) return false;
       /* 【2026-10-24】候选是开窗时扫出来的；开窗后费用可能被支付/削减 ⇒ 每次取候选都按“当前余额”重验，
          否则会问“2音韵能否连锁3费卡”，选中后又被费用闸拒绝（作者截图事故）。 */
       if (c.onAdd && c.pick && typeof __costAffordable === 'function'
@@ -9054,16 +9113,10 @@ var TW = {
     } catch (e) { console.error('连锁费用闸出错（放行）', e); }
     /* A2：记录该环建立时，发动者的"每回合一次"类标记（若本环最终被发动无效 ⇒ 还原） */
     try { if (c && c.owner && !c._onceSnap && typeof __snapshotOncePerTurn === 'function') c._onceSnap = __snapshotOncePerTurn(c.owner); } catch (e) { console.error('A2 快照失败（忽略）', e); }
-    if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c);
-    win.chain.push(c);
     var fin = (typeof done === 'function') ? done : function () {};
-    if (typeof c.onAdd === 'function') {
-      try { return c.onAdd(fin); }
-      catch (e) {
-        try { addBattleLog('system', '【连锁】入链动作异常（已跳过该环）：' + ((e && e.message) || e)); } catch (e2) { try { console.error('[catch] assets/engine.js:7872', e2); } catch (e2) {} }
-      }
-    }
-    fin();
+    function accepted(ok) { if (ok === false) { fin(false); return; } if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c); win.chain.push(c); fin(true); }
+    if (typeof c.onAdd === 'function') { try { return c.onAdd(accepted); } catch (e) { console.error('连锁发动提交失败', e); fin(false); return; } }
+    accepted(true);
   },
   /** arrange：必发按「回合方 → 对方」入链；同一方多个必发由该方点选，顺序即链序 */
   arrange: function (win, after) {
@@ -9524,7 +9577,7 @@ function resolveChainStack(effect, onDone) {
         if (typeof moveCardToGrave === 'function') {
           moveCardToGrave(pg.player, pg.card, 'use');
         } else {
-          (__pp.grave = __pp.grave || []).push(pg.card);
+          __putPlayerGrave(pg.player, pg.card);
           addBattleLog(pg.player, '【' + (pg.name || pg.card.name || '') + '】结算完毕，送入墓地');
           if (typeof checkGraveTrigger === 'function') checkGraveTrigger(pg.player, pg.card, 'use');
         }
@@ -9646,7 +9699,7 @@ function resolveChainStack(effect, onDone) {
       var __psKey = (e.permSP === 'leishan') ? 'leishanSP' : null;
       var __psFn = (__psTable && __psKey) ? __psTable[__psKey] : null;
       if (typeof __psFn === 'function') {
-        var __psOk = __psFn(e.card || { name: e.name }, e.by);
+        var __psOk = __psFn(e.card || { name: e.name }, e.by, e.activation);
         __doneSet[i] = true;
         /* 只有**真的发动成功**才消费"一回合一次" ✓（牌组空等未发动 ⇒ 返回 false ⇒ 不扣次数 ✓） */
         if (__psOk !== false) { try { battleState[e.by]._leishanSPTurn = battleState.turn; } catch (e) { try { console.error('[catch] 雷閃SP 连锁结算记账', e); } catch (e2) {} } }   /* 与入链处同一标记 ✓ */
@@ -10404,6 +10457,7 @@ function runResponseWindow(opts) {
             needTarget: (function () {
               try {
                 if (typeof __collectChainTarget !== 'function' || typeof __tgtTiming !== 'function') return false;
+                if (pick.from === 'permSP') return false;
                 return __tgtTiming((pick.card && (pick.card.effect || pick.card.text)) || '') === 'activation';
               } catch (e) { return false; }
             })(),
@@ -10416,18 +10470,19 @@ function runResponseWindow(opts) {
             onAdd: function (done) {
               /* 目标已在**连锁窗自己的槽**里收好（ui.showChainChoice 的第二步）；这里只兜底：
                  AI 座 / 无窗 / 阶段时点等场合才现场取，且**绝不取对手** ✓ */
+              if (pick.from === 'permSP') { activateFn(side, pick, effect, done, pick.target); return; }
               var __tg = pick.target;
               if (__tg === undefined || __tg === null) {
                 if (typeof __collectChainTarget === 'function') {
                   __collectChainTarget(side, pick.card, function (t) {
                     if (t === null) { try { addBattleLog(side, '【连锁】未选定目标 ⇒ 本次不发动'); } catch (e) {} done(); return; }
-                    activateFn(side, pick, effect, function () { done(); }, t);
+                    activateFn(side, pick, effect, function (ok) { done(ok); }, t);
                   });
                   return;
                 }
                 __tg = '' + side;
               }
-              activateFn(side, pick, effect, function () { done(); }, __tg);
+              activateFn(side, pick, effect, function (ok) { done(ok); }, __tg);
             },
             fire: function (next) { next(); }
           });
@@ -10476,7 +10531,7 @@ function runResponseWindow(opts) {
       if (who !== 'p1') return '🔗 ' + (card.name || '?');
       /* 【2026-10-24】显示“当前所需费用”，不是卡面基础费：有钢笔/葵/等级减免时，3费卡可能实际2费。 */
       var __lblCost = (typeof computeRequiredCost === 'function' && card && card.name) ? computeRequiredCost(card, who) : (card.cost || 0);
-      return (pick.selfBuff ? '⚡ 使用 ' : '🔗 ') + (card.name || '?') + '（' + __lblCost + '费）' +
+      return (pick.selfBuff ? '⚡ 使用 ' : '🔗 ') + (card.name || '?') + '（' + (pick.from === 'permSP' ? 'SP·牌组顶送墓' : __lblCost + '费') + '）' +
         (pick.selfBuff ? ' · 本次位移x2' : '') + (pick.from === 'faceDown' ? '[盖伏]' : '');
     },
     passLabelOf: function () { return '■ 不连锁'; },
@@ -12048,7 +12103,7 @@ function aiResourceStepBody(done) {
         var sac = p.hand.splice(wi, 1)[0];
         /* 【2026-10-09 第3件】同上：献祭送墓前先还原蓝图复制卡 */
         if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(sac);
-        p.grave.push(sac);
+        __putPlayerGrave(aiSeat(), sac);
         if (typeof checkGraveTrigger === 'function') checkGraveTrigger(aiSeat(), sac, p._kotaroPassive ? 'effect' : 'sacrifice');
         p._sacrificeUsedThisTurn = usedSac + 1;
         var rec = 2 + ((usedSac === 0 && p._kotaroPassive) ? 1 : 0) +   // 【2026-10-11】新卡面：首次献祭回 1（旧 2 ✗）
@@ -13601,7 +13656,7 @@ function triggerTileEffect(player) {
           });
         });
       } else {
-        if (p.hand.length > 0) { var aiIdx = GameRNG.int(p.hand.length); var ac = p.hand.splice(aiIdx,1)[0]; p.grave.push(ac); var ad = drawCard(player); addBattleLog(player, '易物：AI将【' + ac.name + '】送墓，抽到【' + (ad?ad.name:'无') + '】'); }
+        if (p.hand.length > 0) { var aiIdx = GameRNG.int(p.hand.length); var ac = p.hand.splice(aiIdx,1)[0]; __putPlayerGrave(player, ac); var ad = drawCard(player); addBattleLog(player, '易物：AI将【' + ac.name + '】送墓，抽到【' + (ad?ad.name:'无') + '】'); }
       }
       break;
     case 'airport': {
@@ -13649,7 +13704,7 @@ function doSacrifice() {
     /* 【2026-10-09 第3件】蓝图复制的卡被献祭时也要变回蓝图原貌
        （献祭是人手直接送墓，绕过了唯一会还原的 moveCardToGrave 出口） */
     if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(sacCard);
-    p.grave.push(sacCard);
+    __putPlayerGrave('p1', sacCard);
     // 光太郎被动：献祭的卡视为因卡的效果送入墓地（一回合只触发一次）
     var __kotaroEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
     if (__kotaroEff) p._kotaroGraveViewTurn = battleState.turn;
@@ -13935,7 +13990,7 @@ function activateRioHWForceSac(seat) {
     }
     var card = arr.splice(idx, 1)[0];
     if (!card) { dealDamageWithResponse(who, 1, '里绪（万圣祭）·不给糖就捣蛋', null, '热忱'); return; }
-    t.grave.push(card);
+    __putPlayerGrave(who, card);
     addBattleLog(who, '【不给糖就捣蛋】被强制献祭【' + (card.name || '?') + '】');
     try { if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, card, 'sacrifice'); } catch (e) { try { console.error('[catch] 里绪万圣祭强献触发', e); } catch (e2) {} }
     if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -14263,7 +14318,7 @@ function aiUsePermanentActive(player, done) {
       if (!(p.hand && p.hand.length)) { next(); return; }
       var sac = p.hand.shift();
       // ① 献祭送入墓地并回复音韵值
-      p.grave.push(sac);
+      __commitPlayerZones(player, function () { p.grave.push(sac);
       var __qkE = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
       if (__qkE) p._kotaroGraveViewTurn = battleState.turn;
       if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, sac, __qkE ? 'effect' : 'sacrifice');
@@ -14273,7 +14328,7 @@ function aiUsePermanentActive(player, done) {
       var __gi = p.grave.indexOf(sac); if (__gi >= 0) p.grave.splice(__gi, 1);
       if (!p.removed) p.removed = []; p.removed.push(sac);
       if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: player, card: sac });
-      L('对手【巧匠之手】【' + sac.name + '】移出游戏');
+      L('对手【巧匠之手】【' + sac.name + '】移出游戏'); });
       var pool2 = collectZoneCards(player, ['removed'], null, null, null, true).filter(function (x) { return x.card !== sac; });
       if (pool2.length) {
         var rc = pool2[0].card, source = p[pool2[0].zone]; var ri = source.indexOf(rc); if (ri >= 0) source.splice(ri, 1);
@@ -19566,7 +19621,7 @@ function sacrificeCards(user, picks, thenDraw, next) {
     }
     var z = pk.zone || 'hand', arr = p[z], idx = arr ? arr.indexOf(pk.card) : -1;
     if (idx >= 0) arr.splice(idx, 1);
-    p.grave.push(pk.card);
+    __putPlayerGrave(user, pk.card);
     // 光太郎被动：献祭的卡视为因卡的效果送入墓地（一回合只触发一次）
     var __kEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
     if (__kEff) p._kotaroGraveViewTurn = battleState.turn;
@@ -20488,7 +20543,7 @@ function __opsMove(op, ctx, next, env) {
       break;
     }
     case 'interrupt_move': { var iw = op.who === 'self' ? user : target; if (iw !== user && typeof frostBlockDebuff === 'function' && frostBlockDebuff(user, iw)) break; battleState[iw]._moveInterrupted = true; addBattleLog(user, '打断' + (iw === user ? '自己' : '目标') + '移动'); break; }
-    case 'knock_off': { var h = q.hand; if (h.length) { var ri = GameRNG.int(h.length), rc = h.splice(ri, 1)[0]; q.grave.push(rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
+    case 'knock_off': { var h = q.hand; if (h.length) { var ri = GameRNG.int(h.length), rc = h.splice(ri, 1)[0]; __putPlayerGrave(target, rc); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(target, rc, 'effect'); q.cost = Math.max(0, q.cost - (op.loseCost || 3)); addBattleLog(user, '打落对手【' + rc.name + '】，其失' + (op.loseCost || 3) + '音韵'); } break; }
   }
   env.pendingNext = true;
   return true;
@@ -20703,7 +20758,7 @@ function __opsBuff(op, ctx, next, env) {
           if (!picks || !picks.length) { next(); return; }
           var pk = picks[0], arr = battleState[dw][pk.zone], ix = arr.indexOf(pk.card);
           if (ix >= 0) {
-            arr.splice(ix, 1); battleState[dw].grave.push(pk.card); battleState[dw]._lastDestroyed = pk.card;
+            arr.splice(ix, 1); __putPlayerGrave(dw, pk.card); battleState[dw]._lastDestroyed = pk.card;
             if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, pk.card, 'effect');
             if ((battleState[dw].permanent || []).some(function (c) { return c.name && (c.name.indexOf('血之佑戒') >= 0 || c.name.indexOf('血戒') >= 0 || c.name.indexOf('红泪') >= 0); })) { /* 卡面 2026-09-25 版已删除「自己的卡被破坏后受到2点无来源热忱伤害」——旧实现随之移除，不再造成伤害 */ }
             addBattleLog(user, '破坏' + (dw === 'p1' ? '我方' : '对手') + '场上的【' + pk.card.name + '】');
@@ -20840,7 +20895,7 @@ function __opsCards(op, ctx, next, env) {
              这里直接 grave.push，绕过 moveCardToGrave 的蓝图复原钩子 ⇒ 墓地残留复制卡面。
              送墓前先复原（唯一送墓点，所有 discard 路径共用）。 */
           if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(pk.card);
-          var arr = __dP[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); (__dP.grave = __dP.grave || []).push(pk.card); __dP._lastDiscardCard = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(__dOw, pk.card, 'effect');
+          var arr = __dP[pk.zone], ix = arr.indexOf(pk.card); if (ix >= 0) arr.splice(ix, 1); __putPlayerGrave(__dOw, pk.card); __dP._lastDiscardCard = pk.card; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(__dOw, pk.card, 'effect');
         });
         if (op.thenDraw) drawCard(__dOw);
         if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -20866,7 +20921,7 @@ function __opsCards(op, ctx, next, env) {
           var arr = battleState[dw][pk.zone]; var ix = arr ? arr.indexOf(__real) : -1; if (ix < 0) return;
           arr.splice(ix, 1);
           if (op.to === 'removed') { battleState[dw].removed = battleState[dw].removed || []; battleState[dw].removed.push(__real); runTiming(TIMING.ON_REMOVE, { player: dw, card: __real }); }
-          else { battleState[dw].grave.push(__real); battleState[dw]._lastDestroyed = __real; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, __real, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { /* 卡面 2026-09-25 版已删除「自己的卡被破坏后受到2点无来源热忱伤害」——旧实现随之移除，不再造成伤害 */ } }
+          else { __putPlayerGrave(dw, __real); battleState[dw]._lastDestroyed = __real; if (typeof checkGraveTrigger === 'function') checkGraveTrigger(dw, __real, 'effect'); if ((battleState[dw].permanent||[]).some(function(c){return c.name&&(c.name.indexOf('血之佑戒')>=0||c.name.indexOf('血戒')>=0||c.name.indexOf('红泪')>=0);})) { /* 卡面 2026-09-25 版已删除「自己的卡被破坏后受到2点无来源热忱伤害」——旧实现随之移除，不再造成伤害 */ } }
           addBattleLog(user, '破坏' + (op.to === 'removed' ? '并移出' : '') + (__hideHand ? '一张手卡（内容保密）' : '【' + __real.name + '】'));
         });
         if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -21817,7 +21872,7 @@ function __psSearchDrawClauses(user, target, effectText, context, hold, finish) 
         var __srcArr = battleState[user][sel.source];
         if (__srcArr) {
           var __idIx = __srcArr.indexOf(card);
-          if (__idIx >= 0) __srcArr.splice(__idIx, 1);
+          if (__idIx >= 0) { if (sel.source === 'deck') __takeFromDeckAt(user, __idIx); else __srcArr.splice(__idIx, 1); }
           else addBattleLog('system', '【归属】要取走的【' + ((card && card.name) || '?') + '】已不在原区域（区域内容已变化）⇒ 不重复取，直接加入手卡');
         }
         battleState[user].hand.push(card);
@@ -22876,7 +22931,7 @@ function __captainPassives(player, p, env) {
       if (charName.indexOf('雨清') >= 0 || charName.indexOf('宁雨清') >= 0) {
         var ningDrawn = [];
         for (var j = 0; j < 7; j++) {
-          if (p.deck.length > 0) ningDrawn.push(p.deck.shift());
+          if (p.deck.length > 0) ningDrawn.push(__takeFromDeckAt(player, 0));
         }
         if (ningDrawn.length >= 5 && player === 'p1') {
           showCardPickerMulti(ningDrawn.slice(), '【宁雨清被动】初始7选5：点选要保留的5张卡', function(sel) {
@@ -23568,7 +23623,7 @@ function moveCardToGrave(player, card, reason) {
       }
     }
   } catch (e) { console.error('予被动·理智分支出错', e); }
-  (__pg.grave = __pg.grave || []).push(card);
+  __putPlayerGrave(player, card);
   if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, card, reason || 'effect');
   return true;
 }
@@ -23932,7 +23987,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
           if (!picks.length) { addBattleLog(player, '【典籍之残页·SP】未选择卡 ⇒ 本项不处理'); return; }
           var pk = picks[0], arr2 = battleState[player][pk.zone], ix2 = arr2.indexOf(pk.card);
           if (ix2 >= 0) arr2.splice(ix2, 1);
-          (p.grave = p.grave || []).push(pk.card);
+          __putPlayerGrave(player, pk.card);
           recoverCost(player, 3, '典籍之残页·SP②');
           addBattleLog(player, '【典籍之残页·SP②】把手卡【' + pk.card.name + '】送入墓地，自己回复3点音韵值（当前' + p.cost + '）');
           if (typeof checkGraveTrigger === 'function') checkGraveTrigger(player, pk.card, 'effect');
@@ -24091,7 +24146,7 @@ function applyJudgeChain(side, pick, je, done) {
     if (me._skillCostMinus && c._category === 'skill_cards') { __lilCost = Math.max(0, __lilCost - 1); me._skillCostMinus = 0; addBattleLog(me.__seat || 'p1', '【里尔亚斯SP】技能卡音韵值-1（本次实付' + __lilCost + '）'); }
     __spendCost(me, __lilCost);
     if (pick.from === 'faceDown') me.faceDownCards.splice(pick.index, 1); else me.hand.splice(pick.index, 1);
-    (me.grave = me.grave || []).push(c);
+    __putPlayerGrave(side, c);
   }
   if (kind === 'reroll_judge' || name === 'Twice') {
     __pay();
@@ -24432,7 +24487,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
           var t2 = target2 || __others[0];
           if (t2) {
             var j2 = ab.hand.indexOf(t2); if (j2 >= 0) ab.hand.splice(j2, 1);
-            (ab.grave = ab.grave || []).push(t2);
+            __putPlayerGrave(attacker, t2);
             addBattleLog(attacker, '【' + pk.card.name + '·SP】舍弃手卡【' + t2.name + '】');
             if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, t2, 'effect');
           } else { addBattleLog(attacker, '【' + pk.card.name + '·SP】没有其他手卡可舍弃 ⇒ 本次不增伤'); __then(0); return; }
@@ -24448,7 +24503,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
         __applyDiscard(__others[0]);
         return;
       }
-      ab.hand.splice(j, 1); (ab.grave = ab.grave || []).push(pk.card);
+      ab.hand.splice(j, 1); __putPlayerGrave(attacker, pk.card);
       damage += pk.bonus; addBattleLog(attacker, '【' + pk.card.name + '·SP】造成伤害时从手牌送墓，最终伤害+' + pk.bonus);
       if (typeof checkGraveTrigger === 'function') checkGraveTrigger(attacker, pk.card, 'hand_sp');
       if (typeof updateBattleUI === 'function') updateBattleUI();
@@ -25427,7 +25482,7 @@ var PERMANENT_ONPLAY_HANDLERS = {
     function __qjApply(hi) {
       if (hi === null || hi === undefined || hi < 0) { cb && cb(); return; }
       var real = p.hand.indexOf(hand[hi]); if (real < 0) { cb && cb(); return; }
-      var sac = p.hand.splice(real, 1)[0]; p.grave.push(sac);
+      var sac = p.hand.splice(real, 1)[0]; __putPlayerGrave(user, sac);
       var __qkEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
       if (__qkEff) p._kotaroGraveViewTurn = battleState.turn;
       checkGraveTrigger(user, sac, __qkEff ? 'effect' : 'sacrifice');
@@ -25459,9 +25514,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
      · 伤害走**统一管线**（属性传"神圣" ⇒ 克制判定交给 `__attrBeats` 的"神圣克制非神圣"新规则 ✓，不在此硬算 ✗）
      · 目标：p1 弹窗 / p2 联机 / AI 自动选对手 ✓（与环境既有三段式同款）
      · 一回合一次：由 `active.flag` 闸门写/重置 ✓（被无效时的回滚由既有 A2 负责，标记后缀 `Turn` 可被识别 ✓） */
-  leishanSP: function (card, user) {
+  leishanSP: function (card, user, activation) {
+    var prepaid = activation && activation.paid;
     var p = battleState[user]; if (!p) return false;
-    if (!(p.deck || []).length) {
+    if (!prepaid && !(p.deck || []).length) {
       addBattleLog(user, '【雷閃·SP】牌组已空 ⇒ 无法把牌组最上方送墓，本次不发动');
       if (typeof updateBattleUI === 'function') updateBattleUI();
       return false;   /* 返回 false ⇒ 不消耗"一回合一次"✓（没发动成功就不该记次数） */
@@ -25474,15 +25530,14 @@ var PERMANENT_ACTIVE_HANDLERS = {
       if (typeof Online !== 'undefined' && Online.active && user === 'p2' && typeof onlineDecideModal === 'function') { onlineDecideModal('p2', card.name + '·SP（对手）', '选一名其他玩家', '对其造成1点神圣属性伤害', opts, function (i) { cb(foes[i == null ? 0 : i]); }); return; }
       cb(foes[0]);
     }
-    var __top = p.deck.shift();
-    (p.grave = p.grave || []).push(__top);
-    addBattleLog(user, '【雷閃·SP】把牌组最上方【' + (__top.name || '?') + '】送入墓地');
+    var __top = prepaid ? activation.top : __deckTopToGrave(user);
+    if (!prepaid) addBattleLog(user, '【雷閃·SP】把牌组最上方【' + (__top.name || '?') + '】送入墓地');
     /* 【2026-10-14 作者报「把牌组最后一张送墓后不立刻洗牌」⇒ 修 ✓】
        走引擎既有的唯一补充规则 `__refillDeckIfEmpty`（牌组一空就立刻把墓地整体翻面为新牌组、**不洗切** ✓），
        与所有抽卡/检索路径同一套 ✔（原来这里送墓后不补 ⇒ 牌组停在 0 张）。 */
     try { if (typeof __refillDeckIfEmpty === 'function') __refillDeckIfEmpty(user); } catch (e) {}
-    if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, __top, 'effect');
-    __pickTarget(function (foe) {
+    if (!prepaid && typeof checkGraveTrigger === 'function') checkGraveTrigger(user, __top, 'effect');
+    (prepaid ? function (cb) { cb(activation.target); } : __pickTarget)(function (foe) {
       if (!foe || !battleState[foe]) { if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
       addBattleLog(user, '【雷閃·SP】对' + playerDisplayName(foe) + '造成1点神圣属性伤害');
       dealDamageWithResponse(foe, 1, card.name + '·SP', function () { if (typeof updateBattleUI === 'function') updateBattleUI(); }, '神圣', user);
@@ -25553,9 +25608,10 @@ var PERMANENT_ACTIVE_HANDLERS = {
     return true;
   },
   // 福金与穆宁主动：付3音韵从墓地/移出选[侵略]回收，最终伤害+1（一局一次）
-  huginn: function (card, user) {
+  huginn: function (card, user, activation) {
+    var prepaid = activation && activation.paid;
     var p = battleState[user];
-    if (p.cost < 3) { if (user === 'p1') showToast('【福金与穆宁】音韵不足3点。', 'warn'); return false; }
+    if (!prepaid && p.cost < 3) { if (user === 'p1') showToast('【福金与穆宁】音韵不足3点。', 'warn'); return false; }
     /* 【2026-10-12 作者报："回收效果居然能回收非侵略标签的卡" ✗】卡面：「从墓地或移出游戏的卡中选一张
        **[侵略]标签**的卡加入手卡」 ✓ ⇒ 判定必须**认标签/属性本身** ✓，不再用 matchCardQuery（实测它放行了
        非侵略卡，例如混沌属性的【小恶魔的投喂】✗）。判据与 `engine.js:12058` 那一族的写法保持一致 ✓
@@ -25565,7 +25621,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
     if (!pool.length) { if (user === 'p1') showToast('【福金与穆宁】墓地与移出区都没有[侵略]卡。', 'warn'); return false; }
     function __applyHuginn(idx) {
       if (idx === null || idx === undefined || idx < 0) { updateBattleUI(); return; }
-      var picked = pool[idx], z = zone[idx]; __spendCost(p, 3);
+      var picked = pool[idx], z = zone[idx]; if (!picked || (p[z] || []).indexOf(picked) < 0) return; if (!prepaid) __spendCost(p, 3);
       var source = p[z], i = source.indexOf(picked); if (i >= 0) source.splice(i, 1);
       p.hand.push(picked);
       /* 【2026-10-12 作者报："造成的最终伤害+1 实际处理为+1攻击力" ✗】卡面是「那之后**造成的最终伤害+1**」✓
@@ -25576,6 +25632,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
       addBattleLog(user, '【福金与穆宁】支付3音韵回收【' + picked.name + '】，之后造成的最终伤害+1（累计+' + p._teamFinalDmgUp + '）');
       updateBattleUI();
     }
+    if (prepaid) { var chosen = pool.indexOf(activation.pickCard); if (chosen < 0) return false; __applyHuginn(chosen); return true; }
     if (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over && user === 'p2') {
       Online.awaitAnswer({ label: '福金与穆宁·选[侵略]回收（对手）', cards: pool.map(function(c,i){ return c.name + '（' + (zone[i]==='grave'?'墓地':'移出区') + '）'; }) }, __applyHuginn);
     } else {
@@ -25640,7 +25697,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
       if (hi === null || hi === undefined || hi < 0) { updateBattleUI(); return; }
       var real = p.hand.indexOf(h[hi]); if (real < 0) { updateBattleUI(); return; }
       var sac = p.hand.splice(real, 1)[0];
-      p.grave.push(sac);
+      __commitPlayerZones(user, function () { p.grave.push(sac);
       var __qkEff = p._kotaroPassive && p._kotaroGraveViewTurn !== battleState.turn;
       if (__qkEff) p._kotaroGraveViewTurn = battleState.turn;
       checkGraveTrigger(user, sac, __qkEff ? 'effect' : 'sacrifice');
@@ -25650,7 +25707,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
       if (!p.removed) p.removed = [];
       p.removed.push(sac);
       if (typeof runTiming === 'function' && typeof TIMING !== 'undefined') runTiming(TIMING.ON_REMOVE, { player: user, card: sac });
-      addBattleLog(user, '【巧匠之手】【' + sac.name + '】已移出游戏');
+      addBattleLog(user, '【巧匠之手】【' + sac.name + '】已移出游戏'); });
       updateBattleUI();
       var poolEntries = collectZoneCards(user, ['removed'], null, null, null, true).filter(function (x) { return x.card !== sac; });
       var pool = poolEntries.map(function (x) { return x.card; });
@@ -25742,7 +25799,7 @@ var PERMANENT_ACTIVE_HANDLERS = {
 function executePermanentActiveFor(user, index, done) {
   var card = battleState[user].permanent[index];
   if (!card) { if (done) done(); return; }
-  if (card._faceDown === true) { card._faceDown = false; addBattleLog(user, '翻开盖伏卡【' + card.name + '】'); }
+
   var st = permanentStruct(card);
   if (!st || !st.active || !st.active.handler) {
     if (user === 'p1') showToast('【' + (card.name || '') + '】\n效果：' + (card.effect || '') + '\n\n（此卡为被动/发动时效果，无需主动发动）', 'info');
@@ -25765,8 +25822,8 @@ function executePermanentActiveFor(user, index, done) {
      这道闸原来只看卡上标记（`act.flag`）；而【雷閃】的次数已改记在**座位**上
      ⇒ 卡上没有 flag ⇒ 闸永久失效 ✗。现在**同时认座位标记**（`p._leishanSPTurn`）✓；
      `act.flag` 分支一字不动 ⇒ 别的永续卡行为不变 ✓。 */
-  var __seatOnceUsed = (battleState[user] && battleState[user]._leishanSPTurn === battleState.turn);
-  if ((act.flag && card[act.flag]) || __seatOnceUsed) {
+  var __seatOnceUsed = (act.handler === 'leishanSP' && battleState[user]._leishanSPTurn === battleState.turn);
+  if ((!act.noAutoFlag && act.flag && card[act.flag]) || __seatOnceUsed) {
     if (user === 'p1') showToast('【' + card.name + '】' + (act.once === 'game' ? '该效果一局游戏只能使用一次。' : '本回合已经发动过（每回合一次）。'), 'warn');
     if (done) done();
     return;
@@ -25785,6 +25842,10 @@ function executePermanentActiveFor(user, index, done) {
     if (done) done();
     return;
   }
+  var eligibility = __activeEligibility(card, user, false); if (!eligibility.ok) { if (user === 'p1') showToast(eligibility.reason, 'warn'); if (done) done(false); return; }
+  __prepareActive(user, card, false, null, function (plan) {
+  var receipt = __commitActive(plan); if (!receipt) { if (done) done(false); return; }
+  if (card._faceDown === true) { card._faceDown = false; addBattleLog(user, '翻开盖伏卡【' + card.name + '】'); }
   addBattleLog(user, '发动永续卡【' + card.name + '】主动效果');
   /* 【2026-10-17 作者实测·结构修 ✓】**永续卡在场发主动效果必须进连锁**（原来这里直接 `fn(card, user)`
      ⇒ 整段绕过"效果将要执行前"时点 ⇒ 对手连锁不了、永眠之棺也无效不了 ✗；行为扫描实测 8/8 张都是这样 ✗）。
@@ -25814,10 +25875,11 @@ function executePermanentActiveFor(user, index, done) {
   };
   beforeEffectExecution(__pEff, function (eff) {
     if (!eff || eff.cancelled) { __unmarkOnce(); try { updateBattleUI(); } catch (e) {} if (done) done(); return; }
-    var ok = fn(card, user);
+    var ok = fn(card, user, receipt);
     if (!ok) __unmarkOnce();      /* 没发动成功 ⇒ 不记次数（沿用原来的 `ok` 语义 ✓） */
     updateBattleUI();
     if (done) done();
+  });
   });
 }
 
@@ -26458,7 +26520,7 @@ function placeAfterUse(user, card, isPerm) {
     // 效果处理区共3格：正面永续 + 盖伏卡合计不超过3（盖伏卡占一个空位）；满则进墓
     var __procSlots = p.permanent.length + ((p.faceDownCards || []).length);
     if (__procSlots < 3) { p.permanent.push(card); addBattleLog(user, '【永续】' + card.name + '留在效果处理区'); }
-    else { p.grave.push(card); addBattleLog(user, '效果处理区已满（3格），' + card.name + '送入墓地'); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, card, 'use'); }
+    else { __putPlayerGrave(user, card); addBattleLog(user, '效果处理区已满（3格），' + card.name + '送入墓地'); if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, card, 'use'); }
   } else if (card._recycled && /放回牌组最下方|牌组最下方/.test((card.sp||'')+(card.effect||card.text||''))) {
     // 回收卡（认真起来了/共鸣/破损电子设备）：回收后再次使用，放回牌组最下方而非进墓地（约定牌顶=deck[0]、shift 抽，故最下方=数组末位，用 push）
     card._recycled = false;
@@ -26502,14 +26564,14 @@ function placeAfterUse(user, card, isPerm) {
         }
         if (typeof updateBattleUI === 'function') updateBattleUI();
       } else {
-        p.grave.push(card);   /* 极端情况下没有公共墓地容器：宁可进个人墓地，也不丢卡 */
+        __putPlayerGrave(user, card);   /* 极端情况下没有公共墓地容器：宁可进个人墓地，也不丢卡 */
         addBattleLog(user, '【' + (card.name || '?') + '】送入墓地（公共墓地不可用，回退）');
       }
     } catch (e) { console.error('事件卡/乐谱卡送公共墓地出错', e); }
   } else {
     // 蓝图复制的卡使用结算完毕：送入墓地前变回蓝图原本卡面与效果
     if (typeof __revertBlueprintCopy === 'function') __revertBlueprintCopy(card);
-    p.grave.push(card);
+    __putPlayerGrave(user, card);
     addBattleLog(user, card.name + '送入墓地');
     if (typeof checkGraveTrigger === 'function') checkGraveTrigger(user, card, 'use');
   }
@@ -26703,7 +26765,7 @@ function postUsePassiveHooks(user, card, done) {
                 if (picks && picks.length) {
                   var __edReal = picks[0]._realCard || picks[0].card;
                   var __ix = __wp.hand.indexOf(__edReal); if (__ix >= 0) __wp.hand.splice(__ix, 1);
-                  (__wp.grave = __wp.grave || []).push(__edReal);
+                  __putPlayerGrave(who, __edReal);
                   if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, __edReal, 'effect');
                   addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + (__edHide ? '一张手卡（内容保密）' : '手卡【' + __edReal.name + '】'));
                 }
@@ -26718,7 +26780,7 @@ function postUsePassiveHooks(user, card, done) {
                 if (__vi2 != null && __vi2 >= 0 && __vi2 < __ewList.length) {
                   var __pc2 = __ewList[__vi2].card, __ix5 = __wp.hand.indexOf(__pc2);
                   if (__ix5 >= 0) __wp.hand.splice(__ix5, 1);
-                  (__wp.grave = __wp.grave || []).push(__pc2);
+                  __putPlayerGrave(who, __pc2);
                   if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, __pc2, 'effect');
                   addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + '手卡【' + __pc2.name + '】');
                 }
@@ -26727,7 +26789,7 @@ function postUsePassiveHooks(user, card, done) {
               });
             } else {
               var __c0 = __wp.hand[0]; __wp.hand.splice(0, 1);
-              (__wp.grave = __wp.grave || []).push(__c0);
+              __putPlayerGrave(who, __c0);
               if (typeof checkGraveTrigger === 'function') checkGraveTrigger(who, __c0, 'effect');
               addBattleLog(user, '【爱德华被动】第' + cnt + '次同费触发：破坏' + (who === 'p1' ? '自己' : '对手') + '手卡【' + __c0.name + '】');
               next();
