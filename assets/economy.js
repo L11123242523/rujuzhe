@@ -73,6 +73,8 @@
    exportAccount:function(){return managed(function(){return account.request('/account/export');});},
    getEvents:function(){return managed(function(){return account.request('/events');});},
    getMail:function(){return managed(function(){return account.request('/mail');});},
+   getWallet:function(){return managed(function(){return account.request('/wallet');});},
+   buyTickets:function(count){return mutate('/shop/tickets',{count:count},true);},
    claimEvent:function(eventId){return mutate('/events/claim',{eventId:eventId},false);},
    claimMail:function(mailId){return mutate('/mail/claim',{mailId:mailId},false);},
    deleteAccount:function(word){if(word!=='删除账号')return Promise.reject(issue('DELETE_CONFIRM','请输入确认词“删除账号”'));return managed(async function(){await cache.backupForDelete();var token=await account.request('/account/delete-token','POST',{});await account.request('/account','DELETE',{confirmationToken:token.confirmationToken});await guest.clearAccountHint();epoch++;identity=null;cache=null;phase='guest';emit();return {deleted:true};});},

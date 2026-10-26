@@ -23,6 +23,17 @@
   async openPack(poolId,count){if(poolId===undefined)poolId='character';if(count===undefined)count=1;if(busy){var e=new Error('正在保存上一包');e.code='PACK_BUSY';throw e;}busy=true;try{var p=profile.getSnapshot(),saved=await profile.openPack(poolId,p.revision,count);return saved.result;}finally{busy=false;}},
   resume:function(){return profile.resumeReveal();},confirm:function(id){return profile.confirmReveal(id);},snapshot:function(){return profile.getSnapshot();}
  });}
+ var shopLoading=null;
+ function loadShop(doc){
+  if(globalThis.RJShop)return Promise.resolve(globalThis.RJShop);if(shopLoading)return shopLoading;if(!moduleURL)return Promise.reject(Error('商店界面脚本地址缺失'));
+  var url=new URL('shop.js',moduleURL);url.search=new URL(moduleURL).search;
+  shopLoading=new Promise(function(resolve,reject){var script=doc.createElement('script');script.src=url.href;script.onload=function(){resolve(globalThis.RJShop);};script.onerror=function(){reject(Error('商店界面加载失败，请重新打开'));};doc.head.appendChild(script);}).catch(function(e){shopLoading=null;throw e;});return shopLoading;
+ }
+ function displayGoldReward(doc,value){
+  var overlay=doc.getElementById('resultOverlay'),box=doc.getElementById('resultBox');if(!overlay||!box||!overlay.classList.contains('active')||!value||!value.result||!value.result.receipt)return;
+  var node=doc.getElementById('accountGoldReward'),result=value.result;if(result.receipt.mode!=='online'||!Number.isSafeInteger(result.goldAwarded)||result.goldAwarded<=0){if(node)node.remove();return;}
+  if(!node){node=doc.createElement('p');node.id='accountGoldReward';node.className='rb-desc';box.insertBefore(node,box.querySelector('.rb-btn'));}node.textContent='金币 +'+result.goldAwarded;node.dataset.matchId=result.receipt.matchId;
+ }
  function createMatchBridge(options){
   var crypt=options.crypto,profile=Promise.resolve(options.profile),local=new WeakMap(),remote=new Map(),active=null;
   function onlineId(meta){if(!meta.roomId||meta.seed===undefined)throw Error('联机开局信息缺失，未发券');return crypt.subtle.digest('SHA-256',new TextEncoder().encode('rujuzhe-match-v1:'+meta.roomId+':'+meta.seed)).then(function(b){return 'online:'+Array.from(new Uint8Array(b),function(x){return x.toString(16).padStart(2,'0');}).join('');});}
@@ -87,7 +98,8 @@
     var actions=el('div','rjc-actions');actions.append(button('仓库 / 图鉴 / 合成',function(){collectionUI.show('warehouse');showScreen('collectionScreen');}),button('重试保存对局奖励',function(){bridge.retry().then(function(){render();},report);}));body.appendChild(actions);if(readOnly())actions.lastChild.disabled=true;
     body.appendChild(el('p','rjc-note','每日登录福利请到主菜单“活动”领取。北京时间每日：前'+rules.economy.participationDailyCap+'局正常完成每局'+rules.economy.participationTickets+'券；首胜额外'+rules.economy.firstWinTickets+'券。活动与对局奖励独立。沙盒和直接退出不发对局券。'));
    }
-   var api={open:async function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');showScreen('packScreen');render();await retry();},observeBattle:function(state,meta){bridge.observe(state,meta).then(updateBalance,report);},finishBattle:function(win){bridge.finish(win).then(updateBalance,report);},abandonBattle:function(){bridge.abandon().then(updateBalance,report);},profile:profile,controller:controller,bridge:bridge,render:render};
+   function rewardView(job){var state=typeof battleState==='undefined'?null:battleState;job.then(function(value){updateBalance();if(moduleURL&&(typeof battleState==='undefined'||battleState===state))displayGoldReward(doc,value);},report);}
+   var api={open:async function(){if(doc.getElementById('battleScreen')&&doc.getElementById('battleScreen').classList.contains('active'))throw Error('战斗期间不能打开卡包');showScreen('packScreen');render();await retry();},observeBattle:function(state,meta){rewardView(bridge.observe(state,meta));},finishBattle:function(win){rewardView(bridge.finish(win));},abandonBattle:function(){rewardView(bridge.abandon());},profile:profile,controller:controller,bridge:bridge,render:render};
    unsubscribe=profile.subscribe(function(){if(!busy){updateBalance();if(host.classList.contains('active'))render();}});
    function storageChanged(event){if(event.key==='rujuzhe_account_active'){profile.syncSelection().catch(report);return;}if((event.key==='rujuzhe_profile'||event.key&&event.key.startsWith('rujuzhe_account_cache_'))&&!busy){try{updateBalance();if(host.classList.contains('active'))render();}catch(e){report(e);}}}globalThis.addEventListener('storage',storageChanged);
    render();instance=api;starting.then(function(value){if(!destroyed){render();if(value&&value.error)report(value.error);}});if(moduleURL&&doc.getElementById('eventsScreen'))loadEvents(doc).catch(function(e){var n=doc.getElementById('mailUnclaimedCount');if(n)n.textContent=e.message;console.error('活动邮件界面未加载',e);});return api;
@@ -97,5 +109,5 @@
  // 只读桥接按事件顺序消费；开局上下文在当前事件结束后即捕获，不等档案网络加载。
  var bridgeEvents=Promise.resolve();
  function bridgeEvent(action){if(!isPageReady())return Promise.resolve({ignored:true});var job=bridgeEvents.then(function(){return boot().then(action);});bridgeEvents=job.catch(function(e){console.error('对局领奖桥接未完成',e);});return bridgeEvents;}
- return Object.freeze({createController:createController,createMatchBridge:createMatchBridge,isPageReady:isPageReady,getEconomy:getEconomy,boot:boot,openEvents:function(kind){return loadEvents(document).then(function(app){return app.open(kind);});},enterBattle:function(getContext){var context=Promise.resolve().then(getContext);return bridgeEvent(function(app){return context.then(function(c){app.observeBattle(c.state,c.meta);});});},open:function(){return ready(function(app){return app.open();});},observeBattle:function(state,meta){return ready(function(app){app.observeBattle(state,meta);});},finishBattle:function(win){return bridgeEvent(function(app){app.finishBattle(win);});},abandonBattle:function(){return bridgeEvent(function(app){app.abandonBattle();});}});
+ return Object.freeze({createController:createController,createMatchBridge:createMatchBridge,displayGoldReward:displayGoldReward,isPageReady:isPageReady,getEconomy:getEconomy,boot:boot,openShop:function(){return loadShop(document).then(function(app){return app.open();});},openEvents:function(kind){return loadEvents(document).then(function(app){return app.open(kind);});},enterBattle:function(getContext){var context=Promise.resolve().then(getContext);return bridgeEvent(function(app){return context.then(function(c){app.observeBattle(c.state,c.meta);});});},open:function(){return ready(function(app){return app.open();});},observeBattle:function(state,meta){return ready(function(app){app.observeBattle(state,meta);});},finishBattle:function(win){return bridgeEvent(function(app){app.finishBattle(win);});},abandonBattle:function(){return bridgeEvent(function(app){app.abandonBattle();});}});
 });
