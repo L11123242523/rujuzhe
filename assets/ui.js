@@ -71,6 +71,7 @@ try {
 function openAccountDialog() { if (typeof RJCloud !== 'undefined') return RJCloud.open(); }
 function closeAccountDialog() { if (typeof RJCloud !== 'undefined') RJCloud.close(); }
 function showScreen(id) {
+  if (id === 'cardViewer') id = 'mainMenu';
   closeAccountDialog();
   if ((id === 'mainMenu' || id === 'onlineLobby') && typeof RJPackApp !== 'undefined' && typeof battleState !== 'undefined' && battleState && !battleState._over && document.getElementById('battleScreen') && document.getElementById('battleScreen').classList.contains('active')) RJPackApp.abandonBattle();
   try { __mmPickBg(); } catch (e) {}
@@ -87,11 +88,10 @@ function showScreen(id) {
   if (id === 'battleScreen' && typeof RJPackApp !== 'undefined') RJPackApp.enterBattle(function () {
     return { state: typeof battleState !== 'undefined' ? battleState : null, meta: { online: typeof Online !== 'undefined' && Online.active, roomId: typeof Online !== 'undefined' ? Online.roomId : '', seed: typeof Online !== 'undefined' ? Online.seed : undefined, sandbox: typeof battleState !== 'undefined' && battleState && (battleState._sandbox || (typeof __pendingSandbox !== 'undefined' && __pendingSandbox)), over: typeof battleState !== 'undefined' && battleState && battleState._over, winner: typeof battleState !== 'undefined' && battleState ? battleState._winner : null } };
   });
-  if (id === 'cardViewer') renderCardGrid();
   if (id === 'deckBuilder') { renderDeckBuilder(); try { __deckModeUI(); } catch (e) { try { console.error('[catch] assets/ui.js:15', e); } catch (e2) {} } }
   /* 回到主菜单/联机大厅 = 明确已经不在战斗里了 → 把战斗残留的浮层与临时状态清干净。
      （线上实测：对局结束后回主界面，效果框/结算框还挂在上面。）
-     刻意**只在这两个界面**清：查卡器（cardViewer）等界面可能在对局中打开，那时清掉
+     刻意**只在这两个界面**清：其他界面可能在对局中打开，那时清掉
      正在结算的窗口反而会把结算弄坏。 */
   if (id === 'mainMenu' || id === 'onlineLobby') {
     try { __clearTransientBattleState('离开战斗界面'); } catch (e) { try { console.error('[catch] assets/ui.js:21', e); } catch (e2) {} }
@@ -156,59 +156,6 @@ function flashStat(id, val) {
     el.classList.add(cls);
   }
   __uiPrevVals[id] = val;
-}
-
-function renderFilters() {
-  var container = document.getElementById('cardFilters');
-  if (!container) return;
-  var html = '';
-  for (var i = 0; i < cardCategories.length; i++) {
-    var cat = cardCategories[i];
-    var active = currentFilter === cat.key ? 'active' : '';
-    html += '<button class="filter-btn ' + active + '" onclick="filterCards(\'' + cat.key + '\')">' + cat.name + '</button>';
-  }
-  container.innerHTML = html;
-}
-
-function renderCardGrid() {
-  renderFilters();
-  var grid = document.getElementById('cardGrid');
-  if (!grid) return;
-  
-  var cards = currentFilter === 'all' ? allCards : allCards.filter(function(c) { return c._category === currentFilter; });
-  
-  // 搜索过滤：卡名 / 效果 / 被动 / SP / 属性 / 分类
-  if (cardSearchText) {
-    var q = cardSearchText.toLowerCase();
-    cards = cards.filter(function(c) {
-      var hay = ((c.name || '') + ' ' + (c.effect || '') + ' ' + (c.text || '') + ' ' + (c.attribute || '') + ' ' +
-                  (c.passive || '') + ' ' + (c.sp || '') + ' ' + getCategoryName(c._category)).toLowerCase();
-      return hay.indexOf(q) >= 0;
-    });
-  }
-  
-  if (cards.length === 0) {
-    grid.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.5);padding:40px;">' +
-      (cardSearchText ? '没有找到匹配「' + cardSearchText + '」的卡牌' : '暂无卡牌') + '</div>';
-    return;
-  }
-  
-  var html = '';
-  for (var i = 0; i < cards.length; i++) {
-    var card = cards[i];
-    var idx = allCards.indexOf(card);
-    html += '<div class="card-item" onclick="showViewerCardDetail(' + idx + ')">';
-    if (card.cost !== undefined) {
-      html += '<div class="card-item-cost">' + card.cost + '</div>';
-    }
-    if (card.image_url) {
-      html += '<img loading="lazy" decoding="async" onerror="imgRetry(this)" src="' + card.image_url + '" alt="' + card.name + '" >';
-    }
-    html += '<div class="card-item-name">' + card.name + '</div>';
-    html += '<div class="card-item-type">' + getCategoryName(card._category) + '</div>';
-    html += '</div>';
-  }
-  grid.innerHTML = html;
 }
 
 function showViewerCardDetail(idx) {
@@ -1770,8 +1717,6 @@ try { window.showScreen = showScreen; } catch (e) {}
 try { window.showToast = showToast; } catch (e) {}
 try { window.showBattleResult = showBattleResult; } catch (e) {}
 try { window.flashStat = flashStat; } catch (e) {}
-try { window.renderFilters = renderFilters; } catch (e) {}
-try { window.renderCardGrid = renderCardGrid; } catch (e) {}
 try { window.showViewerCardDetail = showViewerCardDetail; } catch (e) {}
 try { window.renderDeckBuilder = renderDeckBuilder; } catch (e) {}
 try { window.renderAttrBar = renderAttrBar; } catch (e) {}

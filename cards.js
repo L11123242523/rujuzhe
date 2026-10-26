@@ -3915,7 +3915,7 @@ window.__CARD_DATA__ = {
             "神乐铃"
          ],
          "combo_notes": "3费把墓地任意两张卡捞回手卡，SP再给一条被效果送墓时的保险——4面骰要么回等量音韵，要么当判定伤害打出去。搭木原光太郎最顺：他的献祭视为因卡的效果送墓，献祭盒子就吃SP；搭宁雨清则每次捞卡都扣对手1同步。判定端接小沙香琉璃与极夜君王之冕，也能顺手捞回神乐铃叠层。",
-         "image_url": "assets/images/ui2/img_ZXkWqiqmEt.webp?v=8",
+         "image_url": "assets/images/ui2/img_ZXkWqiqmEt.webp?v=9",
          "_category": "item_single",
          "dims": {
             "cost": 8.7,
@@ -4013,7 +4013,7 @@ window.__CARD_DATA__ = {
             "里绪(水着)"
          ],
          "combo_notes": "2费回自身1同步、获得2护盾，能盖伏到其他玩家回合再开，是保命三件套里最便宜的一张。队里带小沙香琉璃——唯一的圣女词条——回复量直接翻倍，1同步变2、2护盾变4。它和幸运护符、怪怪幽灵吊坠叠用：先吃护盾再抵消，破局体系的里绪(水着)靠这套才敢做校准。",
-         "image_url": "assets/images/ui2/img_VFLLB04nAP.webp?v=10",
+         "image_url": "assets/images/ui2/img_VFLLB04nAP.webp?v=11",
          "_category": "item_single",
          "dims": {
             "cost": 6.5,
@@ -4112,7 +4112,7 @@ window.__CARD_DATA__ = {
             "血之佑戒·红泪拉克莎"
          ],
          "combo_notes": "1费打1点热忱，本体便宜到可以随便扔；杀招在SP——每进墓一次下次伤害+1、最多叠9层，攒满后每次1费打10。前提是能反复捞回手卡：来自地狱的盒子3费直接捞2张，案件还原回收上一张使用的卡，魔法蓝图还能从墓地再演一次。伤害端接小野结衣与血之佑戒·红泪拉克莎，每发都在给终局加码。",
-         "image_url": "assets/images/ui2/img_oG0h5KxjBT.webp?v=9",
+         "image_url": "assets/images/ui2/img_oG0h5KxjBT.webp?v=10",
          "_category": "item_single",
          "dims": {
             "cost": 9.3,

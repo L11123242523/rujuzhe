@@ -15,7 +15,8 @@
 .rjc-root .rjc-tabs { margin:18px 0 12px; }
 .rjc-root .rjc-filters { margin:0 0 12px; }
 .rjc-root .rjc-filter { display:flex; flex-direction:column; gap:4px; flex:1 1 135px; min-width:0; }
-.rjc-root .rjc-filter select { width:100%; }
+.rjc-root .rjc-filter select { width:100%; color-scheme:light; }
+.rjc-root .rjc-filter option { color:#122039; background:#fff; }
 .rjc-root .rjc-status { min-height:24px; margin:10px 0; }
 .rjc-root .rjc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
 .rjc-root .rjc-card { background:var(--rjc-panel); border:1px solid #40516c; border-radius:13px; padding:10px; min-width:0; display:flex; flex-direction:column; gap:7px; }
@@ -67,3 +68,13 @@
 #packScreen .rjc-pack-opens button { flex:1 1 85px; }
 #packScreen .rjc-summary, #packScreen .rjc-pity { overflow-wrap:anywhere; }
 @media(max-width:480px) { #packScreen .rjc-pack-results { gap:4px; } #packScreen .rjc-pack-results .rjc-card { padding:3px; } #packScreen .rjc-pack-results .rjc-card-name { font-size:10px; } }
+
+/* 活动双卡片仅作用于活动页，沿用服务端奖励和领取状态。 */
+#eventsScreen .rjc-event-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:20px 0; }
+#eventsScreen .rjc-event-card { padding:24px; border:1px solid #526581; border-radius:18px; background:linear-gradient(145deg,#243951,#1b263d); display:flex; flex-direction:column; gap:16px; min-width:0; }
+#eventsScreen .rjc-event-reward { margin:0; color:#ffe1a1; font-size:18px; }
+#eventsScreen .rjc-event-reward strong { font-size:48px; line-height:1.2; }
+#eventsScreen .rjc-event-card button { margin-top:auto; width:100%; white-space:normal; }
+#eventsScreen .rjc-event-card button:disabled { color:#c3cad4; background:#344153; border-color:#526071; opacity:1; }
+#mailScreen .rjc-claim-all { margin:12px 0; max-width:100%; white-space:normal; }
+@media(max-width:600px) { #eventsScreen .rjc-event-grid { grid-template-columns:minmax(0,1fr); } #eventsScreen .rjc-event-card { padding:18px; } }

@@ -124,7 +124,6 @@ function __cardMaster() {
 
 function __cardListForNewInstance() { var m = __cardMaster(); return m ? __deepCopyCards(m) : []; }
 
-var currentFilter = 'all';
 
 var MAP_TILES = [
   {id:0, type:'start', name:'起点', x:93.60, y:90.70, big:true},
@@ -3705,22 +3704,6 @@ function getCategoryName(cat) {
   }
   return cat;
 }
-
-// ========== 卡牌图鉴 ==========
-
-
-function filterCards(cat) {
-  currentFilter = cat;
-  renderFilters();
-  renderCardGrid();
-}
-
-var cardSearchText = '';
-function onCardSearch(v) {
-  cardSearchText = (v || '').trim();
-  renderCardGrid();
-}
-
 
 // ========== 卡组配置 ==========
 /* ============================================================
@@ -27833,7 +27816,6 @@ try { window.__CARD_DEFS = __CARD_DEFS; } catch (e) {}
 try { window.__deepCopyCards = __deepCopyCards; } catch (e) {}
 try { window.__cardMaster = __cardMaster; } catch (e) {}
 try { window.__cardListForNewInstance = __cardListForNewInstance; } catch (e) {}
-try { window.currentFilter = currentFilter; } catch (e) {}
 try { window.MAP_TILES = MAP_TILES; } catch (e) {}
 try { window.RING_EDGES = RING_EDGES; } catch (e) {}
 try { window.TILE_EDGE_MASK = TILE_EDGE_MASK; } catch (e) {}
@@ -27978,9 +27960,6 @@ try { window.closeEmotePanel = closeEmotePanel; } catch (e) {}
 try { window.sendEmote = sendEmote; } catch (e) {}
 try { window.initCards = initCards; } catch (e) {}
 try { window.getCategoryName = getCategoryName; } catch (e) {}
-try { window.filterCards = filterCards; } catch (e) {}
-try { window.cardSearchText = cardSearchText; } catch (e) {}
-try { window.onCardSearch = onCardSearch; } catch (e) {}
 try { window.__deckLibKey = __deckLibKey; } catch (e) {}
 try { window.__deckLibAll = __deckLibAll; } catch (e) {}
 try { window.__deckLibWrite = __deckLibWrite; } catch (e) {}
