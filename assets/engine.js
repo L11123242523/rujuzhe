@@ -548,7 +548,7 @@ var Online = {
   refreshLobby:function(){
     this.status('服务器栏填中继主机即可（留空：本地调试连 ws://localhost:2567，线上自动用 '+this._defaultRelay+'）。\n创建房间会先向中继申请 4 位房号，再把房号发给对手加入。');
   },
-  _name:function(){ var el=document.getElementById('olName'); var n=el?el.value.trim():''; return n||('玩家'+Math.floor(Math.random()*900+100)); },
+  _name:function(){ var identity=RJOnlineAccess.get()||RJOnlineAccess.identity();if(!identity||!identity.displayName)throw new Error('请先设置玩家名，再进入联机');return identity.displayName; },
   _send:function(obj){
     if(this.ws && this.ws.readyState===1){ try{ this.ws.send(JSON.stringify(obj)); return true; }catch (e) { try { console.error('[catch] assets/engine.js:534', e); } catch (e2) {} } }
     return false;

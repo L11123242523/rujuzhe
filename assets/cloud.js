@@ -80,7 +80,7 @@
   function mask(email){var at=String(email||'').lastIndexOf('@');return at<0?'已登录':email.slice(0,Math.min(at,2))+'***'+email.slice(at);}
   function mount(options){
     var doc=options.document||document,host=options.container,account=options.account,profile=options.profile;
-    var current=null,controller=null,busy=false,opened=false,email='',code='',notice='',destroyed=false,epoch=0,mergeView=null,deleteView=false,deleteWord='',nameValue='';
+    var current=null,controller=null,busy=false,opened=false,email='',code='',notice='',destroyed=false,epoch=0,mergeView=null,deleteView=false,deleteWord='',nameValue='',namePrompt=false,deferredFor=null,wallet=null,walletError='',cloudSynced=false;
     function el(tag,text){var n=doc.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
     var style=el('style');
     style.textContent='#accountRoot .rja-overlay[hidden]{display:none!important}#accountRoot .rja-overlay{position:fixed;inset:0;z-index:10000;background:#080c18ce;display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}#accountRoot .rja-dialog{box-sizing:border-box;width:min(100%,480px);max-height:calc(100dvh - 24px);overflow:auto;background:#172138;color:#f2f5ff;border:1px solid #627baf;border-radius:16px;padding:18px;font:15px/1.55 sans-serif;overflow-wrap:anywhere}#accountRoot .rja-dialog *{box-sizing:border-box;min-width:0}#accountRoot h2{margin:0 0 12px;font-size:22px}#accountRoot p{white-space:pre-line;margin:10px 0}#accountRoot input{width:100%;padding:12px;margin:6px 0 12px;border:1px solid #6980a8;border-radius:8px;background:#0c1526;color:white;font-size:16px}#accountRoot .rja-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}#accountRoot button{flex:1 1 120px;max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:11px;border:1px solid #6f89b6;border-radius:8px;background:#263d61;color:white;cursor:pointer;font-size:15px}#accountRoot button:disabled{opacity:.55;cursor:wait}#accountRoot .rja-status{color:#ffe5a2}';
@@ -88,14 +88,39 @@
     var box=el('section');box.className='rja-dialog';box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-label','账号与云档案');
     overlay.appendChild(box);host.append(style,overlay);
     function menu(){
-      var n=doc.getElementById('accountMenuStatus');if(n)n.textContent=current?mask(current.email):'登录/绑定账号';
+      var n=doc.getElementById('accountMenuStatus');if(n)n.textContent=current?(current.displayName||'未设置玩家名')+' · '+mask(current.email):'登录/绑定账号';
     }
     function button(parent,text,action,fn){
       var b=el('button',text);b.type='button';b.dataset.action=action;b.disabled=busy;b.addEventListener('click',fn);parent.appendChild(b);return b;
     }
     async function source(){return typeof profile==='function'?await profile():await profile;}
     async function setAccount(a){
-      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';menu();var p=await source();if(p.connect)p.connect(a);
+      if(!a||!current||current.id!==a.id)deferredFor=null;
+      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';wallet=null;walletError='';cloudSynced=false;menu();var p=await source();if(p.connect)p.connect(a);
+      namePrompt=!!(a&&a.displayName===''&&deferredFor!==a.id);
+      var main=doc.getElementById('mainMenu');if(namePrompt&&main&&main.classList.contains('active')){opened=true;overlay.hidden=false;render();}
+    }
+    async function refreshCard(){
+      if(!current)return;var owner=current.id,token=epoch,p=await source(),remote=controller&&controller.getState().remote;
+      cloudSynced=false;if(p.getState&&p.getState().phase==='ready'&&remote&&remote.data){try{cloudSynced=p.getSnapshot().revision===remote.revision;}catch(e){walletError='账号缓存暂无法读取：'+e.message;}}
+      try{var value=await account.request('/wallet');if(!Number.isSafeInteger(value.gold)||value.gold<0||!Number.isSafeInteger(value.tickets)||value.tickets<0)throw Error('钱包数据格式无效');if(current&&current.id===owner&&token===epoch){wallet=value;walletError='';}}
+      catch(e){if(current&&current.id===owner&&token===epoch){wallet=null;walletError='钱包暂无法读取：'+e.message;}}
+    }
+    function playerCard(state){
+      var card=el('section');card.className='rja-player-card';card.dataset.view='player-card';
+      var title=el('h3',(Array.from(current.displayName||'未')[0])+' · '+(current.displayName||'未设置玩家名'));title.dataset.field='player-name';card.appendChild(title);
+      var no=el('p','账号编号：'+(current.accountNo||'暂无法读取'));no.dataset.field='account-no';card.appendChild(no);
+      card.appendChild(el('p','邮箱：'+mask(current.email)+'\n注册时间：'+(Number.isFinite(current.createdAt)?new Date(current.createdAt).toLocaleDateString('zh-CN'):'暂无法读取')));
+      card.appendChild(el('p','云端状态：'+(!state.remote?'暂无法读取':state.remote.data===null?'未建立':cloudSynced?'已同步':'只读')));
+      card.appendChild(el('p','抽卡券 '+(wallet?wallet.tickets:state.remote&&state.remote.data?state.remote.data.tickets:'暂无法读取')+' · 金币 '+(wallet?wallet.gold:'暂无法读取')));
+      if(walletError)card.appendChild(el('p',walletError));box.appendChild(card);
+    }
+    function nameEditor(parent,prompt){
+      if(prompt)parent.appendChild(el('h3','给自己起个玩家名'));
+      var label=el('label','玩家名（1–24个字，允许重名）'),input=el('input');input.value=nameValue;input.maxLength=48;input.disabled=busy;input.dataset.field='display-name';input.addEventListener('input',function(){nameValue=input.value;});parent.append(label,input);
+      var actions=el('div');actions.className='rja-actions';parent.appendChild(actions);
+      button(actions,'保存玩家名','display-name',function(){work(async function(){var raw=nameValue,value=raw.trim();if(/[\p{Cc}\p{Cf}]/u.test(raw)||Array.from(value).length<1||Array.from(value).length>24||!(/^[\p{L}\p{N} _·.\-]+$/u).test(value))throw Error('玩家名需1–24个字，仅限文字、数字、空格和 _·.-');var result=await controller.updateDisplayName(value);if(!current||result.account.id!==current.id)throw Error('登录账号已切换');current=result.account;nameValue=current.displayName;namePrompt=false;},'玩家名已保存');});
+      if(prompt)button(actions,'稍后','name-later',function(){deferredFor=current.id;namePrompt=false;render();});
     }
     function summary(remote){
       if(!remote)return '尚未读取云档案';
@@ -106,8 +131,9 @@
     function render(){
       menu();if(!opened||destroyed)return;box.replaceChildren();box.appendChild(el('h2','账号与云档案'));
       if(current){
-        box.appendChild(el('p','已登录：'+mask(current.email)));
-        var state=controller?controller.getState():{remote:null,management:null};box.appendChild(el('p',summary(state.remote)));
+        var state=controller?controller.getState():{remote:null,management:null};playerCard(state);
+        if(namePrompt){nameEditor(box,true);var message=el('p',notice);message.setAttribute('role','status');box.appendChild(message);var defer=el('div');defer.className='rja-actions';box.appendChild(defer);button(defer,'关闭','close',close);return;}
+        box.appendChild(el('p',summary(state.remote)));
         box.appendChild(el('p','账号资产以服务端为准；下载仅更新独立账号缓存。游客档保留，不会自动合并。'));
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
         button(actions,'读取云档案','pull',function(){work(function(){return controller.pull();},'已读取云档案，请选择操作');});
@@ -130,8 +156,7 @@
           button(confirmActions,'取消合并','merge-cancel',function(){mergeView=null;render();});
         }
         var manageActions=el('div');manageActions.className='rja-actions';box.appendChild(manageActions);
-        var nameLabel=el('label','显示名（1–24个字）'),nameInput=el('input');nameInput.value=nameValue;nameInput.maxLength=24;nameInput.disabled=busy;nameInput.dataset.field='display-name';nameInput.addEventListener('input',function(){nameValue=nameInput.value;});box.append(nameLabel,nameInput);
-        button(manageActions,'保存显示名','display-name',function(){work(async function(){var result=await controller.updateDisplayName(nameValue);current=result.account;nameValue=current.displayName;},'显示名已保存');});
+        nameEditor(box,false);
         button(manageActions,'导出账号 JSON','account-export',function(){work(async function(){var data=await controller.exportAccount(),url=doc.defaultView.URL.createObjectURL(new doc.defaultView.Blob([JSON.stringify(data,null,2)],{type:'application/json'})),link=el('a');link.href=url;link.download='入局者-账号-'+Date.now()+'.json';link.click();doc.defaultView.URL.revokeObjectURL(url);},'账号档案已导出，不含会话凭据');});
         button(manageActions,'删除账号','account-delete',function(){if(doc.defaultView.confirm('删除当前账号及云端收藏？删除前保留本机账号缓存备份，游客档和旧卡组保留。')){deleteView=true;deleteWord='';render();}});
         if(deleteView){
@@ -161,20 +186,20 @@
     }
     async function work(fn,success){
       if(busy)return;busy=true;var token=epoch;
-      try{render();await fn();if(token===epoch)notice=typeof success==='function'?success():success;}
+      try{render();await fn();if(token===epoch){await refreshCard();notice=typeof success==='function'?success():success;}}
       catch(e){if(token===epoch)notice=e.message;}
       finally{busy=false;if(token===epoch)render();}
     }
     async function reload(){try{var me=await account.me();await setAccount(me.account);var p=await source();if(p.initialize)await p.initialize(true);await controller.pull();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}}
-    async function open(){
+    async function open(settings){
       if(destroyed||busy)return;
       var main=doc.getElementById('mainMenu');if(!main||!main.classList.contains('active'))return;
       epoch++;opened=true;overlay.hidden=false;notice='';render();
-      await work(reload,'');
+      await work(reload,'');if(settings&&settings.requireName&&current&&!current.displayName){namePrompt=true;nameValue='';render();}
     }
     function close(){if(!opened)return;opened=false;overlay.hidden=true;var n=doc.getElementById('accountMenuButton');if(n)n.focus();}
     overlay.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();}});
-    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch)await controller.pull();}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);else if(!destroyed&&token===epoch){notice=e.message;render();}}}
+    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch){await controller.pull();await refreshCard();render();}}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);else if(!destroyed&&token===epoch){notice=e.message;render();}}}
     menu();initialize();
     return Object.freeze({open:open,close:close,getState:function(){return {loggedIn:!!current,maskedEmail:current?mask(current.email):null,busy:busy,notice:notice,opened:opened};},destroy:function(){destroyed=true;epoch++;if(controller)controller.dispose();host.replaceChildren();}});
   }
@@ -185,5 +210,5 @@
     app=mount({container:host,account:RJAccount.client(),profile:async function(){return RJPackApp.getEconomy();}});
     return app;
   }
-  return Object.freeze({create:create,mount:mount,maskEmail:mask,boot:boot,open:function(){var a=boot();return a?a.open():Promise.resolve();},close:function(){if(app)app.close();}});
+  return Object.freeze({create:create,mount:mount,maskEmail:mask,boot:boot,open:function(settings){var a=boot();return a?a.open(settings):Promise.resolve();},close:function(){if(app)app.close();}});
 });

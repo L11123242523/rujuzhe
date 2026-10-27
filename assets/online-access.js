@@ -1,10 +1,10 @@
 /* v556：仅联机使用的账号准入、云档持有视图与内存凭证。 */
-(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory();else root.RJOnlineAccess=factory().create({economy:function(){return root.RJPackApp.getEconomy();},account:function(){return root.RJAccount.client();},openAccount:function(){return root.openAccountDialog();},confirm:function(text){return root.confirm(text);},cloud:function(o){return root.RJCloud.create(o);},changed:function(){if(typeof root.renderDeckBuilder==='function'&&typeof root.deckSetMode!=='undefined'&&root.deckSetMode==='online')root.renderDeckBuilder();}});})(typeof globalThis!=='undefined'?globalThis:this,function(){
+(function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory();else root.RJOnlineAccess=factory().create({economy:function(){return root.RJPackApp.getEconomy();},account:function(){return root.RJAccount.client();},openAccount:function(o){if(o&&o.requireName){root.showScreen('mainMenu');return root.RJCloud.open(o);}return root.openAccountDialog();},confirm:function(text){return root.confirm(text);},cloud:function(o){return root.RJCloud.create(o);},changed:function(){if(typeof root.renderDeckBuilder==='function'&&typeof root.deckSetMode!=='undefined'&&root.deckSetMode==='online')root.renderDeckBuilder();}});})(typeof globalThis!=='undefined'?globalThis:this,function(){
   'use strict';
   function issue(code,message){var e=new Error(message);e.code=code;return e;}
   function freeze(v){if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;}
   function create(options){
-    var store=null,library=null,session=null,generation=0,loading=null;
+    var store=null,library=null,session=null,generation=0,loading=null,player=null;
     function account(){return options.account();}
     async function inspect(){
       if(loading)return loading;
@@ -17,6 +17,8 @@
       var me;
       try{me=await account().me();}catch(e){if(e.status===401)options.openAccount();throw e;}
       if(me.account.id!==state.accountId){options.openAccount();throw issue('ONLINE_SESSION_CHANGED','登录账号已切换，请先重新读取云档案');}
+      if(typeof me.account.displayName!=='string'||!me.account.displayName.trim()){player=null;options.openAccount({requireName:true});throw issue('ONLINE_NAME_REQUIRED','请先设置玩家名，再进入联机');}
+      player={id:me.account.id,displayName:me.account.displayName,accountNo:me.account.accountNo};
       if(state.phase!=='ready'){
         var remote=await account().request('/profile');
         if(remote.revision===0||remote.data===null){
@@ -26,7 +28,7 @@
         }else{options.openAccount();throw issue('ONLINE_ACCOUNT_NOT_READY','请先在账号界面读取并下载云档案，再进入联机');}
       }
       if(p.getState().mode!=='account'||p.getState().phase!=='ready'||p.getState().accountId!==state.accountId)throw issue('ONLINE_ACCOUNT_NOT_READY','账号云档尚未就绪或登录身份已改变');
-      p.getSnapshot();return p;
+      p.getSnapshot();var field=globalThis.document&&globalThis.document.getElementById('olName');if(field)field.value=player.displayName;return p;
     }
     function unowned(card){
       if(!card)return false;
@@ -42,7 +44,7 @@
         globalThis.enterOnlineDeckMode();
         var errors=globalThis.validateDeck('p1');if(errors.length)throw issue('ONLINE_DECK_INVALID','联机卡组不合法：\n'+errors.join('\n'));
         var cfg=library.bind(online._myDeckCfg());
-        session={cfg:freeze(cfg),cards:freeze(library.fromCfg(cfg,true)),owner:store.getState().accountId,role:role,room:null,pass:null};
+        session={cfg:freeze(cfg),cards:freeze(library.fromCfg(cfg,true)),owner:store.getState().accountId,displayName:player.displayName,accountNo:player.accountNo,role:role,room:null,pass:null};
         await (role==='host'?online._createRoom():online._joinRoom());
       }catch(e){
         if(token!==generation)return;
@@ -62,9 +64,9 @@
       session=Object.assign({},current,{pass:result.pass,expiresAt:result.expiresAt,deckHash:result.deckHash,room:room});return result.pass;
     }
     async function accept(cfg){var current=session,token=generation;if(!current||await library.hash(library.fromCfg(cfg,true))!==current.deckHash)throw issue('ONLINE_DECK_MISMATCH','服务器确认的实际卡组不一致');if(token!==generation||current!==session)throw issue('ONLINE_SESSION_CHANGED','已退出原房间');session=Object.assign({},current,{approved:freeze(JSON.parse(JSON.stringify(cfg)))});return session.approved;}
-    function clear(){generation++;session=null;}
+    function clear(){generation++;session=null;player=null;}
     function blockEdit(online){var blocked=!!(online&&(online.connected||online.active||online._entryPending||(online.ws&&online.ws.readyState<2)));if(blocked&&typeof globalThis.showToast==='function')globalThis.showToast('进入房间后不能编辑联机卡组，要改请先退出房间','warn');return blocked;}
-    return Object.freeze({inspect:inspect,gate:gate,enter:enter,pass:pass,accept:accept,unowned:unowned,blockEdit:blockEdit,get:function(){return session;},clear:clear});
+    return Object.freeze({inspect:inspect,gate:gate,enter:enter,pass:pass,accept:accept,unowned:unowned,blockEdit:blockEdit,get:function(){return session;},identity:function(){return player?Object.assign({},player):null;},clear:clear});
   }
   return Object.freeze({create:create});
 });
