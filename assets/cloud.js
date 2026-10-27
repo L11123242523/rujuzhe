@@ -102,7 +102,7 @@
     }
     async function refreshCard(){
       if(!current)return;var owner=current.id,token=epoch,p=await source(),remote=controller&&controller.getState().remote;
-      cloudSynced=false;if(p.getState&&p.getState().phase==='ready'&&remote&&remote.data){try{cloudSynced=p.getSnapshot().revision===remote.revision;}catch(e){walletError='账号缓存暂无法读取：'+e.message;}}
+      cloudSynced=false;if(p.getState&&p.getState().phase==='ready'&&remote&&remote.data){try{var cached=p.getAccountCache?p.getAccountCache().get():null;cloudSynced=!!(cached&&cached.profileRevision===remote.revision);}catch(e){walletError='账号缓存暂无法读取：'+e.message;}}
       try{var value=await account.request('/wallet');if(!Number.isSafeInteger(value.gold)||value.gold<0||!Number.isSafeInteger(value.tickets)||value.tickets<0)throw Error('钱包数据格式无效');if(current&&current.id===owner&&token===epoch){wallet=value;walletError='';}}
       catch(e){if(current&&current.id===owner&&token===epoch){wallet=null;walletError='钱包暂无法读取：'+e.message;}}
     }
