@@ -36,7 +36,19 @@
         return freeze(Object.assign({ revision: saved.profile.revision }, saved.result));
       });
     }
+    function previewDisassembleAll() {
+      var p = profile.getSnapshot(), result = {revision:p.revision,disassembled:0,dustAdded:0,cards:[]};
+      records.forEach(function (c) {
+        var count = (p.owned[c.id] || 0) - rules.duplicates.keepAtLeast;
+        if (!c.collectible || c.public || count <= 0) return;
+        var dust = count * c.disassembleValue;
+        result.cards.push({cardId:c.id,name:c.name,count:count,dust:dust}); result.disassembled += count; result.dustAdded += dust;
+      });
+      return freeze(result);
+    }
     return Object.freeze({
+      previewDisassembleAll: previewDisassembleAll,
+      disassembleAll: function (revision) { return profile.disassembleAll(revision).then(function (saved) { return freeze(Object.assign({revision:saved.profile.revision},saved.result)); }); },
       ownedCount: function (id) { known(id); return profile.getCardCount(id); },
       listOwned: function (filter) { return listAll(Object.assign({}, filter, { public: false, owned: true })); },
       listAll: listAll,

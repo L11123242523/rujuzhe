@@ -29,7 +29,8 @@
     var raritySelect = select('稀有度', [['','全部稀有度'],['UR','UR'],['SR','SR'],['R','R'],['N','N']], function (value) { rarity = value; });
     var ownedSelect = select('收藏状态', [['','全部'],['yes','已收藏'],['no','未收藏']], function (value) { owned = value; });
     var status = el('p', 'rjc-status'); status.setAttribute('role','status'); status.setAttribute('aria-live','polite');
-    var grid = el('div', 'rjc-grid'); root.append(header, note, tabs, filters, status, grid);
+    var bulk = button('一键分解多余卡',confirmAll); bulk.dataset.action = 'disassemble-all';
+    var grid = el('div', 'rjc-grid'); root.append(header, note, tabs, filters, bulk, status, grid);
     var backdrop = el('div', 'rjc-backdrop'); backdrop.hidden = true;
     var dialog = el('section', 'rjc-dialog'); dialog.setAttribute('role','dialog'); dialog.setAttribute('aria-modal','true'); dialog.tabIndex = -1; backdrop.appendChild(dialog); root.appendChild(backdrop);
     function battleActive() { var b = doc.getElementById('battleScreen'); return !!(b && b.classList.contains('active')); }
@@ -76,12 +77,34 @@
       },'rjc-primary');
       actions.append(cancel,submit); dialog.append(error,actions);
     }
+    function confirmAll() {
+      if (busy || battleActive()) return;
+      var quote = collection.previewDisassembleAll(); if (!quote.disassembled) return;
+      openDialog('一键分解多余卡');
+      dialog.appendChild(el('p','','将分解 ' + quote.disassembled + ' 张，涉及 ' + quote.cards.length + ' 种卡，获得 ' + quote.dustAdded + ' 星尘。每种保留1张，公共卡不参与。'));
+      var list = el('details'), rows = el('ul'); list.appendChild(el('summary','','查看全部卡种'));
+      quote.cards.forEach(function (c) { rows.appendChild(el('li','',c.name + ' ×' + c.count + '，获得 ' + c.dust + ' 星尘')); }); list.appendChild(rows); dialog.appendChild(list);
+      var error = el('p','rjc-dialog-error'); error.setAttribute('role','alert');
+      var cancel = button('取消',closeDialog), submit = button('确认分解全部多余卡',async function () {
+        if (busy || battleActive()) return;
+        busy = true; submit.disabled = true; cancel.disabled = true; bulk.disabled = true; error.textContent = '';
+        try {
+          if (collection.previewDisassembleAll().revision !== quote.revision) throw new Error('预览后档案已变化，请取消并重新预览');
+          var result = await collection.disassembleAll(quote.revision);
+          busy = false; closeDialog(); refresh(); status.textContent = '已分解 ' + result.disassembled + ' 张，涉及 ' + result.cards.length + ' 种卡，获得 ' + result.dustAdded + ' 星尘。';
+        } catch (e) { busy = false; error.textContent = e.message; submit.disabled = false; cancel.disabled = false; bulk.disabled = false; }
+      },'rjc-primary');
+      var actions = el('div','rjc-actions'); actions.append(cancel,submit); dialog.append(error,actions);
+    }
     function refresh() {
       if (closed) throw new Error('收藏界面已经销毁');
       var isPublic = view === 'public', filter = {public:isPublic,category:category};
       if (!isPublic && rarity) filter.rarity = rarity;
       if (!isPublic && owned) filter.owned = owned === 'yes';
       var cards = collection.listAll(filter);
+      bulk.hidden = view !== 'warehouse';
+      if (bulk.hidden) bulk.removeAttribute('data-action'); else bulk.dataset.action = 'disassemble-all';
+      bulk.disabled = busy || !collection.previewDisassembleAll().disassembled;
       balance.textContent = '星尘：' + collection.dustBalance();
       title.textContent = {warehouse:'收藏仓库',catalog:'收藏图鉴',public:'公共卡',craft:'指定卡合成'}[view];
       Object.keys(tabButtons).forEach(function (key) { tabButtons[key].setAttribute('aria-pressed',String(key === view)); });

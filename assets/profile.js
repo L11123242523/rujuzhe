@@ -225,6 +225,21 @@
       getSnapshot: snapshot,
       getCardCount: function (id) { need(byId.has(id), '未知卡ID'); var p = snapshot(); return own(p.owned, id) ? p.owned[id] : 0; },
       getCatalog: function () { return catalog; }, getRules: function () { return rules; },
+      disassembleAll: function (expectedRevision) {
+        return change(function (p) {
+          if (expectedRevision !== undefined && p.revision !== expectedRevision) fail('COLLECTION_STALE', '预览后档案已变化，请重新预览');
+          var result = {disassembled: 0, dustAdded: 0, cards: []};
+          catalog.cards.forEach(function (c) {
+            var count = (p.owned[c.id] || 0) - rules.duplicates.keepAtLeast;
+            if (!c.collectible || c.public || count <= 0) return;
+            var dust = count * rules.dust[c.rarity].disassemble;
+            result.cards.push({cardId:c.id,count:count,dust:dust}); result.disassembled += count; result.dustAdded += dust; p.owned[c.id] = rules.duplicates.keepAtLeast;
+          });
+          if (!integer(result.disassembled) || !integer(p.dust + result.dustAdded)) fail('COLLECTION_OVERFLOW', '星尘或数量超出范围');
+          if (!result.disassembled) return {noChange:true,value:{profile:p,result:result}};
+          p.dust += result.dustAdded; return result;
+        });
+      },
       // 收藏资产只允许这两种操作，价格取同一配置；检查与扣加在既有互斥提交内完成。
       collectionAction: function (action, id, count) {
         return change(function (p) {
