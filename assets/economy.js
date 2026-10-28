@@ -14,14 +14,15 @@
   function ready(){network();if(!identity||phase!=='ready')throw issue('ECONOMY_CHOICE',phase==='expired'?'账号登录已失效，请重新登录或明确登出继续游客':'请先在账号界面读取并下载云档案，或首次上传本机档案');}
   async function accept(value,token){if(token!==epoch)throw issue('ECONOMY_SESSION_CHANGED','账号已切换，请重新读取结果');var saved=await cache.accept(value);if(token!==epoch)throw issue('ECONOMY_SESSION_CHANGED','账号已切换');emit();return saved;}
   async function activate(value){var token=epoch;await accept(value,token);await cache.activate();phase='ready';emit();return refreshPending();}
-  async function refreshPending(){
-   if(!identity)return {profile:guest.getSnapshot(),pending:guest.resumeReveal()};network();var token=epoch,value=await account.request('/pack/pending');await accept(value,token);
+  function bootstrap(retry){network();return account.bootstrap(undefined,retry);}
+  async function receivePending(value,token){await accept(value,token);
    if(phase==='offline'&&hint===identity.id){phase='ready';emit();}var pending=snapshot().pendingReveal;
    if(pending){var all=cache.requests();for(var signature of Object.keys(all)){var entry=all[signature];if(entry.path==='/pack/open'&&entry.data.poolId===pending.packId&&(entry.data.count||1)===pending.ticketsSpent)await cache.finishRequest(signature,entry.requestId);}}
    return {profile:snapshot(),pending:pending};
   }
-  async function initialize(retry){if(retry)initialized=null;if(initialized)return initialized;if(!hint&&!identity)return Promise.resolve(state());var token=epoch;initialized=(async function(){try{var me=await account.me();if(token!==epoch)return state();connect(me.account);token=epoch;if(hint===me.account.id){await refreshPending();if(token===epoch){phase='ready';emit();}}}catch(e){if(token!==epoch)return state();if(e.status===401)connect(null);else{phase='offline';emit();}}return state();})();return initialized;}
-  async function syncSelection(){var selected=guest.getAccountHint();if(selected===(identity?identity.id:null))return state();epoch++;hint=selected;identity=selected?{id:selected}:null;cache=selected?guest.createAccountCache(selected):null;phase=selected?'loading':'guest';initialized=null;emit();return selected?initialize():state();}
+  async function refreshPending(){if(!identity)return {profile:guest.getSnapshot(),pending:guest.resumeReveal()};network();var token=epoch;return receivePending(await account.request('/pack/pending'),token);}
+  async function initialize(retry){if(retry){initialized=null;account.invalidateBootstrap();}if(initialized)return initialized;if(!hint&&!identity)return Promise.resolve(state());var token=epoch;initialized=(async function(){try{var me=await bootstrap();if(token!==epoch)return state();connect(me.account);token=epoch;if(hint===me.account.id){await receivePending(me,token);if(token===epoch){phase='ready';emit();}}}catch(e){if(token!==epoch)return state();if(e.status===401)connect(null);else{phase='offline';emit();}}return state();})();return initialized;}
+  async function syncSelection(){var selected=guest.getAccountHint();if(selected===(identity?identity.id:null))return state();account.invalidateBootstrap();epoch++;hint=selected;identity=selected?{id:selected}:null;cache=selected?guest.createAccountCache(selected):null;phase=selected?'loading':'guest';initialized=null;emit();return selected?initialize():state();}
   function state(){return {mode:identity?'account':'guest',phase:phase,accountId:identity?identity.id:null};}
   async function mutate(path,data,hasRequest){
    ready();var token=epoch,owner=identity.id;
@@ -42,6 +43,8 @@
   function guestCall(name,args){return guest[name].apply(guest,args);}
   // C3管理操作共享账号会话锁；未知提交结果固定原快照，只读查询后才恢复。
   async function managed(fn){network();if(!identity)throw issue('ECONOMY_LOGIN','请先登录');var owner=identity.id,token=epoch;return exclusive(async function(){var me=await account.me();if(token!==epoch||owner!==me.account.id)throw issue('ECONOMY_SESSION_CHANGED','账号已切换');return fn(token,owner);});}
+  async function managedRead(fn){network();if(!identity)throw issue('ECONOMY_LOGIN','请先登录');var owner=identity.id,token=epoch;return exclusive(async function(){var value=await bootstrap();if(token!==epoch||owner!==value.account.id)throw issue('ECONOMY_SESSION_CHANGED','账号已切换');return fn(value);});}
+  async function bootstrapMerge(){return managedRead(function(value){var intent=cache.requests()['c3-guest-merge'],local=intent?intent.data.localProfile:guest.getSnapshot();return Object.assign({},value.merge,{profileRevision:value.profileRevision,profile:value.profile,localMark:guest.getGuestMergeMark(local.profileId),pendingMerge:intent?intent.data:null});});}
   async function mergeState(){
    var intent=cache.requests()['c3-guest-merge'],local=intent?intent.data.localProfile:guest.getSnapshot();
    var value=await account.request('/account/merge-status?sourceProfileId='+encodeURIComponent(local.profileId));
@@ -67,13 +70,13 @@
    return status;
   });}
   var api={
-   initialize:initialize,connect:connect,getState:state,syncSelection:syncSelection,getGuestProfile:function(){return guest;},getAccountCache:function(){if(!cache)throw issue('ECONOMY_LOGIN','请先登录');return cache;},
+   getBootstrap:bootstrap,getBootstrapMerge:bootstrapMerge,initialize:initialize,connect:connect,getState:state,syncSelection:syncSelection,getGuestProfile:function(){return guest;},getAccountCache:function(){if(!cache)throw issue('ECONOMY_LOGIN','请先登录');return cache;},
    getMergeState:function(){return managed(mergeState);},mergeGuest:mergeGuest,recoverGuestMerge:recoverMerge,
    updateDisplayName:function(value){return managed(function(){return account.request('/account/display-name','POST',{displayName:value});});},
    exportAccount:function(){return managed(function(){return account.request('/account/export');});},
-   getEvents:function(){return managed(function(){return account.request('/events');});},
-   getMail:function(){return managed(function(){return account.request('/mail');});},
-   getWallet:function(){return managed(function(){return account.request('/wallet');});},
+   getEvents:function(){return managedRead(function(){return account.request('/events');});},
+   getMail:function(){return managedRead(function(){return account.request('/mail');});},
+   getWallet:function(){return managedRead(function(){return account.request('/wallet');});},
    buyTickets:function(count){return mutate('/shop/tickets',{count:count},true);},
    claimEvent:function(eventId){return mutate('/events/claim',{eventId:eventId},false);},
    claimMail:function(mailId){return mutate('/mail/claim',{mailId:mailId},false);},
@@ -88,7 +91,7 @@
    claimDaily:function(){return connected()?mutate('/reward/daily',{},false):guestCall('claimDaily',arguments);},
    beginMatch:function(matchId,mode){var owner=identity?identity.id:null,old=matches.get(matchId);if(old&&(old.owner!==owner||old.epoch!==epoch))return Promise.reject(issue('ECONOMY_MATCH','账号切换后不能使用原对局领奖'));matches.set(matchId,{mode:mode,owner:owner,epoch:epoch});if(!connected())return guestCall('beginMatch',arguments);return Promise.resolve({begun:true,matchId:matchId});},
    settleMatch:function(matchId,outcome){var match=matches.get(matchId),owner=identity?identity.id:null;if(!match||match.owner!==owner||match.epoch!==epoch)return Promise.reject(issue('ECONOMY_MATCH','账号切换后不能用原对局领奖'));if(!connected())return guestCall('settleMatch',arguments);return mutate('/reward/match',{matchId:matchId,mode:match.mode,result:outcome},false);},
-   verifyLogin:function(email,code){network();return exclusive(async function(){await account.verify(email,code);var me=await account.me();connect(me.account);return me;});},
+   verifyLogin:function(email,code){network();return exclusive(async function(){await account.verify(email,code);var me=await bootstrap();connect(me.account);initialized=null;return me;});},
    logout:function(){network();return exclusive(async function(){try{await account.logout();}catch(e){if(e.status!==401)throw e;}await guest.clearAccountHint();epoch++;identity=null;cache=null;phase='guest';emit();return {notice:'本地缓存与云端可能不同；已恢复原游客档，未自动合并'};});}
   };
   return Object.freeze(api);

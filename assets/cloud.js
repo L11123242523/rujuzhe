@@ -18,14 +18,14 @@
     async function accountCache(){if(cache)return cache;var p=await store();if(p.getAccountCache)cache=p.getAccountCache();else{var me=await account.me();cache=p.createAccountCache(me.account.id);}return cache;}
     async function previewData(data,revision){return (await accountCache()).preview({profileRevision:revision,profile:data});}
     function alive(){if(disposed)throw issue('CLOUD_CLOSED','账号已切换，请重新打开云档案');}
-    async function getProfile(){return account.request('/profile');}
+    async function getProfile(retry){if(!options.bootstrap)return account.request('/profile');var value=await (await store()).getBootstrap(retry);return {revision:value.profileRevision,data:value.profile,updatedAt:value.profileUpdatedAt};}
     async function putProfile(data,expectedRevision){return account.request('/profile','PUT',{data:data,expectedRevision:expectedRevision});}
-    async function pull(){
-      var result=await getProfile();alive();
+    async function pull(retry){
+      var result=await getProfile(retry);alive();
       if(!result||!Number.isSafeInteger(result.revision)||result.revision<0||!Object.hasOwn(result,'data')||(result.data===null)!==(result.revision===0))throw issue('CLOUD_RESPONSE','云档案格式无效，本机档案未更改');
       var next=result.data===null?null:await previewData(result.data,result.revision);alive();
       remote=result;preview=next;
-      var p=await store();if(p.getMergeState&&result.data!==null){try{management=await p.getMergeState();}catch(e){management={enabled:false,error:'合并状态读取失败：'+e.message};}}
+      var p=await store();if(p.getMergeState&&result.data!==null){try{management=await (options.bootstrap?p.getBootstrapMerge():p.getMergeState());}catch(e){management={enabled:false,error:'合并状态读取失败：'+e.message};}}
       return state();
     }
     function state(){return {remote:remote?JSON.parse(JSON.stringify(remote)):null,preview:preview?JSON.parse(JSON.stringify(preview)):null,busy:busy,management:management?JSON.parse(JSON.stringify(management)):null};}
@@ -34,7 +34,7 @@
       try{return await action();}finally{busy=false;}
     }
     return Object.freeze({
-      getProfile:getProfile,putProfile:putProfile,getState:state,getAccountCache:accountCache,pull:function(){return exclusive(pull);},
+      getProfile:getProfile,putProfile:putProfile,getState:state,getAccountCache:accountCache,pull:function(retry){return exclusive(function(){return pull(retry);});},
       previewMerge:function(){return exclusive(async function(){
         if(!remote||!remote.data)throw issue('CLOUD_EMPTY','空云档请先首次迁入');var p=await store();management=await p.getMergeState();alive();
         if(!management.enabled)throw issue('MERGE_DISABLED','游客合并入口已关闭');if(management.merged||management.sourceMerged||management.localMark)throw issue('ALREADY_MERGED','账号或这份游客档已经合并过');
@@ -80,7 +80,7 @@
   function mask(email){var at=String(email||'').lastIndexOf('@');return at<0?'已登录':email.slice(0,Math.min(at,2))+'***'+email.slice(at);}
   function mount(options){
     var doc=options.document||document,host=options.container,account=options.account,profile=options.profile;
-    var current=null,controller=null,busy=false,opened=false,email='',code='',notice='',destroyed=false,epoch=0,mergeView=null,deleteView=false,deleteWord='',nameValue='',namePrompt=false,deferredFor=null,wallet=null,walletError='',cloudSynced=false;
+    var current=null,controller=null,sourceStore=null,busy=false,opened=false,email='',code='',notice='',destroyed=false,epoch=0,mergeView=null,deleteView=false,deleteWord='',nameValue='',namePrompt=false,deferredFor=null,wallet=null,walletError='',cloudSynced=false;
     function el(tag,text){var n=doc.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
     var style=el('style');
     style.textContent='#accountRoot .rja-overlay[hidden]{display:none!important}#accountRoot .rja-overlay{position:fixed;inset:0;z-index:10000;background:#080c18ce;display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}#accountRoot .rja-dialog{box-sizing:border-box;width:min(100%,480px);max-height:calc(100dvh - 24px);overflow:auto;background:#172138;color:#f2f5ff;border:1px solid #627baf;border-radius:16px;padding:18px;font:15px/1.55 sans-serif;overflow-wrap:anywhere}#accountRoot .rja-dialog *{box-sizing:border-box;min-width:0}#accountRoot h2{margin:0 0 12px;font-size:22px}#accountRoot p{white-space:pre-line;margin:10px 0}#accountRoot input{width:100%;padding:12px;margin:6px 0 12px;border:1px solid #6980a8;border-radius:8px;background:#0c1526;color:white;font-size:16px}#accountRoot .rja-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}#accountRoot button{flex:1 1 120px;max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:11px;border:1px solid #6f89b6;border-radius:8px;background:#263d61;color:white;cursor:pointer;font-size:15px}#accountRoot button:disabled{opacity:.55;cursor:wait}#accountRoot .rja-status{color:#ffe5a2}';
@@ -93,19 +93,20 @@
     function button(parent,text,action,fn){
       var b=el('button',text);b.type='button';b.dataset.action=action;b.disabled=busy;b.addEventListener('click',fn);parent.appendChild(b);return b;
     }
-    async function source(){return typeof profile==='function'?await profile():await profile;}
+    async function source(){sourceStore=typeof profile==='function'?await profile():await profile;return sourceStore;}
     async function setAccount(a){
       if(!a||!current||current.id!==a.id)deferredFor=null;
-      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto}):null;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';wallet=null;walletError='';cloudSynced=false;menu();var p=await source();if(p.connect)p.connect(a);
+      if(controller)controller.dispose();current=a;controller=a?create({account:account,profile:profile,crypto:options.crypto,bootstrap:!!(sourceStore&&sourceStore.getBootstrap)}):null;mergeView=null;deleteView=false;deleteWord='';nameValue=a?a.displayName||'':'';wallet=null;walletError='';cloudSynced=false;menu();var p=await source();if(p.connect)p.connect(a);
       namePrompt=!!(a&&a.displayName===''&&deferredFor!==a.id);
       var main=doc.getElementById('mainMenu');if(namePrompt&&main&&main.classList.contains('active')){opened=true;overlay.hidden=false;render();}
     }
     async function refreshCard(){
       if(!current)return;var owner=current.id,token=epoch,p=await source(),remote=controller&&controller.getState().remote;
       cloudSynced=false;if(p.getState&&p.getState().phase==='ready'&&remote&&remote.data){try{var cached=p.getAccountCache?p.getAccountCache().get():null;cloudSynced=!!(cached&&cached.profileRevision===remote.revision);}catch(e){walletError='账号缓存暂无法读取：'+e.message;}}
-      try{var value=await account.request('/wallet');if(!Number.isSafeInteger(value.gold)||value.gold<0||!Number.isSafeInteger(value.tickets)||value.tickets<0)throw Error('钱包数据格式无效');if(current&&current.id===owner&&token===epoch){wallet=value;walletError='';}}
+      try{var value=p.getBootstrap?(await p.getBootstrap()).wallet:await account.request('/wallet');if(!Number.isSafeInteger(value.gold)||value.gold<0||!Number.isSafeInteger(value.tickets)||value.tickets<0)throw Error('钱包数据格式无效');if(current&&current.id===owner&&token===epoch){wallet=value;walletError='';}}
       catch(e){if(current&&current.id===owner&&token===epoch){wallet=null;walletError='钱包暂无法读取：'+e.message;}}
     }
+    async function readCloud(retry){wallet=null;walletError='';cloudSynced=false;try{return await controller.pull(retry);}catch(e){walletError='钱包暂无法读取：'+e.message;throw e;}}
     function playerCard(state){
       var card=el('section');card.className='rja-player-card';card.dataset.view='player-card';
       var title=el('h3',(Array.from(current.displayName||'未')[0])+' · '+(current.displayName||'未设置玩家名'));title.dataset.field='player-name';card.appendChild(title);
@@ -136,7 +137,7 @@
         box.appendChild(el('p',summary(state.remote)));
         box.appendChild(el('p','账号资产以服务端为准；下载仅更新独立账号缓存。游客档保留，不会自动合并。'));
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
-        button(actions,'读取云档案','pull',function(){work(function(){return controller.pull();},'已读取云档案，请选择操作');});
+        button(actions,'读取云档案','pull',function(){work(function(){return readCloud(true);},'已读取云档案，请选择操作');});
         var upload=button(actions,'上传本机','upload',function(){if(doc.defaultView.confirm('首次上传本机档案到空云档？不会合并。'))work(function(){return controller.upload();},'本机档案已首次迁入');});upload.disabled=busy||!state.remote||state.remote.data!==null;
         upload.hidden=!!(state.remote&&state.remote.data!==null);
         var download=button(actions,'下载云端','download',function(){if(doc.defaultView.confirm('下载到独立账号缓存？下载前保留本机备份，游客档不会被覆盖。'))work(function(){return controller.download();},'账号缓存已更新，游客档及备份保留');});download.disabled=busy||!state.remote||!state.remote.data;
@@ -165,6 +166,10 @@
           var destroy=button(deleteActions,'确认永久删除账号','account-delete-confirm',function(){work(async function(){await controller.deleteAccount(deleteWord);await setAccount(null);},'账号已删除并登出；本地缓存与云端可能不同，已恢复原游客档');});destroy.disabled=busy||deleteWord!=='删除账号';
           word.addEventListener('input',function(){deleteWord=word.value;destroy.disabled=busy||deleteWord!=='删除账号';});
         }
+      }else if(sourceStore&&sourceStore.getState&&sourceStore.getState().mode==='account'){
+        box.appendChild(el('p','账号缓存只读，暂无法核对登录状态。请重试连接或明确登出继续游客。'));
+        var recoveryActions=el('div');recoveryActions.className='rja-actions';box.appendChild(recoveryActions);
+        button(recoveryActions,'登出','logout',function(){work(async function(){await (await source()).logout();await setAccount(null);},'本地缓存与云端可能不同；已恢复原游客档，未自动合并');});
       }else{
         var label=el('label','邮箱');label.htmlFor='rjaEmail';var input=el('input');input.id='rjaEmail';input.type='email';input.autocomplete='email';input.value=email;input.disabled=busy;input.addEventListener('input',function(){email=input.value.trim();});box.append(label,input);
         var actions=el('div');actions.className='rja-actions';box.appendChild(actions);
@@ -182,7 +187,7 @@
         button(verifyActions,'继续游客','guest',function(){work(async function(){var p=await source();if(p.logout)await p.logout();else{try{await account.logout();}catch(e){if(e.status!==401)throw e;}}await setAccount(null);},'本地缓存与云端可能不同；已恢复原游客档，未自动合并');});
       }
       var status=el('p',notice);status.className='rja-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');box.appendChild(status);
-      var bottom=el('div');bottom.className='rja-actions';box.appendChild(bottom);button(bottom,'重试连接','retry',function(){work(reload,'连接已重试');});button(bottom,'关闭','close',close);
+      var bottom=el('div');bottom.className='rja-actions';box.appendChild(bottom);button(bottom,'重试连接','retry',function(){work(function(){return reload(true);},'连接已重试');});button(bottom,'关闭','close',close);
     }
     async function work(fn,success){
       if(busy)return;busy=true;var token=epoch;
@@ -190,16 +195,16 @@
       catch(e){if(token===epoch)notice=e.message;}
       finally{busy=false;if(token===epoch)render();}
     }
-    async function reload(){try{var me=await account.me();await setAccount(me.account);var p=await source();if(p.initialize)await p.initialize(true);await controller.pull();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}}
+    async function reload(retry){try{var p=await source();if(p.initialize)await p.initialize(retry);var value=p.getBootstrap?(p.getState().mode==='guest'?await account.bootstrap(undefined,retry):await p.getBootstrap()):await account.me();await setAccount(value.account);await readCloud();}catch(e){if(e.status===401){await setAccount(null);return;}throw e;}}
     async function open(settings){
       if(destroyed||busy)return;
       var main=doc.getElementById('mainMenu');if(!main||!main.classList.contains('active'))return;
-      epoch++;opened=true;overlay.hidden=false;notice='';render();
+      epoch++;opened=true;overlay.hidden=false;notice='正在读取账号…';render();
       await work(reload,'');if(settings&&settings.requireName&&current&&!current.displayName){namePrompt=true;nameValue='';render();}
     }
     function close(){if(!opened)return;opened=false;overlay.hidden=true;var n=doc.getElementById('accountMenuButton');if(n)n.focus();}
     overlay.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();}});
-    async function initialize(){var token=epoch;try{var result=await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch){await controller.pull();await refreshCard();render();}}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);else if(!destroyed&&token===epoch){notice=e.message;render();}}}
+    async function initialize(){var token=epoch;try{var p=await source();if(p.initialize)await p.initialize();if(p.getBootstrap&&p.getState().mode==='guest')return;var result=p.getBootstrap?await p.getBootstrap():await account.me();if(!destroyed&&token===epoch){await setAccount(result.account);if(token===epoch){await controller.pull();await refreshCard();render();}}}catch(e){if(e.status===401&&!destroyed&&token===epoch)await setAccount(null);else if(!destroyed&&token===epoch){notice=e.message;render();}}}
     menu();initialize();
     return Object.freeze({open:open,close:close,getState:function(){return {loggedIn:!!current,maskedEmail:current?mask(current.email):null,busy:busy,notice:notice,opened:opened};},destroy:function(){destroyed=true;epoch++;if(controller)controller.dispose();host.replaceChildren();}});
   }
