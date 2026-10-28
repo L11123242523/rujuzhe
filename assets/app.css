@@ -4453,3 +4453,49 @@ body:not(.ui-classic) #battleScreen .hand-cards { padding-bottom: 4px; }
   #battleScreen button[onclick="showOppZone('removed')"],
   #battleScreen button[onclick="showPublicGraveList()"] { min-height: 36px; min-width: 36px; }
 }
+/* v567：样式只作用于卡组编辑器。 */
+#deckBuilder.md-editor { padding:16px; overflow:auto; }
+#deckBuilder .md-layout { display:grid; grid-template-columns:minmax(300px, .85fr) minmax(340px, 1.15fr); gap:18px; align-items:start; width:100%; max-width:1500px; margin:12px auto; }
+#deckBuilder .md-layout>.deck-side { min-width:0; width:auto; max-width:none; margin:0; padding:14px; background:linear-gradient(150deg,#172941,#111a2d); border:1px solid #41556e; border-radius:12px; }
+#deckBuilder .md-layout h3 { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; margin:0 0 12px; color:#e7f1ff; }
+#deckBuilder .md-layout h3 small { font-size:12px; color:#a9c7db; font-weight:normal; }
+#deckBuilder .md-deck .deck-side-title { display:flex; flex-wrap:wrap; gap:4px; font-size:12px; }
+#deckBuilder .md-deck .deck-side-title button { margin:0!important; }
+#deckBuilder .md-deck .deck-slots { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+#deckBuilder #p1Chars { grid-template-columns:repeat(3,minmax(0,1fr)); max-width:310px; }
+#deckBuilder .md-deck .deck-slot,#deckBuilder .md-card { position:relative; display:block; width:100%!important; height:auto!important; min-width:0; aspect-ratio:3/4; padding:0!important; border:1px solid #617b98; border-radius:6px; background:#1d3048; color:#fff; overflow:hidden; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none; }
+body:not(.ui-classic) #deckBuilder .md-card img { display:block; width:100%!important; height:100%!important; object-fit:cover!important; margin:0!important; }
+#deckBuilder .md-card .deck-slot-name { position:absolute!important; bottom:0!important; left:0!important; right:0; width:100%!important; padding:4px 2px!important; font-size:11px!important; line-height:1.3!important; background:rgba(9,17,30,.9); white-space:normal!important; }
+#deckBuilder .md-empty { display:grid!important; place-items:center; font-size:25px; border-style:dashed!important; touch-action:pan-y; }
+#deckBuilder .md-card:focus-visible,#deckBuilder .md-empty:focus-visible { outline:3px solid #69dcff; outline-offset:2px; }
+#deckBuilder .md-card:disabled { cursor:default; opacity:.65; }
+#deckBuilder .md-rarity { position:absolute; top:3px; left:3px; background:#16263e; color:#ffe8a7; border-radius:3px; padding:2px 3px; font-size:10px; }
+#deckBuilder .online-lock,#deckBuilder .md-lock { position:absolute; left:0; right:0; top:auto; bottom:34px; font-size:10px; pointer-events:none; background:rgba(9,17,30,.9); text-align:center; }
+#deckBuilder .md-unowned img { filter:grayscale(1) brightness(.42); }
+#deckBuilder .md-collection { display:grid; grid-template-columns:repeat(auto-fill,minmax(85px,1fr)); gap:9px; max-height:65vh; overflow:auto; padding:4px; align-content:start; }
+#deckBuilder .md-filters { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+#deckBuilder #mdSearch { grid-column:1/-1; }
+#deckBuilder .md-filters input,#deckBuilder .md-filters select { min-width:0; width:100%; padding:9px 6px; color:#e8f2ff; background:#122238; border:1px solid #506783; border-radius:5px; }
+#deckBuilder .md-help { color:#a8bacb; font-size:12px; margin:9px 0; }
+#deckBuilder .deck-mode-bar,#deckBuilder #cloudDeckBar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+#deckBuilder #cloudDeckBar[hidden] { display:none; }
+#deckBuilder #cloudDeckStatus { overflow-wrap:anywhere; }
+#deckBuilder .md-ai { max-width:1500px; margin:10px auto; padding:10px; border:1px solid #41556e; border-radius:8px; }
+#deckBuilder .md-ai summary { cursor:pointer; }
+#deckBuilder .md-drag-source { opacity:.35; }
+.md-drag-ghost { position:fixed; width:75px; height:100px; padding:0; pointer-events:none; z-index:99999; opacity:.9; transform:translate(-50%,-50%) rotate(5deg); overflow:hidden; background:#172941; border:2px solid #69dcff; border-radius:7px; }
+.md-drag-ghost img { width:100%; height:100%; object-fit:cover; }
+.md-drag-ghost span { display:none; }
+@media(max-width:700px) {
+  #deckBuilder.md-editor { padding:8px; }
+  #deckBuilder .md-layout { grid-template-columns:minmax(0,1fr); gap:10px; }
+  #deckBuilder .md-layout>.deck-side { padding:9px; }
+  #deckBuilder .md-deck .deck-slots { grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+  #deckBuilder .md-deck .deck-slot { max-height:88px!important; aspect-ratio:auto; height:82px!important; }
+  #deckBuilder #p1Chars { max-width:none; }
+  #deckBuilder .md-collection { grid-template-columns:repeat(3,minmax(0,1fr)); max-height:58vh; }
+  #deckBuilder .md-card .deck-slot-name { font-size:10px!important; }
+  #deckBuilder .md-deck .deck-side-title { font-size:0; }
+  #deckBuilder .screen-header { gap:6px; }
+  #deckBuilder .screen-title { font-size:20px; }
+}

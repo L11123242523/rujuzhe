@@ -3261,16 +3261,16 @@ function __applyDeckSlim(slim) {
 /** 切到某一套并刷新界面（联机模式隐藏 AI 那列） */
 function setDeckMode(mode, silent) {
   mode = (mode === 'pve') ? 'pve' : 'online';
-  if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.accountMode()){deckSetMode=mode;RJCloudDecks.useCasual();__deckModeUI();return;}
+  if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.accountMode()){deckSetMode=mode;RJCloudDecks.useMode(mode==='pve'?'casual':'match');__deckModeUI();return;}
   if (mode === deckSetMode && deckSets[mode]) { __deckModeUI(); return; }
   try { saveDeckConfig(); } catch (e) { try { console.error('[catch] assets/engine.js:2964', e); } catch (e2) {} }          // 先把当前这套存进它自己的槽
   deckSetMode = mode;
-  if (deckSets[mode]) __applyDeckSlim(deckSets[mode]);   // 首次没有快照 → 沿用当前配置
+  if (deckSets[mode]) { if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.ready())RJDeckEditor.loadGuest(deckSets[mode]);else __applyDeckSlim(deckSets[mode]); }   // 首次没有快照 → 沿用当前配置
   else deckSets[mode] = __deckSlimAll();
   __deckModeUI();
   if (!silent) { try { renderDeckSide('p1'); renderDeckSide('p2'); } catch (e) { try { console.error('[catch] assets/engine.js:2969', e); } catch (e2) {} } }
 }
-function __onlineDeckEditBlocked(){if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.blocked()){showToast('云卡组当前只读，请联网并重新读取','warn');return true;}return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
+function __onlineDeckEditBlocked(){if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.migrationBlocked()){showToast('旧卡组尚未唯一映射，原数据已保留','warn');return true;}if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.blocked()){showToast('云卡组当前只读，请联网并重新读取','warn');return true;}return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
 function __onlineUnowned(card){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.unowned(card);}
 function __deckModeUI() {
   if(typeof RJCloudDecks!=='undefined')RJCloudDecks.render();
@@ -3286,13 +3286,13 @@ function __deckModeUI() {
       hint.dataset.missing=String(missing);
     }
     if (hint) hint.textContent = (deckSetMode === 'pve')
-      ? '当前编辑：单机 vs 对手 卡组（你 + 对手 各 12 张，只用于单机对战）'
+      ? '当前编辑：休闲 / PVE（全卡可选，3角色／8道具／4携带）'
       : '当前编辑：联机卡组（3角色／8道具／4携带）'+(hint.dataset.missing>0?'；有 '+hint.dataset.missing+' 张未持有卡，无法开始联机对战':'');
   } catch (e) { try { console.error('[catch] assets/engine.js:2982', e); } catch (e2) {} }
 }
 /** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
 function openDeckBuilder(mode) {
-  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.boot().catch(function(e){showToast(e.message,'warn');});
+  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.boot().then(function(){if(document.getElementById('deckBuilder').classList.contains('active')){setDeckMode(deckSetMode,true);renderDeckBuilder();}}).catch(function(e){showToast(e.message,'warn');});
   if(mode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online)) return;
   if(mode==='online' && typeof RJOnlineAccess!=='undefined') RJOnlineAccess.inspect().then(function(){if(deckSetMode==='online')renderDeckBuilder();}).catch(function(e){showToast(e.message,'warn');});
   /* 【2026-10-03 清单③】卡组配置页顶部注入"我的卡组"存档条 */
@@ -3321,7 +3321,7 @@ function openDeckBuilder(mode) {
  * 没有 online 存档时则沿用当前配置并新建槽（首次玩联机的人不会拿到空卡组）。
  * ============================================================ */
 function enterOnlineDeckMode() {
-  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.useCasual();
+  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.useMode('match');
   try {
     if (deckSetMode === 'online') return;      // 已经是联机那套，不用动
     setDeckMode('online', true);
@@ -3390,6 +3390,7 @@ function clearDeckSide(player) {
 /* —— 卡组配置持久化：刷新/重开浏览器不丢失 —— */
 var __deckStorageKey = 'rujuzhe_deck_v1';
 function saveDeckConfig() {
+  if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.migrationBlocked())return;
   if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.capture(deckConfig.p1))return;
   try {
     deckSets[deckSetMode] = __deckSlimAll();      // 当前这套存回它自己的槽
@@ -3416,6 +3417,7 @@ function tryLoadDeckConfig() {
     if (!deckSets.pve) deckSets.pve = deckSets.online ? JSON.parse(JSON.stringify(deckSets.online)) : null;
     var slim = deckSets[deckSetMode];
     if (!slim) return;
+    if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.ready()){RJDeckEditor.loadGuest(slim);__deckModeUI();return;}
     var byName = {};
     allCards.forEach(function (c) { byName[c.name] = c; });
     function restore(arr, n) {
@@ -3844,6 +3846,7 @@ function deckAutoFill(player) {
   var cfg = deckConfig[player];
   if ((cfg.chars || []).filter(Boolean).length < 3) { showToast('请先选满3名角色，再按属性配额补全道具', 'warn'); return; }
   cfg.items = autoFillItems(cfg.chars, cfg.items);
+  saveDeckConfig();
   renderDeckSide(player);
 }
 
@@ -3904,6 +3907,7 @@ function createDeckSlot(card, player, type, index) {
 function removeCard(player, type, index) {
   if(__onlineDeckEditBlocked()) return;
   deckConfig[player][type][index] = null;
+  saveDeckConfig();
   /* 【2026-10-09 修·**删掉一张卡之后点不动补充**（作者实测，需 F5 才好）】
      选卡器 cardPicker 是**全屏遮罩**（game.html 的 .card-picker-overlay；active 时 display:flex）
      ⇒ 它一旦处于 active 没被关掉，后续点击都会被它吞掉（表现：点不动、刷新才好）。
@@ -4036,6 +4040,7 @@ function selectCard(cardIndex) {
     if (!cardBelongsToTeam(card, __nm)) { __dg('携带卡不属于所选角色：' + card.name + '（队伍=' + JSON.stringify(__nm) + '）'); showToast('携带卡【'+card.name+'】不属于所选3名角色（同名不同形态不通用）', 'warn'); return; }
   }
   cfg[ty][idx] = card;
+  saveDeckConfig();
   closeCardPicker();
   renderDeckSide(pl);
 }
@@ -4252,6 +4257,7 @@ function applySmartDeck(player, d, showMsg) {
   deckConfig[player].chars = __cloneDeckSlots(d.chars, 3);
   deckConfig[player].items = __cloneDeckSlots(d.items, 8);
   deckConfig[player].carries = __cloneDeckSlots(d.carries, 4);
+  saveDeckConfig();
   renderDeckSide(player);
   if (showMsg) {
     var msg = '已智能构筑【' + d.arch + '】\n队长（核心）：' + d.captain.name + '\n队员：' + d.chars.slice(1).map(function(c){return c.name;}).join('、') +

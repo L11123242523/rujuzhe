@@ -183,6 +183,7 @@ function showViewerCardDetail(idx) {
 }
 
 function renderDeckBuilder() {
+  if (typeof RJDeckEditor !== 'undefined' && RJDeckEditor.ready()) { RJDeckEditor.render(); renderDeckSide('p2'); return; }
   renderDeckSide('p1');
   renderDeckSide('p2');
 }
@@ -252,6 +253,7 @@ function renderAttrBar(player) {
 }
 
 function renderDeckSide(player) {
+  if (player === 'p1' && typeof RJDeckEditor !== 'undefined' && RJDeckEditor.ready()) { RJDeckEditor.render(); return; }
   var config = deckConfig[player];
   
   // 角色
