@@ -3261,6 +3261,7 @@ function __applyDeckSlim(slim) {
 /** 切到某一套并刷新界面（联机模式隐藏 AI 那列） */
 function setDeckMode(mode, silent) {
   mode = (mode === 'pve') ? 'pve' : 'online';
+  if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.accountMode()){deckSetMode=mode;RJCloudDecks.useCasual();__deckModeUI();return;}
   if (mode === deckSetMode && deckSets[mode]) { __deckModeUI(); return; }
   try { saveDeckConfig(); } catch (e) { try { console.error('[catch] assets/engine.js:2964', e); } catch (e2) {} }          // 先把当前这套存进它自己的槽
   deckSetMode = mode;
@@ -3269,9 +3270,10 @@ function setDeckMode(mode, silent) {
   __deckModeUI();
   if (!silent) { try { renderDeckSide('p1'); renderDeckSide('p2'); } catch (e) { try { console.error('[catch] assets/engine.js:2969', e); } catch (e2) {} } }
 }
-function __onlineDeckEditBlocked(){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
+function __onlineDeckEditBlocked(){if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.blocked()){showToast('云卡组当前只读，请联网并重新读取','warn');return true;}return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
 function __onlineUnowned(card){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.unowned(card);}
 function __deckModeUI() {
+  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.render();
   try {
     var side = document.getElementById('p2DeckSide');
     if (side) side.style.display = (deckSetMode === 'pve') ? '' : 'none';
@@ -3290,6 +3292,7 @@ function __deckModeUI() {
 }
 /** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
 function openDeckBuilder(mode) {
+  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.boot().catch(function(e){showToast(e.message,'warn');});
   if(mode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online)) return;
   if(mode==='online' && typeof RJOnlineAccess!=='undefined') RJOnlineAccess.inspect().then(function(){if(deckSetMode==='online')renderDeckBuilder();}).catch(function(e){showToast(e.message,'warn');});
   /* 【2026-10-03 清单③】卡组配置页顶部注入"我的卡组"存档条 */
@@ -3318,6 +3321,7 @@ function openDeckBuilder(mode) {
  * 没有 online 存档时则沿用当前配置并新建槽（首次玩联机的人不会拿到空卡组）。
  * ============================================================ */
 function enterOnlineDeckMode() {
+  if(typeof RJCloudDecks!=='undefined')RJCloudDecks.useCasual();
   try {
     if (deckSetMode === 'online') return;      // 已经是联机那套，不用动
     setDeckMode('online', true);
@@ -3386,6 +3390,7 @@ function clearDeckSide(player) {
 /* —— 卡组配置持久化：刷新/重开浏览器不丢失 —— */
 var __deckStorageKey = 'rujuzhe_deck_v1';
 function saveDeckConfig() {
+  if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.capture(deckConfig.p1))return;
   try {
     deckSets[deckSetMode] = __deckSlimAll();      // 当前这套存回它自己的槽
     localStorage.setItem(__deckSetsKey, JSON.stringify(deckSets));
@@ -3394,6 +3399,7 @@ function saveDeckConfig() {
   } catch (e) { /* 隐私模式等场景静默失败 */ }
 }
 function tryLoadDeckConfig() {
+  if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.accountMode())return;
   try {
     if (!allCards || !allCards.length) return;
     // 新格式（两套）优先；没有就迁移旧格式（旧格式那一套视为"联机卡组"，同时复制给单机）
@@ -3737,6 +3743,7 @@ function __deckLibCurrentConfig() {
   } catch (e) { return null; }
 }
 function __deckLibSaveCurrent(name) {
+  if(__onlineDeckEditBlocked()) return;
   try {
     var cfg = __deckLibCurrentConfig(); if (!cfg) return null;
     var rec = {
@@ -3775,6 +3782,7 @@ function __deckLibApply(id) {
   } catch (e) { console.error('套用卡组出错', e); return false; }
 }
 function __deckLibDelete(id) {
+  if(__onlineDeckEditBlocked()) return;
   try {
     var arr = __deckLibAll(), out = arr.filter(function (r) { return r.id !== id; });
     __deckLibWrite(out);
@@ -3784,6 +3792,7 @@ function __deckLibDelete(id) {
   } catch (e) { return false; }
 }
 function __deckLibRename(id, name) {
+  if(__onlineDeckEditBlocked()) return;
   try {
     var arr = __deckLibAll();
     for (var i = 0; i < arr.length; i++) if (arr[i].id === id) { arr[i].name = String(name || arr[i].name); arr[i].ts = Date.now(); }

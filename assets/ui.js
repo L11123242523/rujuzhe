@@ -284,7 +284,7 @@ function renderDeckSide(player) {
     }
     carryContainer.innerHTML = html;
   }
-  // 每次渲染即持久化（所有修改路径最终都会经过这里）
+  // 游客保持原本地保存；账号只记录内存草稿，明确保存才写云端。
   if (typeof saveDeckConfig === 'function') saveDeckConfig();
   if(typeof __deckModeUI==='function') __deckModeUI();
 }
