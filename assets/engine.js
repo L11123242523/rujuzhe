@@ -538,7 +538,9 @@ var Online = {
   },
   /* 状态栏：服务器权威模式下**前缀座位号**（玩家要知道自己是先手还是后手；
      也避免"座位 p1"这类信息被后来的状态刷新冲掉）。 */
+  mode:'online',
   status:function(t){
+    if(this.mode==='friendly'){var note=document.getElementById('friendRoomStatus');if(note)note.textContent='好友战 · 全卡 · 无奖励\n'+t;}
     var el=document.getElementById('olStatus');
     if(!el) return;
     var s=String(t==null?'':t);
@@ -772,6 +774,7 @@ var Online = {
       case 'joined':
         this.roomId=m.id; this.mySession=m.sid; this.isHost=!!m.isHost; this.connected=true;
         this._reconnectTry=0;
+        if(this.mode==='friendly'){var fr=document.getElementById('friendReadyBtn');if(fr)fr.disabled=false;}
         if(m.resumed){
           // 重连回到原房间：向服务器要权威快照恢复对局
           this._onRejoined();
@@ -792,6 +795,7 @@ var Online = {
         break;
       }
       case 'start':
+        if((this.mode==='friendly')!==(m.mode==='friendly'))throw new Error('房间模式与准入凭证不一致');
         this._gotStart=true;
         this._onGameStart(m);
         break;
@@ -823,7 +827,7 @@ var Online = {
         this._onOpponentLeft();
         break;
       case 'error':
-        if(/^ONLINE_/.test(m.code||'')){ this._authRejected=true; this.leave(); showScreen('onlineLobby'); }
+        if(/^ONLINE_/.test(m.code||'')){ var wasFriendly=this.mode==='friendly';this._authRejected=true; this.leave(); showScreen(wasFriendly?'casualScreen':'onlineLobby'); }
         this.status('服务器：'+(m.message||m.msg||'未知错误'));
         break;
     }
@@ -869,7 +873,7 @@ var Online = {
     if(typeof RJOnlineAccess!=='undefined') RJOnlineAccess.clear(); this._entryPending=false;
     if(this._reconnectTimer){ clearTimeout(this._reconnectTimer); this._reconnectTimer=null; }
     try{ if(this.ws){ this._send({t:'leave'}); this.ws.close(); } }catch (e) { try { console.error('[catch] assets/engine.js:762', e); } catch (e2) {} }
-    this.ws=null; this.connected=false; this.active=false; this._gotStart=false; this._battleStarted=false;
+    this.mode='online';this.ws=null; this.connected=false; this.active=false; this._gotStart=false; this._battleStarted=false;
     this._decSeq=0; this._answers={}; this._intentQueue=[]; this._intentBusy=false; this._oppDeck=null; this._oppDeckWaiters=[];
     this._stopSeqWatch();
     this._hideWaiting();
@@ -3270,7 +3274,7 @@ function setDeckMode(mode, silent) {
   __deckModeUI();
   if (!silent) { try { renderDeckSide('p1'); renderDeckSide('p2'); } catch (e) { try { console.error('[catch] assets/engine.js:2969', e); } catch (e2) {} } }
 }
-function __onlineDeckEditBlocked(){if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.migrationBlocked()){showToast('旧卡组尚未唯一映射，原数据已保留','warn');return true;}if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.blocked()){showToast('云卡组当前只读，请联网并重新读取','warn');return true;}return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
+function __onlineDeckEditBlocked(){if(typeof RJDeckEditor!=='undefined'&&RJDeckEditor.migrationBlocked()){showToast('旧卡组尚未唯一映射，原数据已保留','warn');return true;}if(typeof RJCloudDecks!=='undefined'&&RJCloudDecks.blocked()){showToast('云卡组当前只读，请联网并重新读取','warn');return true;}return (deckSetMode==='online'||Online.mode==='friendly') && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online);}
 function __onlineUnowned(card){return deckSetMode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.unowned(card);}
 function __deckModeUI() {
   if(typeof RJCloudDecks!=='undefined')RJCloudDecks.render();

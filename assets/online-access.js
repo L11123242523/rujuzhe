@@ -30,6 +30,33 @@
       if(p.getState().mode!=='account'||p.getState().phase!=='ready'||p.getState().accountId!==state.accountId)throw issue('ONLINE_ACCOUNT_NOT_READY','账号云档尚未就绪或登录身份已改变');
       p.getSnapshot();var field=globalThis.document&&globalThis.document.getElementById('olName');if(field)field.value=player.displayName;return p;
     }
+    async function friendlyGate(){
+      var p=await inspect(),s=p.getState();if(s.mode!=='account'||s.phase==='expired'){options.openAccount();throw issue('ONLINE_LOGIN_REQUIRED','好友战需要登录账号');}
+      var me=(await account().me()).account;if(me.id!==s.accountId||p.getState().accountId!==s.accountId)throw issue('ONLINE_SESSION_CHANGED','登录账号已切换');
+      if(!me.displayName.trim()){options.openAccount({requireName:true});throw issue('ONLINE_NAME_REQUIRED','请先设置玩家名，再进入好友战');}
+      player={id:me.id,displayName:me.displayName,accountNo:me.accountNo};return p;
+    }
+    async function friendlyDeck(){
+      await friendlyGate();var id=player.id,cloud=await globalThis.RJCloudDecks.boot();if(cloud.state().accountId!==id)throw issue('ONLINE_SESSION_CHANGED','登录账号已切换');
+      if(cloud.state().phase!=='ready')throw issue('FRIENDS_DECK_EMPTY','请先读取并保存休闲卡组');
+      globalThis.RJCloudDecks.useCasual();globalThis.deckSetMode='pve';globalThis.__deckModeUI();
+      var errors=globalThis.validateDeck('p1');if(errors.length)throw issue('ONLINE_DECK_INVALID','休闲卡组不合法：'+errors.join('、'));
+      var cfg=library.bind(globalThis.deckConfig.p1),saved=(await account().request('/decks')).decks.casual.data;
+      if(store.getState().accountId!==id)throw issue('ONLINE_SESSION_CHANGED','登录账号已切换');
+      if(!saved||await library.hash([].concat(saved.chars,saved.items,saved.carries))!==await library.hash(library.fromCfg(cfg,true)))throw issue('FRIENDS_DECK_UNSAVED','休闲草稿尚未保存，请先保存云卡组再邀请或接受');
+      return cfg;
+    }
+    async function enterFriendly(online,room,role){
+      if(online.serverAuthoritative||online.connected||online.active||online._entryPending||(online.ws&&online.ws.readyState<2))throw issue('ONLINE_BUSY','请先退出当前房间');
+      var token=++generation;session=null;online._entryPending=true;online._authRejected=false;
+      try{
+        var cfg=await friendlyDeck();if(token!==generation)throw issue('ONLINE_SESSION_CHANGED','进入好友房间已取消');
+        session={friendly:true,cfg:freeze(cfg),cards:freeze(library.fromCfg(cfg,true)),owner:store.getState().accountId,displayName:player.displayName,accountNo:player.accountNo,role:role,room:room,pass:null};
+        await pass(room,role);if(token!==generation)throw issue('ONLINE_SESSION_CHANGED','进入好友房间已取消');
+        online.mode='friendly';online.role=role;online.isGuest=role==='guest';online.isHost=role==='host';online.authority='host';online.mySeat='';online.roomId=room;
+        online.relayBase=online._wsUrl(online._serverInput());online.endpoint=online.relayBase;online._connect(function(){online._send(online._hello(role));},room);
+      }catch(e){if(token===generation){session=null;online.mode='online';online.status(e.message);}throw e;}finally{if(token===generation)online._entryPending=false;}
+    }
     function unowned(card){
       if(!card)return false;
       if(!store||!library||store.getState().mode!=='account'||store.getState().phase!=='ready')return true;
@@ -56,17 +83,21 @@
     async function pass(room,role){
       if(!session||session.role!==role)throw issue('ONLINE_PASS_INVALID','请重新进入房间');
       var token=generation,current=session;
-      await gate();
+      await (current.friendly?friendlyGate():gate());
       if(current.owner!==store.getState().accountId)throw issue('ONLINE_SESSION_CHANGED','登录账号已切换，请退出房间重新进入');
-      var result=await account().request('/online/pass','POST',{roomCode:room,role:role,cards:current.cards.slice()});
+      var result=await account().request(current.friendly?'/online/friendly-pass':'/online/pass','POST',current.friendly?{roomCode:room,role:role}:{roomCode:room,role:role,cards:current.cards.slice()});
       if(typeof result.pass!=='string'||result.expiresAt<=Date.now()||result.deckHash!==await library.hash(current.cards))throw issue('ONLINE_PASS_INVALID','联机凭证响应无效');
-      if(token!==generation||current!==session||store.getState().accountId!==current.owner||store.getState().phase!=='ready')throw issue('ONLINE_SESSION_CHANGED','进入房间已取消或账号已切换');
+      if(token!==generation||current!==session||store.getState().accountId!==current.owner||(!current.friendly&&store.getState().phase!=='ready'))throw issue('ONLINE_SESSION_CHANGED','进入房间已取消或账号已切换');
       session=Object.assign({},current,{pass:result.pass,expiresAt:result.expiresAt,deckHash:result.deckHash,room:room});return result.pass;
     }
     async function accept(cfg){var current=session,token=generation;if(!current||await library.hash(library.fromCfg(cfg,true))!==current.deckHash)throw issue('ONLINE_DECK_MISMATCH','服务器确认的实际卡组不一致');if(token!==generation||current!==session)throw issue('ONLINE_SESSION_CHANGED','已退出原房间');session=Object.assign({},current,{approved:freeze(JSON.parse(JSON.stringify(cfg)))});return session.approved;}
     function clear(){generation++;session=null;player=null;}
     function blockEdit(online){var blocked=!!(online&&(online.connected||online.active||online._entryPending||(online.ws&&online.ws.readyState<2)));if(blocked&&typeof globalThis.showToast==='function')globalThis.showToast('进入房间后不能编辑联机卡组，要改请先退出房间','warn');return blocked;}
-    return Object.freeze({inspect:inspect,gate:gate,enter:enter,pass:pass,accept:accept,unowned:unowned,blockEdit:blockEdit,get:function(){return session;},identity:function(){return player?Object.assign({},player):null;},clear:clear});
+    return Object.freeze({inspect:inspect,gate:gate,friendlyGate:friendlyGate,friendlyDeck:friendlyDeck,enterFriendly:enterFriendly,enter:enter,pass:pass,accept:accept,unowned:unowned,blockEdit:blockEdit,get:function(){return session;},identity:function(){return player?Object.assign({},player):null;},clear:clear});
   }
   return Object.freeze({create:create});
 });
+if(typeof document!=='undefined'&&document.currentScript){
+  var friendModuleURL=new URL('friends.js',document.currentScript.src);friendModuleURL.search=new URL(document.currentScript.src).search;
+  import(friendModuleURL.href).catch(function(e){console.error('好友模块加载失败',e);});
+}

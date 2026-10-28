@@ -1,0 +1,10 @@
+#casualScreen{overflow-y:auto;padding:24px 12px;box-sizing:border-box}
+.friends-shell{width:min(100%,760px);margin:auto;padding:20px;border:1px solid #625442;border-radius:18px;background:#171a23;color:#eee;box-sizing:border-box}
+.friends-shell h2{font-size:24px}.friends-shell p,.friend-row small{color:#c7c4c0;line-height:1.6;overflow-wrap:anywhere}
+#friendsBody{display:flex;flex-wrap:wrap;gap:10px}#friendsBody>h3,#friendsBody>p,#friendsBody>form,.friend-row{width:100%}
+.friends-shell button,.friend-invitation button{padding:10px 14px;border:1px solid #9d835a;border-radius:9px;background:#282632;color:#f7e4bb;cursor:pointer;font:inherit;max-width:100%;white-space:normal}
+.friends-shell button:disabled{opacity:.4;cursor:default}.friends-shell input{min-width:0;flex:1;padding:10px;box-sizing:border-box;border:1px solid #71634c;border-radius:8px;background:#11151d;color:#fff;font:inherit}
+.friends-shell form{display:flex;gap:8px;flex-wrap:wrap}.friend-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px;background:#222632;border-radius:10px;box-sizing:border-box}
+.friend-row>div{flex:1;min-width:120px;overflow-wrap:anywhere}.friend-row small{display:block}.friend-invitation{position:fixed;right:12px;bottom:16px;z-index:15000;width:min(340px,calc(100vw - 24px));padding:16px;box-sizing:border-box;border:1px solid #bca16a;border-radius:12px;background:#1a202c;color:#eee;box-shadow:0 8px 36px #0008;overflow-wrap:anywhere}
+.friend-invitation[hidden]{display:none}.friend-invitation button{margin-right:8px}.friend-invitation p{font-size:13px;color:#d0c4a8}
+@media(max-width:400px){.friends-shell{padding:14px}.friends-shell h2{font-size:21px}.friends-shell form button{width:100%}.friend-row{padding:10px}.friend-row button{padding:8px 10px}}
