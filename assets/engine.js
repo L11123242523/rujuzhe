@@ -9009,27 +9009,30 @@ var TW = {
   collect: function (win, cb) {
     if (win._closed) return;
     win.state = 'collect';
-    if (win.scan) {
-      try {
-        var fresh = (win.scan(win) || []).filter(Boolean);
+
         /* 【2026-10-01 修·作者报的"一张卡在连锁询问里变成两个选项"（技能卡/事件卡各占两个）】
            原来按**对象身份**合并（fresh.indexOf(c) < 0），可 win.scan 每次重扫都会 new 一批节点对象
            ⇒ 旧候选永远不会被认作"已在 fresh 里"，于是每扫一次就把旧候选再追加一遍（1→2→3…），
            玩家看到的就是"1. 超频 2. 超频"。改成按**稳定键**去重：
              owner + 卡名(或 id) + 区域(from) + 下标(index) + 座位效果(seatEffect)
            并在 fresh 内部也去重一次（同一个窗口重扫出两条同一张卡时只留第一条）。 */
-        var __ck = function (c) {
+        var __ck = win.keyOf = win.keyOf || function (c) {
           try {
             if (!c) return null;
-            if (c.key) return c.key;                       // 已入链的节点带 key，直接用
+            if (c._twKey) return c._twKey;
+            if (c.key) return (c._twKey = String(c.owner || '') + '|' + c.key);
             var p = c.pick || {}, cd = p.card || c.card;
             var nm = (cd && (cd.name || cd.id)) || c.label || '';
             var fr = p.from || c.from || '';
             var ix = (p.index !== undefined) ? p.index : ((c.index !== undefined) ? c.index : '');
             var se = p.seatEffect || c.seatEffect || '';
-            return String(c.owner || '') + '|' + String(nm) + '|' + String(fr) + '|' + String(ix) + '|' + String(se);
+            return (c._twKey = String(c.owner || '') + '|' + String(nm) + '|' + String(fr) + '|' + String(ix) + '|' + String(se) + '|' + String(c.pick ? '' : (c.id || c.label || '')));
           } catch (e) { return null; }
         };
+    win.declined = win.declined || new Set();
+    if (win.scan) {
+      try {
+        var fresh = (win.scan(win) || []).filter(Boolean);
         var __seen = {}, __fresh = [];
         fresh.forEach(function (c) {
           var k = __ck(c);
@@ -9077,12 +9080,19 @@ var TW = {
         } catch (e) { try { console.error('[catch] 并入费用触发(collect)', e); } catch (e2) {} }
       } catch (e) { addBattleLog('system', '【时点窗口】候选重扫异常，沿用现有候选：' + ((e && e.message) || e)); }
     }
+    var keys = this._avail(win, 'p1').concat(this._avail(win, 'p2')).map(__ck);
+    if (win._known && keys.some(function (k) { return !win._known.has(k); })) win.passStreak = 0;
+    win._known = new Set((win._known ? Array.from(win._known) : []).concat(keys));
     cb();
   },
   _avail: function (win, who) {
     /* 【2026-10-01】_chainDisabled：已被"同链一次"拒绝过的候选不再提供（否则 AI 会反复重选 ⇒ 死循环） */
     return win.candidates.filter(function (c) {
       if (!c || c.owner !== who || c._chainDisabled || win.chain.indexOf(c) >= 0) return false;
+      if (win.keyOf) {
+        var key = win.keyOf(c);
+        if (win.declined.has(key) || win.chain.some(function (n) { return win.keyOf(n) === key; })) return false;
+      }
       if (typeof c.alive === 'function' && !c.alive()) return false;
       if (c.pick && c.pick.from === 'permSP' && !__chainPickAffordable(c.owner, c.pick)) return false;
       /* 【2026-10-24】候选是开窗时扫出来的；开窗后费用可能被支付/削减 ⇒ 每次取候选都按“当前余额”重验，
@@ -9252,7 +9262,11 @@ var TW = {
     var __labelOf = function (c) { return (typeof win.labelOf === 'function') ? win.labelOf(c, who) : ('↧ 连锁发动：' + c.label); };
     var __passLabel = (typeof win.passLabelOf === 'function') ? win.passLabelOf(who, win) : ('■ PASS（不连锁，优先权转交' + this._whoName(win.foe) + '）');
     var __hint = (typeof win.hintOf === 'function') ? win.hintOf(who, win) : '发动一个效果追加为下一环，或PASS转交；双方连续PASS才开始逆结算';
-    function pass() { win.passStreak++; win.priority = (win.priority === 'p1' ? 'p2' : 'p1'); self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); }); }
+    function pass() {
+      pool.forEach(function (c) { win.declined.add(win.keyOf(c)); });
+      win.passStreak++; win.priority = (win.priority === 'p1' ? 'p2' : 'p1');
+      self.collect(win, function () { setTimeout(function () { self.priorityStep(win); }, 0); });
+    }
     function fire(label) {
       win.passStreak = 0;
       win.priority = (who === 'p1' ? 'p2' : 'p1');

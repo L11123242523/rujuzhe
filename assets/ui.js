@@ -554,12 +554,17 @@ function __showChainChoiceNow(title, cardName, effectText, choices, onPick, req)
   never.style.cssText = 'padding:5px 10px;font-size:12px;';
   never.textContent = '本会话不再询问';
   never.onclick = function (ev) {
+    if (settled || DecisionHub.active !== req) return;
+    var answered = false, reply = req.cb;
+    req.cb = function (v) { if (answered) return; answered = true; if (typeof reply === 'function') return reply(v); };
     ev.stopPropagation();
     /* 【2026-10-03】二次确认：一点就静默关掉所有连锁询问，很容易误触成"AI 抢跑"。 */
     try {
       if (typeof confirm === 'function' && !confirm('确定本会话内不再弹出连锁询问？\n（此后所有连锁都会自动放弃；可随时用 setChainNeverAsk(false) 恢复）')) return;
     } catch (e) { try { console.error('[catch] assets/ui.js:473', e); } catch (e2) {} }
-    __chainNeverAsk = true; finish(choices.length - 1);
+    __chainNeverAsk = true;
+    if (DecisionHub.active === req) finish(choices.length - 1);
+    else req.cb(choices.length - 1);
   };
   bar.appendChild(never);
   buttonsDiv.appendChild(bar);
