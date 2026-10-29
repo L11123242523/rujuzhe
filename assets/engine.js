@@ -9778,9 +9778,14 @@ function resolveChainStack(effect, onDone) {
     } else if (e.kind === 'reroll') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】动作已被打断，丢失对象，不处理'); }
       else {
-        var __nr = __rollFor(e.by, effect._diceSides || 6, '重新判定/投掷');   // 【2026-10-11】重掷也是"一次投掷" ⇒ 走唯一出口（投掷者 = 施加重掷者 e.by ✓）
-        cur = __nr; effect._newDiceResult = __nr; __doneSet[i] = true;
-        addBattleLog(e.by, '【' + e.name + '】重新判定/投掷，新点数 ' + __nr);
+        __rollForAsync(e.by, effect._diceSides || 6, '重新判定/投掷', function (value) {
+          cur = value; effect._newDiceResult = value; __doneSet[i] = true;
+          addBattleLog(e.by, '【' + e.name + '】重新判定/投掷，新点数 ' + value);
+          __flushGrave();
+          if (typeof ChainAnim !== 'undefined') ChainAnim.flash('C' + (i + 1) + ' 结算完成', 'flash-ok');
+          finished();
+        });
+        return;
       }
     } else if (e.kind === 'cancel' || e.kind === 'cancelDamage') {
       if (!actionAlive) { __lostSet[i] = true; addBattleLog(e.by, '【' + e.name + '】对象动作/伤害已不存在，不重复处理'); }
@@ -11207,8 +11212,7 @@ function rollPlayerDice(player) {
   // AI 自动结算：莉莉被动（原点数/对立面取大，多枚骰不适用）、伊织被动（原值与2取大）
   // 联机时远端位走与玩家相同的 rollDiceForPlayer 流程弹窗，此处不做 AI 自动（避免决策点/RNG 流分叉）
   if (player !== 'p1' && p && !(typeof Online!=='undefined' && Online.active)) {
-    if (p._lilyPassive && cnt === 1) { var __lo = sides + 1 - d; if (__lo > d) { d = __lo; p._lastRoll = __lo; addBattleLog(player, '【莉莉被动】AI选择对立面值 ' + __lo + ' 作为最终结果'); } }
-    if (p._ioriPassive && d < 2) { d = 2; p._lastRoll = 2; addBattleLog(player, '【伊织被动】AI选择2作为最终结果'); }
+    __rollResultChoose(player, d, { sides: sides, count: cnt, movement: true }, function (v) { d = v; p._lastRoll = v; });
     // 控骰（AI 自动结算）：每 20% 控骰 = 骰子点数 ±1，移动投掷最多适用 100%（±5）
     if (typeof __diceControlSteps === 'function') {
       var __aiSteps = __diceControlSteps(player, __CTRL_PCT_NORMAL);
@@ -11507,78 +11511,6 @@ function rollDiceForPlayer(player) {
           executeMoveEffect(moveEffect);
         }
       }
-      // 莉莉被动·逝者之眼：结果出现前，在原点数与其对立面值中二选一
-      // 伊织被动·恩典：每次投掷结果出现时，可在原值与2之间选一项为最终结果
-      var __lilyOn = !!__rp._lilyPassive, __ioriOn = !!__rp._ioriPassive;
-      function __lilyAsk(done) {
-        if (!__lilyOn) { done(); return; }
-        var __oppDice = __sides + 1 - finalDice;
-        if (__oppDice === finalDice || (__rp._lastRolls && __rp._lastRolls.length > 1)) { done(); return; } // 多枚骰点数相加无“对立面”语义，跳过
-        var __lilyApply = function (o) {
-          try { __movePreviewEnd(); } catch (e) { try { console.error('[catch] assets/engine.js:9543', e); } catch (e2) {} }      // 选完立刻清掉地图高亮 ✓
-          if (o === 1) { finalDice = __oppDice; __rp._lastRoll = __oppDice; addBattleLog(player, '【莉莉被动】选择对立面值 ' + __oppDice + ' 作为最终结果'); }
-          else addBattleLog(player, '【莉莉被动】保留 ' + finalDice + ' 点');
-          done();
-        };
-        /* 【2026-10-11 作者要求：所有"移动类/改点类"都要给落点，不只是控骰弹窗】
-           莉莉被动·逝者之眼改的是**移动点数** ⇒ 属移动类 ⇒ 照抄控骰弹窗同一套格式与配色：
-           `第N格【格名】：效果前20字`、原点数落点=蓝、对立面落点=黄、选完清理 ✓ */
-        var __lilyOpts = ['保留 ' + finalDice + ' 点', '改为对立面 ' + __oppDice + ' 点'];
-        try {
-          var __lilyTip = function (id) {
-            try {
-              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
-              return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
-            } catch (e) { return '第' + id + '格'; }
-          };
-          var __lilyTileA = __previewLandingTile(player, finalDice);
-          var __lilyTileB = __previewLandingTile(player, __oppDice);
-          __lilyOpts[0] = __lilyOpts[0] + ' → ' + __lilyTip(__lilyTileA);
-          __lilyOpts[1] = __lilyOpts[1] + ' → ' + __lilyTip(__lilyTileB);
-          if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
-            Map3D.previewTiles([{ id: __lilyTileA, color: 0x9fd8ff }, { id: __lilyTileB, color: 0xffd166 }]);
-          }
-          try { __busSetChooserUi(true); } catch (e) { try { console.error('[catch] assets/engine.js:9566', e); } catch (e2) {} }
-        } catch (e) { console.error('莉莉被动落点预览出错（忽略）', e); }
-        if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-          onlineDecideModal('p2', '莉莉被动·逝者之眼（对手）', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', __lilyOpts, __lilyApply);
-          return;
-        }
-        showChoiceModal('莉莉被动·逝者之眼', '原始投掷为 ' + finalDice + ' 点，可选择对立面值', '', __lilyOpts, __lilyApply);
-      }
-      function __ioriAsk(done) {
-        if (!__ioriOn || finalDice === 2) { done(); return; }
-        var __ioriApply = function (o) {
-          try { __movePreviewEnd(); } catch (e) { try { console.error('[catch] assets/engine.js:9577', e); } catch (e2) {} }      // 选完立刻清掉地图高亮 ✓
-          if (o === 1) { finalDice = 2; __rp._lastRoll = 2; addBattleLog(player, '【伊织被动】选择2作为最终结果'); }
-          else addBattleLog(player, '【伊织被动】保留 ' + finalDice + ' 点');
-          done();
-        };
-        /* 【2026-10-11 作者要求：所有"移动类/改点类"都要给落点】伊织被动·恩典改的同样是**移动点数**
-           ⇒ 与莉莉被动同一套处理：文案 `第N格【格名】：效果前20字`、原点数落点=蓝、改为2的落点=黄、选完清理 ✓ */
-        var __ioriOpts = ['保留 ' + finalDice + ' 点', '改为 2 点'];
-        try {
-          var __ioriTip = function (id) {
-            try {
-              var t = (typeof MAP_TILES !== 'undefined' && MAP_TILES) ? MAP_TILES[id] : null;
-              return '第' + id + '格' + (t && t.name ? ('【' + t.name + '】') : '') + (t && t.desc ? ('：' + String(t.desc).slice(0, 20)) : '');
-            } catch (e) { return '第' + id + '格'; }
-          };
-          var __ioriTileA = __previewLandingTile(player, finalDice);
-          var __ioriTileB = __previewLandingTile(player, 2);
-          __ioriOpts[0] = __ioriOpts[0] + ' → ' + __ioriTip(__ioriTileA);
-          __ioriOpts[1] = __ioriOpts[1] + ' → ' + __ioriTip(__ioriTileB);
-          if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) {
-            Map3D.previewTiles([{ id: __ioriTileA, color: 0x9fd8ff }, { id: __ioriTileB, color: 0xffd166 }]);
-          }
-          try { __busSetChooserUi(true); } catch (e) { try { console.error('[catch] assets/engine.js:9599', e); } catch (e2) {} }
-        } catch (e) { console.error('伊织被动落点预览出错（忽略）', e); }
-        if (typeof Online !== 'undefined' && Online.active && player === 'p2') {
-          onlineDecideModal('p2', '伊织被动·恩典（对手）', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', __ioriOpts, __ioriApply);
-          return;
-        }
-        showChoiceModal('伊织被动·恩典', '本次投掷结果为 ' + finalDice + ' 点', '可将最终结果改为2', __ioriOpts, __ioriApply);
-      }
       function __taotuoAsk(done) {
         if (!__rp._nextRollAdjustable) { done(); return; }
         __rp._nextRollAdjustable = false;
@@ -11637,8 +11569,11 @@ function rollDiceForPlayer(player) {
           done();
         }, __askOpts);
       }
-      if (__lilyOn || __ioriOn || __rp._nextRollAdjustable || __ctrlSteps > 0) {
-        __lilyAsk(function () { __ioriAsk(function () { __taotuoAsk(function () { __ctrlAsk(function () { setTimeout(__beginDiceWindow, 300); }); }); }); });
+      if (__rp._lilyPassive || __rp._ioriPassive || __rp._nextRollAdjustable || __ctrlSteps > 0) {
+        __rollResultChoose(player, finalDice, { sides: __sides, count: __cnt, movement: true, label: '移动投掷' }, function (v) {
+          finalDice = v; __rp._lastRoll = v;
+          __taotuoAsk(function () { __ctrlAsk(function () { setTimeout(__beginDiceWindow, 300); }); });
+        });
       } else { setTimeout(__beginDiceWindow, 600); }
     }
   }, 80);
@@ -13139,9 +13074,10 @@ function actCalibrate() {
     updateBattleUI();
   };
   /* 【2026-10-11】格子校准也是"一次投掷" ⇒ 走唯一出口（予的被动等"投掷后"效果 ✓；投掷者固定为 p1 ✓） */
-  var __calRaw = __rollFor('p1', 20, '20面骰校准(≥14)');
-  if (typeof __diceControlAsk === 'function') __diceControlAsk('p1', __calRaw, 20, '20面骰校准(≥14)', __calSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
-  else __calSettle(typeof applyDiceControl === 'function' ? applyDiceControl('p1', __calRaw, 20, __CTRL_PCT_NORMAL) : __calRaw);
+  __rollForAsync('p1', 20, '20面骰校准(≥14)', function (raw) {
+    if (typeof __diceControlAsk === 'function') __diceControlAsk('p1', raw, 20, '20面骰校准(≥14)', __calSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+    else __calSettle(typeof applyDiceControl === 'function' ? applyDiceControl('p1', raw, 20, __CTRL_PCT_NORMAL) : raw);
+  });
 }
 
 
@@ -13224,14 +13160,15 @@ function __busBoard(player, tile, __kasumi) {
   if (typeof updateBattleUI === 'function') updateBattleUI();
   if (__kasumi) { p._busRolledThisAction = true; __busChooseStep(player, 1, true, tile.id); return; }   // 免判定：直接选下车点
   /* 【2026-10-11】公交站四面骰也是"一次投掷" ⇒ 走唯一出口（投掷者 = 当前玩家 player ✓） */
-  var raw = __rollFor(player, 4, '公交站·四面骰');
   var settle = function (v) {
     p._busRolledThisAction = true;
     addBattleLog(player, '【' + tile.name + '】四面骰 ' + v + ' 点 ⇒ 可以在锚点间移动 ' + v + ' 格（转乘不消耗步数）');
     __busChooseStep(player, v, false, tile.id);
   };
-  if (typeof __diceControlAsk === 'function') __diceControlAsk(player, raw, 4, tile.name + '·四面骰', settle, { capPct: __CTRL_PCT_NORMAL });
-  else settle((typeof applyDiceControl === 'function') ? applyDiceControl(player, raw, 4, __CTRL_PCT_NORMAL) : raw);
+  __rollForAsync(player, 4, '公交站·四面骰', function (raw) {
+    if (typeof __diceControlAsk === 'function') __diceControlAsk(player, raw, 4, tile.name + '·四面骰', settle, { capPct: __CTRL_PCT_NORMAL });
+    else settle((typeof applyDiceControl === 'function') ? applyDiceControl(player, raw, 4, __CTRL_PCT_NORMAL) : raw);
+  });
 }
 /** 锚点网络上一步步走：每步选"相邻锚点"；随时可在挨着格子的锚点下车；走完可停在锚点 */
 /* 【2026-10-03 作者要求】公交/地铁在选目的地时：弹窗要**半透明并贴底**，让玩家能盯着地图确认要去哪一格。 */
@@ -14348,12 +14285,12 @@ function aiUsePermanentActive(player, done) {
     }
     if (h === 'lanzhangCoin') { // 蓝宝之杖·命：每回合一次的硬币判定伤害（正面2点、背面0）
       if (typeof judgePerform !== 'function') { next(); return; }
-      judgePerform(player, { kind: 'coin', label: '蓝宝之杖·命·硬币' }, function (face) {
+      judgePerform(player, { kind: 'coin', label: '蓝宝之杖·命·硬币' }, function (face, cancelled, rollContext) {
         setFlag(card, act);
         try {
           if (face === '正面') {
             L('对手【蓝宝之杖·命】硬币判定：正面，对对手造成2点判定伤害');
-            if (typeof dealDamageWithResponse === 'function') dealDamageWithResponse(foe, 2, '蓝宝之杖·命·硬币判定', null, null, player, { judge: true, segment: true });
+            if (typeof dealDamageWithResponse === 'function') dealDamageWithResponse(foe, 2, '蓝宝之杖·命·硬币判定', null, null, player, { judge: true, segment: true, judgeRoll: rollContext });
           } else {
             L('对手【蓝宝之杖·命】硬币判定：反面，不造成伤害');
           }
@@ -14559,9 +14496,9 @@ function checkLevelUp(player) {
             else showCardPickerMulti(rm, '供给者：选一张移出游戏的卡加入手卡', __recoverSup, 1);
           } else {
             var __tgt = foeOf(player);
-            if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
-            else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true }); __supOnce(remain - 1); });
-            else { dealDamageWithResponse(__tgt, 1 + __rollFor(player, 4, '供给者四面骰'), '供给者四面骰', function () {}, null, player, { judge: true }); __supOnce(remain - 1); }
+            if (typeof judgePerform === 'function') judgePerform(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, __cxl, rollContext) { if (!__cxl && r != null) dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true, judgeRoll: rollContext }); __supOnce(remain - 1); });
+            else if (typeof judgeAnimate === 'function') judgeAnimate(player, { kind: 'dice', sides: 4, label: '供给者四面骰' }, function (r, cancelled, rollContext) { dealDamageWithResponse(__tgt, r, '核心的供给者升级·四面骰判定', function () {}, null, player, { judge: true, judgeRoll: rollContext }); __supOnce(remain - 1); });
+            else __rollForAsync(player, 4, '供给者四面骰', function (r, cxl, rollContext) { dealDamageWithResponse(__tgt, 1 + r, '供给者四面骰', function () {}, null, player, { judge: true, judgeRoll: rollContext }); __supOnce(remain - 1); });
           }
         };
         if (__supOL) {
@@ -15517,7 +15454,7 @@ function performCalibration(player, difficulty, reduce, cb) {
       function (finalVal, cancelled) { __settle(finalVal, cancelled); });
     return undefined;   // 已转为异步：结果只通过 cb 交付
   }
-  return __settle(__rollFor(player, 20, '20面骰校准(' + difficulty + ')'), false);   // 【2026-10-11】走唯一投骰出口（触发予的被动 ✓）
+  return __rollForAsync(player, 20, '20面骰校准(' + difficulty + ')', __settle);   // 【2026-10-11】走唯一投骰出口（触发予的被动 ✓）
 }
 
 // 触发事件卡
@@ -18803,14 +18740,14 @@ function __resolveBackPathTouch(user, n) {
       var sides = sameCell ? 6 : 4;
       var label = '谢幕·SP' + (sameCell ? '（同格·六面骰）' : '（路径触碰·四面骰）');
       function __doRoll() {
-        var cb = function (roll, __cxl) {
+        var cb = function (roll, __cxl, rollContext) {
           if (__cxl || roll == null) { addBattleLog(user, '【谢幕·SP】判定被连锁无效，不造伤害'); return; }
-          try { dealDamageWithResponse(foe, roll, '谢幕·SP', null, null, user, { judge: true }); } catch (e) { try { console.error('[catch] 谢幕·SP 造伤', e); } catch (e2) {} }
+          try { dealDamageWithResponse(foe, roll, '谢幕·SP', null, null, user, { judge: true, judgeRoll: rollContext }); } catch (e) { try { console.error('[catch] 谢幕·SP 造伤', e); } catch (e2) {} }
           addBattleLog(user, '【谢幕·SP】后退路径上触碰到' + playerDisplayName(foe) + '，' + sides + '面骰' + roll + '点 ⇒ 造成' + roll + '点判定伤害' + (sameCell ? '（同格）' : ''));
         };
         if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: sides, label: label }, cb);
         else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: sides, label: label }, cb);
-        else cb(__rollFor(user, sides, label));
+        else __rollForAsync(user, sides, label, cb);
       }
       var __ol = (typeof Online !== 'undefined' && Online.active && battleState && !battleState._over);
       if (__ol && user === 'p2') {
@@ -19020,18 +18957,18 @@ function triggerLanzhangAfterJudge(user, target, done) {
   var has = (p.permanent || []).some(function (c) { return c.name && /蓝宝|蓝杖/.test(c.name); });
   if (!has) { __d(); return; }
   p._lanzhangUsed = true; // 每回合首次，无论正反都消耗本次机会
-  function __settle(face, __cancelled) {
+  function __settle(face, __cancelled, rollContext) {
     if (__cancelled || face == null) { addBattleLog(user, '【蓝宝之杖·命】追加硬币判定被连锁无效，不造成伤害'); __d(); return; }
     var ok = face === '正面' || face === true || face === 1;
     addBattleLog(user, '【蓝宝之杖·命】首次判定伤害后追加硬币判定：' + (ok ? '正面，造成2点判定伤害' : '反面，不造成伤害'));
-    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { __d(); }, null, user, { judge: true, segment: true });
+    if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命追加硬币判定', function () { __d(); }, null, user, { judge: true, segment: true, judgeRoll: rollContext });
     else __d();
   }
   if (user === 'p1' && typeof judgePerform === 'function') judgePerform('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
   else if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
   // 联机：远端位同样走统一判定流程（同 RNG + 双方连锁窗口），保证双机一致
   else if (typeof Online !== 'undefined' && Online.active && typeof judgePerform === 'function') judgePerform(user, { kind: 'coin', label: '蓝宝之杖·命追加' }, __settle);
-  else __settle(GameRNG.coin() ? '正面' : '反面');
+  else { var face = GameRNG.coin() ? '正面' : '反面'; __settle(face, false, { kind: 'coin', raw: face, count: 1 }); }
 }
 
 /* 妖刀的两次破坏共用候选与原区域出口，保密展示不改变真实卡引用。 */
@@ -19576,7 +19513,7 @@ function __offensiveBuffSum(user, opt) {
 }
 
 function applyDamageOps(user, target, op, done, srcCard) {
-  var p = battleState[user];
+  var p = battleState[user], __judgeRoll = null;
   function __settle(base) {
     // 等级成长SP：基础伤害随使用者等级提升（钢筋铁肘/放轻松些）
     if (srcCard && typeof __lvDamageBase === 'function' && !op.judge) base = __lvDamageBase(srcCard, user, base);
@@ -19590,7 +19527,7 @@ function applyDamageOps(user, target, op, done, srcCard) {
       dealDamageWithResponse(target, base, op.source || '效果', function () {
         // 伤害后触发（琉璃/宫樱子/琉璃水着/羽奈/妖刀/蓝宝）已统一收口进 dealDamageWithResponse 的 __finish，此处不再重复触发
         if (done) done();
-      }, __attr, user, { judge: !!op.judge, srcCard: srcCard, kind: op.kind, extraFinal: extraFinal || 0, finalMul: op.finalMul || 1, coinFail: __coinFail, selfInflicted: target === user });
+      }, __attr, user, { judge: !!op.judge, srcCard: srcCard, kind: op.kind, extraFinal: extraFinal || 0, finalMul: op.finalMul || 1, coinFail: __coinFail, selfInflicted: target === user, judgeRoll: __judgeRoll });
     }
     /* 血之佑戒·红泪拉克莎（卡面 2026-09-25 版）：一回合一次，造成伤害时可以支付2点同步值让**最终伤害+1**。
        与"善意面具·金币增伤"同款落点（造伤前的选发窗口），区别只是费用用同步值、每回合一次。 */
@@ -19636,13 +19573,14 @@ function applyDamageOps(user, target, op, done, srcCard) {
   if (op.judge) {
     // 固定值判定伤害（无骰种，如清凉时间“1点判定伤害”）：不掷骰、无波动，直接按固定值结算，但仍属判定伤害（吃判定增伤、不吃属性克制）
     if (op.dice === 'fixed') { __settle(op.base || 1); return; }
-    var __afterRoll = function (roll, __cancelled) {
-      if (__cancelled || roll === null || roll === undefined) { addBattleLog(user, '本次判定被连锁无效，不造成伤害'); __deal(0); return; }
+    var __afterRoll = function (roll, __cancelled, rollContext) {
+      __judgeRoll = rollContext;
+      if (__cancelled || roll === null || roll === undefined) { addBattleLog(user, '本次判定被连锁无效，不造成伤害'); if (done) done(); return; }
       var base;
       if (op.dice === 'coin') { base = (roll === '正面') ? (op.base || 2) : 0; addBattleLog(user, '硬币判定伤害：' + roll + (base ? '，造成' + base : '，不造成伤害'));
-        if (roll === '正面') __ruriMaxJudgeSP(user, 'coin', roll); }        // 硬币最大=正面2点
+      }
       else { base = roll; p._lastRoll = base; addBattleLog(user, '判定伤害骰点：' + base);
-        __ruriMaxJudgeSP(user, op.dice, roll);                              // 骰子：原始骰点等于最大面（不看增伤）
+        // 小沙香SP由实际伤害落点统一处理。
       }
       __settle(base);
     };
@@ -19653,8 +19591,8 @@ function applyDamageOps(user, target, op, done, srcCard) {
       if (op.dice === 'coin') judgeAnimate(user, { kind: 'coin', label: (op.source || '硬币判定') }, __afterRoll);
       else { var __sx2 = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; judgeAnimate(user, { kind: 'dice', sides: __sx2, label: __sx2 + '面骰判定伤害' }, __afterRoll); }
     } else {
-      if (op.dice === 'coin') __afterRoll(GameRNG.coin() ? '正面' : '反面');
-      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __afterRoll(applyDiceControl(user, __rollFor(user, __m, __m + '面骰判定伤害'), __m)); }   // 【2026-10-11】走唯一投骰出口 ✓
+      if (op.dice === 'coin') { var face = GameRNG.coin() ? '正面' : '反面'; __afterRoll(face, false, { kind: 'coin', raw: face, count: 1 }); }
+      else { var __m = ({ d4: 4, d6: 6, d20: 20 })[op.dice] || 6; __rollForAsync(user, __m, __m + '面骰判定伤害', function (v, cxl, rollContext) { __afterRoll(applyDiceControl(user, v, __m), cxl, rollContext); }); }   // 【2026-10-11】走唯一投骰出口 ✓
     }
   } else __settle(op.base || 0);
 }
@@ -20621,11 +20559,15 @@ function __opsDice(op, ctx, next, env) {
       var __cnt = op.count || 1;
       var __rolls = [], __sum = 0;
       for (var __k = 0; __k < __cnt; __k++) { var __one = __rollFor(user, __sd, '掷骰判定·' + __sd + '面骰'); __rolls.push(__one); __sum += __one; }
+      __rollResultChoose(user, __sum, { sides: __sd, count: __cnt, label: '掷骰判定' }, function (v) {
+      __sum = v;
       p._lastRolls = __rolls; p._lastDiceSides = __sd; p._lastDiceCount = __cnt;
       p._lastRoll = __sum;
       addBattleLog(user, '【判定】投掷' + __cnt + '枚' + __sd + '面骰，结果 ' + (__cnt > 1 ? __rolls.join('+') + '=' : '') + __sum);
       if (typeof judgeAnimate === 'function') { try { judgeAnimate(user, { sides: __sd, fixed: __sum, label: '掷骰判定' }, function () { }); } catch (e) { try { console.error('[catch] assets/engine.js:17252', e); } catch (e2) {} } }
-      break;
+      next();
+      });
+      return true;
     }   // 【2026-10-11】走唯一投骰出口 ✓
     /* 【2026-10-13 作者报·bug2 结构修 ✓】条件路由：投掷后**按结果**选分支，不问玩家 ✗
        病象：卡面「投掷N枚M面骰，**若结果**：①…②…③…」被编成"选择一项发动"让玩家自己挑 ✗
@@ -20637,6 +20579,8 @@ function __opsDice(op, ctx, next, env) {
       var __rs = op.sides || 6, __rc2 = op.count || 1;
       var __rr = [], __rsum = 0;
       for (var __rk = 0; __rk < __rc2; __rk++) { var __rv2 = __rollFor(user, __rs, '掷骰判定·' + __rs + '面骰'); __rr.push(__rv2); __rsum += __rv2; }
+      __rollResultChoose(user, __rsum, { sides: __rs, count: __rc2, label: '掷骰判定' }, function (v) {
+      __rsum = v;
       p._lastRolls = __rr; p._lastDiceSides = __rs; p._lastDiceCount = __rc2; p._lastRoll = __rsum;
       addBattleLog(user, '【判定】' + (ctx.card ? ('【' + (ctx.card.name || '') + '】') : '') + '投掷' + __rc2 + '枚' + __rs + '面骰，结果 ' +
         (__rc2 > 1 ? __rr.join('+') + '=' : '') + __rsum);
@@ -20661,6 +20605,7 @@ function __opsDice(op, ctx, next, env) {
       if (__pick < 0) { addBattleLog(user, '【条件路由】投掷结果 ' + __rsum + '（每枚 ' + __rr.join('、') + '）不满足任何一条 ⇒ 本效果不适用'); next(); return true; }
       addBattleLog(user, '【条件路由】按投掷结果 ' + __rsum + ' ⇒ 执行「' + String((op.labels || [])[__pick] || ('第' + (__pick + 1) + '条')).slice(0, 24) + '」');
       runOps((op.branches || [])[__pick] || [], ctx, next);
+      });
       return true;
     }
     case 'buff_next_judge': p._nextAttackJudge = { dice: op.dice, front: op.front }; addBattleLog(user, '获得增益：下一次造伤害附带' + (op.dice==='coin'?'硬币':(op.dice==='d4'?'四面骰':'六面骰')) + '判定（正面/' + (op.front||2) + '点）'); break;
@@ -21278,7 +21223,7 @@ function runOneOp(op, ctx, next) {
       };
       if (typeof judgePerform === 'function') judgePerform(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定', ctrlFull: true }, __settleJB);
       else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: __sides, cmp: op.cmp, rhs: op.rhs, label: op.label || '效果判定' }, __settleJB);
-      else { var __rr = (typeof applyDiceControl === 'function') ? applyDiceControl(user, __rollFor(user, __sides, op.label || '效果判定'), __sides) : __rollFor(user, __sides, op.label || '效果判定'); __settleJB(__rr); }   // 【2026-10-11】走唯一投骰出口 ✓
+      else __rollForAsync(user, __sides, op.label || '效果判定', function (r) { __settleJB(typeof applyDiceControl === 'function' ? applyDiceControl(user, r, __sides) : r); });   // 【2026-10-11】走唯一投骰出口 ✓
       return;
     }
     case 'optional': {
@@ -21661,49 +21606,44 @@ function __psDamageClause(user, target, effectText, context, hold, finish) {
     var __txtCard = context.card || null;
     var __dmgKind = /理智/.test(effectText) ? 'sanity' : (/热忱/.test(effectText) ? 'fervor' : (/无序/.test(effectText) ? '无序' : (/混沌/.test(effectText) ? '混沌' : null))); // C25 无序/混沌按字面区分
     var __hadSync = battleState[target].sync;
-    function __doDeal(__dmg, __cf) {
+    function __doDeal(__dmg, __cf, rollContext) {
+      if (rollContext && rollContext.cancelled) { finish(); return; }
       hold(); // 伤害含抵消弹窗/判定动画，暂停自动推进，结算完成后再 finish
       dealDamageWithResponse(target, __dmg, (__txtCard && __txtCard.name) || '效果', function () {
         // 琉璃被动等伤害后触发已统一收口进 dealDamageWithResponse 的 __finish
         if (typeof updateBattleUI === 'function') updateBattleUI();
         finish();
-      }, (__txtCard && __txtCard.attribute) || null, user, { judge: __isJudge, srcCard: __txtCard, kind: __dmgKind, coinFail: __cf });
+      }, (__txtCard && __txtCard.attribute) || null, user, { judge: __isJudge, srcCard: __txtCard, kind: __dmgKind, coinFail: __cf, judgeRoll: rollContext });
     }
     if (__isJudge && typeof judgePerform === 'function') {
       // 判定伤害：结果在“确定前连锁窗”内生成，可被 Twice 重判/遥控改点
       hold();
       var __front = damage;
       if (effectText.indexOf('硬币') >= 0 || effectText.indexOf('正反面') >= 0) {
-        judgePerform(user, { kind: 'coin', label: __judgeLabel }, function (face, cxl) {
+        judgePerform(user, { kind: 'coin', label: __judgeLabel }, function (face, cxl, rollContext) {
           var dmg = (cxl || face == null) ? 0 : (face === '正面' ? __front : 0);
           effectEngine.effectLog.push({ label: '【硬币判定】', text: cxl ? '判定被连锁无效' : ('硬币结果' + face + (face === '正面' ? ('，造成' + dmg + '点') : '，不造成伤害')), class: 'effect-step step-result' });
-          if (!cxl && face === '正面') __ruriMaxJudgeSP(user, 'coin', face);        // 琉璃SP：硬币最大=正面2点
-          __doDeal(dmg, face !== '正面');
+          __doDeal(dmg, face !== '正面', rollContext);
         });
       } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
-        judgePerform(user, { kind: 'dice', sides: 4, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【四面骰判定】', text: cxl ? '判定被连锁无效' : ('四面骰' + dmg + '点'), class: 'effect-step step-result' }); if (!cxl) __ruriMaxJudgeSP(user, 'd4', r); __doDeal(dmg, false); });
+        judgePerform(user, { kind: 'dice', sides: 4, label: __judgeLabel }, function (r, cxl, rollContext) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【四面骰判定】', text: cxl ? '判定被连锁无效' : ('四面骰' + dmg + '点'), class: 'effect-step step-result' }); __doDeal(dmg, false, rollContext); });
       } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
-        judgePerform(user, { kind: 'dice', sides: 6, label: __judgeLabel }, function (r, cxl) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【六面骰判定】', text: cxl ? '判定被连锁无效' : ('六面骰' + dmg + '点'), class: 'effect-step step-result' }); if (!cxl) __ruriMaxJudgeSP(user, 'd6', r); __doDeal(dmg, false); });
+        judgePerform(user, { kind: 'dice', sides: 6, label: __judgeLabel }, function (r, cxl, rollContext) { var dmg = (cxl || r == null) ? 0 : r; effectEngine.effectLog.push({ label: '【六面骰判定】', text: cxl ? '判定被连锁无效' : ('六面骰' + dmg + '点'), class: 'effect-step step-result' }); __doDeal(dmg, false, rollContext); });
       } else __doDeal(damage, false);
     } else {
-      if (__isJudge) {
-        if (effectText.indexOf('硬币') >= 0 || effectText.indexOf('正反面') >= 0) {
-          var coinResult = (GameRNG.coin() ? '反面' : '正面');
-          if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', fixed: coinResult, label: __judgeLabel }, function () {});
-          if (coinResult !== '正面') { damage = 0; __coinFail = true; }
-          else __ruriMaxJudgeSP(user, 'coin', coinResult);                      // 琉璃SP：硬币最大=正面2点
-        } else if (effectText.indexOf('4面骰') >= 0 || effectText.indexOf('四面骰') >= 0) {
-          /* 【2026-10-11】判定伤害的伤害判定也是"一次投掷" ⇒ 走唯一出口（予的被动等"投掷后"效果 ✓） */
-          damage = applyDiceControl(user, __rollFor(user, 4, '判定伤害·4面骰'), 4);
-          if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 4, fixed: damage, label: __judgeLabel }, function () {});
-          __ruriMaxJudgeSP(user, 'd4', damage);
-        } else if (effectText.indexOf('6面骰') >= 0 || effectText.indexOf('六面骰') >= 0) {
-          damage = applyDiceControl(user, __rollFor(user, 6, '判定伤害·6面骰'), 6);
-          if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: 6, fixed: damage, label: __judgeLabel }, function () {});
-          __ruriMaxJudgeSP(user, 'd6', damage);
-        }
-      }
-      __doDeal(damage, __coinFail);
+      if (!__isJudge) __doDeal(damage, false);
+      else if (/硬币|正反面/.test(effectText)) {
+        var face = GameRNG.coin() ? '反面' : '正面';
+        if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', fixed: face, label: __judgeLabel }, function () {});
+        __doDeal(face === '正面' ? damage : 0, face !== '正面', { kind: 'coin', raw: face, count: 1 });
+      } else if (/4面骰|四面骰|6面骰|六面骰/.test(effectText)) {
+        var sides = /4面骰|四面骰/.test(effectText) ? 4 : 6;
+        __rollForAsync(user, sides, __judgeLabel, function (v, cxl, rollContext) {
+          var value = applyDiceControl(user, v, sides);
+          if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'dice', sides: sides, fixed: value, label: __judgeLabel }, function () {});
+          __doDeal(value, false, rollContext);
+        });
+      } else __doDeal(damage, false);
     }
   }
   return target;
@@ -22208,8 +22148,12 @@ function __eventCasesA(card, player, p, done, env) {
           updateBattleUI(); checkBattleEnd();
         }
       };
-      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __sum, __dN * 6, '即兴演出·' + __dN + '枚六面骰', __jxSettle, { capPct: __CTRL_PCT_NORMAL, min: __dN, prefer: 'high', arr: __rolls, arrSides: 6 });
-      else __jxSettle(__sum);
+      __rollResultChoose(player, __sum, { sides: 6, count: __dN, label: '即兴演出' }, function (v) {
+        var ctrl = { capPct: __CTRL_PCT_NORMAL, min: Math.min(__dN, v), prefer: 'high' };
+        if (v === __sum) { ctrl.arr = __rolls; ctrl.arrSides = 6; }
+        if (typeof __diceControlAsk === 'function') __diceControlAsk(player, v, __dN * 6, '即兴演出·' + __dN + '枚六面骰', __jxSettle, ctrl);
+        else __jxSettle(v);
+      });
       break;
     }
       
@@ -22372,9 +22316,10 @@ function __eventCasesB(card, player, p, done, env) {
         checkBattleEnd();
       };
       /* 【2026-10-11】独奏的 20 面骰也是"一次投掷" ⇒ 走唯一出口（投掷者 = player ✓） */
-      var __jzRaw = __rollFor(player, 20, '独奏·20面骰');
-      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __jzRaw, 20, '独奏·20面骰', __jzSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
-      else __jzSettle(__jzRaw);
+      __rollForAsync(player, 20, '独奏·20面骰', function (raw) {
+        if (typeof __diceControlAsk === 'function') __diceControlAsk(player, raw, 20, '独奏·20面骰', __jzSettle, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+        else __jzSettle(raw);
+      });
       break;
     }
       
@@ -22487,8 +22432,13 @@ function __eventCasesB(card, player, p, done, env) {
         checkBattleEnd();
       };
       var __gtSum = diceArr.reduce(function (a, b) { return a + b; }, 0);
-      if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __gtSum, __diceN * 6, '赌徒游戏·' + __diceN + '枚六面骰', __gtSettle, { capPct: __CTRL_PCT_NORMAL, min: __diceN, prefer: 'high', arr: diceArr, arrSides: 6 });
-      else __gtSettle();
+      __rollResultChoose(player, __gtSum, { sides: 6, count: __diceN, label: '赌徒游戏' }, function (v) {
+        var ctrl = { capPct: __CTRL_PCT_NORMAL, min: Math.min(__diceN, v), prefer: 'high' };
+        if (v === __gtSum) { ctrl.arr = diceArr; ctrl.arrSides = 6; }
+        p._lastRoll = v;
+        if (typeof __diceControlAsk === 'function') __diceControlAsk(player, v, __diceN * 6, '赌徒游戏·' + __diceN + '枚六面骰', __gtSettle, ctrl);
+        else __gtSettle();
+      });
       break;
     }
       
@@ -22514,8 +22464,10 @@ function __eventCasesB(card, player, p, done, env) {
           addBattleLog(player, '躁动之心：第' + idx + '次校准' + sides + '面骰出' + v + '点，' + (v >= 6 ? '成功' : '失败'));
           next();
         };
-        if (typeof __diceControlAsk === 'function') __diceControlAsk(player, __raw, sides, '躁动之心·第' + idx + '次校准(' + sides + '面骰)', __apply, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
-        else __apply(__raw);
+        __rollResultChoose(player, __raw, { sides: sides, label: '躁动之心·第' + idx + '次校准' }, function (v) {
+          if (typeof __diceControlAsk === 'function') __diceControlAsk(player, v, sides, '躁动之心·第' + idx + '次校准(' + sides + '面骰)', __apply, { capPct: __CTRL_PCT_NORMAL, prefer: 'high' });
+          else __apply(v);
+        });
       };
       __calStep(12, 1, function () {
         __calStep(8, 2, function () {
@@ -24087,10 +24039,10 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       addBattleLog(player, '【来自地狱的盒子SP】4面骰' + roll + '点，回复' + roll + '音韵（当前' + p.cost + '）');
       if (typeof updateBattleUI === 'function') updateBattleUI();
     }
-    function __hellBoxDamage(roll, __cancelled) {
+    function __hellBoxDamage(roll, __cancelled, rollContext) {
       if (__cancelled || roll == null) { addBattleLog(player, '【来自地狱的盒子SP】判定被连锁无效，不造伤害'); return; }
       var __hbFoe = foeOf(player);
-      dealDamageWithResponse(__hbFoe, roll, '来自地狱的盒子SP', null, null, player, { judge: true });
+      dealDamageWithResponse(__hbFoe, roll, '来自地狱的盒子SP', null, null, player, { judge: true, judgeRoll: rollContext });
       addBattleLog(player, '【来自地狱的盒子SP】4面骰' + roll + '点，对' + (player === 'p1' ? '对手' : '你') + '造成' + roll + '点判定伤害');
     }
     if (player === 'p1' && typeof showChoiceModal === 'function') {
@@ -24227,7 +24179,8 @@ function applyJudgeChain(side, pick, je, done) {
        否则会先按旧值结算（实测日志顺序：先"校准：6点，失败"，之后才"重判新结果 = 12"）。 */
     je._rerollPending = true;
     // 被判定者重新掷一次（走动画+控骰），替换待结算结果，双方重新获得连锁机会
-    judgeAnimate(je.judgeUser, je.spec, function (nv) {
+    judgeAnimate(je.judgeUser, je.spec, function (nv, cancelled, rollContext) {
+      je.rollContext = rollContext;
       je.val = nv; je.description = (je.spec.label || '判定') + ' → 结果 ' + nv + '（重判，确定前可连锁）';
       addBattleLog('system', '重判新结果 = ' + nv);
       if (typeof renderChainBar === 'function') renderChainBar(je);
@@ -24266,7 +24219,7 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
   var je = {
     type: 'rand_result', _stage: 'rand_result', player: user, judgeUser: user, spec: spec,
     description: (spec.label || '判定') + ' → 结果 ' + initVal + '（确定前可连锁）',
-    val: initVal, _chain: [], cancelled: false
+    val: initVal, _chain: [], cancelled: false, rollContext: spec._rollContext || null
   };
   rwOpen('rand', je);
   /* 【2026-10-12 今晚修·作者报"没有投骰也能用②修改掷骰结果"】⇒ 建立**唯一真相**：
@@ -24274,11 +24227,11 @@ function judgeSettleWindow(user, spec, initVal, applyFn) {
      供①特制手套的选项② ✓、②人类侧"改点卡/重判卡"的可用性判定 ✓ 共同读取（不再各自猜 ✗） */
   try { battleState._openRollWindow = 'rand'; } catch (e) { try { console.error('[catch] assets/engine.js:20619 开窗标记', e); } catch (e2) {} }
   function __settleNow() {
-    if (je.cancelled) { addBattleLog(user, '本次判定被连锁无效，不适用结果'); applyFn(null, true); return; }
+    if (je.cancelled) { if (je.rollContext) je.rollContext.cancelled = true; addBattleLog(user, '本次判定被连锁无效，不适用结果'); applyFn(null, true, je.rollContext); return; }
     /* "最终点数"以 je.val 为准（重判落地时已写回）；_newDiceResult 只是某些路径的兜底 */
     var __finalVal = (je._newDiceResult !== undefined && je._newDiceResult !== null) ? je._newDiceResult : je.val;
     if (__finalVal !== je.val) addBattleLog(user, '【重判生效】本次判定最终点数 ' + je.val + ' → ' + __finalVal);
-    applyFn(__finalVal, false);
+    applyFn(__finalVal, false, je.rollContext);
   }
   function __close() {
     rwClose('rand');
@@ -24348,7 +24301,8 @@ function __ruriMaxJudgeSP(user, diceKind, roll) {
 
 function judgePerform(user, spec, applyFn) {
   try { if (typeof __sfx !== 'undefined') __sfx.play('judge'); } catch (e) { try { console.error('[catch] assets/engine.js:20323', e); } catch (e2) {} }
-  judgeAnimate(user, spec, function (initVal) { judgeSettleWindow(user, spec, initVal, applyFn); });
+  spec = Object.assign({}, spec);
+  judgeAnimate(user, spec, function (initVal, cancelled, rollContext) { spec._rollContext = rollContext; judgeSettleWindow(user, spec, initVal, applyFn); });
 }
 
 function judgeAnimate(user, spec, cb) {
@@ -24363,6 +24317,10 @@ function judgeAnimate(user, spec, cb) {
     return __rollFor(user, spec.sides || 6, spec.label || '判定');
   }
   var finalVal = __isFixed ? spec.fixed : __roll();
+  var rollContext = { kind: isCoin ? 'coin' : 'dice', sides: spec.sides || 6, count: 1, raw: finalVal, fixed: __isFixed, cancelled: false };
+  function deliver(v) { cb(v, false, rollContext); }
+  __rollResultChoose(user, finalVal, spec, function (chosen) {
+  finalVal = chosen;
   // 控骰【手动按钮】：点数已知后询问玩家是否 ±N（不再替玩家自动选"更有利"的结果）
   // 上限口径：判定伤害最多适用 20% 控骰（±1）；非伤害类判定（御神签校准/回音韵判定等）属普通投掷，最多 100%（±5）
   if (!isCoin && !__isFixed && typeof __diceControlAsk === 'function') {
@@ -24371,7 +24329,7 @@ function judgeAnimate(user, spec, cb) {
     var __ctrlPrefer = (spec.cmp === '<' || spec.cmp === '<=') ? 'low' : 'high';
     __diceControlAsk(user, finalVal, spec.sides || 6, spec.label, function (v) {
       if (v !== finalVal) addBattleLog(user, '【控骰】判定骰子点数' + finalVal + '→' + v + '（手动选择）');
-      __judgeAnimPlay(user, spec, false, v, cb);
+      __judgeAnimPlay(user, spec, false, v, deliver);
     }, { capPct: __ctrlCap, prefer: __ctrlPrefer });
     return;
   }
@@ -24385,9 +24343,10 @@ function judgeAnimate(user, spec, cb) {
   /* 【2026-10-18 同上】AI 的判定伤害/判定结果不能抢在判定动画之前落地；
      人类侧仍保持逻辑立即继续。 */
   if (typeof cb === 'function') {
-    if (typeof isAISeat === 'function' && isAISeat(user) && typeof __aiPace === 'function') __aiPace(function () { cb(finalVal); }, 0);
-    else cb(finalVal);
+    if (typeof isAISeat === 'function' && isAISeat(user) && typeof __aiPace === 'function') __aiPace(function () { deliver(finalVal); }, 0);
+    else deliver(finalVal);
   }
+  });
 }
 
 function __uiJudgeAnimOn() {
@@ -24519,7 +24478,7 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   var __eeD=(typeof effectEngine!=='undefined')?effectEngine:null;
   __eeMarkInc('dealDamageWithResponse·造伤与受伤响应');
   __eeDepthAdd(__eeD,'eeD·进入结算');
-  var __releasedD=false;
+  var __releasedD=false, __finishedD=false;
   function __relD(){ if(__releasedD) return; __releasedD=true; __eeDepthSub(__eeD,'eeD·释放'); try { __tryDrainTriggers(); } catch (e) { try { console.error('[catch] assets/engine.js:20482', e); } catch (e2) {} } try { __eeAfterRelease(); } catch (e) { try { console.error('[catch] assets/engine.js:20482', e); } catch (e2) {} } try { if (typeof __drainAllWhenIdle === 'function') __drainAllWhenIdle('release'); } catch (e) { try { console.error('[catch] assets/engine.js:20482', e); } catch (e2) {} } }   /* 【2026-10-05】结算退干净 ⇒ 统一排空（带重试） */
   try {
   var p = battleState[target];
@@ -24705,22 +24664,24 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
       var nj = __nj; delete atk._nextAttackJudge;
       addBattleLog(attacker, '【一次性增益】下次造伤害附带判定已消耗（本次成功造成伤害）');
       var __lblName = (source || '攻击') + '·附带判定';
-      function __applyBonus(bonus, rollText) {
+      function __applyBonus(bonus, rollText, rollContext) {
         if (rollText) addBattleLog(attacker, '附带判定（' + __lblName + '）：' + rollText);
         if (bonus > 0) {
           // 判定伤害：吃攻击力÷2/防御/判定增伤，仅不吃属性克制增伤
           var __bc = computeDamageValue(attacker, target, { base: bonus, judge: true, attr: null, srcCard: null, kind: null });
-          __applyBonusLocal(__bc.value, '附带判定');
+          var actualBonus = __applyBonusLocal(__bc.value, '附带判定');
+          __ruriJudgeAfterHit(attacker, actualBonus, rollContext, function () { __finish(actualDamage); });
+          return;
         } else {
           addBattleLog(attacker, '附带判定未追加伤害（判定为0/背面，效果已正常结算，并非未执行）');
         }
         __finish(actualDamage);
       }
       if (nj.dice === 'coin') {
-        judgePerform(attacker, { kind: 'coin', label: __lblName }, function (roll) { __applyBonus(roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll); });
+        judgePerform(attacker, { kind: 'coin', label: __lblName }, function (roll, cancelled, rollContext) { __applyBonus(!cancelled && roll === '正面' ? (nj.front || 2) : 0, '硬币' + roll, rollContext); });
       } else {
         var __sides = (nj.dice === 'd4') ? 4 : 6;
-        judgePerform(attacker, { kind: 'dice', sides: __sides, label: __lblName }, function (roll) { if (roll == null) roll = 0; __applyBonus(roll, __sides + '面骰点数' + roll + '，追加' + roll); });
+        judgePerform(attacker, { kind: 'dice', sides: __sides, label: __lblName }, function (roll, cancelled, rollContext) { if (cancelled || roll == null) roll = 0; __applyBonus(roll, __sides + '面骰点数' + roll + '，追加' + roll, rollContext); });
       }
       return;
     }
@@ -24787,7 +24748,13 @@ function dealDamageWithResponse(target, damage, source, callback, attackerAttr, 
   }
   // 统一结算收尾：伤害后触发（琉璃/宫樱子/琉璃水着/羽奈/妖刀/蓝宝）→ 胜负判定 → 释放锁 → 回调
   function __finish(actual) {
-    function __tail() { updateBattleUI(); checkBattleEnd(); __relD(); if (callback) callback(actual); }
+    if (__finishedD) return;
+    __finishedD = true;
+    function __tail() {
+      __ruriJudgeAfterHit(attacker, opts.judge ? actual : 0, opts.judgeRoll, function () {
+        updateBattleUI(); checkBattleEnd(); __relD(); if (callback) callback(actual);
+      });
+    }
     if (!opts.segment && actual > 0 && attacker) {
       var __ap = battleState[attacker];
       if (__ap) {
@@ -25630,17 +25597,17 @@ var PERMANENT_ACTIVE_HANDLERS = {
     var opts = foes.map(function (k) { return '对' + (k === 'p1' ? '我方' : '对手' + k.slice(1)) + '造成硬币判定伤害'; });
     function __settle(target) {
       function __done() { if (typeof updateBattleUI === 'function') updateBattleUI(); }
-      function __after(face, __cancelled) {
+      function __after(face, __cancelled, rollContext) {
         if (__cancelled || face == null) { addBattleLog(user, '【蓝宝之杖·命】硬币判定被连锁无效，不造成伤害'); __done(); return; }
         var ok = (face === '正面' || face === true || face === 1);
         addBattleLog(user, '【蓝宝之杖·命】主动发动硬币判定：' + (ok ? '正面，对' + target + '造成2点判定伤害' : '反面，不造成伤害'));
-        if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命·硬币判定', function () { __done(); }, null, user, { judge: true, segment: true });
+        if (ok) dealDamageWithResponse(target, 2, '蓝宝之杖·命·硬币判定', function () { __done(); }, null, user, { judge: true, segment: true, judgeRoll: rollContext });
         else __done();
       }
       if (user === 'p1' && typeof judgePerform === 'function') judgePerform('p1', { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
       else if (user === 'p1' && typeof judgeAnimate === 'function') judgeAnimate('p1', { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
       else if (typeof Online !== 'undefined' && Online.active && typeof judgePerform === 'function') judgePerform(user, { kind: 'coin', label: '蓝宝之杖·命·硬币' }, __after);
-      else __after(GameRNG.coin() ? '正面' : '反面');
+      else { var face = GameRNG.coin() ? '正面' : '反面'; __after(face, false, { kind: 'coin', raw: face, count: 1 }); }
     }
     function __pick(i) {
       if (i == null || i < 0) { if (typeof updateBattleUI === 'function') updateBattleUI(); return; }
@@ -26277,6 +26244,61 @@ function __rollForAfter(who, tag) {
     }
   } catch (e) { console.error('投掷后被动出错（忽略）', e); }
 }
+/* v571：原始骰面与最终结果分离；选择不消耗随机数，后续只由回调推进。 */
+function __rollResultChoose(player, value, spec, done) {
+  var p = battleState && battleState[player];
+  if (!p || spec.kind === 'coin' || spec.fixed != null) { done(value); return; }
+  var sides = spec.sides || 6, count = spec.count || 1;
+  var online = typeof Online !== 'undefined' && Online.active;
+  function ask(flag, title, alternative, next) {
+    if (!p[flag] || alternative === value) { next(); return; }
+    var options = ['保留 ' + value + ' 点', flag === '_lilyPassive' ? '改为对立面 ' + alternative + ' 点' : '改为 2 点'];
+    if (!online && player !== 'p1') {
+      if (alternative > value) value = alternative;
+      next(); return;
+    }
+    if (spec.movement) {
+      var tiles = [value, alternative].map(function (v, i) {
+        var id = __previewLandingTile(player, v), tile = MAP_TILES[id];
+        options[i] += ' → 第' + id + '格' + (tile && tile.name ? '【' + tile.name + '】' : '') + (tile && tile.desc ? '：' + String(tile.desc).slice(0, 20) : '');
+        return { id: id, color: i ? 0xffd166 : 0x9fd8ff };
+      });
+      if (typeof Map3D !== 'undefined' && Map3D && Map3D.previewTiles) Map3D.previewTiles(tiles);
+      __busSetChooserUi(true);
+    }
+    function apply(i) {
+      if (spec.movement) __movePreviewEnd();
+      if (i === 1) value = alternative;
+      if (spec.movement) p._lastRoll = value;
+      addBattleLog(player, '【' + title + '】选择最终结果 ' + value + ' 点');
+      next();
+    }
+    if (online) onlineDecideModal(player, title + (player === 'p2' ? '（对手）' : ''), '本次投掷结果为 ' + value + ' 点', spec.label || '', options, apply);
+    else showChoiceModal(title, '本次投掷结果为 ' + value + ' 点', spec.label || '', options, apply);
+  }
+  function iori() { ask('_ioriPassive', '伊织被动·恩典', 2, function () { done(value); }); }
+  if (count === 1) ask('_lilyPassive', '莉莉被动·逝者之眼', sides + 1 - value, iori);
+  else iori();
+}
+function __rollForAsync(who, sides, tag, done) {
+  var raw = __rollFor(who, sides, tag);
+  var context = { kind: 'dice', sides: sides || 6, count: 1, raw: raw, cancelled: false };
+  __rollResultChoose(who, raw, { sides: sides, label: tag }, function (v) { done(v, false, context); });
+}
+function __ruriJudgeAfterHit(user, actual, roll, done) {
+  var p = battleState && battleState[user];
+  if (!p || !p._ruriSP || !(actual > 0) || !roll || roll.cancelled || roll.fixed || roll.count > 1 ||
+      (roll.kind === 'coin' ? roll.raw !== '正面' : roll.raw !== roll.sides)) { done(); return; }
+  function apply(i) {
+    if (i === 0) __ruriMaxJudgeSP(user, roll.kind === 'coin' ? 'coin' : 'd' + roll.sides, roll.raw);
+    done();
+  }
+  var choices = ['发动：抽1张卡并回复2音韵', '不发动'];
+  if (typeof Online !== 'undefined' && Online.active) onlineDecideModal(user, '小沙香琉璃SP', '最大骰面且实际造成' + actual + '点判定伤害', '', choices, apply);
+  else if (user === 'p1') showChoiceModal('小沙香琉璃SP', '最大骰面且实际造成' + actual + '点判定伤害', '', choices, apply);
+  else apply(0);
+}
+
 function __rollFor(who, sides, tag) {
   var v = GameRNG.dice(sides || 6);
   __rollForAfter(who, tag);
@@ -26967,15 +26989,15 @@ function postUsePassiveHooks(user, card, done) {
   // 予(水着)SP：使用理智属性[移动]道具卡后，对一名玩家造硬币判定伤害（正面2/背面0）（必发）
   if (p._yuMizugiSP && __yuMizugiTriggerCard(p, card)) {
     __add(user, true, '予(水着)SP·硬币判定', function (next) {
-      function __ymSettle(face, tgt) {
-        if (face === '正面') { dealDamageWithResponse(tgt, 2, '予(水着)SP', null, null, user, { judge: true }); addBattleLog(user, '【予(水着)SP】硬币正面，对' + (tgt === user ? '自己' : '对手') + '造成2点伤害'); }
+      function __ymSettle(face, tgt, rollContext) {
+        if (face === '正面') { dealDamageWithResponse(tgt, 2, '予(水着)SP', null, null, user, { judge: true, judgeRoll: rollContext }); addBattleLog(user, '【予(水着)SP】硬币正面，对' + (tgt === user ? '自己' : '对手') + '造成2点伤害'); }
         else addBattleLog(user, face == null ? '【予(水着)SP】硬币判定被连锁无效，不造成伤害' : '【予(水着)SP】硬币背面，不造成伤害');
         next();
       }
       function __ymGo(tgt) {
-        if (typeof judgePerform === 'function') judgePerform(user, { kind: 'coin', label: '予(水着)SP 硬币判定' }, function (face) { __ymSettle(face, tgt); });
-        else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', label: '予(水着)SP 硬币判定' }, function (face) { __ymSettle(face, tgt); });
-        else { __ymSettle(GameRNG.coin() ? '正面' : '反面', tgt); }
+        if (typeof judgePerform === 'function') judgePerform(user, { kind: 'coin', label: '予(水着)SP 硬币判定' }, function (face, cancelled, rollContext) { __ymSettle(face, tgt, rollContext); });
+        else if (typeof judgeAnimate === 'function') judgeAnimate(user, { kind: 'coin', label: '予(水着)SP 硬币判定' }, function (face, cancelled, rollContext) { __ymSettle(face, tgt, rollContext); });
+        else { var face = GameRNG.coin() ? '正面' : '反面'; __ymSettle(face, tgt, { kind: 'coin', raw: face, count: 1 }); }
       }
       if (user === 'p1') {
         // 卡面：对一名“其他玩家”——1v1 中即对手，不再提供对自己选项
@@ -27436,9 +27458,9 @@ var SPECIAL_CARD_HANDLERS = {
       dealDamageWithResponse(foe, __base, card.name, function () {
         try {
           if (typeof judgePerform === 'function') {
-            judgePerform(user, { kind: 'dice', sides: 4, label: card.name + '·判定伤害' }, function (roll, __cancelled) {
+            judgePerform(user, { kind: 'dice', sides: 4, label: card.name + '·判定伤害' }, function (roll, __cancelled, rollContext) {
               if (__cancelled || roll == null) { __fin(); return; }
-              dealDamageWithResponse(foe, roll, card.name + '·判定伤害', __fin, null, user, { judge: true });
+              dealDamageWithResponse(foe, roll, card.name + '·判定伤害', __fin, null, user, { judge: true, judgeRoll: rollContext });
             });
           } else __fin();
         } catch (e) { __fin(); }
