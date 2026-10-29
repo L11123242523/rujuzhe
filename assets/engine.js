@@ -6448,7 +6448,6 @@ function startTurn() {
   battleState[player]._busRolledThisAction = false;   // 【2026-10-03】公交/地铁：每次自己行动期间只能投 1 次四面骰
   if (battleState[player]._onAnchor) { addBattleLog(player, '回合开始：从公交/地铁锚点回到第' + battleState[player].position + '格'); battleState[player]._onAnchor = 0; }
   battleState[player]._koharuTimesThisTurn = 0; // 小春SP先机每回合递增加成重置
-  battleState[player]._rioMizugiFirstRoll = false; battleState[player]._rioMizugiFirstMove = false; // 里绪(水着)首次投掷/移动每回合重置
   // 自然回复音韵：基础5；枫(水着)/葵SP各+50%（5×1.5=7.5→7，与成员数无关，用户口径）；予每名无序成员+1；霜烬+1；里尔亚斯被动+2(随等级)
   // 口径（用户）：首个回合的准备阶段不回复/不抽卡，改在游戏开始时结算——每个玩家首个准备阶段各跳过一次（用 per-player 标记，不依赖 battleState.turn）
   if (battleState[player]._firstRegenSkipped) {
@@ -7937,22 +7936,8 @@ registerTrigger({
 registerTrigger({
   id: 'liuli-hw-sp-leave',
   timing: 'leave-field',
-  /* 【2026-10-14 作者报「同时两张卡送墓 ⇒ 弹出两个询问」⇒ 结构修 ✓】
-     卡面：「**一回合一次**，当有玩家的卡不因使用而离开其原本所在的区域时可以发动，自己抽一张卡」。
-     病根：原来的"一回合一次"判据 `_liuliHWSPTurn !== turn` 在 `ownerOf`/`cond` 里只是**读**，
-           真正写它却在 `fire` —— 而**同一批候选收集时两个候选都会被判过**（那时还没写）
-           ⇒ 两张卡同时送墓就**两条都入列** ⇒ 弹两次询问 ✗（正是作者看到的现象）。
-     修法：把"一回合一次"**消费在候选生成时** —— 谁被收进这一批，就在 `ownerOf` 里立刻记上本回合已用 ✓
-           ⇒ 同一批的第二张卡再也收不进来 ✓（一次离场事件只产生一条候选）。
-     ⚠ 消费了会不会"被无效后少一次"？不会：引擎**既有**的 A2 机制会在该环被无效时自动回滚 ——
-       `__snapshotOncePerTurn` / `__restoreOncePerTurn` 的键名判据是后缀 `Turn$`（已读码确认 ✓），
-       `_liuliHWSPTurn` 正好匹配 ⇒ 无需我再写回滚代码 ✓。
-     ⚠ `_liuliHWQueuedFor`（按"哪张卡触发过"去重）**保留**：它仍负责"同一张卡的同一次离场"不重复排队 ✓。 */
-  /* ⚠【2026-10-14 我自己的回归修正 ✓】本函数**必须是纯判据、绝不能有副作用** ✗：
-     `__leaveEventHasTrigger`（约 21096）会先调一次 `__scanTriggers` **只当"这事件会不会触发什么"用** ——
-     我上一版在这里消费"一回合一次" ⇒ 那次纯判据调用把标记烧掉 ⇒ 真正入队时琉璃SP 不再产出
-     ⇒ 进行曲与琉璃SP **不再同窗**（门禁 chain_completeness 实测 5 项红 ✗）。
-     ⇒ 消费回到 `fire`；"同一离场事件内只留一条"由入批处的 `__dedupeLeaveCands` 负责 ✓。 */
+  /* ownerOf/cond 只读；次数在 __dedupeLeaveCands 真实入批时占用。
+     占用凭据随候选穿过费用队列/新连锁，未生效的占用由 TW.close 明确释放。 */
   ownerOf: function (ctx) {
     var list = [];
     playerIds().forEach(function (w) {
@@ -8474,8 +8459,14 @@ function __runTimingTriggers(timing, ctx, next) {
             if (!__isFullTimeCard(c, pk.from, __pTxt)) return;                     // 其余卡不进阶段时点（其余卡行为不变）✓
             if (!__cardTimingAllowed(c, side, timing)) return;                     // 【卡时点】按卡面限定可发动的时点
             if ((cands || []).some(function (x) { return x && x.id === 'phasecard|' + side + '|' + (c.name || ''); })) return;
+            var __phaseSP = null;
             cands.push({
               owner: side, mandatory: false, id: 'phasecard|' + side + '|' + (c.name || ''),
+              pick: pk.from === 'permSP' ? pk : null,
+              onAdd: pk.from === 'permSP' ? function (done) {
+                __phaseSP = { _chain: [], _parentWindow: TW.active, _stage: timing, player: side, card: c };
+                applyChainCard(side, pk, __phaseSP, done);
+              } : undefined,
               /* 【2026-10-14 作者真机截图报「按钮显示成 发动【发动【X】】」⇒ 结构修 ✓】
                  `label` 的语义是**名字** —— 显示层会自己套前缀：
                    · 窗口选项：`__labelOf` ⇒ `'↧ 连锁发动：' + c.label`
@@ -8487,6 +8478,7 @@ function __runTimingTriggers(timing, ctx, next) {
               label: (c.name || ''),
               fire: function (nx) {
                 var fin = (typeof nx === 'function') ? nx : function () {};
+                if (pk.from === 'permSP') { resolveChainStack(__phaseSP, fin); return; }
                 try {
                   var stub = { _chain: [], _parentWindow: TW.active, _stage: timing, player: side, description: '阶段时点发动：' + (c.name || ''), card: c };
                   /* 【2026-10-13 S3 ✓】与连锁窗同款：**入链之前先收目标** ✓
@@ -9069,7 +9061,7 @@ var TW = {
               owner: __owner,
               label: __lbl,
               mandatory: !!tr.mandatory,
-              trigger: tr,
+              trigger: tr, leaveReservation: tr.leaveReservation,
               /* 已上链 ⇒ 不再可选（重扫会新建对象，必须按链上的事实判，不能按候选对象判 ✓） */
               alive: function () { return !__triggerRingOnChain(win.effect, tr, __owner); },
               onAdd: function (done) {
@@ -9173,7 +9165,7 @@ var TW = {
     /* A2：记录该环建立时，发动者的"每回合一次"类标记（若本环最终被发动无效 ⇒ 还原） */
     try { if (c && c.owner && !c._onceSnap && typeof __snapshotOncePerTurn === 'function') c._onceSnap = __snapshotOncePerTurn(c.owner); } catch (e) { console.error('A2 快照失败（忽略）', e); }
     var fin = (typeof done === 'function') ? done : function () {};
-    function accepted(ok) { if (ok === false) { fin(false); return; } if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c); win.chain.push(c); fin(true); }
+    function accepted(ok) { if (ok === false) { fin(false); return; } if (c.leaveReservation) c.leaveReservation.added = true; if (typeof ChainAnim !== 'undefined' && ChainAnim.push) ChainAnim.push(c); win.chain.push(c); fin(true); }
     if (typeof c.onAdd === 'function') { try { return c.onAdd(accepted); } catch (e) { console.error('连锁发动提交失败', e); fin(false); return; } }
     accepted(true);
   },
@@ -9504,6 +9496,9 @@ var TW = {
   close: function (win) {
     if (!win || win._closed) return;
     win._closed = true;
+    (win.candidates || []).concat(win.chain || []).forEach(function (c) {
+      if (!win.onClose || !c.leaveReservation || !c.leaveReservation.added) __releaseLeaveReservation(c);
+    });
     if (win.parent) {
       win.state = 'done';
       win.parent._stepEntry = null;
@@ -9908,7 +9903,7 @@ function resolveChainStack(effect, onDone) {
      （旧的自写逆序循环与 __stepSafe 兜底已删除）。 */
   TW.settlePrebuilt(stack.map(function (e, i) {
     return {
-      owner: e.by, label: e.name || '', alive: function () { return true; },
+      owner: e.by, label: e.name || '', alive: function () { return true; }, leaveReservation: e.leaveReservation,
       /* 【2026-10-13 修】原来这里是 `__applyNode(i, e); next();` ✗ —— next() 同步执行 ⇒ 不等交互。
          现在把 next 作为"这一环结算完"的信号交给 __applyNode ✓：交互做完它才会被调用 ✓。 */
       fire: function (next) { __applyNode(i, e, next); }
@@ -10256,7 +10251,7 @@ function __triggerRingOnChain(effect, tr, owner) {
 function __pushTriggerRing(effect, tr, owner) {
   var ch = (effect._chain = effect._chain || []);
   if (effect._c1Node && ch.indexOf(effect._c1Node) < 0) ch.unshift(effect._c1Node);
-  ch.push({ kind: 'trigger', by: owner, name: (tr.label || '触发'), fire: tr.fire, _isTriggerRing: true });
+  ch.push({ kind: 'trigger', by: owner, name: (tr.label || '触发'), fire: tr.fire, _isTriggerRing: true, leaveReservation: tr.leaveReservation });
   return ch.length;
 }
 
@@ -10380,7 +10375,7 @@ function __tryDrainTriggers() {
     }
     function __wrapDrainNode(x) {
       return {
-        owner: x.owner, label: x.label, mandatory: x.mandatory !== false, alive: x.alive,
+        owner: x.owner, label: x.label, mandatory: x.mandatory !== false, alive: x.alive, leaveReservation: x.leaveReservation,
         fire: function (next) {
           var __done = false;
           function finish() {
@@ -10559,7 +10554,7 @@ function runResponseWindow(opts) {
             owner: __owner,
             label: (tr.label || '触发') + '（触发）',
             mandatory: !!tr.mandatory,
-            trigger: tr,
+            trigger: tr, leaveReservation: tr.leaveReservation,
             alive: function () { return !__triggerRingOnChain(effect, tr, __owner); },
             onAdd: function (done) {
               try {
@@ -23780,6 +23775,11 @@ function __leaveEventKey() {
     return (battleState && battleState.turn) + '#' + d;
   } catch (e) { return '0#0'; }
 }
+function __releaseLeaveReservation(c) {
+  var r = c && c.leaveReservation, q = r && battleState[r.owner];
+  if (!q || r.fired || q._liuliHWReservation !== r) return;
+  q._liuliHWSPTurn = r.previous; q._liuliHWReservation = null;
+}
 function __dedupeLeaveCands(cands) {
   try {
     var key = __leaveEventKey();
@@ -23790,6 +23790,19 @@ function __dedupeLeaveCands(cands) {
     var seen = battleState._leaveSeenByOwner || (battleState._leaveSeenByOwner = {});
     return (cands || []).filter(function (c) {
       if (!c) return true;
+      /* 琉璃只在真实入批时占用；纯扫描不写次数，取消由窗口统一释放。 */
+      if (c.id === 'liuli-hw-sp-leave') {
+        var q = battleState[c.owner];
+        if (q._liuliHWSPTurn === battleState.turn) return false;
+        var r = c.leaveReservation = { owner: c.owner, turn: battleState.turn, previous: q._liuliHWSPTurn, fired: false };
+        q._liuliHWReservation = r; q._liuliHWSPTurn = r.turn;
+        var fire = c.fire;
+        c.fire = function (next) {
+          if (q._liuliHWReservation !== r || r.fired || q._liuliHWSPTurn !== r.turn) { if (next) next(); return; }
+          r.fired = true; fire(next);
+        };
+        return true;
+      }
       /* 【2026-10-21】钢笔 SP 也是一回合一次；同一结算里两张卡先后送墓会各产一条候选 ⇒ 只留一条 ✓ */
       if (c.id !== 'liuli-hw-sp-leave' && c.id !== 'toma-sp-leave' && c.id !== 'gangbi-sp-grave') return true;
       var k = c.id + '@' + (c.owner || '');
@@ -23828,7 +23841,7 @@ function __buildLeaveBatch(player, card, reason, ownFire) {
     __scannedB = (typeof __dedupeLeaveCands === 'function') ? __dedupeLeaveCands(__scannedB) : __scannedB;
     __scannedB.forEach(function (c) {
       out.push({
-        owner: c.owner, card: card, mandatory: c.mandatory, label: c.label,
+        owner: c.owner, card: card, mandatory: c.mandatory, label: c.label, leaveReservation: c.leaveReservation,
         fire: function (next) { try { c.fire(); } finally { if (typeof next === 'function') next(); } }
       });
       if (c.id === 'liuli-hw-sp-leave' || c.id === 'toma-sp-leave') { try { battleState._leaveHooksBatchedFor = card; } catch (e) { try { console.error('[catch] assets/engine.js:19933', e); } catch (e2) {} } }
@@ -23929,7 +23942,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
       var __scannedQ = (typeof __scanTriggers === 'function') ? __scanTriggers('leave-field', __ctxQ) : [];
       __scannedQ = (typeof __dedupeLeaveCands === 'function') ? __dedupeLeaveCands(__scannedQ) : __scannedQ;
       __scannedQ.forEach(function (c) {
-        queueOrRunTrigger({ owner: c.owner, card: card, label: c.label, mandatory: c.mandatory,
+        queueOrRunTrigger({ owner: c.owner, card: card, label: c.label, mandatory: c.mandatory, leaveReservation: c.leaveReservation,
                             fire: function () { try { c.fire(); } catch (e) { console.error('扫描出的触发执行出错 ' + c.id, e); } } });
         if (c.id === 'liuli-hw-sp-leave' || c.id === 'toma-sp-leave') { try { battleState._leaveHooksBatchedFor = card; } catch (e) { try { console.error('[catch] assets/engine.js:20011', e); } catch (e2) {} } }
       });
@@ -23967,7 +23980,7 @@ function checkGraveTrigger(player, card, reason, skipYongzou) {
         effectEngine._pendingTriggers = effectEngine._pendingTriggers || [];
         __nbBatch.forEach(function (c) {
           effectEngine._pendingTriggers.push({
-            owner: c.owner || player,
+            owner: c.owner || player, leaveReservation: c.leaveReservation,
             label: c.label,
             mandatory: !!c.mandatory,
             fire: function () { try { c.fire(); } catch (e) { try { console.error('费用触发执行出错 ' + c.id, e); } catch (e2) {} } }
