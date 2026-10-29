@@ -1,0 +1,6 @@
+#matchmakingScreen{overflow:auto}
+.matchmaking-shell{box-sizing:border-box;width:min(100%,580px);margin:auto;padding:20px;overflow-wrap:anywhere}
+#matchmakingBody{display:flex;flex-wrap:wrap;gap:12px}
+#matchmakingBody p{flex-basis:100%;margin:8px 0}
+.matchmaking-shell button{max-width:100%;min-height:44px;white-space:normal}
+@media(max-width:400px){.matchmaking-shell{padding:12px}#matchmakingBody button{flex:1 1 100%}}

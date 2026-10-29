@@ -540,6 +540,7 @@ var Online = {
      也避免"座位 p1"这类信息被后来的状态刷新冲掉）。 */
   mode:'online',
   status:function(t){
+    if(this.mode==='matched'&&typeof RJMatchmaking!=='undefined')RJMatchmaking.status(t);
     if(this.mode==='friendly'){var note=document.getElementById('friendRoomStatus');if(note)note.textContent='好友战 · 全卡 · 无奖励\n'+t;}
     var el=document.getElementById('olStatus');
     if(!el) return;
@@ -780,6 +781,7 @@ var Online = {
           this._onRejoined();
           break;
         }
+        if(this.mode==='matched'){this.ready();break;}
         this.status((m.isHost?'已创建房间':'已加入房间')+'，房号：'+m.id+'\n等待双方准备…（把房号发给对手，对手输入后点加入）');
         var rb=document.getElementById('olReadyBtn'); if(rb) rb.disabled=false;
         break;
@@ -795,9 +797,14 @@ var Online = {
         break;
       }
       case 'start':
+        if((this.mode==='matched')!==(m.mode==='matched'))throw new Error('匹配模式与准入凭证不一致');
+        if(this.mode==='matched')RJMatchmaking.started(m.matchId);
         if((this.mode==='friendly')!==(m.mode==='friendly'))throw new Error('房间模式与准入凭证不一致');
         this._gotStart=true;
         this._onGameStart(m);
+        break;
+      case 'matchEnded':
+        if(this.mode==='matched')RJMatchmaking.relayEnded(m.matchId);
         break;
       case 'engine':                    // 服务器权威模式：中继的权威引擎发来的下行消息
         this._onEngine(m.m);
@@ -870,6 +877,7 @@ var Online = {
     else prompt('复制房号',this.roomId);
   },
   leave:function(){
+    if(this.mode==='matched'&&typeof RJMatchmaking!=='undefined')RJMatchmaking.left();
     if(typeof RJOnlineAccess!=='undefined') RJOnlineAccess.clear(); this._entryPending=false;
     if(this._reconnectTimer){ clearTimeout(this._reconnectTimer); this._reconnectTimer=null; }
     try{ if(this.ws){ this._send({t:'leave'}); this.ws.close(); } }catch (e) { try { console.error('[catch] assets/engine.js:762', e); } catch (e2) {} }
@@ -3296,6 +3304,7 @@ function __deckModeUI() {
 }
 /** 从主菜单/单机入口打开卡组配置：先切模式再进页面 */
 function openDeckBuilder(mode) {
+  if(typeof RJMatchmaking!=='undefined'&&RJMatchmaking.locked()){showToast('匹配或对局中不能打开或切换卡组','warn');return;}
   if(typeof RJCloudDecks!=='undefined')RJCloudDecks.boot().then(function(){if(document.getElementById('deckBuilder').classList.contains('active')){setDeckMode(deckSetMode,true);renderDeckBuilder();}}).catch(function(e){showToast(e.message,'warn');});
   if(mode==='online' && typeof RJOnlineAccess!=='undefined' && RJOnlineAccess.blockEdit(Online)) return;
   if(mode==='online' && typeof RJOnlineAccess!=='undefined') RJOnlineAccess.inspect().then(function(){if(deckSetMode==='online')renderDeckBuilder();}).catch(function(e){showToast(e.message,'warn');});
@@ -3371,6 +3380,7 @@ function returnFromDeckBuilder() {
   showScreen('mainMenu');
 }
 async function openOnlineLobby() {
+  if(typeof RJMatchmaking!=='undefined'&&RJMatchmaking.locked()){showToast('请先取消或结束当前匹配','warn');return;}
   try{await RJOnlineAccess.gate();}catch(e){showToast(e.message,'warn');return;}
   enterOnlineDeckMode();
   try { showScreen('onlineLobby'); } catch (e) { try { console.error('[catch] assets/engine.js:3020', e); } catch (e2) {} }
@@ -4360,6 +4370,8 @@ function importDeckCode(player) {
 // ========== 对战 ==========
 var __pendingSandbox = false;   // 【测试卡组·沙盒】由菜单按钮置位，startTurn 首次进入时落到 battleState._sandbox
 function startBattle(__sandbox) {
+  var __matchedBot=typeof RJMatchmaking!=='undefined'&&RJMatchmaking.startingBot();
+  if(typeof RJMatchmaking!=='undefined'&&RJMatchmaking.locked()&&!__matchedBot&&!(Online.active&&Online._startingOnlineBattle)){showToast('请先取消或结束当前匹配','warn');return;}
   /* 【2026-10-03】进对局起播 BGM：**延后一拍**，等战斗状态（同步值/上限）初始化完再判断，
      避免开局读到未初始化的数值而误播残血曲（作者实测："一开局就放"）。 */
   try { setTimeout(function () { try { if (typeof __sfx !== 'undefined' && __sfx.bgmStart) __sfx.bgmStart(); } catch (e) { try { console.error('[catch] assets/engine.js:3882', e); } catch (e2) {} } }, 400); } catch (e) { try { console.error('[catch] assets/engine.js:3882', e); } catch (e2) {} }
@@ -4371,7 +4383,7 @@ function startBattle(__sandbox) {
      修法：只有**不在联机对局中**时才切单机卡组。 */
   var __inOnlineMatch = false;
   try { __inOnlineMatch = !!(typeof Online !== 'undefined' && Online && Online.active && Online._startingOnlineBattle); } catch (e) { try { console.error('[catch] assets/engine.js:3890', e); } catch (e2) {} }
-  if (!__inOnlineMatch) { try { setDeckMode('pve', true); } catch (e) { try { console.error('[catch] assets/engine.js:3891', e); } catch (e2) {} } }
+  if (!__inOnlineMatch&&!__matchedBot) { try { setDeckMode('pve', true); } catch (e) { try { console.error('[catch] assets/engine.js:3891', e); } catch (e2) {} } }
   // 检查双方卡组是否完整
   for (var player of playerIds()) {
     var config = deckConfig[player];
@@ -5939,7 +5951,8 @@ function initBattle() {
   if (typeof Online !== 'undefined' && Online.active) {
     var __olFirst = battleState.currentPlayer;                 // 默认（p1 = 房主）
     var __olCoinR = { hostFirst: true, face: '正面' };
-    try { __olCoinR = __onlineCoinFlip(); } catch (e) { console.error('开局硬币派生失败（回退房主先手）', e); }
+    // 排队匹配已随机分配房主；该入口固定房主先手，原手动联机硬币保持。
+    try { if(Online.mode!=='matched')__olCoinR = __onlineCoinFlip(); } catch (e) { console.error('开局硬币派生失败（回退房主先手）', e); }
     __olFirst = __olCoinR.hostFirst ? 'p1' : 'p2';
     battleState.currentPlayer = __olFirst;
     /* 硬币结果随快照带给客人（客人侧据此**播同一个面**的动画；`NetSync` 会整体编码 battleState） */
